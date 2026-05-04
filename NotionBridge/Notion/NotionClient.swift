@@ -238,6 +238,14 @@ public actor NotionClient {
         return notionVersion
     }
 
+    private static func validateSingleRichTextRun(_ text: String, context: String) throws {
+        let actualChars = text.count
+        let maxChars = 2000
+        guard actualChars <= maxChars else {
+            throw NotionClientError.decodingError("\(context): rich_text.text.content exceeds Notion's 2000-character per-run limit (actualChars=\(actualChars), maxChars=\(maxChars)). Split into shorter comments, flatten list-like text into smaller runs, or use notion_code_block_append for code content.")
+        }
+    }
+
     // MARK: - Validation
 
     /// Validate the token by making a lightweight API call (search with empty query, 1 result).
@@ -646,6 +654,7 @@ public actor NotionClient {
     /// A9b: Create a comment on a page.
     /// POST /v1/comments
     public func createComment(pageId: String, text: String) async throws -> Data {
+        try Self.validateSingleRichTextRun(text, context: "notion_comment_create")
         // v1.9.0 B3: accept raw UUID, dashed UUID, Notion URL, or compressed placeholder
         let cleanId = Self.normalizePageId(pageId)
         let body: [String: Any] = [
@@ -705,7 +714,12 @@ public actor NotionClient {
     /// A12: Upload a file (single-part ≤ 20MB).
     /// POST /v1/file_uploads (two-phase: create upload → send content)
     public func uploadFile(fileName: String, fileData: Data, contentType: String = "application/octet-stream") async throws -> Data {
-        // Phase 1: Create the file upload object (JSON metadata only)
+        return try await uploadFileWithTrace(fileName: fileName, fileData: fileData, contentType: contentType).data
+    }
+
+    /// Upload a file and return safe phase diagnostics. Trace entries intentionally avoid tokens and file contents.
+    public func uploadFileWithTrace(fileName: String, fileData: Data, contentType: String = "application/octet-stream") async throws -> (data: Data, trace: [String]) {
+        var trace: [String] = ["phase=create_upload status=starting fileName=\(fileName) contentType=\(contentType) bytes=\(fileData.count)"]
         let createBody: [String: Any] = [
             "file_name": fileName,
             "content_type": contentType,
@@ -713,18 +727,18 @@ public actor NotionClient {
         ]
         let createData = try JSONSerialization.data(withJSONObject: createBody)
         let (createResponseData, createHttp) = try await request(method: "POST", path: "/file_uploads", body: createData)
+        trace.append("phase=create_upload httpStatus=\(createHttp.statusCode)")
         guard (200...299).contains(createHttp.statusCode) else {
             let msg = String(data: createResponseData, encoding: .utf8) ?? ""
-            throw NotionClientError.httpError(createHttp.statusCode, msg)
+            throw NotionClientError.decodingError("notion_file_upload failed during phase=create_upload httpStatus=\(createHttp.statusCode) body=\(String(msg.prefix(500)))")
         }
 
-        // Extract upload ID from response
         guard let createJSON = try? JSONSerialization.jsonObject(with: createResponseData) as? [String: Any],
               let uploadId = createJSON["id"] as? String else {
-            throw NotionClientError.invalidResponse
+            throw NotionClientError.decodingError("notion_file_upload failed during phase=parse_create_response: missing file_upload id")
         }
 
-        // Phase 2: Send the file content via multipart form
+        trace.append("phase=send_content status=starting uploadId=\(uploadId)")
         let boundary = "NotionBridge-\(UUID().uuidString)"
         var bodyData = Data()
         bodyData.append("--\(boundary)\r\n".data(using: .utf8)!)
@@ -739,11 +753,13 @@ public actor NotionClient {
             body: bodyData,
             contentType: "multipart/form-data; boundary=\(boundary)"
         )
+        trace.append("phase=send_content httpStatus=\(response.statusCode)")
         guard (200...299).contains(response.statusCode) else {
             let msg = String(data: data, encoding: .utf8) ?? ""
-            throw NotionClientError.httpError(response.statusCode, msg)
+            throw NotionClientError.decodingError("notion_file_upload failed during phase=send_content httpStatus=\(response.statusCode) body=\(String(msg.prefix(500)))")
         }
-        return data
+        trace.append("phase=complete status=success")
+        return (data, trace)
     }
 
     /// A13: Get bot user identity (token introspection).
@@ -859,6 +875,7 @@ public actor NotionClient {
     /// POST /v1/comments with parent.page_id (no discussion_id → starts a new thread).
     /// Accepts raw UUID, dashed UUID, Notion URL, or compressed placeholder (via normalizePageId).
     public func createDiscussion(pageId: String, text: String) async throws -> Data {
+        try Self.validateSingleRichTextRun(text, context: "notion_discussion_create")
         let cleanId = Self.normalizePageId(pageId)
         let body: [String: Any] = [
             "parent": ["page_id": cleanId],

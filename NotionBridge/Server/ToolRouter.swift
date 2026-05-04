@@ -287,7 +287,15 @@ public actor ToolRouter {
                     text = String(describing: result)
                 }
             }
-            return (text: text, isError: false)
+            let structuredFailure: Bool = {
+                if case .object(let dict) = result {
+                    if case .bool(let success) = dict["success"], success == false { return true }
+                    if case .string(let status) = dict["status"], ["failed", "error", "partial_or_unverified"].contains(status) { return true }
+                    if case .string = dict["error"] { return true }
+                }
+                return false
+            }()
+            return (text: text, isError: structuredFailure)
         } catch {
             return (text: "Error: \(error.localizedDescription)", isError: true)
         }

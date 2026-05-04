@@ -59,6 +59,14 @@ make clean      # Remove build artifacts
 make clean-tcc  # Reset TCC permissions for both legacy (solutions.kup.keepr) and current bundle IDs
 ```
 
+### Agent workflow hardening notes
+
+- **Portable repository search:** Prefer `rg` when available, but do not assume it exists in every agent shell. Use POSIX fallbacks such as `find . -type f ...`, `grep -R`, and `sed -n` before treating a search failure as missing source.
+- **Patch scripts:** Before generating Node-based patch scripts, check the package module type (`package.json` `type`, file extension, or existing scripts). For cross-repo agent edits, Python `pathlib` patch scripts are the safest default because they avoid CommonJS/ESM `require` drift.
+- **Cloudflare Pages in mixed repos:** For repositories that contain both Worker and Pages configs, run Pages deploys from a temporary clean cwd or explicitly point Wrangler at the Pages project directory/config so Worker-only bindings do not contaminate the Pages deploy context.
+- **Notion comments/discussions:** Comment and discussion tools are inline-rich-text surfaces, not page-body block markdown. Keep each rich_text run ≤ 2000 characters; split long notes into multiple comments or write long structured/code content to a page/code block.
+- **Shell execution:** `shell_exec` reports `success`, `status`, `timedOut`, `terminationReason`, output line counts, and truncation metadata. Use `env` for explicit environment overrides, `loginShell: true` only when profile-loaded tooling is required, and `stdoutHeadLines`/`stdoutTailLines`/`stderrHeadLines`/`stderrTailLines` when large output should be summarized. Background commands ending in `&` remain capped to a short request window; redirect to logs and poll when detaching work.
+
 ### Configuration
 
 Set the HTTP/SSE port (default 9700):

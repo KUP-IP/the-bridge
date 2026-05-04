@@ -178,6 +178,27 @@ func runFileModuleTests() async {
         }
     }
 
+    await test("file_list supports maxEntries truncation metadata") {
+        let result = try await router.dispatch(
+            toolName: "file_list",
+            arguments: .object([
+                "path": .string(testDir),
+                "recursive": .bool(true),
+                "maxEntries": .int(1)
+            ])
+        )
+        if case .object(let dict) = result,
+           case .int(let count) = dict["count"],
+           case .bool(let truncated) = dict["truncated"],
+           case .string(let reason) = dict["truncationReason"] {
+            try expect(count == 1, "Expected capped count of 1, got \(count)")
+            try expect(truncated, "Expected truncated true")
+            try expect(reason == "maxEntries", "Expected maxEntries truncation reason")
+        } else {
+            throw TestError.assertion("Expected truncation metadata")
+        }
+    }
+
     // file_search
     await test("file_search finds files by name") {
         let result = try await router.dispatch(
@@ -190,6 +211,27 @@ func runFileModuleTests() async {
         if case .object(let dict) = result,
            case .int(let count) = dict["count"] {
             try expect(count >= 1, "Should find test_write.txt, got \(count) matches")
+        }
+    }
+
+    await test("file_search supports maxResults cap and hint") {
+        FileManager.default.createFile(atPath: "\(testDir)/test_cap_one.txt", contents: Data("one".utf8))
+        FileManager.default.createFile(atPath: "\(testDir)/test_cap_two.txt", contents: Data("two".utf8))
+        let result = try await router.dispatch(
+            toolName: "file_search",
+            arguments: .object([
+                "directory": .string(testDir),
+                "query": .string("test"),
+                "maxResults": .int(1)
+            ])
+        )
+        if case .object(let dict) = result,
+           case .int(let count) = dict["count"],
+           case .bool(let truncated) = dict["truncated"] {
+            try expect(count <= 1, "Expected search cap to limit matches")
+            try expect(truncated || count == 0, "Expected truncated when cap is reached")
+        } else {
+            throw TestError.assertion("Expected search cap metadata")
         }
     }
 
@@ -273,8 +315,14 @@ func runFileModuleTests() async {
             ])
         )
         if case .object(let dict) = result,
-           case .bool(let success) = dict["success"] {
+           case .bool(let success) = dict["success"],
+           case .bool(let destinationExists) = dict["destinationExistsAfterMove"],
+           case .bool(let sourceExists) = dict["sourceExistsAfterMove"],
+           case .string(let status) = dict["status"] {
             try expect(success, "Expected success: true")
+            try expect(destinationExists, "Expected destinationExistsAfterMove true")
+            try expect(!sourceExists, "Expected sourceExistsAfterMove false")
+            try expect(status == "verified", "Expected verified move status")
         }
         try expect(FileManager.default.fileExists(atPath: dst), "Moved file should exist at destination")
         try expect(!FileManager.default.fileExists(atPath: src), "Source should no longer exist")

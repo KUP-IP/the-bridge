@@ -19,12 +19,12 @@ func runNotionModuleTests() async {
     await NotionModule.register(on: router)
 
     // ============================================================
-    // MARK: - Tool Registration (18 tools)
+    // MARK: - Tool Registration (23 tools)
     // ============================================================
 
-    await test("NotionModule registers 18 tools") {
+    await test("NotionModule registers 23 tools") {
         let tools = await router.registrations(forModule: "notion")
-        try expect(tools.count == 21, "Expected 21 notion tools, got \(tools.count)")
+        try expect(tools.count == 23, "Expected 23 notion tools, got \(tools.count)")
     }
 
     let expectedTools: [String] = [
@@ -34,7 +34,8 @@ func runNotionModuleTests() async {
         "notion_comments_list", "notion_comment_create", "notion_users_list",
         "notion_page_move", "notion_file_upload", "notion_token_introspect",
         "notion_connections_list", "notion_block_read", "notion_block_update",
-        "notion_datasource_update", "notion_datasource_create"
+        "notion_datasource_update", "notion_datasource_create",
+        "notion_discussion_create", "notion_code_block_append"
     ]
 
     for toolName in expectedTools {
@@ -233,6 +234,27 @@ func runNotionModuleTests() async {
             throw TestError.assertion("Expected error for missing parentId/discussionId")
         } catch is ToolRouterError {
             // Expected
+        }
+    }
+
+    await test("notion_comment_create preflights rich_text length before API call") {
+        let longText = String(repeating: "x", count: 2001)
+        let result = try await router.dispatch(
+            toolName: "notion_comment_create",
+            arguments: .object([
+                "pageId": .string("00000000-0000-0000-0000-000000000000"),
+                "text": .string(longText)
+            ])
+        )
+        if case .object(let dict) = result,
+           case .bool(let success) = dict["success"],
+           case .int(let maxChars) = dict["maxChars"],
+           case .int(let actualChars) = dict["actualChars"] {
+            try expect(!success, "Expected long comment preflight to fail structurally")
+            try expect(maxChars == 2000, "Expected maxChars 2000")
+            try expect(actualChars == 2001, "Expected actualChars 2001")
+        } else {
+            throw TestError.assertion("Expected structured preflight response")
         }
     }
 

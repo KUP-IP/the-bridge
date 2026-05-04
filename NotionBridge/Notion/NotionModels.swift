@@ -32,7 +32,7 @@ public enum NotionClientError: Error, LocalizedError, Sendable {
         case .decodingError(let msg):
             return "Decoding error: \(msg)"
         case .connectionNotFound(let name):
-            return "Notion connection '\(name)' not found in registry"
+            return "Notion connection '\(name)' not found in registry. Run notion_connections_list or connections_list to see available workspace connection names, or omit workspace to use the primary connection. For data-source/page aliases, pass the canonical Notion ID from notion_search/notion_datasource_get."
         }
     }
 }

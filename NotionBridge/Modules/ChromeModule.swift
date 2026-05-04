@@ -33,7 +33,7 @@ public enum ChromeModule {
             name: "chrome_tabs",
             module: moduleName,
             tier: .open,
-            description: "List all open Chrome tabs across windows. Returns windowId + tabIndex for other chrome_* tools.",
+            description: "List all open Chrome tabs across windows. Returns windowId + tabIndex for other chrome_* tools. Resilient to per-window/tab Apple Event failures; returns partialResults/errors when possible.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([:]),
@@ -44,19 +44,26 @@ public enum ChromeModule {
                 let script = """
                     tell application "Google Chrome"
                         set output to ""
-                        set winIndex to 0
+                        set errorOutput to ""
                         repeat with w in windows
-                            set winIndex to winIndex + 1
-                            set winId to id of w
-                            set tabIndex to 0
-                            repeat with t in tabs of w
-                                set tabIndex to tabIndex + 1
-                                set tabTitle to title of t
-                                set tabURL to URL of t
-                                set output to output & winId & "\t" & tabIndex & "\t" & tabTitle & "\t" & tabURL & linefeed
-                            end repeat
+                            try
+                                set winId to id of w
+                                set tabIndex to 0
+                                repeat with t in tabs of w
+                                    set tabIndex to tabIndex + 1
+                                    try
+                                        set tabTitle to title of t
+                                        set tabURL to URL of t
+                                        set output to output & winId & "\t" & tabIndex & "\t" & tabTitle & "\t" & tabURL & linefeed
+                                    on error errMsg number errNum
+                                        set errorOutput to errorOutput & winId & "\t" & tabIndex & "\t" & errNum & "\t" & errMsg & linefeed
+                                    end try
+                                end repeat
+                            on error errMsg number errNum
+                                set errorOutput to errorOutput & "window" & "\t" & "0" & "\t" & errNum & "\t" & errMsg & linefeed
+                            end try
                         end repeat
-                        return output
+                        return output & "__NB_ERRORS__" & linefeed & errorOutput
                     end tell
                 """
 
@@ -68,10 +75,14 @@ public enum ChromeModule {
                     ])
                 }
 
-                // Parse tab-separated output into structured data
+                // Parse tab-separated output into structured data. AppleScript emits a sentinel
+                // before per-tab/window errors so one bad tab does not fail the full listing.
                 let raw = result.value ?? ""
-                let lines = raw.components(separatedBy: "\n").filter { !$0.isEmpty }
+                let sections = raw.components(separatedBy: "__NB_ERRORS__\n")
+                let lines = (sections.first ?? "").components(separatedBy: "\n").filter { !$0.isEmpty }
+                let errorLines = (sections.count > 1 ? sections[1] : "").components(separatedBy: "\n").filter { !$0.isEmpty }
                 var tabs: [Value] = []
+                var errors: [Value] = []
                 for line in lines {
                     let parts = line.components(separatedBy: "\t")
                     if parts.count >= 4 {
@@ -85,9 +96,22 @@ public enum ChromeModule {
                         ]))
                     }
                 }
+                for line in errorLines {
+                    let parts = line.components(separatedBy: "\t")
+                    if parts.count >= 4 {
+                        errors.append(.object([
+                            "windowId": .string(parts[0]),
+                            "tabIndex": .string(parts[1]),
+                            "errorNumber": .string(parts[2]),
+                            "error": .string(parts[3])
+                        ]))
+                    }
+                }
                 return .object([
                     "tabs": .array(tabs),
-                    "count": .int(tabs.count)
+                    "count": .int(tabs.count),
+                    "partialResults": .bool(!errors.isEmpty),
+                    "errors": .array(errors)
                 ])
             }
         ))
@@ -97,7 +121,7 @@ public enum ChromeModule {
             name: "chrome_navigate",
             module: moduleName,
             tier: .notify,
-            description: "Navigate Chrome to a URL — new tab (newTab: true) or replace an existing tab's location.",
+            description: "Navigate Chrome to a URL — new tab (newTab: true) or replace an existing tab's location. If Chrome is on another Space, returns an activation recovery hint or uses open fallback when untargeted.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -144,8 +168,9 @@ public enum ChromeModule {
                 // If Chrome not visible and specific window/tab requested, return error
                 if !chromeVisible && hasWindowTarget {
                     return .object([
-                        "error": .string("Chrome is not visible on the current Space. Cannot target a specific window or tab. Use chrome_tabs to find windows with onScreen: true."),
-                        "navigated_via": .string("none")
+                        "error": .string("Chrome is not visible on the current Space. Cannot target a specific window or tab."),
+                        "navigated_via": .string("none"),
+                        "recoveryHint": .string("Activate Chrome and bring a window onto the current Space, then rerun chrome_tabs and retry with an onScreen windowId/tabIndex. AppleScript fallback: tell application \"Google Chrome\" to activate")
                     ])
                 }
 
@@ -219,7 +244,8 @@ public enum ChromeModule {
                     return .object([
                         "error": .string(error),
                         "errorNumber": .int(result.errorNumber ?? -1),
-                        "navigated_via": .string("applescript")
+                        "navigated_via": .string("applescript"),
+                        "recoveryHint": .string("If this is a tab-index churn error, rerun chrome_tabs immediately and retry with the refreshed windowId/tabIndex. If Chrome is off-screen, activate it first: tell application \"Google Chrome\" to activate")
                     ])
                 }
                 return .object([

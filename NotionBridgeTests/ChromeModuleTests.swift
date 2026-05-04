@@ -80,6 +80,14 @@ func runChromeModuleTests() async {
         }
     }
 
+    await test("chrome recovery descriptions mention partial results and recovery hints") {
+        let tools = await router.registrations(forModule: "chrome")
+        let tabs = tools.first(where: { $0.name == "chrome_tabs" })
+        let navigate = tools.first(where: { $0.name == "chrome_navigate" })
+        try expect(tabs?.description.contains("partialResults") == true, "chrome_tabs should document partialResults")
+        try expect(navigate?.description.contains("recovery hint") == true, "chrome_navigate should document recovery hint behavior")
+    }
+
     await test("All chrome tools have input schemas") {
         let tools = await router.registrations(forModule: "chrome")
         for tool in tools {

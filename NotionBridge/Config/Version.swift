@@ -39,8 +39,8 @@ public enum BridgeConstants {
 
     /// Tools registered by Swift `*Module` types only: excludes `builtin` (`echo`) and excludes Stripe MCP (dynamic).
     /// Keep in sync with `ServerManager.setup()` module registrations before `StripeMcpModule` / `echo`.
-    /// v1.9.1: 80 total (73 pre-sprint + 7 new scheduler tools).
-    public static let staticFeatureModuleToolCount = 80
+    /// v1.9.5: 82 total (80 prior static tools + discussion/code-block Notion helpers).
+    public static let staticFeatureModuleToolCount = 82
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     public static let staticFeatureModuleFamilyCount = 15

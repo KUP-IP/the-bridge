@@ -16,6 +16,38 @@ public enum ShellModule {
 
     public static let moduleName = "shell"
 
+    private final class TimeoutFlag: @unchecked Sendable {
+        var value = false
+    }
+
+    private static func valueToString(_ value: Value) -> String? {
+        if case .string(let s) = value { return s }
+        return nil
+    }
+
+    private static func valueToInt(_ value: Value?) -> Int? {
+        if case .int(let i) = value { return i }
+        if case .double(let d) = value { return Int(d) }
+        return nil
+    }
+
+    private static func lineSummary(_ text: String, head: Int?, tail: Int?) -> (text: String, lineCount: Int, truncated: Bool) {
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if lines.last == "" { lines.removeLast() }
+        let lineCount = text.isEmpty ? 0 : lines.count
+        let headCount = head.map { max(0, $0) }
+        let tailCount = tail.map { max(0, $0) }
+        guard headCount != nil || tailCount != nil else { return (text, lineCount, false) }
+        let h = headCount ?? 0
+        let t = tailCount ?? 0
+        if lineCount <= h + t || lineCount == 0 { return (text, lineCount, false) }
+        var kept: [String] = []
+        if h > 0 { kept.append(contentsOf: lines.prefix(h)) }
+        kept.append("… [truncated \(lineCount - h - t) middle lines] …")
+        if t > 0 { kept.append(contentsOf: lines.suffix(t)) }
+        return (kept.joined(separator: "\n"), lineCount, true)
+    }
+
     /// Register all ShellModule tools on the given router.
     public static func register(on router: ToolRouter) async {
 
@@ -39,6 +71,30 @@ public enum ShellModule {
                     "workingDir": .object([
                         "type": .string("string"),
                         "description": .string("Working directory for command execution")
+                    ]),
+                    "env": .object([
+                        "type": .string("object"),
+                        "description": .string("Optional environment variables to merge into the process environment. Values must be strings.")
+                    ]),
+                    "loginShell": .object([
+                        "type": .string("boolean"),
+                        "description": .string("Run bash as a login shell (-lc) so shell profile PATH/tooling is loaded. Default false.")
+                    ]),
+                    "stdoutHeadLines": .object([
+                        "type": .string("integer"),
+                        "description": .string("Optional number of stdout lines to keep from the head of large output.")
+                    ]),
+                    "stdoutTailLines": .object([
+                        "type": .string("integer"),
+                        "description": .string("Optional number of stdout lines to keep from the tail of large output.")
+                    ]),
+                    "stderrHeadLines": .object([
+                        "type": .string("integer"),
+                        "description": .string("Optional number of stderr lines to keep from the head of large output.")
+                    ]),
+                    "stderrTailLines": .object([
+                        "type": .string("integer"),
+                        "description": .string("Optional number of stderr lines to keep from the tail of large output.")
                     ])
                 ]),
                 "required": .array([.string("command")])
@@ -64,7 +120,8 @@ public enum ShellModule {
 
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/bin/bash")
-                process.arguments = ["-c", command]
+                let loginShell: Bool = { if case .bool(let b) = args["loginShell"] { return b }; return false }()
+                process.arguments = [loginShell ? "-lc" : "-c", command]
 
                 // Deterministic PATH bootstrap so common developer tools (node/npm, brew, etc.)
                 // are discoverable when running from a GUI app context that may not inherit a login shell.
@@ -80,10 +137,17 @@ public enum ShellModule {
                 } else {
                     env["PATH"] = defaultPath
                 }
+                if case .object(let envArgs) = args["env"] {
+                    for (key, value) in envArgs {
+                        if let stringValue = Self.valueToString(value) {
+                            env[key] = stringValue
+                        }
+                    }
+                }
                 process.environment = env
 
                 if let dir = workingDir {
-                    process.currentDirectoryURL = URL(fileURLWithPath: dir)
+                    process.currentDirectoryURL = URL(fileURLWithPath: (dir as NSString).expandingTildeInPath)
                 }
 
                 let stdoutPipe = Pipe()
@@ -92,12 +156,15 @@ public enum ShellModule {
                 process.standardError = stderrPipe
 
                 let startTime = ContinuousClock.now
+                let timeoutFlag = TimeoutFlag()
 
                 try process.run()
 
-                // Timeout enforcement — terminate process if it exceeds the limit
+                // Timeout enforcement — terminate process if it exceeds the limit. The response explicitly
+                // reports timeout state so agents can distinguish killed work from ordinary non-zero exits.
                 let timeoutItem = DispatchWorkItem {
                     if process.isRunning {
+                        timeoutFlag.value = true
                         process.terminate()
                     }
                 }
@@ -106,7 +173,6 @@ public enum ShellModule {
                     execute: timeoutItem
                 )
 
-                // Read pipe data BEFORE waitUntilExit to prevent buffer deadlock
                 let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
                 let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
 
@@ -116,14 +182,41 @@ public enum ShellModule {
                 let elapsed = ContinuousClock.now - startTime
                 let durationSec = Double(elapsed.components.seconds)
                     + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000_000.0
-                let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
-                let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+                let rawStdout = String(data: stdoutData, encoding: .utf8) ?? ""
+                let rawStderr = String(data: stderrData, encoding: .utf8) ?? ""
+                let stdoutSummary = Self.lineSummary(
+                    rawStdout,
+                    head: Self.valueToInt(args["stdoutHeadLines"]),
+                    tail: Self.valueToInt(args["stdoutTailLines"])
+                )
+                let stderrSummary = Self.lineSummary(
+                    rawStderr,
+                    head: Self.valueToInt(args["stderrHeadLines"]),
+                    tail: Self.valueToInt(args["stderrTailLines"])
+                )
+                let exitCode = Int(process.terminationStatus)
+                let timedOut = timeoutFlag.value
+                let success = exitCode == 0 && !timedOut
+                let terminationReason: String = timedOut
+                    ? "timeout_killed"
+                    : (success ? "exited" : "non_zero_exit")
 
                 return .object([
-                    "stdout": .string(stdout),
-                    "stderr": .string(stderr),
-                    "exitCode": .int(Int(process.terminationStatus)),
-                    "duration": .double(durationSec)
+                    "stdout": .string(stdoutSummary.text),
+                    "stderr": .string(stderrSummary.text),
+                    "exitCode": .int(exitCode),
+                    "success": .bool(success),
+                    "status": .string(success ? "success" : (timedOut ? "timed_out" : "failed")),
+                    "timedOut": .bool(timedOut),
+                    "timeoutSeconds": .int(timeout),
+                    "terminationReason": .string(terminationReason),
+                    "duration": .double(durationSec),
+                    "backgroundCommand": .bool(isBackground),
+                    "recoveryHint": .string(isBackground ? "Background commands are capped at 5s by the MCP request. Redirect output to a log file and poll the log or process separately." : "For long-running work, increase timeout or run a detached command that writes to a log path."),
+                    "stdoutLineCount": .int(stdoutSummary.lineCount),
+                    "stderrLineCount": .int(stderrSummary.lineCount),
+                    "stdoutTruncated": .bool(stdoutSummary.truncated),
+                    "stderrTruncated": .bool(stderrSummary.truncated)
                 ])
             }
         ))

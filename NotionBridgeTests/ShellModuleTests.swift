@@ -45,9 +45,13 @@ func runShellModuleTests() async {
         )
         if case .object(let dict) = result,
            case .string(let stdout) = dict["stdout"],
-           case .int(let exitCode) = dict["exitCode"] {
+           case .int(let exitCode) = dict["exitCode"],
+           case .bool(let success) = dict["success"],
+           case .string(let status) = dict["status"] {
             try expect(stdout.contains("hello_notionbridge"), "stdout should contain hello_notionbridge")
             try expect(exitCode == 0, "Expected exit code 0, got \(exitCode)")
+            try expect(success, "Expected success true for exit 0")
+            try expect(status == "success", "Expected success status, got \(status)")
         } else {
             throw TestError.assertion("Unexpected result format")
         }
@@ -74,8 +78,14 @@ func runShellModuleTests() async {
             arguments: .object(["command": .string("exit 42")])
         )
         if case .object(let dict) = result,
-           case .int(let exitCode) = dict["exitCode"] {
+           case .int(let exitCode) = dict["exitCode"],
+           case .bool(let success) = dict["success"],
+           case .string(let status) = dict["status"],
+           case .string(let reason) = dict["terminationReason"] {
             try expect(exitCode == 42, "Expected exit code 42, got \(exitCode)")
+            try expect(!success, "Expected success false for non-zero exit")
+            try expect(status == "failed", "Expected failed status, got \(status)")
+            try expect(reason == "non_zero_exit", "Expected non_zero_exit reason, got \(reason)")
         } else {
             throw TestError.assertion("Unexpected result format")
         }
@@ -124,11 +134,38 @@ func runShellModuleTests() async {
             ])
         )
         if case .object(let dict) = result,
-           case .int(let exitCode) = dict["exitCode"] {
+           case .int(let exitCode) = dict["exitCode"],
+           case .bool(let timedOut) = dict["timedOut"],
+           case .string(let reason) = dict["terminationReason"] {
             // Process terminated by signal should have non-zero exit code
             try expect(exitCode != 0, "Expected non-zero exit code for timed-out process")
+            try expect(timedOut, "Expected timedOut true")
+            try expect(reason == "timeout_killed", "Expected timeout_killed reason, got \(reason)")
         } else {
             throw TestError.assertion("Unexpected result format")
+        }
+    }
+
+    await test("shell_exec merges env and summarizes long stdout") {
+        let result = try await router.dispatch(
+            toolName: "shell_exec",
+            arguments: .object([
+                "command": .string("printf '%s\n' \"$NB_TEST_ENV\"; printf 'line1\nline2\nline3\nline4\n'"),
+                "env": .object(["NB_TEST_ENV": .string("bridge-env-ok")]),
+                "stdoutHeadLines": .int(2),
+                "stdoutTailLines": .int(1)
+            ])
+        )
+        if case .object(let dict) = result,
+           case .string(let stdout) = dict["stdout"],
+           case .int(let lineCount) = dict["stdoutLineCount"],
+           case .bool(let truncated) = dict["stdoutTruncated"] {
+            try expect(stdout.contains("bridge-env-ok"), "stdout should include merged env value")
+            try expect(stdout.contains("line4"), "stdout should include tail line")
+            try expect(lineCount >= 5, "Expected at least 5 stdout lines")
+            try expect(truncated, "Expected summarized stdout to be marked truncated")
+        } else {
+            throw TestError.assertion("Expected stdout summary metadata")
         }
     }
 

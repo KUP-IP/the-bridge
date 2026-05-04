@@ -628,7 +628,7 @@ public enum NotionModule {
             name: "notion_comment_create",
             module: moduleName,
             tier: .notify,
-            description: "Post a top-level comment on a Notion page. For threaded replies use notion_discussion_create.",
+            description: "Post a top-level inline-only markdown comment on a Notion page. Preflights Notion's 2000-character rich_text run limit. For threaded replies use notion_discussion_create.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -643,6 +643,17 @@ public enum NotionModule {
                       case .string(let pageId) = args["pageId"],
                       case .string(let text) = args["text"] else {
                     throw ToolRouterError.invalidArguments(toolName: "notion_comment_create", reason: "missing 'pageId' or 'text'")
+                }
+
+                let maxChars = 2000
+                if text.count > maxChars {
+                    return .object([
+                        "success": .bool(false),
+                        "error": .string("notion_comment_create: rich_text.text.content exceeds Notion's 2000-character per-run limit"),
+                        "maxChars": .int(maxChars),
+                        "actualChars": .int(text.count),
+                        "hint": .string("Split long comments into multiple shorter comments or use notion_code_block_append for long code/text blocks. Comments support inline-only markdown, not block markdown.")
+                    ])
                 }
 
                 let client = try await registryHolder.getClient(workspace: extractWorkspace(args))
@@ -760,11 +771,12 @@ public enum NotionModule {
             name: "notion_file_upload",
             module: moduleName,
             tier: .notify,
-            description: "Upload a local Mac file and return a Notion-hosted file reference for use in file / image / pdf blocks.",
+            description: "Upload a local Mac file and return a Notion-hosted file reference for use in file / image / pdf blocks. Optional trace=true returns safe create_upload vs send_content diagnostics.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "filePath": .object(["type": .string("string"), "description": .string("Absolute path to the local file")]),
+                    "trace": .object(["type": .string("boolean"), "description": .string("If true, include safe phase diagnostics for create_upload and send_content failures/success.")]),
                     "workspace": workspaceParam
                 ]),
                 "required": .array([.string("filePath")])
@@ -812,17 +824,20 @@ public enum NotionModule {
                 }()
 
                 let client = try await registryHolder.getClient(workspace: extractWorkspace(args))
-                let data = try await client.uploadFile(fileName: fileName, fileData: fileData, contentType: contentType)
+                let includeTrace: Bool = { if case .bool(let b) = args["trace"] { return b }; return false }()
+                let upload = try await client.uploadFileWithTrace(fileName: fileName, fileData: fileData, contentType: contentType)
 
-                guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                guard let json = try? JSONSerialization.jsonObject(with: upload.data) as? [String: Any] else {
                     return .object(["error": .string("Failed to parse upload response")])
                 }
 
-                return .object([
+                var result: [String: Value] = [
                     "success": .bool(true),
                     "id": .string(json["id"] as? String ?? ""),
                     "status": .string(json["status"] as? String ?? "unknown")
-                ])
+                ]
+                if includeTrace { result["trace"] = .array(upload.trace.map { .string($0) }) }
+                return .object(result)
             }
         ))
 
@@ -1249,7 +1264,7 @@ public enum NotionModule {
             name: "notion_discussion_create",
             module: moduleName,
             tier: .notify,
-            description: "Start a new threaded discussion on a Notion page (accepts compressed URLs, UUIDs, or full Notion URLs).",
+            description: "Start a new threaded discussion on a Notion page (accepts compressed URLs, UUIDs, or full Notion URLs). Initial comment is inline-only markdown and preflights Notion's 2000-character rich_text run limit.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -1264,6 +1279,17 @@ public enum NotionModule {
                       case .string(let pageId) = args["pageId"],
                       case .string(let text) = args["text"] else {
                     throw ToolRouterError.invalidArguments(toolName: "notion_discussion_create", reason: "missing 'pageId' or 'text'")
+                }
+
+                let maxChars = 2000
+                if text.count > maxChars {
+                    return .object([
+                        "success": .bool(false),
+                        "error": .string("notion_discussion_create: rich_text.text.content exceeds Notion's 2000-character per-run limit"),
+                        "maxChars": .int(maxChars),
+                        "actualChars": .int(text.count),
+                        "hint": .string("Split long discussion starters into shorter comments or move long structured content into the page body/code block. Comments support inline-only markdown, not block markdown.")
+                    ])
                 }
 
                 let client = try await registryHolder.getClient(workspace: extractWorkspace(args))

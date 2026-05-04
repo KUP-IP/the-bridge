@@ -11,6 +11,17 @@ import MCP
 /// Forbidden path enforcement handled by SecurityGate at ToolRouter dispatch level.
 public enum FileModule {
 
+    private static func valueToInt(_ value: Value?) -> Int? {
+        if case .int(let i) = value { return i }
+        if case .double(let d) = value { return Int(d) }
+        return nil
+    }
+
+    private static func shouldSkipHidden(_ url: URL, root: URL) -> Bool {
+        let rel = url.path.replacingOccurrences(of: root.path, with: "")
+        return rel.split(separator: "/").contains { $0.hasPrefix(".") }
+    }
+
     // MARK: - HTML Entity Decoding (A1 fix)
     private static func decodeHTMLEntities(_ string: String) -> String {
         var result = string
@@ -47,7 +58,9 @@ public enum FileModule {
                 "properties": .object([
                     "path": .object(["type": .string("string"), "description": .string("Absolute path to directory")]),
                     "recursive": .object(["type": .string("boolean"), "description": .string("List recursively (default: false)")]),
-                    "showHidden": .object(["type": .string("boolean"), "description": .string("Show hidden files (default: false)")])
+                    "showHidden": .object(["type": .string("boolean"), "description": .string("Show hidden files (default: false)")]),
+                    "maxEntries": .object(["type": .string("integer"), "description": .string("Maximum entries to return (default: 5000 for recursive listings, unlimited otherwise)")]),
+                    "maxDepth": .object(["type": .string("integer"), "description": .string("Maximum recursive depth below the root (default: unlimited)")])
                 ]),
                 "required": .array([.string("path")])
             ]),
@@ -58,44 +71,74 @@ public enum FileModule {
                 }
                 let recursive: Bool = { if case .bool(let b) = args["recursive"] { return b }; return false }()
                 let showHidden: Bool = { if case .bool(let b) = args["showHidden"] { return b }; return false }()
+                let maxEntries = Self.valueToInt(args["maxEntries"]) ?? (recursive ? 5000 : Int.max)
+                let maxDepth = Self.valueToInt(args["maxDepth"])
 
                 let fm = FileManager.default
-                let url = URL(fileURLWithPath: path)
+                let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
                 var entries: [Value] = []
+                var scanned = 0
+                var truncated = false
+                var truncationReason: String? = nil
+
+                func appendEntry(_ item: URL) throws {
+                    let isDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                    entries.append(.object([
+                        "name": .string(item.lastPathComponent),
+                        "path": .string(item.path),
+                        "type": .string(isDir ? "directory" : "file")
+                    ]))
+                }
 
                 if recursive {
+                    let rootDepth = url.pathComponents.count
                     if let enumerator = fm.enumerator(
                         at: url,
                         includingPropertiesForKeys: [.isDirectoryKey],
                         options: showHidden ? [] : [.skipsHiddenFiles]
                     ) {
                         while let itemURL = enumerator.nextObject() as? URL {
-                            let isDir = (try? itemURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-                            entries.append(.object([
-                                "name": .string(itemURL.lastPathComponent),
-                                "path": .string(itemURL.path),
-                                "type": .string(isDir ? "directory" : "file")
-                            ]))
+                            scanned += 1
+                            let depth = max(0, itemURL.pathComponents.count - rootDepth)
+                            if let maxDepth, depth > maxDepth {
+                                enumerator.skipDescendants()
+                                continue
+                            }
+                            if entries.count >= maxEntries {
+                                truncated = true
+                                truncationReason = "maxEntries"
+                                enumerator.skipDescendants()
+                                break
+                            }
+                            try appendEntry(itemURL)
                         }
                     }
                 } else {
                     let items = try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey])
                     for item in items {
+                        scanned += 1
                         if !showHidden && item.lastPathComponent.hasPrefix(".") { continue }
-                        let isDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-                        entries.append(.object([
-                            "name": .string(item.lastPathComponent),
-                            "path": .string(item.path),
-                            "type": .string(isDir ? "directory" : "file")
-                        ]))
+                        if entries.count >= maxEntries {
+                            truncated = true
+                            truncationReason = "maxEntries"
+                            break
+                        }
+                        try appendEntry(item)
                     }
                 }
 
-                return .object([
-                    "path": .string(path),
+                var result: [String: Value] = [
+                    "path": .string(url.path),
                     "count": .int(entries.count),
+                    "scannedCount": .int(scanned),
+                    "truncated": .bool(truncated),
                     "entries": .array(entries)
-                ])
+                ]
+                if let truncationReason { result["truncationReason"] = .string(truncationReason) }
+                if truncated {
+                    result["warning"] = .string("Listing truncated before exhausting the directory. Re-run with a narrower path, maxDepth, or larger maxEntries if you need more results.")
+                }
+                return .object(result)
             }
         ))
 
@@ -109,7 +152,9 @@ public enum FileModule {
                 "type": .string("object"),
                 "properties": .object([
                     "directory": .object(["type": .string("string"), "description": .string("Directory to search in")]),
-                    "query": .object(["type": .string("string"), "description": .string("Query string to match file names against")])
+                    "query": .object(["type": .string("string"), "description": .string("Query string to match file names against")]),
+                    "maxResults": .object(["type": .string("integer"), "description": .string("Maximum matches to return (default 1000)")]),
+                    "timeoutSeconds": .object(["type": .string("integer"), "description": .string("Soft search time limit in seconds (default 10)")])
                 ]),
                 "required": .array([.string("directory"), .string("query")])
             ]),
@@ -120,12 +165,29 @@ public enum FileModule {
                     throw ToolRouterError.invalidArguments(toolName: "file_search", reason: "missing 'directory' or 'query'")
                 }
 
-                let url = URL(fileURLWithPath: directory)
+                let url = URL(fileURLWithPath: (directory as NSString).expandingTildeInPath)
+                let maxResults = Self.valueToInt(args["maxResults"]) ?? 1000
+                let timeoutSeconds = Self.valueToInt(args["timeoutSeconds"]) ?? 10
+                let deadline = Date().addingTimeInterval(TimeInterval(timeoutSeconds))
                 var matches: [Value] = []
+                var scanned = 0
+                var truncated = false
+                var truncationReason: String? = nil
 
-                if let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: nil) {
+                if let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) {
                     while let itemURL = enumerator.nextObject() as? URL {
+                        scanned += 1
+                        if Date() >= deadline {
+                            truncated = true
+                            truncationReason = "timeoutSeconds"
+                            break
+                        }
                         if itemURL.lastPathComponent.localizedCaseInsensitiveContains(query) {
+                            if matches.count >= maxResults {
+                                truncated = true
+                                truncationReason = "maxResults"
+                                break
+                            }
                             matches.append(.object([
                                 "name": .string(itemURL.lastPathComponent),
                                 "path": .string(itemURL.path)
@@ -134,12 +196,19 @@ public enum FileModule {
                     }
                 }
 
-                return .object([
+                var result: [String: Value] = [
                     "query": .string(query),
-                    "directory": .string(directory),
+                    "directory": .string(url.path),
                     "count": .int(matches.count),
+                    "scannedCount": .int(scanned),
+                    "truncated": .bool(truncated),
                     "matches": .array(matches)
-                ])
+                ]
+                if let truncationReason { result["truncationReason"] = .string(truncationReason) }
+                if truncated {
+                    result["hint"] = .string("Search was capped before exhaustive traversal. Narrow directory/query, raise maxResults/timeoutSeconds, or use Spotlight via shell_exec mdfind for broad user-home searches.")
+                }
+                return .object(result)
             }
         ))
 
@@ -333,15 +402,23 @@ public enum FileModule {
                     throw ToolRouterError.invalidArguments(toolName: "file_move", reason: "missing 'sourcePath' or 'destinationPath'")
                 }
 
+                let sourceURL = URL(fileURLWithPath: (src as NSString).expandingTildeInPath)
+                let destinationURL = URL(fileURLWithPath: (dst as NSString).expandingTildeInPath)
                 try FileManager.default.moveItem(
-                    at: URL(fileURLWithPath: src),
-                    to: URL(fileURLWithPath: dst)
+                    at: sourceURL,
+                    to: destinationURL
                 )
 
+                let sourceExists = FileManager.default.fileExists(atPath: sourceURL.path)
+                let destinationExists = FileManager.default.fileExists(atPath: destinationURL.path)
+                let success = destinationExists && !sourceExists
                 return .object([
-                    "source": .string(src),
-                    "destination": .string(dst),
-                    "success": .bool(true)
+                    "source": .string(sourceURL.path),
+                    "destination": .string(destinationURL.path),
+                    "success": .bool(success),
+                    "sourceExistsAfterMove": .bool(sourceExists),
+                    "destinationExistsAfterMove": .bool(destinationExists),
+                    "status": .string(success ? "verified" : "partial_or_unverified")
                 ])
             }
         ))

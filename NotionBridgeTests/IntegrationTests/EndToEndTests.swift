@@ -68,8 +68,12 @@ func runEndToEndTests() async {
             arguments: .object(["command": .string(sudoStr + " -n true")])
         )
         if case .object(let dict) = result {
-            try expect(dict["status"] == nil, "Expected no handoff status for sudo command")
             try expect(dict["exitCode"] != nil, "Expected shell_exec result payload")
+            if case .string(let status) = dict["status"] {
+                try expect(["failed", "timed_out", "success"].contains(status), "Expected shell_exec status payload, got \(status)")
+            } else {
+                throw TestError.assertion("Expected shell_exec structured status payload")
+            }
         } else {
             throw TestError.assertion("Expected shell_exec result object for sudo command")
         }
@@ -360,7 +364,7 @@ func runEndToEndTests() async {
         try expect(messages.count == 6, "MessagesModule: expected 6")
         try expect(system.count == 3, "SystemModule: expected 3")
         try expect(contacts.count == 4, "ContactsModule: expected 4")
-        try expect(notion.count == 21, "NotionModule: expected 21")
+        try expect(notion.count == 23, "NotionModule: expected 23")
         try expect(screen.count == 5, "ScreenModule: expected 5")
         try expect(accessibility.count == 5, "AccessibilityModule: expected 5")
         try expect(applescript.count == 1, "AppleScriptModule: expected 1")

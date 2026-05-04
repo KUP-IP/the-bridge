@@ -1,4 +1,19 @@
 # Changelog
+## [1.9.5] — 2026-05-04
+
+### Added
+- **Shell execution hardening** — `shell_exec` now reports structured success/status/timeout/termination fields, output line counts/truncation metadata, environment overrides, login-shell opt-in, tilde-expanded working directories, and recovery hints for long-running/background commands.
+- **Filesystem caps** — `file_list` supports `maxEntries`/`maxDepth` with truncation metadata; `file_search` supports `maxResults`/`timeoutSeconds` with scanned counts and narrowing hints.
+- **Notion diagnostics** — file uploads can return safe phase trace entries for create-upload vs send-content; long comment/discussion text is preflighted against Notion's 2000-character rich-text limit before API calls.
+- **Chrome recovery** — `chrome_tabs` preserves partial tab listings when individual windows/tabs fail and returns structured per-item errors; `chrome_navigate` returns activation/tab-refresh recovery hints for off-Space or churned-tab failures.
+
+### Changed
+- MCP formatted responses now flag structured `success: false`/error-status payloads as tool errors at the transport layer while preserving the JSON body for agent recovery.
+- Operator/agent guidance now documents portable search fallbacks, Python-first patch scripts, Cloudflare Pages temp-cwd deploys, inline-only Notion comments, and shell timeout/output semantics.
+
+### Fixed
+- Removed a duplicate execution-notification argument in the tool router path while adding structured failure propagation.
+
 ## [1.9.4] — 2026-04-18
 
 ### Added
