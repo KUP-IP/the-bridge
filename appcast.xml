@@ -3,14 +3,14 @@
     <channel>
         <title>NotionBridge</title>
         <item>
-            <title>1.9.3</title>
-            <pubDate>Sat, 18 Apr 2026 10:41:01 -0500</pubDate>
+            <title>1.9.5</title>
+            <pubDate>Mon, 04 May 2026 13:44:59 -0500</pubDate>
             <link>https://github.com/KUP-IP/Notion-bridge/releases</link>
-            <sparkle:version>24</sparkle:version>
-            <sparkle:shortVersionString>1.9.3</sparkle:shortVersionString>
+            <sparkle:version>26</sparkle:version>
+            <sparkle:shortVersionString>1.9.5</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/KUP-IP/Notion-bridge/releases/download/v1.9.3/notion-bridge-v1.9.3.dmg" length="13700190" type="application/octet-stream" sparkle:edSignature="gSxaQzKt4TX2Y4lWGXeJnIZMPL6lOjYqfoH5oeqRfognaP2cqNpMv9xuokx7ZY6Gl0AyV4h92d/f4vLOdCPHBw=="/>
+            <enclosure url="https://github.com/KUP-IP/Notion-bridge/releases/download/v1.9.5/notion-bridge-v1.9.5.dmg" length="13191749" type="application/octet-stream" sparkle:edSignature="J324CQC3LTf6jve8L8ZsDmXObASrkkk3VxMwDFYPMd/I+5yKKU/Zs1qd72SuaF6SiiSbn7S/zZrc/L/HiuvRCw=="/>
         </item>
     </channel>
 </rss>
