@@ -115,6 +115,9 @@ public actor ServerManager {
         await CodeEditModule.register(on: router)  // PKT-750 (v2.2 · 1.2): code_search · file_str_replace · file_apply_patch   // PKT-738 (v2.2 · 0.1): 15th module — dev/ scaffold (placeholder dev_module_info; real primitives in follow-ups)
         await SpotlightModule.register(on: router)         // PKT-747 (v2.2 · 3.3): spotlight_query (mdfind wrapper)
         await SyntheticInputModule.register(on: router)    // PKT-747 (v2.2 · 3.3): keyboard_type (CGEvent synthetic input)
+        await MouseClickModule.register(on: router)        // PKT-765 (v2.2 · 3.3.1): mouse_click (CGEvent mouse, abs/window-relative)
+        await CGEventModule.register(on: router)           // PKT-765 (v2.2 · 3.3.1): cgevent_send (raw CGEvent escape hatch)
+        await PasteboardHistoryModule.register(on: router) // PKT-765 (v2.2 · 3.3.1): pasteboard_history (NSPasteboard polling + persistence)
 
         // 3. Register echo tool (backward compatibility from V1-01)
         await router.register(ToolRegistration(

@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.2.0-3.3.1] — 2026-05-10 — MAC UI extras Wave 2 (PKT-765)
+
+### Added
+- **`MouseClickModule`** registers **`mouse_click`** (.notify) — synthetic mouse click via CGEvent. Supports left/right/middle buttons and 1- or 2-click sequences. Accepts absolute screen coordinates by default, or window-relative coordinates (resolved via AX from the focused application’s focused window) when `windowRelative=true`. Returns `code="capability_missing"` with `settingsHint` deep-link when Accessibility is not granted; never silently no-ops.
+- **`CGEventModule`** registers **`cgevent_send`** (.notify) — raw CGEvent escape hatch (cliclick-equivalent). Posts `key_down` / `key_up` / `key_press` events with virtual key code and modifier flags (`cmd` / `shift` / `opt` / `ctrl` / `fn` / `capslock`), or `scroll` events with pixel deltas on both axes. Same AX gate + `capability_missing` surface.
+- **`PasteboardHistoryModule`** registers **`pasteboard_history`** (.open) — returns the rolling 50-entry pasteboard history captured by a background `NSPasteboard.changeCount` poller (750 ms interval, documented). Entries persist across bridge restarts to `~/Library/Application Support/NotionBridge/pasteboard-history.json`. No TCC grant required. Honors a `limit` parameter (1..50, default 50).
+
+### Changed
+- **Tool-count baseline** bumped to **+3** static feature module tools (`mouse_click`, `cgevent_send`, `pasteboard_history`).
+
+### Notes
+- Companion to PKT-747 (Wave 1: `spotlight_query` + `keyboard_type`). Branch `bridge-v2.2/3.3.1-mac-ui-extras-wave2` cut from PKT-747 head `6bf0507`.
+- Live-HITL items deferred to QA: (1) `mouse_click` validation against an AX-incompatible (Adobe-class) application, (2) `pasteboard_history` idle CPU footprint measurement (target < 1%). The polling timer uses a utility-QoS DispatchSourceTimer with 100 ms leeway and string-only payload capture, which is the low-overhead path; measurement remains a QA gate.
+- Test coverage: 7 new tests in `MouseClickModuleTests.swift`, 6 new tests in `CGEventModuleTests.swift`, 8 new tests in `PasteboardHistoryModuleTests.swift` (registration, tier classification, input validation, capability_missing surface, in-process pasteboard capture round-trip, limit clamping, persistence assertion).
+
 ## [2.2.0-1.2] — 2026-05-10 — code_search · file_str_replace · file_apply_patch (PKT-750)
 
 ### Added
