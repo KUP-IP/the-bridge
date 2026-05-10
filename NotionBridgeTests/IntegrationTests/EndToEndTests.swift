@@ -37,6 +37,7 @@ func runEndToEndTests() async {
     await CredentialModule.register(on: router)
     await PaymentModule.register(on: router)
     await ConnectionsModule.register(on: router)
+    await DevModule.register(on: router)  // PKT-738 (v2.2 · 0.1): dev/ scaffold module
 
     // ============================================================
     // E2E-1: Full pipeline — dispatch → security → handler → audit

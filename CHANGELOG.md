@@ -1,4 +1,24 @@
 # Changelog
+
+## [2.2.0-0.1] — 2026-05-10 — Pruning + dev/ scaffold (PKT-738)
+
+### Added
+- **`modules/dev/` Swift module scaffold** — new `DevModule` registered as the 15th static feature module. Surfaces in `notion_modules_list` and exposes a placeholder `dev_module_info` tool. Foundation for v2.2 dev primitives (code-edit, cursor/, computer/ helpers); real tools land in follow-up packets (PKT-364, PKT-365, …).
+
+### Changed
+- **Tool-count baseline** bumped from 82 to **83** static feature module tools (`BridgeConstants.staticFeatureModuleToolCount`): + 1 (`dev_module_info` scaffold). Jobs kill-switch drops do not affect this count because `JobsModule` is registered after `StripeMcpModule` in `ServerManager.setup()` and excluded from the static surface (matches test setup).
+- **Family count** bumped from 15 to **16** with the `dev` family.
+
+### Deprecated
+- **`notion_block_read`** — description prefixed with `[DEPRECATED v2.2 · PKT-738]`. Prefer `notion_page_read` for whole-page reads or `notion_block_update` for surgical edits. Tool remains in registry through the v2.3 ramp.
+
+### Removed
+- **`jobs_pause_all`** and **`jobs_resume_all`** mass kill-switches deregistered. Per-job `job_pause` / `job_resume` (or iterate `job_list`) replace them. Factory functions retained in `JobsModule` for potential reinstatement; no longer wired to the router.
+
+### Deferred to follow-up packets (out of scope here)
+- 25 Stripe long-tail tool deprecations (warn + shim → `stripe_api_execute`) — needs its own focused packet; Stripe MCP module is a remote proxy and shimming requires a wrapping layer.
+- AX collapse: `ax_focused_app` + `ax_find_element` + `ax_element_info` → unified `ax_query` — this is a feature implementation, not a warning shim, and warrants its own packet.
+
 ## [1.9.5] — 2026-05-04
 
 ### Added

@@ -36,8 +36,9 @@ public enum JobsModule {
         await router.register(makeJobDuplicate())
         await router.register(makeJobExport())
         await router.register(makeJobImport())
-        await router.register(makeJobsPauseAll())
-        await router.register(makeJobsResumeAll())
+        // DROPPED v2.2 · PKT-738: jobs_pause_all / jobs_resume_all kill-switches removed.
+        // Use per-job job_pause / job_resume, or iterate job_list. Factories retained
+        // (makeJobsPauseAll / makeJobsResumeAll) for potential reinstatement; not registered.
     }
 
     // MARK: - v1.9.0 tool factories

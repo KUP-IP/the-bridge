@@ -916,7 +916,7 @@ public enum NotionModule {
             name: "notion_block_read",
             module: moduleName,
             tier: .open,
-            description: "Fetch one block by ID with full raw block JSON (type, content, children flag). Use for surgical edits.",
+            description: "[DEPRECATED v2.2 · PKT-738 — prefer notion_page_read for whole-page reads, or notion_block_update for surgical edits.] Fetch one block by ID with full raw block JSON (type, content, children flag).",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
