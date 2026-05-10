@@ -738,7 +738,7 @@ public actor NotionClient {
             throw NotionClientError.decodingError("notion_file_upload failed during phase=parse_create_response: missing file_upload id")
         }
 
-        trace.append("phase=send_content status=starting uploadId=\(uploadId)")
+        trace.append("phase=send status=starting uploadId=\(uploadId)")
         let boundary = "NotionBridge-\(UUID().uuidString)"
         var bodyData = Data()
         bodyData.append("--\(boundary)\r\n".data(using: .utf8)!)
@@ -749,14 +749,14 @@ public actor NotionClient {
 
         let (data, response) = try await request(
             method: "POST",
-            path: "/file_uploads/\(uploadId)/send_content",
+            path: "/file_uploads/\(uploadId)/send",
             body: bodyData,
             contentType: "multipart/form-data; boundary=\(boundary)"
         )
-        trace.append("phase=send_content httpStatus=\(response.statusCode)")
+        trace.append("phase=send httpStatus=\(response.statusCode)")
         guard (200...299).contains(response.statusCode) else {
             let msg = String(data: data, encoding: .utf8) ?? ""
-            throw NotionClientError.decodingError("notion_file_upload failed during phase=send_content httpStatus=\(response.statusCode) body=\(String(msg.prefix(500)))")
+            throw NotionClientError.decodingError("notion_file_upload failed during phase=send httpStatus=\(response.statusCode) body=\(String(msg.prefix(500)))")
         }
         trace.append("phase=complete status=success")
         return (data, trace)

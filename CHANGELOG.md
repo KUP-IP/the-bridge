@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.2.0-0.2] — 2026-05-10 — Remediation: notion_file_upload (PKT-739)
+
+### Fixed
+- `notion_file_upload` send-phase endpoint (carryover from v1.9.5 B1) — the second-phase POST now targets the documented Notion API route `/v1/file_uploads/{id}/send` instead of the non-existent `/send_content`, which had been returning `400 invalid_request_url` for every upload regardless of MIME. Trace labels (`phase=send`) updated to match.
+
+### Added
+- `notion_file_upload` MIME guard — uploads with unrecognized extensions (which previously fell through to `application/octet-stream`) now fail fast with a clear error listing all supported extensions, instead of being rejected by the Notion API with a confusing 400 `validation_error` from `phase=create_upload`.
+
+### Deferred to follow-up packet
+- `wrangler_d1_status` binding-ambiguity tool — out of scope here; tool does not yet exist in the Bridge MCP and creating it from scratch (TOML parser + subprocess + tests) exceeds the 0.2 complexity envelope.
+
 ## [2.2.0-0.1] — 2026-05-10 — Pruning + dev/ scaffold (PKT-738)
 
 ### Added

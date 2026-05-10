@@ -823,6 +823,13 @@ public enum NotionModule {
                     }
                 }()
 
+                // PKT-739 (v2.2 · 0.2): Reject unsupported MIME early. Notion's File Upload API
+                // rejects application/octet-stream with a 400 validation_error at create_upload phase;
+                // surface a clearer error here listing the supported extensions.
+                if contentType == "application/octet-stream" {
+                    let extLabel = ext.isEmpty ? "(none)" : ext
+                    return .object(["error": .string("Unsupported file extension '\(extLabel)' for notion_file_upload. The Notion File Upload API does not accept application/octet-stream. Supported extensions: pdf, png, jpg, jpeg, gif, webp, svg, mp3, m4a, mp4, mov, ogg, wav, webm, txt, json, csv, html, htm, xml, zip, md.")])
+                }
                 let client = try await registryHolder.getClient(workspace: extractWorkspace(args))
                 let includeTrace: Bool = { if case .bool(let b) = args["trace"] { return b }; return false }()
                 let upload = try await client.uploadFileWithTrace(fileName: fileName, fileData: fileData, contentType: contentType)
