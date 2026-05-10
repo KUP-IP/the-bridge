@@ -414,6 +414,8 @@ await runSecurityAuditTests()
 // ============================================================
 
 await runCodeEditModuleTests()
+await runSpotlightModuleTests()        // PKT-747 (v2.2 · 3.3)
+await runSyntheticInputModuleTests()   // PKT-747 (v2.2 · 3.3)
 await runJobsModuleTests()
 await runCronHumanizerTests()
 
