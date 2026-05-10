@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.2.0-1.2] — 2026-05-10 — code_search · file_str_replace · file_apply_patch (PKT-750)
+
+### Added
+- **`CodeEditModule`** registers three new `dev/` tools that replace ad-hoc `shell_exec rg` + manual file rewrite patterns:
+  - **`code_search`** (.open) — ripgrep-backed search with structured output. Returns `{matches: [{path, lineNumber, lineText, columnStart, columnEnd, absoluteOffset, submatches}], count, elapsedMs}`. Honors `pattern`, `path`, `globs`, `caseInsensitive`, `fixedString`, `contextBefore`/`contextAfter`, `maxCount`. Discovers `rg` via `PATH` then common Homebrew/MacPorts prefixes; reports `capability_missing` if absent.
+  - **`file_str_replace`** (.notify) — scope-safe string replace. Default mode requires the `search` substring to be unique in the file (rejects ambiguous matches with `status: "failed"`). `replaceAllMatches: true` opts into bulk replace and reports `occurrencesReplaced`. `preview: true` returns a unified diff without writing. Atomic write via tmp + rename.
+  - **`file_apply_patch`** (.notify) — unified-diff apply with strict context validation. Parses `@@ -a,b +c,d @@` hunks; tolerates leading line drift but rejects context-line drift with a clear `context drift` error. Atomic write; partial application is impossible (validate-all-then-write).
+
+### Changed
+- **Tool-count baseline** bumped from 83 to **86** static feature module tools (`BridgeConstants.staticFeatureModuleToolCount`): + 3 (`code_search`, `file_str_replace`, `file_apply_patch`).
+- **Family count** unchanged at **16** (still the `dev` family from PKT-738).
+
+### Notes
+- Performance: `code_search` against the bridge repo itself (≈34k LoC) measures 27–38 ms p50 — well under the 500 ms p50 target for the ≈100k LoC reference workload.
+- Test coverage: 18 new tests in `CodeEditModuleTests.swift` cover registration, tier assignment, structured search output, ambiguous-match rejection, replaceAllMatches, preview mode, unicode, trailing whitespace, no-match, not-found, clean apply, drift rejection, multi-hunk apply, and malformed patch rejection. Total bridge test count: **447 passed / 0 failed**.
+
 ## [2.2.0-0.1] — 2026-05-10 — Pruning + dev/ scaffold (PKT-738)
 
 ### Added

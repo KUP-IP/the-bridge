@@ -111,7 +111,8 @@ public actor ServerManager {
         await StripeMcpModule.register(on: router)
         await ConnectionsModule.register(on: router)
         await JobsModule.register(on: router)  // PKT-340 W1: 14th module (8 job_* tools, handlers throw .notImplemented pending W2-4)
-        await DevModule.register(on: router)   // PKT-738 (v2.2 · 0.1): 15th module — dev/ scaffold (placeholder dev_module_info; real primitives in follow-ups)
+        await DevModule.register(on: router)
+        await CodeEditModule.register(on: router)  // PKT-750 (v2.2 · 1.2): code_search · file_str_replace · file_apply_patch   // PKT-738 (v2.2 · 0.1): 15th module — dev/ scaffold (placeholder dev_module_info; real primitives in follow-ups)
 
         // 3. Register echo tool (backward compatibility from V1-01)
         await router.register(ToolRegistration(
