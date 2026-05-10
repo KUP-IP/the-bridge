@@ -251,3 +251,21 @@ NotionBridge is **source-available commercial software**.
 This repository is licensed under the **KUP Solutions Source-Available License** (Version 1.0, April 2026). You may view and reference the source code. Copying, modification, redistribution, derivative works, and commercial use are prohibited without written permission from KUP Solutions.
 
 See [`LICENSE`](LICENSE) for the full license text. See also [`PRIVACY.md`](PRIVACY.md) and [`TERMS.md`](TERMS.md).
+
+---
+
+## LSP server prerequisites (optional, for `lsp_*` tools)
+
+The `lsp_*` tools (PKT-745, v2.2 · 2.3) wrap external Language Server Protocol implementations. The tools register and report `capability_missing` if the underlying servers are absent, so they are safe to leave uninstalled — they only become functional once the matching server is on disk.
+
+| Language    | LSP server                  | Install                                                                                                                       |
+|-------------|-----------------------------|-------------------------------------------------------------------------------------------------------------------------------|
+| TypeScript / JavaScript | `typescript-language-server` | `npm install -g typescript-language-server typescript`                                                                        |
+| Swift       | `sourcekit-lsp`             | Ships with the Xcode toolchain (`/Applications/Xcode.app/...`). Falls back to Command Line Tools (`xcode-select --install`).  |
+
+Probe-supported install locations (checked in order):
+
+- **typescript-language-server:** `/opt/homebrew/bin`, `/usr/local/bin`, `~/.npm-global/bin`, `~/.local/bin`
+- **sourcekit-lsp:** Xcode default toolchain, then CommandLineTools
+
+If you install via a non-standard npm prefix, symlink the binary into one of the supported directories.
