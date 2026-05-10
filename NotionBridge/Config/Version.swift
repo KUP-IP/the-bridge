@@ -41,9 +41,10 @@ public enum BridgeConstants {
     /// Keep in sync with `ServerManager.setup()` module registrations before `StripeMcpModule` / `echo`.
     /// v1.9.5: 82 total (80 prior static tools + discussion/code-block Notion helpers).
     /// v2.2 · 0.1 (PKT-738): 82 + 1 (dev_module_info scaffold) = 83.
+    /// v2.2 · 0.2.2 (PKT-757): 83 + 1 (wrangler_d1_status) = 84.
     /// Note: jobs_pause_all / jobs_resume_all dropped, but JobsModule is registered after StripeMcpModule
     /// in ServerManager.setup() and excluded from this static count (matches test surface).
-    public static let staticFeatureModuleToolCount = 83
+    public static let staticFeatureModuleToolCount = 84
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

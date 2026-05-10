@@ -112,6 +112,7 @@ public actor ServerManager {
         await ConnectionsModule.register(on: router)
         await JobsModule.register(on: router)  // PKT-340 W1: 14th module (8 job_* tools, handlers throw .notImplemented pending W2-4)
         await DevModule.register(on: router)   // PKT-738 (v2.2 · 0.1): 15th module — dev/ scaffold (placeholder dev_module_info; real primitives in follow-ups)
+        await WranglerModule.register(on: router) // PKT-757 (v2.2 · 0.2.2): wrangler_d1_status (registered under module="dev" family)
 
         // 3. Register echo tool (backward compatibility from V1-01)
         await router.register(ToolRegistration(
