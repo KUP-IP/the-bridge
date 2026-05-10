@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.2.0-0.1.1] — 2026-05-10 — Stripe long-tail deprecation shims (PKT-754)
+
+### Deprecated
+- **25 Stripe long-tail tools** wrapped with the `[DEPRECATED v2.2 · PKT-754 — prefer stripe_api_execute]` description prefix. Each shim emits a one-shot deprecation warning to stdout, increments a per-tool telemetry counter (`StripeDeprecationTelemetry` actor) for the v2.3 hard-remove decision, and forwards the call through `StripeMcpProxy.shared.callTool` to the canonical replacement.
+  - **23 tools** (Invoices/Customers/Products/Prices/Coupons/Refunds/Disputes/PaymentIntents/Subscriptions/PaymentLinks/Account/Balance) translate args to `stripe_api_execute` with a stripe_api_operation_id (`PostInvoices`, `GetInvoices`, `PostCustomers`, `GetCustomers`, `PostProducts`, `GetProducts`, `PostPrices`, `GetPrices`, `PostCoupons`, `GetCoupons`, `PostInvoiceitems`, `PostPaymentLinks`, `PostRefunds`, `GetRefunds`, `GetDisputes`, `GetPaymentIntents`, `PostDisputesDispute`, `PostSubscriptionsSubscriptionExposedId`, `GetSubscriptions`, `DeleteSubscriptionsSubscriptionExposedId`, `PostInvoicesInvoiceFinalize`, `GetBalance`, `GetAccount`).
+  - **2 aggregator tools** (`fetch_stripe_resources`, `search_stripe_resources`) route through `stripe_api_search` instead. `fetch_stripe_resources` translates a Stripe object id (e.g. `cus_123`, `pi_abc`) to a `<resource>:id:"<id>"` search query via prefix dispatch; `search_stripe_resources` passes its `query` field verbatim.
+- Wrapped responses gain a `_deprecation_warning` sibling key so callers see the warning in JSON payloads in addition to stdout logging.
+
+### Added
+- **`NotionBridge/Modules/StripeDeprecationShim.swift`** — mapping table (25 entries), `StripeDeprecationTelemetry` actor (per-tool counter + per-session log gate), `wrapHandler(toolName:)` factory, `translateArgs(toolName:originalArgs:)` pure function, and result-decoration helper.
+- **`NotionBridgeTests/StripeDeprecationShimTests.swift`** — 17 tests covering: 25-name mapping coverage, description prefix, decoratedDescription for both canonical paths, 5 spot-check argument translations (create_invoice → PostInvoices, list_invoices → GetInvoices, finalize_invoice → PostInvoicesInvoiceFinalize, retrieve_balance → GetBalance, cancel_subscription → DeleteSubscriptionsSubscriptionExposedId), search-canonical translations, fetch_stripe_resources id-prefix dispatch (5 prefixes), telemetry increment + shouldLogOnce gating, warning-message contents, result decoration, and operation_id verb-prefix coverage for all 23 execute-mapped entries.
+
+### Changed
+- **`StripeMcpModule.registerDiscoveredTools`** now branches per discovered tool: deprecated names get the prefixed description and the shim-wrapped handler; non-deprecated names retain the original pass-through handler.
+
+### Gates
+- Two-release ramp policy: **warn in v2.2, hard-remove in v2.3**.
+- v1.9.5 binary base preserved; tool-count baseline unchanged (25 deprecated tools remain registered, just wrapped).
+- DoD spot-check: 5 of 25 tools verified end-to-end via unit tests for argument translation; runtime warning surface validated by telemetry-actor tests.
+
+### Notes
+- The 2 aggregator tools (`fetch_stripe_resources`, `search_stripe_resources`) do not have a clean single-operation `stripe_api_execute` mapping, so they route through the alternate canonical (`stripe_api_search`). Description hint reflects this. Documented as a deliberate deviation from the strict "all 25 → stripe_api_execute" reading of the DoD.
+
 ## [2.2.0-1.2] — 2026-05-10 — code_search · file_str_replace · file_apply_patch (PKT-750)
 
 ### Added

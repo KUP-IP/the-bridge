@@ -417,6 +417,7 @@ await runCodeEditModuleTests()
 await runJobsModuleTests()
 await runCronHumanizerTests()
 
+await runStripeDeprecationShimTests()
 await runEndToEndTests()
 
 // ============================================================
