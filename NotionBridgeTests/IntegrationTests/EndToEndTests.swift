@@ -367,7 +367,7 @@ func runEndToEndTests() async {
         try expect(contacts.count == 4, "ContactsModule: expected 4")
         try expect(notion.count == 23, "NotionModule: expected 23")
         try expect(screen.count == 5, "ScreenModule: expected 5")
-        try expect(accessibility.count == 5, "AccessibilityModule: expected 5")
+        try expect(accessibility.count == 6, "AccessibilityModule: expected 6 (PKT-755: +ax_query)")
         try expect(applescript.count == 1, "AppleScriptModule: expected 1")
 
         let chrome = await router.registrations(forModule: "chrome")

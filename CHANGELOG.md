@@ -11,6 +11,21 @@
 ### Deferred to follow-up packet
 - `wrangler_d1_status` binding-ambiguity tool — out of scope here; tool does not yet exist in the Bridge MCP and creating it from scratch (TOML parser + subprocess + tests) exceeds the 0.2 complexity envelope.
 
+## [2.2.0-0.1.2] — 2026-05-10 — AX consolidation: ax_query (PKT-755)
+
+### Added
+- **`ax_query`** unified Accessibility query tool — single `.open`-tier tool with a discriminated-union schema replacing the three overlapping per-shape AX query tools. Required `mode` enum (`focused_app` / `find_element` / `element_info`) selects the query shape; optional `pid`, `role`, `title`, `label`, `path`, `maxDepth` apply per-mode. Output matches the legacy tool payloads exactly. Deferred from PKT-738 (per Reflow #1, 2026-05-10).
+
+### Changed
+- **Tool-count baseline** bumped from 83 to **84** static feature module tools (`BridgeConstants.staticFeatureModuleToolCount`): + 1 (`ax_query`). `AccessibilityModule` tool count goes 5 → 6 (3 legacy shims retained as deprecated, plus `ax_tree`, `ax_perform_action`, and the new `ax_query`).
+
+### Deprecated
+- **`ax_focused_app`**, **`ax_find_element`**, **`ax_element_info`** — descriptions prefixed with `[DEPRECATED v2.2 · PKT-755 — prefer ax_query with mode='X']`. Handlers continue to return the same payload as before, but now route through shared payload helpers and inject a `_deprecated` warning marker (`"Tool deprecated in v2.2 (PKT-755). Prefer ax_query with mode='…'. This tool will be removed in v2.3."`). Tools remain in registry through the v2.3 hard-removal ramp.
+
+### Unchanged
+- **`ax_tree`** and **`ax_perform_action`** untouched.
+- macOS 26 Tahoe Accessibility permission flow unchanged in scope (PKT-754 territory).
+
 ## [2.2.0-0.1] — 2026-05-10 — Pruning + dev/ scaffold (PKT-738)
 
 ### Added
