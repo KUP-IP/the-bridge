@@ -115,6 +115,7 @@ public actor ServerManager {
         await BgProcessModule.register(on: router)  // PKT-744 (v2.2 · 1.1): bg_process_* runtime — long-running task supervision (5 dev/ tools)
         await DevServerModule.register(on: router)  // PKT-741 (v2.2 1.3): 16th module — port_inspect + devserver_* lifecycle
         await GhModule.register(on: router)         // PKT-742 (v2.2 · 2.2): gh_* CLI wrappers — 7 thin shells over GitHub CLI
+        await CursorModule.register(on: router)     // PKT-3.4.1 (v2.2 · 3.4.1 Wave 1): cursor_agent_* — Cursor SDK adapter via cursor-sidecar (5 tools, .request tier; sidecar @cursor/sdk wiring lands in W2)
         // Reconcile any jobs orphaned by a prior Bridge force-quit. Flips dead-pid running jobs to .unknown
         // and runs the 7-day cleanup pass for terminal jobs.
         _ = await BgProcessRuntime.shared.reconcileOrphans()
