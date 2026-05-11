@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.2.0-4.1] — 2026-05-10 — MCP transport remediation: `bg_process_*` canonicalized (PKT-748)
+
+### Decision spike (no code change)
+Direct inspection of `NotionBridge/Server/SSETransport.swift` and `NotionBridge/Modules/ShellModule.swift` established that the ~60–75 s ceiling forcing the W29 `nohup ... > /tmp/log 2>&1 & disown` workaround **is not in the Bridge**:
+- SSE session lifetime: `SSEServer(sessionTimeout: 300, sessionCleanupInterval: 30)` — normalized to `max(30, sessionTimeout)`; sessions only evicted after 5 min idle.
+- `shell_exec` synchronous budget: `timeout = 600` s by default; background (`&`) commands capped at 5 s by design.
+- **The ~60–75 s ceiling is a client-side per-call HTTP/SSE response deadline** enforced by the MCP client (Claude Code / Cursor / Notion AI tool runner) on a single in-flight `tools/call`. No server-side chunked-SSE long-polling on `shell_exec` would lift it because the cap fires on the client's awaited response, not on the bridge's ability to keep the stream open.
+
+### Documented (no transport code change shipped)
+- **`bg_process_*` canonicalized as the long-running funnel.** New `docs/mcp-transport-and-bg-process.md` documents the contract: `shell_exec` is for ops expected to return within the client's per-call window (conservatively ≤ 30 s wall-clock); anything longer **must** use `bg_process_start` → poll `bg_process_status` / `bg_process_logs` on subsequent short calls. The W29 `nohup … & disown` pattern is retired from agent skills; the only legitimate residual is MAC Keepr's self-update procedure (which must outlive the agent process by construction).
+- **Public surface unchanged.** SSE `sessionTimeout = 300 s` and `shell_exec timeout = 600 s` defaults remain. No `transport_long_poll_enabled` flag introduced.
+- **Anti-patterns retired:** `nohup … & disown` (relied on the 5-s background cap completing the synchronous return); `shell_exec timeout: 600` for 4-min workloads (still subject to the client-side ceiling); hand-rolled status files (the runtime already provides atomic status + orphan reconciliation via PKT-744).
+
+### Deferred to v2.3 (backlog note)
+- **Chunked-SSE long-poll on `shell_exec`.** Reconsidered only if a future MCP client raises its per-call response deadline materially above the `bg_process_*` polling cadence, or if a server-streamed tool output channel becomes necessary for non-job-shaped work. Not on the v2.2 / v2.3 critical path; `bg_process_*` covers every known long-running workload (devserver supervision, LSP, runners, Cursor SDK Node sidecar — see the PKT-744 downstream invariants).
+- **Per-job resource caps (CPU / RAM)** — explicitly out of scope for v2.2 per PKT-744 §Scope.OUT; re-evaluated in v2.3 alongside any sandboxing work.
+
+### References
+- PKT-744 (v2.2 · 1.1) — `bg_process_*` runtime; public surface frozen here.
+- PKT-748 (v2.2 · 4.1) — this entry; decision spike + governance, no Swift transport code change.
+- `docs/mcp-transport-and-bg-process.md` — canonical guide for downstream consumers.
+
 ## [2.2.0-3.3.1] — 2026-05-10 — MAC UI extras Wave 2 (PKT-765)
 
 ### Added
