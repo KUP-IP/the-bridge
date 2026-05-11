@@ -418,6 +418,7 @@ await runBgProcessModuleTests()
 await runDevServerModuleTests()
 await runGhModuleTests()
 await runCursorModuleTests()
+await runCursorHardeningTests()
 await runCronHumanizerTests()
 
 await runEndToEndTests()
