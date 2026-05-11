@@ -41,11 +41,14 @@ public enum BridgeConstants {
     /// Keep in sync with `ServerManager.setup()` module registrations before `StripeMcpModule` / `echo`.
     /// v1.9.5: 82 total (80 prior static tools + discussion/code-block Notion helpers).
     /// v2.2 · 0.1 (PKT-738): 82 + 1 (dev_module_info scaffold) = 83.
+    /// v2.2 · 2.3 W1 (PKT-745): 83 + 5 (lsp_diagnostics, lsp_hover, lsp_references, lsp_definition, lsp_rename) = 88.
+    /// v2.2 · 2.3 W2 (PKT-745, PM Decision Log #29 / Option C): 88 + 1 (lsp_session_list) = 89.
     /// Note: jobs_pause_all / jobs_resume_all dropped, but JobsModule is registered after StripeMcpModule
     /// in ServerManager.setup() and excluded from this static count (matches test surface).
-    public static let staticFeatureModuleToolCount = 88
+    public static let staticFeatureModuleToolCount = 89
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.
+    /// v2.2 · 2.3 W2 (PKT-745): unchanged at 16 — lsp_session_list joins existing `dev` family.
     public static let staticFeatureModuleFamilyCount = 16
 }

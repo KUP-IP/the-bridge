@@ -1,42 +1,30 @@
-// LspModule.swift – PKT-745 W1: lsp_* tool scaffolding (TypeScript first, Swift second)
+// LspModule.swift – PKT-745 W1+W2: lsp_* tools (TypeScript first, Swift second)
 // NotionBridge · Modules · dev/
 //
-// Five Language Server Protocol tools that act as the stable MCP surface for
-// AST-aware operations: diagnostics, hover, references, definition, rename.
-//
+// Six LSP tools that act as the stable MCP surface for AST-aware operations:
 //   - lsp_diagnostics  : textDocument/publishDiagnostics (errors / warnings / hints)
 //   - lsp_hover        : textDocument/hover               (type info + doc strings)
 //   - lsp_references   : textDocument/references          (every reference site)
 //   - lsp_definition   : textDocument/definition          (defining location(s))
 //   - lsp_rename       : textDocument/rename              (atomic workspace patch)
+//   - lsp_session_list : every live LspSession            (substitute for bg_process_list,
+//                                                          PM Decision Log #29 / Option C)
 //
-// Tier: .request for all five (LSP operations cross the file / AST boundary
-// and can spawn long-running servers).
+// Tier: .request for all six.
 //
-// PKT-745 W1 scope (this packet):
-//   ✅ Registration scaffold (5 tools wired into router under module "dev").
-//   ✅ Capability probe — direct binary lookup at standard install paths
-//      (avoids relying on the app's runtime PATH; pins the location, not
-//      the minor version — per Decision Log #21 guardrail #1).
-//   ✅ Language inference from file extension (.ts/.tsx/.js/.jsx/.mjs/.cjs
-//      → typescript; .swift → swift).
-//   ✅ Workspace detection (walks parents looking for tsconfig.json /
-//      Package.swift markers).
-//   ✅ Clean `capability_missing` response when the LSP server binary is
-//      absent, including a copy-paste remediation command.
+// W1 (commit e1ecb8a, 2026-05-10):
+//   ✅ Registration scaffold; capability probe; language inference; workspace detection;
+//      capability_missing fallback.
 //
-// PKT-745 W2 (next dispatch) — out of scope here:
-//   - JSON-RPC client (stdio framing, Initialize / Initialized handshake,
-//     textDocument/* request mapping).
-//   - Lazy-spawn lifecycle supervised by BgProcessRuntime.shared
-//     (per-workspace, 15-min idle timeout, dispose on workspace close).
-//   - Swift Sourcekit-LSP adapter (Package.swift workspace).
-//   - Integration tests (TS rename across KEEP·OS web; Swift hover against
-//     Bridge core itself).
+// W2 (this commit):
+//   ✅ JSON-RPC stdio client wired into LspRuntime / LspSession actors.
+//   ✅ Lazy per-workspace server spawn + 15-min idle dispose.
+//   ✅ textDocument/didOpen lifecycle on first touch per file.
+//   ✅ Handlers map MCP args → LSP requests → MCP-shaped Value responses.
+//   ✅ lsp_session_list tool exposes live sessions for observability.
 //
-// Until W2 lands, all five handlers return `status: "not_implemented"`
-// (mirrors the JobsModule PKT-340 W1 pattern). Capability probe and
-// workspace detection ARE live and testable from W1.
+// W3 (next dispatch): Sourcekit-LSP validation against Bridge core, integration
+// tests (TS rename across KEEP·OS web, Swift hover), QA checklist.
 
 import Foundation
 import MCP
@@ -53,6 +41,7 @@ public enum LspModule {
         await router.register(makeReferences())
         await router.register(makeDefinition())
         await router.register(makeRename())
+        await router.register(makeSessionList())
     }
 
     // MARK: - Probe result
@@ -64,17 +53,12 @@ public enum LspModule {
         public let detail: String?
     }
 
-    /// Locate an LSP server binary by checking standard install paths
-    /// directly (no Process spawn). This is robust to the app's runtime
-    /// PATH being narrower than a user shell's PATH — the common cause of
-    /// `which` failing inside the Bridge MCP process even when the binary
-    /// is installed.
     public static func probe(language: String) -> ProbeResult {
         switch language {
         case "typescript", "javascript", "ts", "js", "tsx", "jsx":
             let candidates = [
-                "/opt/homebrew/bin/typescript-language-server",   // Apple Silicon Homebrew (npm -g prefix)
-                "/usr/local/bin/typescript-language-server",      // Intel Homebrew / system
+                "/opt/homebrew/bin/typescript-language-server",
+                "/usr/local/bin/typescript-language-server",
                 "\(NSHomeDirectory())/.npm-global/bin/typescript-language-server",
                 "\(NSHomeDirectory())/.local/bin/typescript-language-server"
             ]
@@ -117,9 +101,6 @@ public enum LspModule {
 
     // MARK: - Language inference
 
-    /// Infer the LSP language ID from a file extension. Returns nil for
-    /// unsupported extensions (caller should require an explicit `language`
-    /// argument in that case).
     public static func inferLanguage(fromPath path: String) -> String? {
         let ext = (path as NSString).pathExtension.lowercased()
         switch ext {
@@ -131,10 +112,6 @@ public enum LspModule {
 
     // MARK: - Workspace detection
 
-    /// Walk up parents from `filePath` looking for a workspace marker.
-    ///   - typescript : tsconfig.json → jsconfig.json → package.json
-    ///   - swift      : Package.swift
-    /// Returns nil if no marker is found within 32 ancestor directories.
     public static func findWorkspaceRoot(forFile filePath: String, language: String) -> URL? {
         let markers: [String]
         switch language {
@@ -161,11 +138,11 @@ public enum LspModule {
 
     private static let baseProperties: [String: Value] = [
         "filePath": .object([
-            "type": .string("string"),
+            "type":        .string("string"),
             "description": .string("Absolute path to the source file the LSP request targets.")
         ]),
         "language": .object([
-            "type": .string("string"),
+            "type":        .string("string"),
             "description": .string("Optional language hint ('typescript' | 'swift'). Auto-detected from file extension if omitted.")
         ])
     ]
@@ -181,12 +158,12 @@ public enum LspModule {
     }
 
     private static let positionLineProp: Value = .object([
-        "type": .string("integer"),
+        "type":        .string("integer"),
         "description": .string("Zero-indexed line number.")
     ])
 
     private static let positionCharProp: Value = .object([
-        "type": .string("integer"),
+        "type":        .string("integer"),
         "description": .string("Zero-indexed UTF-16 character offset within the line.")
     ])
 
@@ -214,17 +191,46 @@ public enum LspModule {
         return (filePath, language)
     }
 
+    private static func extractPosition(_ arguments: Value, tool: String) throws -> (line: Int, character: Int) {
+        guard case .object(let args) = arguments else {
+            throw ToolRouterError.invalidArguments(toolName: tool, reason: "arguments must be an object")
+        }
+        let line: Int
+        let character: Int
+        if case .int(let v) = args["line"] {
+            line = v
+        } else {
+            throw ToolRouterError.invalidArguments(toolName: tool, reason: "missing required integer 'line' parameter")
+        }
+        if case .int(let v) = args["character"] {
+            character = v
+        } else {
+            throw ToolRouterError.invalidArguments(toolName: tool, reason: "missing required integer 'character' parameter")
+        }
+        return (line, character)
+    }
+
+    private static func extractNewName(_ arguments: Value, tool: String) throws -> String {
+        guard case .object(let args) = arguments,
+              case .string(let newName) = args["newName"] else {
+            throw ToolRouterError.invalidArguments(toolName: tool, reason: "missing required string 'newName' parameter")
+        }
+        return newName
+    }
+
+    private static func includeDeclaration(_ arguments: Value) -> Bool {
+        if case .object(let args) = arguments, case .bool(let b) = args["includeDeclaration"] { return b }
+        return true
+    }
+
     // MARK: - Response shapes
 
     private static func capabilityMissingValue(tool: String, probe: ProbeResult) -> Value {
         let remediation: String
         switch probe.language {
-        case "typescript":
-            remediation = "npm install -g typescript-language-server typescript"
-        case "swift":
-            remediation = "Install Xcode from the App Store (Sourcekit-LSP ships with the Xcode toolchain), or run `xcode-select --install`."
-        default:
-            remediation = "(no remediation — unsupported language)"
+        case "typescript": remediation = "npm install -g typescript-language-server typescript"
+        case "swift":      remediation = "Install Xcode from the App Store (Sourcekit-LSP ships with the Xcode toolchain), or run `xcode-select --install`."
+        default:           remediation = "(no remediation — unsupported language)"
         }
         return .object([
             "ok":          .bool(false),
@@ -236,19 +242,116 @@ public enum LspModule {
         ])
     }
 
-    private static func notImplementedValue(
-        tool: String, language: String, probe: ProbeResult,
-        filePath: String, workspaceRoot: URL?
-    ) -> Value {
+    private static func errorValue(tool: String, language: String, filePath: String?, error: Error) -> Value {
+        var fields: [String: Value] = [
+            "ok":       .bool(false),
+            "status":   .string("error"),
+            "tool":     .string(tool),
+            "language": .string(language),
+            "error":    .string("\(error)")
+        ]
+        if let fp = filePath { fields["filePath"] = .string(fp) }
+        return .object(fields)
+    }
+
+    private static func workspaceNotFoundValue(tool: String, language: String, filePath: String) -> Value {
+        return .object([
+            "ok":          .bool(false),
+            "status":      .string("workspace_not_found"),
+            "tool":        .string(tool),
+            "language":    .string(language),
+            "filePath":    .string(filePath),
+            "error":       .string("no workspace marker found within 32 ancestor directories of '\(filePath)'"),
+            "remediation": .string(language == "typescript"
+                ? "create a tsconfig.json, jsconfig.json, or package.json at the workspace root"
+                : "create a Package.swift at the Swift package root")
+        ])
+    }
+
+    // MARK: - JSON ↔ Value bridge
+
+    /// Decode a `Data?` JSON-RPC response payload into an MCP `Value` (or `.null`).
+    private static func valueFromData(_ data: Data?) -> Value {
+        guard let data = data,
+              !data.isEmpty,
+              let parsed = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) else {
+            return .null
+        }
+        return valueFromJSON(parsed)
+    }
+
+    /// Recursive `JSONSerialization`-result → `Value` converter. NSNumber Bool detection
+    /// must precede int/double (CFBoolean uses NSNumber's type system).
+    private static func valueFromJSON(_ json: Any) -> Value {
+        if let dict = json as? [String: Any] {
+            var out: [String: Value] = [:]
+            for (k, v) in dict { out[k] = valueFromJSON(v) }
+            return .object(out)
+        }
+        if let arr = json as? [Any] { return .array(arr.map(valueFromJSON)) }
+        if let s = json as? String { return .string(s) }
+        if let n = json as? NSNumber {
+            if CFGetTypeID(n) == CFBooleanGetTypeID() { return .bool(n.boolValue) }
+            let oct = String(cString: n.objCType)
+            if oct == "d" || oct == "f" { return .double(n.doubleValue) }
+            return .int(n.intValue)
+        }
+        if let b = json as? Bool { return .bool(b) }
+        if let i = json as? Int { return .int(i) }
+        if let d = json as? Double { return .double(d) }
+        return .null
+    }
+
+    // MARK: - Common request flow
+
+    private enum PrepResult {
+        case capabilityMissing(Value)
+        case noWorkspace(Value)
+        case ready(session: LspSession?, filePath: String, language: String, workspaceRoot: String, error: Error?)
+    }
+
+    /// Shared front-half: probe → workspace → ensureSession → ensureFileOpen.
+    private static func prepareSession(
+        tool: String,
+        arguments: Value
+    ) async throws -> PrepResult {
+        let (filePath, language) = try extractFileAndLanguage(arguments, tool: tool)
+        let p = probe(language: language)
+        if !p.available {
+            return .capabilityMissing(capabilityMissingValue(tool: tool, probe: p))
+        }
+        guard let root = findWorkspaceRoot(forFile: filePath, language: language) else {
+            return .noWorkspace(workspaceNotFoundValue(tool: tool, language: language, filePath: filePath))
+        }
+        do {
+            let session = try await LspRuntime.shared.ensureSession(
+                language: language,
+                workspaceRoot: root.path,
+                serverPath: p.path!
+            )
+            try await session.ensureFileOpen(filePath)
+            return .ready(session: session, filePath: filePath, language: language, workspaceRoot: root.path, error: nil)
+        } catch {
+            return .ready(session: nil, filePath: filePath, language: language, workspaceRoot: root.path, error: error)
+        }
+    }
+
+    private static func positionParams(filePath: String, line: Int, character: Int) -> [String: Any] {
+        [
+            "textDocument": ["uri": URL(fileURLWithPath: filePath).absoluteString],
+            "position":     ["line": line, "character": character]
+        ]
+    }
+
+    private static func successValue(tool: String, language: String, filePath: String, workspaceRoot: String, serverPath: String, result: Data?) -> Value {
         .object([
-            "ok":            .bool(false),
-            "status":        .string("not_implemented"),
+            "ok":            .bool(true),
             "tool":          .string(tool),
             "language":      .string(language),
-            "serverPath":    .string(probe.path ?? ""),
             "filePath":      .string(filePath),
-            "workspaceRoot": .string(workspaceRoot?.path ?? "(not detected)"),
-            "note":          .string("PKT-745 W1 scaffold: registration + capability probe + workspace detection are live. JSON-RPC client + bg_process lifecycle land in W2 follow-up packet.")
+            "workspaceRoot": .string(workspaceRoot),
+            "serverPath":    .string(serverPath),
+            "result":        valueFromData(result)
         ])
     }
 
@@ -259,14 +362,27 @@ public enum LspModule {
             name: "lsp_diagnostics",
             module: moduleName,
             tier: .request,
-            description: "LSP textDocument/publishDiagnostics on a file. Returns diagnostics (errors, warnings, hints) from typescript-language-server (.ts/.tsx/.js/.jsx/.mjs/.cjs) or sourcekit-lsp (.swift). Auto-detects language from extension; pass 'language' to override. PKT-745 W1 scaffold — returns `not_implemented` until W2 LSP JSON-RPC client lands.",
+            description: "LSP textDocument diagnostics on a file. Returns the server's current diagnostics (errors, warnings, hints) via textDocument/diagnostic (LSP pull-diagnostics). Auto-detects language from extension; pass 'language' to override.",
             inputSchema: schema(),
             handler: { arguments in
-                let (filePath, language) = try extractFileAndLanguage(arguments, tool: "lsp_diagnostics")
-                let p = probe(language: language)
-                if !p.available { return capabilityMissingValue(tool: "lsp_diagnostics", probe: p) }
-                let root = findWorkspaceRoot(forFile: filePath, language: language)
-                return notImplementedValue(tool: "lsp_diagnostics", language: language, probe: p, filePath: filePath, workspaceRoot: root)
+                switch try await prepareSession(tool: "lsp_diagnostics", arguments: arguments) {
+                case .capabilityMissing(let v): return v
+                case .noWorkspace(let v):       return v
+                case .ready(let session, let filePath, let language, let workspaceRoot, let prepErr):
+                    guard let session = session, prepErr == nil else {
+                        return errorValue(tool: "lsp_diagnostics", language: language, filePath: filePath, error: prepErr!)
+                    }
+                    let params: [String: Any] = [
+                        "textDocument": ["uri": URL(fileURLWithPath: filePath).absoluteString]
+                    ]
+                    do {
+                        let result = try await session.sendRequest(method: "textDocument/diagnostic", params: params, timeout: 15)
+                        return successValue(tool: "lsp_diagnostics", language: language, filePath: filePath,
+                                            workspaceRoot: workspaceRoot, serverPath: session.serverPath, result: result)
+                    } catch {
+                        return errorValue(tool: "lsp_diagnostics", language: language, filePath: filePath, error: error)
+                    }
+                }
             }
         )
     }
@@ -276,17 +392,29 @@ public enum LspModule {
             name: "lsp_hover",
             module: moduleName,
             tier: .request,
-            description: "LSP textDocument/hover at (line, character). Returns markdown-formatted type info, doc strings, and signatures. PKT-745 W1 scaffold — returns `not_implemented` until W2 LSP JSON-RPC client lands.",
-            inputSchema: schema(extras: [
-                "line":      positionLineProp,
-                "character": positionCharProp
-            ]),
+            description: "LSP textDocument/hover at (line, character). Returns markdown-formatted type info, doc strings, and signatures.",
+            inputSchema: schema(extras: ["line": positionLineProp, "character": positionCharProp]),
             handler: { arguments in
-                let (filePath, language) = try extractFileAndLanguage(arguments, tool: "lsp_hover")
-                let p = probe(language: language)
-                if !p.available { return capabilityMissingValue(tool: "lsp_hover", probe: p) }
-                let root = findWorkspaceRoot(forFile: filePath, language: language)
-                return notImplementedValue(tool: "lsp_hover", language: language, probe: p, filePath: filePath, workspaceRoot: root)
+                let (line, character) = try extractPosition(arguments, tool: "lsp_hover")
+                switch try await prepareSession(tool: "lsp_hover", arguments: arguments) {
+                case .capabilityMissing(let v): return v
+                case .noWorkspace(let v):       return v
+                case .ready(let session, let filePath, let language, let workspaceRoot, let prepErr):
+                    guard let session = session, prepErr == nil else {
+                        return errorValue(tool: "lsp_hover", language: language, filePath: filePath, error: prepErr!)
+                    }
+                    do {
+                        let result = try await session.sendRequest(
+                            method: "textDocument/hover",
+                            params: positionParams(filePath: filePath, line: line, character: character),
+                            timeout: 10
+                        )
+                        return successValue(tool: "lsp_hover", language: language, filePath: filePath,
+                                            workspaceRoot: workspaceRoot, serverPath: session.serverPath, result: result)
+                    } catch {
+                        return errorValue(tool: "lsp_hover", language: language, filePath: filePath, error: error)
+                    }
+                }
             }
         )
     }
@@ -296,7 +424,7 @@ public enum LspModule {
             name: "lsp_references",
             module: moduleName,
             tier: .request,
-            description: "LSP textDocument/references at (line, character). Returns every reference site across the workspace. PKT-745 W1 scaffold — returns `not_implemented` until W2 LSP JSON-RPC client lands.",
+            description: "LSP textDocument/references at (line, character). Returns every reference site across the workspace.",
             inputSchema: schema(extras: [
                 "line":               positionLineProp,
                 "character":          positionCharProp,
@@ -306,11 +434,25 @@ public enum LspModule {
                 ])
             ]),
             handler: { arguments in
-                let (filePath, language) = try extractFileAndLanguage(arguments, tool: "lsp_references")
-                let p = probe(language: language)
-                if !p.available { return capabilityMissingValue(tool: "lsp_references", probe: p) }
-                let root = findWorkspaceRoot(forFile: filePath, language: language)
-                return notImplementedValue(tool: "lsp_references", language: language, probe: p, filePath: filePath, workspaceRoot: root)
+                let (line, character) = try extractPosition(arguments, tool: "lsp_references")
+                let includeDecl = includeDeclaration(arguments)
+                switch try await prepareSession(tool: "lsp_references", arguments: arguments) {
+                case .capabilityMissing(let v): return v
+                case .noWorkspace(let v):       return v
+                case .ready(let session, let filePath, let language, let workspaceRoot, let prepErr):
+                    guard let session = session, prepErr == nil else {
+                        return errorValue(tool: "lsp_references", language: language, filePath: filePath, error: prepErr!)
+                    }
+                    var params = positionParams(filePath: filePath, line: line, character: character)
+                    params["context"] = ["includeDeclaration": includeDecl]
+                    do {
+                        let result = try await session.sendRequest(method: "textDocument/references", params: params, timeout: 15)
+                        return successValue(tool: "lsp_references", language: language, filePath: filePath,
+                                            workspaceRoot: workspaceRoot, serverPath: session.serverPath, result: result)
+                    } catch {
+                        return errorValue(tool: "lsp_references", language: language, filePath: filePath, error: error)
+                    }
+                }
             }
         )
     }
@@ -320,17 +462,29 @@ public enum LspModule {
             name: "lsp_definition",
             module: moduleName,
             tier: .request,
-            description: "LSP textDocument/definition at (line, character). Returns the symbol's defining location(s). PKT-745 W1 scaffold — returns `not_implemented` until W2 LSP JSON-RPC client lands.",
-            inputSchema: schema(extras: [
-                "line":      positionLineProp,
-                "character": positionCharProp
-            ]),
+            description: "LSP textDocument/definition at (line, character). Returns the symbol's defining location(s).",
+            inputSchema: schema(extras: ["line": positionLineProp, "character": positionCharProp]),
             handler: { arguments in
-                let (filePath, language) = try extractFileAndLanguage(arguments, tool: "lsp_definition")
-                let p = probe(language: language)
-                if !p.available { return capabilityMissingValue(tool: "lsp_definition", probe: p) }
-                let root = findWorkspaceRoot(forFile: filePath, language: language)
-                return notImplementedValue(tool: "lsp_definition", language: language, probe: p, filePath: filePath, workspaceRoot: root)
+                let (line, character) = try extractPosition(arguments, tool: "lsp_definition")
+                switch try await prepareSession(tool: "lsp_definition", arguments: arguments) {
+                case .capabilityMissing(let v): return v
+                case .noWorkspace(let v):       return v
+                case .ready(let session, let filePath, let language, let workspaceRoot, let prepErr):
+                    guard let session = session, prepErr == nil else {
+                        return errorValue(tool: "lsp_definition", language: language, filePath: filePath, error: prepErr!)
+                    }
+                    do {
+                        let result = try await session.sendRequest(
+                            method: "textDocument/definition",
+                            params: positionParams(filePath: filePath, line: line, character: character),
+                            timeout: 10
+                        )
+                        return successValue(tool: "lsp_definition", language: language, filePath: filePath,
+                                            workspaceRoot: workspaceRoot, serverPath: session.serverPath, result: result)
+                    } catch {
+                        return errorValue(tool: "lsp_definition", language: language, filePath: filePath, error: error)
+                    }
+                }
             }
         )
     }
@@ -340,7 +494,7 @@ public enum LspModule {
             name: "lsp_rename",
             module: moduleName,
             tier: .request,
-            description: "LSP textDocument/rename at (line, character) with a new identifier name. Returns an atomic workspace patch compatible with file_apply_patch (PKT-750). PKT-745 W1 scaffold — returns `not_implemented` until W2 LSP JSON-RPC client lands.",
+            description: "LSP textDocument/rename at (line, character) with a new identifier name. Returns the server's WorkspaceEdit (compatible with file_apply_patch via PKT-750).",
             inputSchema: schema(extras: [
                 "line":      positionLineProp,
                 "character": positionCharProp,
@@ -350,11 +504,68 @@ public enum LspModule {
                 ])
             ]),
             handler: { arguments in
-                let (filePath, language) = try extractFileAndLanguage(arguments, tool: "lsp_rename")
-                let p = probe(language: language)
-                if !p.available { return capabilityMissingValue(tool: "lsp_rename", probe: p) }
-                let root = findWorkspaceRoot(forFile: filePath, language: language)
-                return notImplementedValue(tool: "lsp_rename", language: language, probe: p, filePath: filePath, workspaceRoot: root)
+                let (line, character) = try extractPosition(arguments, tool: "lsp_rename")
+                let newName = try extractNewName(arguments, tool: "lsp_rename")
+                switch try await prepareSession(tool: "lsp_rename", arguments: arguments) {
+                case .capabilityMissing(let v): return v
+                case .noWorkspace(let v):       return v
+                case .ready(let session, let filePath, let language, let workspaceRoot, let prepErr):
+                    guard let session = session, prepErr == nil else {
+                        return errorValue(tool: "lsp_rename", language: language, filePath: filePath, error: prepErr!)
+                    }
+                    var params = positionParams(filePath: filePath, line: line, character: character)
+                    params["newName"] = newName
+                    do {
+                        let result = try await session.sendRequest(method: "textDocument/rename", params: params, timeout: 30)
+                        return successValue(tool: "lsp_rename", language: language, filePath: filePath,
+                                            workspaceRoot: workspaceRoot, serverPath: session.serverPath, result: result)
+                    } catch {
+                        return errorValue(tool: "lsp_rename", language: language, filePath: filePath, error: error)
+                    }
+                }
+            }
+        )
+    }
+
+    // MARK: - lsp_session_list (Option C observability tool)
+
+    private static func makeSessionList() -> ToolRegistration {
+        ToolRegistration(
+            name: "lsp_session_list",
+            module: moduleName,
+            tier: .request,
+            description: "List every live LSP session under LspRuntime supervision: per-workspace process info, server name/version, spawn + last-used timestamps, idle seconds, request count, open-file count. The substitute for bg_process_list in the LSP supervision domain (PM Decision Log #29, PKT-745).",
+            inputSchema: .object([
+                "type":       .string("object"),
+                "properties": .object([:])
+            ]),
+            handler: { _ in
+                let infos = await LspRuntime.shared.listSessions()
+                let timeout = await LspRuntime.shared.currentIdleTimeout()
+                let iso = ISO8601DateFormatter()
+                iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                var rows: [Value] = []
+                for info in infos {
+                    rows.append(.object([
+                        "language":      .string(info.language),
+                        "workspaceRoot": .string(info.workspaceRoot),
+                        "pid":           .int(Int(info.pid)),
+                        "serverPath":    .string(info.serverPath),
+                        "serverName":    info.serverName.map { Value.string($0) } ?? .null,
+                        "serverVersion": info.serverVersion.map { Value.string($0) } ?? .null,
+                        "spawnedAt":     .string(iso.string(from: info.spawnedAt)),
+                        "lastUsedAt":    .string(iso.string(from: info.lastUsedAt)),
+                        "idleSeconds":   .double(info.idleSeconds),
+                        "requestCount":  .int(info.requestCount),
+                        "openFileCount": .int(info.openFileCount)
+                    ]))
+                }
+                return .object([
+                    "ok":             .bool(true),
+                    "sessions":       .array(rows),
+                    "count":          .int(rows.count),
+                    "idleTimeoutSec": .double(timeout)
+                ])
             }
         )
     }

@@ -269,3 +269,12 @@ Probe-supported install locations (checked in order):
 - **sourcekit-lsp:** Xcode default toolchain, then CommandLineTools
 
 If you install via a non-standard npm prefix, symlink the binary into one of the supported directories.
+
+### LSP session supervision (`lsp_session_list`)
+
+LSP servers are long-running processes; NotionBridge supervises them out-of-band from the short-lived shell processes managed by `bg_process_*`. Each `(language, workspaceRoot)` pair gets a single `LspSession` lazy-spawned on first request, idle-disposed after 15 minutes of inactivity, and observable via `lsp_session_list` (PID, server name/version, spawn / last-used timestamps, idle seconds, request count, open-file count).
+
+- **`lsp_session_list`** — LSP server processes only (typescript-language-server, sourcekit-lsp). Use this for LSP-specific lifecycle questions: “is the TS server up?”, “how many open files does the Swift session have?”, “when will it idle out?”.
+- **`bg_process_list`** — Foreground-detached shell processes spawned via `bg_process_*` (long-running builds, watchers, dev servers). Use this for user-launched commands; LSP servers are **not** listed here.
+
+The two surfaces are deliberately separated so observability for LSP supervision (which has its own RPC lifecycle, didOpen tracking, and capability probe) does not collide with generic shell lifecycle (which has none of those). When debugging cross-cutting state, query both.
