@@ -113,6 +113,7 @@ public actor ServerManager {
         await JobsModule.register(on: router)  // PKT-340 W1: 14th module (8 job_* tools, handlers throw .notImplemented pending W2-4)
         await DevModule.register(on: router)   // PKT-738 (v2.2 · 0.1): 15th module — dev/ scaffold (placeholder dev_module_info; real primitives in follow-ups)
         await BgProcessModule.register(on: router)  // PKT-744 (v2.2 · 1.1): bg_process_* runtime — long-running task supervision (5 dev/ tools)
+        await DevServerModule.register(on: router)  // PKT-741 (v2.2 1.3): 16th module — port_inspect + devserver_* lifecycle
         // Reconcile any jobs orphaned by a prior Bridge force-quit. Flips dead-pid running jobs to .unknown
         // and runs the 7-day cleanup pass for terminal jobs.
         _ = await BgProcessRuntime.shared.reconcileOrphans()

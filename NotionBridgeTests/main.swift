@@ -415,6 +415,7 @@ await runSecurityAuditTests()
 
 await runJobsModuleTests()
 await runBgProcessModuleTests()
+await runDevServerModuleTests()
 await runCronHumanizerTests()
 
 await runEndToEndTests()
