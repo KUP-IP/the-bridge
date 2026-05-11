@@ -1,6 +1,9 @@
 // NotionBridgeApp.swift — @main App Entry Point
 // Notion Bridge v2: macOS Tahoe 26 — Liquid Glass
 // PKT-353: Removed sparkle fallback, content-adaptive popover, Liquid Glass adoption.
+// PKT-3.4.2 W2: MenuBarExtra label routed through CursorMenuBarLabel so the
+//   menu bar surface renders the Bridge icon plus a compact Cursor agent
+//   status pill (`▶⋅N · ✓N · !N`) whenever any agents are tracked.
 // Previous history: PKT-317, PKT-341, PKT-342, V1-QUALITY-C2, PKT-349 B1
 // No Dock icon — pure menu bar app via MenuBarExtra pattern
 
@@ -40,14 +43,12 @@ struct NotionBridgeApp: App {
                 }
             )
         } label: {
-            if let icon = menuBarIcon {
-                Image(nsImage: icon)
-            } else {
-                // Fallback: text label if icon resource unavailable
-                Text("NB")
-                    .font(.caption2)
-                    .fontWeight(.bold)
-            }
+            // PKT-3.4.2 W2: icon + Cursor agent status pill.
+            // Falls back to icon-only / "NB" text when no agents are tracked.
+            CursorMenuBarLabel(
+                registry: CursorAgentRegistry.shared,
+                icon: menuBarIcon
+            )
         }
         .menuBarExtraStyle(.window)
     }
