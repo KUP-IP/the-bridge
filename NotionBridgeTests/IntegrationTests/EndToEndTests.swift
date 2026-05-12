@@ -37,9 +37,24 @@ func runEndToEndTests() async {
     await CredentialModule.register(on: router)
     await PaymentModule.register(on: router)
     await ConnectionsModule.register(on: router)
+    await JobsModule.register(on: router)
     await DevModule.register(on: router)  // PKT-738 (v2.2 · 0.1): dev/ scaffold module
+    await BgProcessModule.register(on: router)
+    await DevServerModule.register(on: router)
+    await GhModule.register(on: router)
+    await GitModule.register(on: router)
+    await LspModule.register(on: router)
+    await CursorModule.register(on: router)
     await CodeEditModule.register(on: router)  // PKT-750 (v2.2 · 1.2): code_search · file_str_replace · file_apply_patch
     await WranglerModule.register(on: router)  // PKT-757 (v2.2 · 0.2.2): wrangler_d1_status
+    await SpotlightModule.register(on: router)
+    await SyntheticInputModule.register(on: router)
+    await MouseClickModule.register(on: router)
+    await CGEventModule.register(on: router)
+    await PasteboardHistoryModule.register(on: router)
+    await PlaywrightModule.register(on: router)
+    await VitestModule.register(on: router)
+    await LighthouseModule.register(on: router)
 
     // ============================================================
     // E2E-1: Full pipeline — dispatch → security → handler → audit
@@ -385,6 +400,18 @@ func runEndToEndTests() async {
 
         let connections = await router.registrations(forModule: "connections")
         try expect(connections.count == 5, "ConnectionsModule: expected 5")
+
+        let scheduler = await router.registrations(forModule: "scheduler")
+        try expect(scheduler.count == 13, "JobsModule scheduler family: expected 13")
+
+        let dev = await router.registrations(forModule: "dev")
+        try expect(dev.count == 41, "dev module family: expected 41")
+
+        let cursor = await router.registrations(forModule: "cursor")
+        try expect(cursor.count == 5, "CursorModule: expected 5")
+
+        let computer = await router.registrations(forModule: "computer")
+        try expect(computer.count == 5, "computer module family: expected 5")
 
         let modulesWithTools = Set((await router.allRegistrations()).map(\.module))
         try expect(

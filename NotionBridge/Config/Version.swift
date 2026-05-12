@@ -38,7 +38,7 @@ public enum BridgeConstants {
     public static let defaultSSEPort = 9700
 
     /// Tools registered by Swift `*Module` types only: excludes `builtin` (`echo`) and excludes Stripe MCP (dynamic).
-    /// Keep in sync with `ServerManager.setup()` module registrations before `StripeMcpModule` / `echo`.
+    /// Keep in sync with `ServerManager.setup()` static module registrations and the E2E fixture.
     /// v1.9.5: 82 total (80 prior static tools + discussion/code-block Notion helpers).
     /// v2.2 · 0.1 (PKT-738): 82 + 1 (dev_module_info scaffold) = 83.
     /// v2.2 · 0.1.2 (PKT-755): 83 + 1 (ax_query, AccessibilityModule consolidation) = 84.
@@ -47,13 +47,13 @@ public enum BridgeConstants {
     /// v2.2 · 3.3/3.3.1 (PKT-747/765): 88 + 5 (spotlight/input/pasteboard tools) = 93.
     /// v2.2 · 2.1/2.1.1 (PKT-740/784/786/788): 93 + 9 (git_* tools) = 102.
     /// v2.2 · 2.3/2.3.1 (PKT-745/777/789): 102 + 6 (lsp_* tools) = 108.
-    /// v2.2 · 3.4.1 (PKT-772): 108 + 5 (cursor_agent_* tools) = 113.
-    /// Note: jobs_pause_all / jobs_resume_all dropped, but JobsModule is registered after StripeMcpModule
-    /// in ServerManager.setup() and excluded from this static count (matches test surface).
-    public static let staticFeatureModuleToolCount = 113
+    /// v2.2 · integration closeout: 113 + 34 previously uncounted static dev/jobs/runner tools = 147.
+    /// Note: jobs_pause_all / jobs_resume_all dropped; current JobsModule contributes 13 job_* tools.
+    public static let staticFeatureModuleToolCount = 147
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.
     /// v2.2 · 2.3 W2 (PKT-745): unchanged at 16 — lsp_session_list joins existing `dev` family.
-    public static let staticFeatureModuleFamilyCount = 16
+    /// v2.2 · integration closeout: + jobs + cursor + computer = 19.
+    public static let staticFeatureModuleFamilyCount = 19
 }
