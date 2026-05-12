@@ -252,4 +252,84 @@ func runCursorNotificationDispatcherTests() async {
             try expect(d.isObserving == false)
         }
     }
+
+    // ------------------------------------------------------------------
+    // 11) E5 (Wave 5b): full e2e — posting .cursorAgentStateDidChange
+    //     through an observer-started dispatcher fires `deliverFn`
+    //     with the READY category for a succeeded run.
+    // ------------------------------------------------------------------
+    await test("E5 e2e: NotificationCenter post drives deliverFn with READY category") {
+        let captured = Box<[UNNotificationRequest]>([])
+        let dBox = Box<CursorNotificationDispatcher?>(nil)
+        try await MainActor.run {
+            let d = CursorNotificationDispatcher()
+            d.stateLookup = { id in
+                makeState(id: id, runtime: .cloud, status: .succeeded, cents: 200)
+            }
+            d.deliverFn = { request in
+                captured.value.append(request)
+            }
+            d.authorizeFn = { _ in true }
+            d.start()
+            dBox.value = d
+            NotificationCenter.default.post(
+                name: .cursorAgentStateDidChange,
+                object: nil,
+                userInfo: [
+                    "runId": "e2e-run-1",
+                    "status": CursorRunStatus.succeeded.rawValue
+                ]
+            )
+        }
+        // Observer is on .main; give it a runloop tick + a small grace window
+        // for any nested Task work inside the handler.
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let summary: (count: Int, firstCategory: String?) = await MainActor.run {
+            dBox.value?.stop()
+            let reqs = captured.value
+            return (reqs.count, reqs.first?.content.categoryIdentifier)
+        }
+        try expect(summary.count == 1)
+        try expect(summary.firstCategory == CursorNotificationCategory.ready)
+    }
+
+    // ------------------------------------------------------------------
+    // 12) E5 (Wave 5b): cost-cap notification e2e routes to FAILED-flavoured
+    //     surface via stalled? Actually the dispatcher does NOT register a
+    //     cost-cap handler today — cost-cap notifications drive the
+    //     CursorAutoPauseController. So instead we verify here that posting
+    //     a failed status drives a FAILED-category UN request.
+    // ------------------------------------------------------------------
+    await test("E5 e2e: failed status drives FAILED category") {
+        let captured = Box<[UNNotificationRequest]>([])
+        let dBox = Box<CursorNotificationDispatcher?>(nil)
+        try await MainActor.run {
+            let d = CursorNotificationDispatcher()
+            d.stateLookup = { id in
+                makeState(id: id, runtime: .cloud, status: .failed, cents: 50, errorMessage: "boom")
+            }
+            d.deliverFn = { request in
+                captured.value.append(request)
+            }
+            d.authorizeFn = { _ in true }
+            d.start()
+            dBox.value = d
+            NotificationCenter.default.post(
+                name: .cursorAgentStateDidChange,
+                object: nil,
+                userInfo: [
+                    "runId": "e2e-fail-1",
+                    "status": CursorRunStatus.failed.rawValue
+                ]
+            )
+        }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let summary: (count: Int, firstCategory: String?) = await MainActor.run {
+            dBox.value?.stop()
+            let reqs = captured.value
+            return (reqs.count, reqs.first?.content.categoryIdentifier)
+        }
+        try expect(summary.count == 1)
+        try expect(summary.firstCategory == CursorNotificationCategory.failed)
+    }
 }

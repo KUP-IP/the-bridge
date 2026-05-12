@@ -67,6 +67,7 @@ struct CursorNewRunView: View {
     @State private var alwaysAllow: Bool = false
     @State private var submitting: Bool = false
     @State private var submitError: String? = nil
+    @ObservedObject private var autoPause = CursorAutoPauseController.shared
 
     private var trimmedPrompt: String {
         prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -75,10 +76,14 @@ struct CursorNewRunView: View {
         repoPath.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var promptIsValid: Bool { !trimmedPrompt.isEmpty }
-    private var repoIsValid: Bool { !trimmedRepo.isEmpty }
-    private var wallCapIsValid: Bool { wallCapMinutes >= 1 && wallCapMinutes <= 240 }
-    private var canSubmit: Bool { promptIsValid && repoIsValid && wallCapIsValid && !submitting }
+    private var promptIsValid: Bool { CursorNewRunFormLogic.isPromptValid(prompt) }
+    private var repoIsValid: Bool { CursorNewRunFormLogic.isRepoValid(repoPath) }
+    private var wallCapIsValid: Bool { CursorNewRunFormLogic.isWallCapValid(wallCapMinutes) }
+    private var canSubmit: Bool {
+        CursorNewRunFormLogic.canSubmit(prompt: prompt, repoPath: repoPath, wallCapMinutes: wallCapMinutes)
+            && !submitting
+            && !autoPause.isLocked
+    }
 
     /// Heuristic estimate — the real cost comes from the sidecar in PKT-3.4.1.W2.
     private var estimatedCostCents: Int {
@@ -93,6 +98,7 @@ struct CursorNewRunView: View {
             header
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    lockBannerView
                     promptSection
                     repoSection
                     runtimeSection
@@ -183,6 +189,39 @@ struct CursorNewRunView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Model").font(.subheadline).bold()
             TextField("composer-2", text: $model).textFieldStyle(.roundedBorder)
+        }
+    }
+
+    @ViewBuilder
+    private var lockBannerView: some View {
+        if autoPause.isLocked {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "lock.fill").foregroundColor(.red)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Daily hard cap reached — new runs locked")
+                        .font(.callout.weight(.semibold))
+                    Text("Submit is disabled until the ledger rolls at midnight (or an admin runs `unlock()`).")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+            }
+            .padding(8)
+            .background(Color.red.opacity(0.08))
+            .cornerRadius(6)
+        } else if autoPause.pausedAt != nil {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "pause.circle.fill").foregroundColor(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Soft cap reached — cloud runs paused")
+                        .font(.callout.weight(.semibold))
+                    Text("Local runs continue. Submit will still work but trips the hard cap sooner.")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+            }
+            .padding(8)
+            .background(Color.orange.opacity(0.08))
+            .cornerRadius(6)
         }
     }
 

@@ -126,6 +126,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // posts cursorAgentDidStall via the registry, which the notification
         // dispatcher renders as CURSOR_AGENT_STALLED.
         CursorHeartbeatWatchdog.shared.start()
+        CursorAutoPauseController.shared.start()
 
         // PKT-441: One-time Stripe key migration to unified credential vault
         Task { await ConnectionRegistry.shared.migrateStripeKeyIfNeeded() }

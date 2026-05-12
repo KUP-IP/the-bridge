@@ -419,6 +419,8 @@ await runDevServerModuleTests()
 await runGhModuleTests()
 await runCursorModuleTests()
 await runCursorNotificationDispatcherTests()
+await runCursorAutoPauseControllerTests()
+await runCursorNewRunFormLogicTests()
 await runCronHumanizerTests()
 
 await runEndToEndTests()

@@ -279,4 +279,28 @@ public actor CursorRuntime {
             throw CursorError.authFailed("Keychain read failed: \(error.localizedDescription)")
         }
     }
+
+    // MARK: - Cost emission (Wave 5b offline stub-emit surface)
+    //
+    // Sidecar will call into this once PKT-3.4.1.W2 ships its event stream.
+    // Today this is exercised by tests + manual cost-replay paths so the
+    // CursorCostLedger → CursorAutoPauseController feedback loop is
+    // already wired end-to-end before the runtime side is finished.
+
+    /// Record a cost delta for a run into the shared `CursorCostLedger`.
+    /// Returns the post-record snapshot (total/tier/crossed-threshold).
+    @discardableResult
+    public nonisolated static func emitCost(
+        runId: String,
+        cents: Int,
+        runtime: CursorRuntimeKind? = nil,
+        model: String? = nil
+    ) async -> CursorCostRecordResult {
+        await CursorCostLedger.shared.record(
+            runId: runId,
+            cents: cents,
+            runtime: runtime?.rawValue,
+            model: model
+        )
+    }
 }
