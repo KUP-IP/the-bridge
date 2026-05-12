@@ -116,6 +116,7 @@ public actor ServerManager {
         await DevServerModule.register(on: router)  // PKT-741 (v2.2 1.3): 16th module — port_inspect + devserver_* lifecycle
         await GhModule.register(on: router)         // PKT-742 (v2.2 · 2.2): gh_* CLI wrappers — 7 thin shells over GitHub CLI
         await GitModule.register(on: router)        // PKT-740/784/786/788 (v2.2 · 2.1): git_* CLI wrappers
+        await LspModule.register(on: router)        // PKT-745/777/789 (v2.2 · 2.3): lsp_* tools
         await CodeEditModule.register(on: router)   // PKT-750 (v2.2 · 1.2): code_search · file_str_replace · file_apply_patch
         await WranglerModule.register(on: router)   // PKT-757 (v2.2 · 0.2.2): wrangler_d1_status
         await SpotlightModule.register(on: router)         // PKT-747 (v2.2 · 3.3): spotlight_query (mdfind wrapper)
