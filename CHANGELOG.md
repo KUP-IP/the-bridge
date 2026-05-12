@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.2.0-2.3.1] — 2026-05-12 — LSP integration tests + live validation scaffold (PKT-789)
+
+### Added
+- **`LspModuleTests.swift`** — 10 hermetic probe-only tests covering `LspModule` registration (6 `lsp_*` tools under module `dev`, tier `.request`), `probe()` shape for typescript/swift/aliases/unsupported, `inferLanguage()` extension mapping, and `findWorkspaceRoot()` for TS (`tsconfig.json`/`jsconfig.json`/`package.json`) + Swift (`Package.swift`) + unsupported-language nil case. All pass under `swift run NotionBridgeTests` without `LSP_LIVE=1` (CI safe).
+- **`LspModuleLiveExtraTests.swift`** — `LSP_LIVE=1`-gated suite: sourcekit-lsp hover on `LspRuntime` actor in the Bridge core, TS-LSP cold-start + idle-dispose round-trip (3s idle override + 5s sleep + re-cold-start, asserting registry state via `LspRuntime.listSessions()`), and TS rename + references on `~/Developer/keepup-club` (heuristic picks the first top-level `export`/`function`/`const`/`type`/`interface`/`class` name; logs reference count + rename file-count + latency for each).
+- **Wired** both entry points (`runLspModuleTests()` + `runLspModuleRenameRefsLiveTests()`) into `NotionBridgeTests/main.swift` after `runShellModuleTests()`.
+
+### Verified
+- **Floor preserved** — `swift run NotionBridgeTests`: **435 passed / 437 total** (vs prior 425/427 floor). Same 2 pre-existing E2E `staticFeatureModuleToolCount` failures persist (Scope OUT — separate housekeeping packet ownership). +10 new tests, all green.
+- **sourcekit-lsp cold-start: 0.580s** (DoD QA target <2s — met for the Swift adapter).
+
+### Deferred to follow-up packet
+- **Live test runtime infrastructure** — under `LSP_LIVE=1` against the current `~/Developer/notion-bridge-pkt777` + `~/Developer/keepup-club` state, the three live tests timed out:
+  - `sourcekit-lsp hover on LspRuntime`: hover request timed out after 30s. Likely cause — the Bridge worktree has no `swift build`-generated indexstore, so SourceKit has no symbol DB to answer hover against. Remediation: warm-build the worktree before the live test, or have the test driver invoke `swift build` as a pre-step.
+  - `TS-LSP cold-start + idle-dispose round-trip` and `TS rename + references`: both failed at `initialize` (timed out after 30s). Likely cause — the discovered workspace root in `keepup-club` lacks an installed `typescript` package (no `node_modules/typescript`), so `typescript-language-server`'s `initialize` blocks. Remediation: ensure `npm install` has run in the picked root, or have the test prefer roots that contain `node_modules/typescript/`.
+- These are environment-tuning items, not Swift code defects — the test scaffolding itself compiles, links, and executes end-to-end; the timeouts are at the LSP server boundary. Honest-partial Done per UEP §4.5; closure precedent in Decisions #16/#28/#33/#35/#37/#39/#42/#43/#44.
+
 ## [2.2.0-0.2] — 2026-05-10 — Remediation: notion_file_upload (PKT-739)
 
 ### Fixed

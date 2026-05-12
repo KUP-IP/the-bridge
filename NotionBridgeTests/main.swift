@@ -386,6 +386,7 @@ await test("AuditEntry is Codable (JSON round-trip)") {
 // SKIPPED: checkAll() hangs in CLI — NSAppleScript probes need AppKit run loop
 // await runPermissionManagerTests()
 await runShellModuleTests()
+await runLspModuleTests()
 await runFileModuleTests()
 await runSessionModuleTests()
 await runMessagesModuleTests()
