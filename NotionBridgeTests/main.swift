@@ -426,6 +426,7 @@ await runCronHumanizerTests()
 
 await runStripeDeprecationShimTests()
 await runEndToEndTests()
+await runWranglerModuleTests() // PKT-757 (v2.2 · 0.2.2)
 
 // ============================================================
 // MARK: - Summary

@@ -116,6 +116,7 @@ public actor ServerManager {
         await DevServerModule.register(on: router)  // PKT-741 (v2.2 1.3): 16th module — port_inspect + devserver_* lifecycle
         await GhModule.register(on: router)         // PKT-742 (v2.2 · 2.2): gh_* CLI wrappers — 7 thin shells over GitHub CLI
         await CodeEditModule.register(on: router)   // PKT-750 (v2.2 · 1.2): code_search · file_str_replace · file_apply_patch
+        await WranglerModule.register(on: router)   // PKT-757 (v2.2 · 0.2.2): wrangler_d1_status
         await PlaywrightModule.register(on: router) // PKT-781 (v2.2 · 3.2a): playwright_run — npx playwright under bg_process supervision
         await VitestModule.register(on: router)     // PKT-781 (v2.2 · 3.2a): vitest_run — npx vitest under bg_process supervision (cap_missing default on this host)
         await LighthouseModule.register(on: router) // PKT-781 (v2.2 · 3.2a): lighthouse_run — npx lighthouse under bg_process supervision

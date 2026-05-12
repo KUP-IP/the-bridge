@@ -43,9 +43,10 @@ public enum BridgeConstants {
     /// v2.2 · 0.1 (PKT-738): 82 + 1 (dev_module_info scaffold) = 83.
     /// v2.2 · 0.1.2 (PKT-755): 83 + 1 (ax_query, AccessibilityModule consolidation) = 84.
     /// v2.2 · 1.2 (PKT-750): 84 + 3 (code_search, file_str_replace, file_apply_patch) = 87.
+    /// v2.2 · 0.2.2 (PKT-757): 87 + 1 (wrangler_d1_status) = 88.
     /// Note: jobs_pause_all / jobs_resume_all dropped, but JobsModule is registered after StripeMcpModule
     /// in ServerManager.setup() and excluded from this static count (matches test surface).
-    public static let staticFeatureModuleToolCount = 87
+    public static let staticFeatureModuleToolCount = 88
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

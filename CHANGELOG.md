@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.2.0-0.2.2] — 2026-05-10 — wrangler_d1_status (PKT-757)
+
+### Added
+- **`wrangler_d1_status` tool** (under `dev/` module family) — resolves a Cloudflare D1 binding from `wrangler.toml` and reports applied + pending migrations against the local or remote DB. Read-only. Returns structured envelope `{ok, binding, database_name, configPath, applied:[{name, applied_at}], pending:[{name}]}`. Includes:
+  - Hand-rolled minimal TOML parser for `[[d1_databases]]` and `[[env.<name>.d1_databases]]` blocks (no new dependencies).
+  - Canonical-pair search over `<repoRoot>/wrangler.toml` and `<repoRoot>/workers/wrangler.toml` (pattern surfaced by the W29 / PKT-739 D2 investigation).
+  - `binding_ambiguous` error envelope (with both paths + recommendation) when a binding is defined in both files.
+  - `capability_missing` error envelope when `wrangler` is not on `PATH`.
+  - Subprocess wrapper for `wrangler d1 migrations list` (pending) and `wrangler d1 execute --command "SELECT … FROM d1_migrations" --json` (applied).
+  - Optional `envScope` parameter for environment-scoped bindings.
+- **`WranglerModuleTests`** — TOML parser edge cases (empty / no-d1 / single / multiple / env-scoped / missing `database_name` / comments-in-quotes), resolver paths (single / ambiguous / not-found / missing-name / explicit-config), output parsers (box-drawn list + JSON envelope), tool registration shape, and gated integration tests against the 605-good-dog repo when reachable (DB → `605-good-dog-local`; preview → `605-good-dog-preview`).
+
+### Changed
+- **Tool-count baseline** bumped from 83 to **84** static feature module tools (`BridgeConstants.staticFeatureModuleToolCount`): + 1 (`wrangler_d1_status`). Family count unchanged at 16 (registers under existing `dev` family alongside `DevModule`).
+
+
 ## [2.2.0-0.2] — 2026-05-10 — Remediation: notion_file_upload (PKT-739)
 
 ### Fixed
