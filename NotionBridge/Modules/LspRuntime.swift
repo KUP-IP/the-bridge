@@ -390,7 +390,9 @@ public actor LspSession {
 
     private func handleIncomingMessage(_ data: Data) async {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-        if let id = obj["id"] as? Int {
+
+        // (1) Response to one of our outgoing requests: integer id, no `method` field.
+        if let id = obj["id"] as? Int, obj["method"] == nil {
             if let cont = pendingRequests.removeValue(forKey: id) {
                 if let error = obj["error"] as? [String: Any] {
                     let code = error["code"] as? Int ?? -32000
@@ -405,9 +407,89 @@ public actor LspSession {
             }
             return
         }
-        // Server-initiated requests with string IDs (rare; e.g. workspace/configuration) and
-        // unsolicited notifications (publishDiagnostics, window/logMessage) are ignored for v1.
-        // Diagnostics will be re-queried on demand by the lsp_diagnostics tool.
+
+        // (2) Server-initiated request: has both `id` and `method`. We must reply, or the server hangs.
+        if let method = obj["method"] as? String, let id = obj["id"] {
+            await handleServerRequest(id: id, method: method, params: obj["params"])
+            return
+        }
+
+        // (3) Server-initiated notification: has `method`, no `id`. Drain quietly.
+        if let method = obj["method"] as? String {
+            await handleServerNotification(method: method, params: obj["params"])
+            return
+        }
+    }
+
+    // MARK: - Server-initiated request/notification handling (PKT-777 W1)
+
+    /// Respond to server-initiated requests so the server does not hang.
+    /// - `workspace/configuration`: reply with an array of `null` matching the requested item count.
+    /// - Any other method: reply with JSON-RPC MethodNotFound (-32601).
+    private func handleServerRequest(id: Any, method: String, params: Any?) async {
+        switch method {
+        case "workspace/configuration":
+            // Per LSP spec, `result` is an array with one entry per `ConfigurationItem` requested.
+            // NotionBridge tracks no client-side LSP configuration, so reply all-null. Servers
+            // (notably sourcekit-lsp) treat null entries as "use defaults".
+            let itemCount: Int
+            if let p = params as? [String: Any], let items = p["items"] as? [Any] {
+                itemCount = max(1, items.count)
+            } else {
+                itemCount = 1
+            }
+            let nulls: [Any] = Array(repeating: NSNull(), count: itemCount)
+            await sendResponse(id: id, result: nulls)
+        default:
+            await sendResponseError(
+                id: id,
+                code: -32601,
+                message: "method '\(method)' not supported by NotionBridge LSP client"
+            )
+        }
+    }
+
+    /// Drain server-initiated notifications. `window/showMessage` + `window/logMessage` are
+    /// silently consumed (no client UI surface). `textDocument/publishDiagnostics` is reserved
+    /// for the W2 push-diagnostics cache; for now it is also drained.
+    private func handleServerNotification(method: String, params: Any?) async {
+        switch method {
+        case "window/showMessage", "window/logMessage":
+            return
+        case "textDocument/publishDiagnostics":
+            // W2 (push-diagnostics cache) will store params["diagnostics"] keyed by params["uri"].
+            return
+        default:
+            return
+        }
+    }
+
+    /// Write a JSON-RPC success response with `result` to the server.
+    private func sendResponse(id: Any, result: Any) async {
+        let message: [String: Any] = [
+            "jsonrpc": "2.0",
+            "id":      id,
+            "result":  result
+        ]
+        await writeFramedMessage(message)
+    }
+
+    /// Write a JSON-RPC error response.
+    private func sendResponseError(id: Any, code: Int, message: String) async {
+        let payload: [String: Any] = [
+            "jsonrpc": "2.0",
+            "id":      id,
+            "error":   ["code": code, "message": message]
+        ]
+        await writeFramedMessage(payload)
+    }
+
+    /// Best-effort framed write. Failures are swallowed because the read-loop will surface
+    /// stream closure to pending requests via the existing `failAllPendingRequests` path.
+    private func writeFramedMessage(_ message: [String: Any]) async {
+        guard let body = try? JSONSerialization.data(withJSONObject: message) else { return }
+        let header = "Content-Length: \(body.count)\r\n\r\n".data(using: .ascii) ?? Data()
+        try? stdin.write(contentsOf: header + body)
     }
 
     // MARK: - Internal helpers
@@ -462,7 +544,7 @@ public actor LspSession {
                 ],
                 "workspace": [
                     "workspaceFolders": true,
-                    "configuration":    false,
+                    "configuration":    true,
                     "applyEdit":        true
                 ]
             ]
