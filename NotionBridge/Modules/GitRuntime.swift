@@ -622,6 +622,7 @@ extension GitRuntime {
                 var ours: [String] = []
                 var theirs: [String] = []
                 var sawSep = false
+                var sawBase = false
                 var j = i + 1
                 var endLine: Int? = nil
                 while j < lines.count {
@@ -632,7 +633,10 @@ extension GitRuntime {
                     } else if l.hasPrefix("=======") && !sawSep {
                         sawSep = true
                     } else if l.hasPrefix("|||||||") {
-                        // diff3 base marker — ignore
+                        // diff3 base marker — entering base section
+                        sawBase = true
+                    } else if sawBase && !sawSep {
+                        // diff3 base content — skip until ======= separator
                     } else {
                         if sawSep { theirs.append(l) } else { ours.append(l) }
                     }
