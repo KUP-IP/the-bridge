@@ -36,6 +36,10 @@
 				<string>SECURITY_APPROVAL_NO_ALWAYS</string>
 				<string>NOTIFY_NOTION</string>
 				<string>NOTIFY_GENERIC</string>
+				<string>CURSOR_AGENT_READY</string>
+				<string>CURSOR_AGENT_FAILED</string>
+				<string>CURSOR_AGENT_STALLED</string>
+				<string>CURSOR_AGENT_NEEDS_APPROVAL</string>
 			</array>
 			<key>UNNotificationExtensionInitialContentSizeRatio</key>
 			<real>0.5</real>
