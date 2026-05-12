@@ -1,14 +1,21 @@
-// CursorRuntime.swift — PKT-3.4.1 (Bridge v2.2)
+// CursorRuntime.swift — PKT-3.4.1 (Bridge v2.2) + PKT-3.4.3 Wave 1 hardening
 // NotionBridge · Modules · Cursor
 //
 // Owns the Node `cursor-sidecar` lifecycle and the (eventual) JSON-RPC 2.0
-// IPC over stdio. Wave 1 (this packet) ships the capability surface, the
+// IPC over stdio. Wave 1 (PKT-3.4.1) shipped the capability surface, the
 // Keychain → env wire-through, and the public API contract; full bidirectional
 // IPC + sidecar runtime impl lands in Wave 2 (PKT-3.4.1.W2) once the published
 // `@cursor/sdk@1.0.12` npm tarball ships its `.d.ts` declarations (currently
 // absent — verified via `find @cursor/sdk/dist -name '*.d.ts'` returning zero
 // results), or until we vendor minimal type declarations from the SDK's
 // upstream source.
+//
+// PKT-3.4.3 Wave 1 (this packet) layers a pre-dispatch hardening pass on top
+// of the Wave 1 contract: `agentRun(...)` now runs sensitive-repo allowlist
+// evaluation + prompt redaction BEFORE `requireCapability()`. The scrubbed
+// prompt + effective runtime + audit entry are what W2's live IPC will
+// dispatch once @cursor/sdk types ship. Pure (never throws); the Wave 1
+// `notImplemented` contract after the capability gate is preserved.
 //
 // Architecture notes:
 //   - Sidecar is a long-lived Node process speaking JSON-RPC 2.0 line-delimited
@@ -53,6 +60,10 @@ public actor CursorRuntime {
     private var process: Process?
     private var spawnedAt: Date?
     private var cachedCapability: CursorCapability?
+
+    /// PKT-3.4.3 Wave 1: queued redaction audit entries waiting for W2's
+    /// AI LOGS DS writer to drain. See `RedactionAuditEntry`.
+    private var pendingAudits: [RedactionAuditEntry] = []
 
     // MARK: - Init
 
@@ -158,7 +169,11 @@ public actor CursorRuntime {
     }
 
     public func agentRun(prompt: String, runtime: CursorRuntimeKind, model: String?, repoPath: String?, branch: String?, maxCostCents: Int?) async throws -> CursorRun {
-        _ = (prompt, runtime, model, repoPath, branch, maxCostCents)
+        // PKT-3.4.3 Wave 1: pre-dispatch hardening pass (redaction + sensitive-repo allowlist).
+        // Audit entry queued for PKT-3.4.1.W2 AI LOGS writer; the scrubbed prompt + effective
+        // runtime are what W2's live IPC will dispatch.
+        let verdict = evaluateGates(prompt: prompt, runtime: runtime, repoPath: repoPath)
+        _ = (verdict, model, branch, maxCostCents)
         try requireCapability()
         throw CursorError.notImplemented("agent_run: sidecar @cursor/sdk wiring deferred to PKT-3.4.1.W2 (SDK .d.ts not shipped in npm tarball)")
     }
@@ -186,6 +201,60 @@ public actor CursorRuntime {
         try requireCapability()
         throw CursorError.notImplemented("agent_artifacts: sidecar @cursor/sdk wiring deferred to PKT-3.4.1.W2")
     }
+
+    // MARK: - PKT-3.4.3 Wave 1: Hardening surface (sensitive-repo allowlist + prompt redaction)
+
+    /// Read-only snapshot of pending redaction audit entries.
+    /// PKT-3.4.1.W2's AI LOGS DS writer drains via `drainPendingRedactionAudits()`.
+    public func pendingRedactionAudits() -> [RedactionAuditEntry] {
+        pendingAudits
+    }
+
+    /// Drain and return all pending audit entries (PKT-3.4.1.W2 calls this
+    /// after the AI LOGS DS write succeeds).
+    public func drainPendingRedactionAudits() -> [RedactionAuditEntry] {
+        let drain = pendingAudits
+        pendingAudits = []
+        return drain
+    }
+
+    /// Pre-dispatch hardening: sensitive-repo allowlist + prompt redaction.
+    /// Returns the scrubbed prompt, effective runtime (cloud→local override on
+    /// sensitive repo), and the verdict that produced them. Always enqueues an
+    /// audit entry for W2's AI LOGS writer.
+    ///
+    /// Pure (never throws); safe to call from tests without triggering IPC.
+    /// Wave 1 of PKT-3.4.3 (this packet): `agentRun(...)` calls this before
+    /// `requireCapability()`.
+    public func evaluateGates(
+        prompt: String,
+        runtime: CursorRuntimeKind,
+        repoPath: String?
+    ) -> CursorGateVerdict {
+        let sensitivity = SensitiveRepoMatcher.evaluate(repoPath: repoPath)
+        let effectiveRuntime: CursorRuntimeKind = sensitivity.forceLocal ? .local : runtime
+        let redaction = PromptRedactor.redact(prompt)
+        let audit = RedactionAuditEntry(
+            runId: nil,
+            count: redaction.count,
+            ruleIds: redaction.ruleIds,
+            promptHash: redaction.promptHash,
+            repoPath: repoPath,
+            sensitiveRepoMatched: sensitivity.matchedPattern,
+            forcedLocal: sensitivity.forceLocal && runtime == .cloud,
+            redactedAt: Date()
+        )
+        pendingAudits.append(audit)
+        return CursorGateVerdict(
+            scrubbedPrompt: redaction.scrubbed,
+            effectiveRuntime: effectiveRuntime,
+            sensitivity: sensitivity,
+            redaction: redaction,
+            auditQueued: audit
+        )
+    }
+
+    // MARK: - Private capability gate
 
     /// Throw `capabilityMissing` if pre-flight fails. Sets `cachedCapability`.
     private func requireCapability() throws {

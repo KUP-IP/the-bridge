@@ -31,6 +31,34 @@
 
 ### Changed
 - **Tool-count baseline** bumped from 83 to **84** static feature module tools (`BridgeConstants.staticFeatureModuleToolCount`): + 1 (`wrangler_d1_status`). Family count unchanged at 16 (registers under existing `dev` family alongside `DevModule`).
+## [2.2.0-3.4.3.W1] — 2026-05-11 — Cursor hardening Wave 1: redaction + sensitive-repo allowlist (PKT-773)
+
+### Added
+- **`SensitiveRepoMatcher`** (`NotionBridge/Modules/Cursor/SensitiveRepoMatcher.swift`) — repo allowlist matcher. Default globs `~/Developer/secure/*` and `~/Developer/secure/**` (covers nested descendants); user-extensible via UserDefaults `com.notionbridge.cursor.sensitiveRepoGlobs` (string array). Matches via POSIX `fnmatch(3)` (strict + permissive passes) plus a prefix fallback for `parent/*` and `parent/**` patterns. Returns `Verdict { isSensitive, matchedPattern, forceLocal, requiresExtraApproval }`. Used by `CursorRuntime.evaluateGates(...)` to force runtime=local when a Cursor agent run targets a sensitive repo.
+- **`PromptRedactor`** (`NotionBridge/Modules/Cursor/PromptRedactor.swift`) — inline gitleaks-style ruleset (16 built-in rules: AWS access/session keys, GitHub PAT/OAuth/App/fine-grained, Slack bot/user/webhook, OpenAI, Anthropic, Stripe, Google API, PEM private keys, JWTs, generic high-entropy ≥40-char strings). Replaces matches with `[REDACTED:<ruleId>]`. Returns `Result { scrubbed, count, ruleIds, promptHash }` where `promptHash` is sha256(original) hex via CryptoKit. User-extensible via UserDefaults `com.notionbridge.cursor.extraRedactionRules` (dict of `ruleId: regexPattern`). No external `gitleaks` binary required.
+- **`CursorAudit.swift`** — `RedactionAuditEntry` + `CursorGateVerdict` DTOs. `RedactionAuditEntry` captures the metadata that PKT-3.4.1.W2's AI LOGS DS writer will drain into a Session-type entry: `runId`, `count`, `ruleIds`, `promptHash`, `repoPath`, `sensitiveRepoMatched`, `forcedLocal`, `redactedAt`. Never persists matched values; the unredacted prompt is referenced only by sha256 hash.
+- **`CursorRuntime.evaluateGates(prompt:runtime:repoPath:)`** — pre-dispatch hardening pass. Returns scrubbed prompt + effective runtime (cloud→local override on sensitive repo) + queued audit entry. Pure (never throws); safe to call from tests without triggering IPC. Called inside `agentRun(...)` before `requireCapability()` so the audit fires regardless of capability outcome.
+- **`CursorRuntime.pendingRedactionAudits()`** / **`drainPendingRedactionAudits()`** — actor-isolated read + drain on the queued audit entries. Wave 2 drains and writes to AI LOGS DS via `NotionAPIClient`.
+- **`NotionBridgeTests/CursorHardeningTests.swift`** — 13 new unit tests covering SensitiveRepoMatcher (5 cases including user-extensible globs + nil/empty path), PromptRedactor (6 cases including AWS-key scrub, GitHub PAT scrub, clean-prompt passthrough, never-echoes-matched-value, known sha256 fixture, user-extensible rules), CursorRuntime.evaluateGates integration (4 cases including scenarios G3 and H1, plus queue observability + drain semantics). Runs against per-suite `UserDefaults` to avoid polluting host defaults.
+
+### Hardened
+- **`CursorRuntime.agentRun(...)`** — now runs the hardening pass before `requireCapability()`. When PKT-3.4.1.W2 wires real IPC, the scrubbed prompt + effective runtime are what flow through to the sidecar. Wave 1 continues to throw `notImplemented` post-gate (W2 contract unchanged; existing 501-test baseline preserved).
+
+### Deferred to PKT-3.4.1.W2 (packet scope IN, but gated on live IPC)
+- **AI LOGS DS write of audit entries** — DTOs + queue ship now; the actual `notion_page_create` against the AI LOGS data source (`992fd5ac-d938-4be4-95fb-8ef18bd86bba`) lives in PKT-3.4.1.W2 per Reflow #18 disposition (W2 owns the `NotionAPIClient` wire path).
+- **Worktree-aware concurrency** (`git worktree list` queue + Dashboard `queued` status surfacing) — requires the running spawn surface from W2. CursorRuntime has no live IPC in Wave 1; there are no concurrent runs to queue against.
+- **Lifecycle archival** (7-day auto-archive, bulk cleanup, hard-delete with hash-retain, transcript export markdown) — requires AI LOGS rows to archive against; W2 writes the first rows.
+- **Settings UI section** (Dashboard → Settings → Cursor) — the UserDefaults keys ship now (`com.notionbridge.cursor.sensitiveRepoGlobs`, `com.notionbridge.cursor.extraRedactionRules`); a Settings UI section that manages them is PKT-3.4.2 / 3.4.3.W2 territory.
+- **Modal redaction warning surface** in the new-run modal — the audit entries are observable now (per `pendingRedactionAudits()`); PKT-3.4.2's new-run modal will subscribe.
+
+### Tests
+- **+13** new tests in `runCursorHardeningTests()` (wired into `NotionBridgeTests/main.swift` after `runCursorModuleTests()`).
+- Pre-existing **501** baseline preserved (the new `agentRun(...)` pre-gate hardening pass does not change the post-capability error contract that `CursorModuleTests` asserts).
+
+### Provenance
+- Branch: `bridge-v2.2/3.4.3-cursor-hardening` cut from `2e7bb88` (PKT-3.4.1 Wave 1 tip), parallelizable with `bridge-v2.2/3.4.2-cursor-ux` per packet Gates.
+- Built in an isolated git worktree (`~/Developer/notion-bridge-3.4.3`) to avoid disturbing the main worktree's concurrent PKT-782 WIP.
+- Spec: PKT-773 packet (Bridge v2.2 · 3.4.3) IN-scope items — sensitive-repo allowlist + prompt redaction + AI LOGS audit DTO ship; concurrency + archival + transcript export honestly deferred to W2 per Decision #15 honest-partial close pattern (mirrors PKT-3.4.1 Wave 1's pattern).
 
 ## [2.2.0-0.2] — 2026-05-10 — Remediation: notion_file_upload (PKT-739)
 
