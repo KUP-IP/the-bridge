@@ -414,6 +414,11 @@ await runSecurityAuditTests()
 // ============================================================
 
 await runCodeEditModuleTests()
+await runSpotlightModuleTests()        // PKT-747 (v2.2 · 3.3)
+await runSyntheticInputModuleTests()   // PKT-747 (v2.2 · 3.3)
+await runMouseClickModuleTests()        // PKT-765 (v2.2 · 3.3.1)
+await runCGEventModuleTests()           // PKT-765 (v2.2 · 3.3.1)
+await runPasteboardHistoryModuleTests() // PKT-765 (v2.2 · 3.3.1)
 await runJobsModuleTests()
 await runBgProcessModuleTests()
 await runDevServerModuleTests()

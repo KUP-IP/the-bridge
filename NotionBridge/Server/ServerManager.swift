@@ -117,6 +117,11 @@ public actor ServerManager {
         await GhModule.register(on: router)         // PKT-742 (v2.2 · 2.2): gh_* CLI wrappers — 7 thin shells over GitHub CLI
         await CodeEditModule.register(on: router)   // PKT-750 (v2.2 · 1.2): code_search · file_str_replace · file_apply_patch
         await WranglerModule.register(on: router)   // PKT-757 (v2.2 · 0.2.2): wrangler_d1_status
+        await SpotlightModule.register(on: router)         // PKT-747 (v2.2 · 3.3): spotlight_query (mdfind wrapper)
+        await SyntheticInputModule.register(on: router)    // PKT-747 (v2.2 · 3.3): keyboard_type (CGEvent synthetic input)
+        await MouseClickModule.register(on: router)        // PKT-765 (v2.2 · 3.3.1): mouse_click (CGEvent mouse, abs/window-relative)
+        await CGEventModule.register(on: router)           // PKT-765 (v2.2 · 3.3.1): cgevent_send (raw CGEvent escape hatch)
+        await PasteboardHistoryModule.register(on: router) // PKT-765 (v2.2 · 3.3.1): pasteboard_history (NSPasteboard polling + persistence)
         await PlaywrightModule.register(on: router) // PKT-781 (v2.2 · 3.2a): playwright_run — npx playwright under bg_process supervision
         await VitestModule.register(on: router)     // PKT-781 (v2.2 · 3.2a): vitest_run — npx vitest under bg_process supervision (cap_missing default on this host)
         await LighthouseModule.register(on: router) // PKT-781 (v2.2 · 3.2a): lighthouse_run — npx lighthouse under bg_process supervision
