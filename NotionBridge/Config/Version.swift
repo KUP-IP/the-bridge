@@ -47,9 +47,10 @@ public enum BridgeConstants {
     /// v2.2 · 3.3/3.3.1 (PKT-747/765): 88 + 5 (spotlight/input/pasteboard tools) = 93.
     /// v2.2 · 2.1/2.1.1 (PKT-740/784/786/788): 93 + 9 (git_* tools) = 102.
     /// v2.2 · 2.3/2.3.1 (PKT-745/777/789): 102 + 6 (lsp_* tools) = 108.
+    /// v2.2 · 3.4.1 (PKT-772): 108 + 5 (cursor_agent_* tools) = 113.
     /// Note: jobs_pause_all / jobs_resume_all dropped, but JobsModule is registered after StripeMcpModule
     /// in ServerManager.setup() and excluded from this static count (matches test surface).
-    public static let staticFeatureModuleToolCount = 108
+    public static let staticFeatureModuleToolCount = 113
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

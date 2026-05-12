@@ -522,3 +522,29 @@ _Initial tracked release._
 [1.1.5]: https://github.com/KUP-IP/Notion-bridge/releases/tag/v1.1.5
 
 [1.9.1]: https://github.com/KUP-IP/Notion-bridge/compare/v1.9.0...v1.9.1
+## [2.2.0-3.4.1] — 2026-05-11 — Cursor SDK adapter Wave 1 — Swift `CursorModule` + sidecar protocol DTOs (PKT-3.4.1 / PKT-772)
+
+### Added
+- **`modules/cursor/` Swift module** — new top-level Bridge module hosting the Cursor SDK adapter as a peer of `dev/` and `computer/`. Justifies its own family: the cursor-sidecar carries a distinct security envelope (`.request` tier on every call as a cost gate), a separate Node-subprocess lifecycle, and an SDK pin (`@cursor/sdk@^1.0.12`) decoupled from the rest of the Bridge.
+  - `CursorTypes.swift` — wire-level DTOs (`CursorRun`, `CursorArtifact`, `CursorEvent`, `CursorCapability`) and `CursorError` mirroring the sidecar error registry (`10001 NOT_IMPLEMENTED`, `10002 CAPABILITY_MISSING`, `10003 AUTH_FAILED`, `10004 SDK_ERROR`, `10005 COST_CAP_TRIPPED`, `10006 TIMEOUT` per `cursor-sidecar/SPEC.md` §4).
+  - `CursorRuntime.swift` — actor singleton with synchronous `capabilityCheck()` (Node binary + sidecar entrypoint + Keychain `service=api_key:cursor / account=cursor`), nonisolated `locateNode()` / `detectNodeVersion()` / `readSidecarVersion()` helpers, public `readApiKey()` Keychain accessor, and the public 5-method API contract (`ping`, `capabilityProbe`, `agentRun`, `agentStatus`, `agentList`, `agentCancel`, `agentArtifacts`). Wave 1 returns `capability_missing` cleanly when the pre-flight fails; returns `not_implemented` after a successful gate — sidecar IPC + `@cursor/sdk` wiring lands in PKT-3.4.1.W2.
+  - `CursorModule.swift` — 5 `cursor_agent_*` tool registrations under module `"cursor"`, all tier `.request`. Schemas describe `prompt` / `runtime` (`local`|`cloud`) / `model` / `repoPath` / `branch` / `maxCostCents`. Handlers proxy to `CursorRuntime` and return a structured error envelope (`ok=false`, `code`, `error`) when capability is missing.
+- **`ServerManager.setup`** registration after `GhModule.register` (line 118).
+- **`NotionBridgeTests/CursorModuleTests.swift`** — registration (5 tools, all `.request`, module name = `"cursor"`), `CursorTypes` JSON round-trip, capability surface, error-code registry, and a dispatch path verifying the structured error envelope shape on the Wave 1 stub path. Wired into `main.swift` after `runGhModuleTests()`.
+- **`cursor-sidecar/src/protocol.ts`** — TypeScript mirror DTOs (`CursorRuntimeKind`, `CursorRunStatus`, `CursorRun`, `CursorArtifact`, `CursorEvent`) so the Wave 2 sidecar runtime impl can replace the NOT_IMPLEMENTED stubs against a typed contract.
+
+### Changed
+- **Tool-count baseline** bumped from 84 to **89** static feature module tools: + 5 (`cursor_agent_run`, `cursor_agent_status`, `cursor_agent_list`, `cursor_agent_cancel`, `cursor_agent_artifacts`).
+- **Family count** bumped from 16 to **17** with the `cursor` family.
+
+### Deferred to PKT-3.4.1.W2 (Wave 2 follow-up)
+- Live JSON-RPC IPC between `CursorRuntime` and `cursor-sidecar` (bidirectional stdio with request/response correlation, SSE notification fan-out, `Last-Event-ID` reconnect per SPEC §8).
+- Sidecar `agent_run` / `agent_status` / `agent_list` / `agent_cancel` / `agent_artifacts` stub-handler replacement with real `@cursor/sdk@1.0.12` calls. **Blocker:** the published `@cursor/sdk@1.0.12` npm tarball does not ship `.d.ts` declaration files (verified — `find @cursor/sdk -name '*.d.ts'` returns zero results) despite `package.json` declaring `"types": "./dist/esm/index.d.ts"`. W2 prerequisite: either upstream SDK ships its types, or we vendor minimal declarations from the SDK's public source on the SDK repo (`github.com/cursor/cursor`).
+- SecurityGate Always-Allow scoped per `(repo, model, runtime)` triple-keyed session memo (default request-tier prompt ships in W1; scoped memo surface is W2).
+- AI LOGS DS write per run (`machine_id`, `prompt_hash`, `model`, `runtime`, `status`, `cost_cents`, `artifact_urls` — hash-only) via `NotionAPIClient`. Wire path scoped to W2.
+- Capability probe auto-rollback on failed sidecar update (failure-injection infrastructure; W2 or W3).
+
+### Deferred to live-validation (requires user-side authorization)
+- DoD A1 — local refactor round-trip against a test repo with structured SSE events captured (requires real `@cursor/sdk` spend).
+- DoD B2 — cloud runtime confirmation modal + cloud VM provisioning + PR URL artifact (requires cloud spend authorization, GitHub repo nomination, real PR creation).
+- DoD C5 — Bridge restart re-attaches running cloud agent via `Last-Event-ID` (requires running cloud agent + induced sleep/disconnect cycle).
