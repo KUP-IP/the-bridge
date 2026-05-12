@@ -40,6 +40,9 @@ struct NotionBridgeApp: App {
                 permissionManager: appDelegate.permissionManager,
                 onOpenSettings: {
                     appDelegate.openSettings()
+                },
+                onOpenCursorAgents: {
+                    appDelegate.openCursorAgents()
                 }
             )
         } label: {

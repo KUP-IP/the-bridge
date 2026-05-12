@@ -86,6 +86,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         permissionManager: permissionManager
     )
 
+    /// PKT-3.4.2 Wave 4: Standalone Cursor Agents window controller.
+    /// Opened from the Dashboard popover "Agents" button.
+    private lazy var cursorAgentsController = CursorAgentsWindowController()
+
     public override init() {
         updaterController = SPUStandardUpdaterController(
             startingUpdater: true,
@@ -110,6 +114,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         CredentialsFeature.migrateIfNeeded()
+
+        // PKT-3.4.2 Wave 4: Start the Cursor notification dispatcher so that
+        // CursorAgentRegistry / CursorCostLedger state changes get fanned out to
+        // the 4 registered notification categories via the Content Extension.
+        CursorNotificationDispatcher.shared.start()
 
         // PKT-441: One-time Stripe key migration to unified credential vault
         Task { await ConnectionRegistry.shared.migrateStripeKeyIfNeeded() }
@@ -234,6 +243,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Open the Settings window. Called from DashboardView gear icon.
     public func openSettings() {
         settingsController.show()
+    }
+
+    /// PKT-3.4.2 Wave 4: Open the standalone Cursor Agents window.
+    /// Called from DashboardView "Agents" button.
+    public func openCursorAgents() {
+        cursorAgentsController.show()
     }
 
     /// PKT-430: Trigger manual Sparkle update check.
