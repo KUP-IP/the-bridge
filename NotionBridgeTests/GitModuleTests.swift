@@ -508,4 +508,353 @@ func runGitModuleTests() async {
             } else { throw TestError.assertion("missing sha on ok result") }
         }
     }
+
+    // ============================================================
+    // MARK: - W3 — git_worktree / git_create_branch / git_merge
+    // ============================================================
+    print("")
+    print("  📁 W3 — git_worktree / git_create_branch / git_merge")
+
+    await test("W3 adds git_worktree / git_create_branch / git_merge to module=\"dev\"") {
+        let router = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
+        await GitModule.register(on: router)
+        let regs = await router.registrations(forModule: "dev")
+        let names = Set(regs.map { $0.name })
+        try expect(names.contains("git_worktree"),       "git_worktree not registered")
+        try expect(names.contains("git_create_branch"),  "git_create_branch not registered")
+        try expect(names.contains("git_merge"),          "git_merge not registered")
+    }
+
+    await test("parseWorktreeList handles main + linked + detached + bare entries") {
+        let porcelain = """
+        worktree /Users/me/repo
+        HEAD aaaaaaa1111111111111111111111111111111aa
+        branch refs/heads/main
+
+        worktree /Users/me/repo-wt1
+        HEAD bbbbbbb2222222222222222222222222222222bb
+        branch refs/heads/feature-x
+
+        worktree /Users/me/repo-detached
+        HEAD ccccccc3333333333333333333333333333333cc
+        detached
+
+        worktree /Users/me/repo-bare
+        bare
+        """
+        let entries = GitRuntime.parseWorktreeList(porcelain)
+        try expect(entries.count == 4, "expected 4 entries, got \(entries.count)")
+        try expect(entries[0].path == "/Users/me/repo", "entry 0 path mismatch")
+        try expect(entries[0].branch == "refs/heads/main", "entry 0 branch mismatch")
+        try expect(entries[0].detached == false && entries[0].bare == false, "entry 0 flags wrong")
+        try expect(entries[1].branch == "refs/heads/feature-x", "entry 1 branch mismatch")
+        try expect(entries[2].detached == true && entries[2].branch == nil, "entry 2 should be detached, no branch")
+        try expect(entries[3].bare == true && entries[3].head == nil, "entry 3 should be bare, no head")
+    }
+
+    await test("parseWorktreeList captures locked + prunable flags with optional reasons") {
+        let porcelain = """
+        worktree /Users/me/repo-locked
+        HEAD dddddddd44444444444444444444444444444444
+        branch refs/heads/feature-y
+        locked needed for release
+
+        worktree /Users/me/repo-prunable
+        HEAD eeeeeeee55555555555555555555555555555555
+        detached
+        prunable gitdir file points to non-existent location
+        """
+        let entries = GitRuntime.parseWorktreeList(porcelain)
+        try expect(entries.count == 2, "expected 2, got \(entries.count)")
+        try expect(entries[0].locked == true, "first entry not locked")
+        try expect(entries[0].lockReason == "needed for release", "lock reason mismatch: \(entries[0].lockReason ?? "nil")")
+        try expect(entries[1].prunable == true, "second entry not prunable")
+        try expect(entries[1].prunableReason?.hasPrefix("gitdir file points to") == true,
+                   "prunable reason mismatch: \(entries[1].prunableReason ?? "nil")")
+    }
+
+    await test("parseConflictMarkers extracts a basic 2-way conflict into ours/theirs/lines") {
+        let content = """
+        line 1
+        line 2
+        <<<<<<< HEAD
+        ours line A
+        ours line B
+        =======
+        theirs line A
+        >>>>>>> feature-x
+        trailing line
+        """
+        let hunks = GitRuntime.parseConflictMarkers(in: content)
+        try expect(hunks.count == 1, "expected 1 hunk, got \(hunks.count)")
+        try expect(hunks[0].startLine == 3, "startLine should be 3, got \(hunks[0].startLine)")
+        try expect(hunks[0].endLine == 8,   "endLine should be 8, got \(hunks[0].endLine)")
+        try expect(hunks[0].ours == ["ours line A", "ours line B"], "ours mismatch: \(hunks[0].ours)")
+        try expect(hunks[0].theirs == ["theirs line A"], "theirs mismatch: \(hunks[0].theirs)")
+    }
+
+    await test("parseConflictMarkers ignores diff3 base markers + returns empty on no conflict") {
+        let diff3 = """
+        <<<<<<< HEAD
+        ours
+        ||||||| base
+        base
+        =======
+        theirs
+        >>>>>>> branch
+        """
+        let hunks = GitRuntime.parseConflictMarkers(in: diff3)
+        try expect(hunks.count == 1, "diff3 should still produce one hunk")
+        try expect(hunks[0].ours == ["ours"], "diff3 ours should not include base marker")
+        try expect(hunks[0].theirs == ["theirs"], "diff3 theirs mismatch")
+        // No-conflict input
+        let clean = GitRuntime.parseConflictMarkers(in: "just\nnormal\nfile\n")
+        try expect(clean.isEmpty, "clean file should produce no hunks")
+    }
+
+    await test("git_create_branch schema requires 'branch'; git_worktree requires 'action'; git_merge needs ref or abort") {
+        let router = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
+        await GitModule.register(on: router)
+        // git_create_branch missing 'branch'
+        let cb = try await router.dispatch(toolName: "git_create_branch", arguments: .object([:]))
+        if case .object(let d) = cb, case .bool(let ok) = d["ok"] {
+            try expect(ok == false, "git_create_branch with no 'branch' must fail")
+        } else { throw TestError.assertion("git_create_branch envelope shape unexpected") }
+        // git_worktree missing 'action'
+        let wt = try await router.dispatch(toolName: "git_worktree", arguments: .object([:]))
+        if case .object(let d) = wt, case .bool(let ok) = d["ok"] {
+            try expect(ok == false, "git_worktree with no 'action' must fail")
+        } else { throw TestError.assertion("git_worktree envelope shape unexpected") }
+        // git_merge missing both ref and abort
+        let mg = try await router.dispatch(toolName: "git_merge", arguments: .object([:]))
+        if case .object(let d) = mg, case .bool(let ok) = d["ok"] {
+            try expect(ok == false, "git_merge with no ref/abort must fail")
+        } else { throw TestError.assertion("git_merge envelope shape unexpected") }
+    }
+
+    await test("git_worktree list returns parsed envelope when git is on PATH (live)") {
+        let router = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
+        await GitModule.register(on: router)
+        let res = try await router.dispatch(toolName: "git_worktree", arguments: .object([
+            "action": .string("list")
+        ]))
+        guard case .object(let d) = res else {
+            throw TestError.assertion("git_worktree list did not return an object")
+        }
+        // capability_missing is acceptable in CI; in dev we should get ok:true
+        if case .string(let st) = d["status"], st == "capability_missing" {
+            return  // accept on hosts without git
+        }
+        guard case .bool(let ok) = d["ok"], ok else {
+            throw TestError.assertion("git_worktree list expected ok:true, got \(d)")
+        }
+        try expect(d["action"] != nil, "missing action field")
+        try expect(d["worktrees"] != nil, "missing worktrees array")
+        if case .array(let arr) = d["worktrees"] {
+            try expect(arr.count >= 1, "expected at least one worktree (process cwd)")
+        } else { throw TestError.assertion("worktrees should be an array") }
+    }
+
+    await test("git_create_branch DoD: creates new branch + switches, then cleans up (live)") {
+        // Hermetic temp git repo.
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("nb-w3-cb-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let runtime = GitRuntime.shared
+        let init1 = try await runtime.runGit(["init", "-q", "-b", "main"], cwd: tmp.path)
+        guard init1.exitCode == 0 else { return }  // git missing/old — skip silently
+        _ = try await runtime.runGit(["config", "user.email", "t@example.com"], cwd: tmp.path)
+        _ = try await runtime.runGit(["config", "user.name", "Test"], cwd: tmp.path)
+        let f = tmp.appendingPathComponent("a.txt")
+        try "hello\n".write(to: f, atomically: true, encoding: .utf8)
+        _ = try await runtime.runGit(["add", "a.txt"], cwd: tmp.path)
+        _ = try await runtime.runGit(["commit", "-q", "-m", "init"], cwd: tmp.path)
+
+        let router = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
+        await GitModule.register(on: router)
+        let res = try await router.dispatch(toolName: "git_create_branch", arguments: .object([
+            "branch": .string("w3-feature"),
+            "switch": .bool(true),
+            "cwd":    .string(tmp.path)
+        ]))
+        guard case .object(let d) = res, case .bool(let ok) = d["ok"], ok else {
+            throw TestError.assertion("git_create_branch DoD failed: \(res)")
+        }
+        if case .string(let b) = d["branch"] { try expect(b == "w3-feature", "branch name mismatch: \(b)") }
+        if case .bool(let sw) = d["switched"] { try expect(sw == true, "switch should be true") }
+        // Confirm git agrees the branch is checked out.
+        let head = try await runtime.runGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd: tmp.path)
+        let curBranch = head.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        try expect(curBranch == "w3-feature", "HEAD should be on w3-feature, got '\(curBranch)'")
+    }
+
+    await test("W3 DoD: git_merge surfaces 2-way conflict as {file, hunks:[…]} (live)") {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("nb-w3-conflict-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let runtime = GitRuntime.shared
+        let init1 = try await runtime.runGit(["init", "-q", "-b", "main"], cwd: tmp.path)
+        guard init1.exitCode == 0 else { return }  // skip if git unavailable
+        _ = try await runtime.runGit(["config", "user.email", "t@example.com"], cwd: tmp.path)
+        _ = try await runtime.runGit(["config", "user.name", "Test"], cwd: tmp.path)
+        _ = try await runtime.runGit(["config", "merge.conflictstyle", "merge"], cwd: tmp.path)
+        // Base commit.
+        let f = tmp.appendingPathComponent("conflict.txt")
+        try "base line 1\nbase line 2\nbase line 3\n".write(to: f, atomically: true, encoding: .utf8)
+        _ = try await runtime.runGit(["add", "conflict.txt"], cwd: tmp.path)
+        _ = try await runtime.runGit(["commit", "-q", "-m", "base"], cwd: tmp.path)
+        // Feature branch with mutation on line 2.
+        _ = try await runtime.runGit(["checkout", "-q", "-b", "feature"], cwd: tmp.path)
+        try "base line 1\nFEATURE LINE 2\nbase line 3\n".write(to: f, atomically: true, encoding: .utf8)
+        _ = try await runtime.runGit(["commit", "-q", "-am", "feature change"], cwd: tmp.path)
+        // Back to main with a competing mutation on line 2.
+        _ = try await runtime.runGit(["checkout", "-q", "main"], cwd: tmp.path)
+        try "base line 1\nMAIN LINE 2\nbase line 3\n".write(to: f, atomically: true, encoding: .utf8)
+        _ = try await runtime.runGit(["commit", "-q", "-am", "main change"], cwd: tmp.path)
+
+        let router = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
+        await GitModule.register(on: router)
+        let res = try await router.dispatch(toolName: "git_merge", arguments: .object([
+            "ref":  .string("feature"),
+            "mode": .string("no-ff"),
+            "cwd":  .string(tmp.path)
+        ]))
+        guard case .object(let d) = res else {
+            throw TestError.assertion("git_merge did not return an object")
+        }
+        // Expect ok:false + conflicted:[…]
+        if case .bool(let ok) = d["ok"] { try expect(ok == false, "merge should conflict (ok=false)") }
+        guard case .array(let conflicted) = d["conflicted"] else {
+            throw TestError.assertion("missing conflicted[] in envelope: \(d)")
+        }
+        try expect(!conflicted.isEmpty, "conflicted array should be non-empty")
+        guard case .object(let c0) = conflicted[0] else {
+            throw TestError.assertion("conflicted[0] not an object")
+        }
+        if case .string(let file) = c0["file"] {
+            try expect(file == "conflict.txt", "conflict file mismatch: \(file)")
+        } else { throw TestError.assertion("missing file in conflicted entry") }
+        guard case .array(let hunks) = c0["hunks"], !hunks.isEmpty else {
+            throw TestError.assertion("hunks array missing or empty")
+        }
+        guard case .object(let h0) = hunks[0] else {
+            throw TestError.assertion("hunks[0] not an object")
+        }
+        try expect(h0["startLine"] != nil, "hunk missing startLine")
+        try expect(h0["endLine"]   != nil, "hunk missing endLine")
+        try expect(h0["ours"]      != nil, "hunk missing ours")
+        try expect(h0["theirs"]    != nil, "hunk missing theirs")
+        // ours should contain MAIN LINE 2, theirs FEATURE LINE 2
+        if case .array(let ours) = h0["ours"] {
+            let joined = ours.compactMap { v -> String? in if case .string(let s) = v { return s } else { return nil } }.joined(separator: "\n")
+            try expect(joined.contains("MAIN LINE 2"), "ours should contain 'MAIN LINE 2', got: \(joined)")
+        }
+        if case .array(let theirs) = h0["theirs"] {
+            let joined = theirs.compactMap { v -> String? in if case .string(let s) = v { return s } else { return nil } }.joined(separator: "\n")
+            try expect(joined.contains("FEATURE LINE 2"), "theirs should contain 'FEATURE LINE 2', got: \(joined)")
+        }
+        // Clean up via the tool's own abort path.
+        let ab = try await router.dispatch(toolName: "git_merge", arguments: .object([
+            "abort": .bool(true),
+            "cwd":   .string(tmp.path)
+        ]))
+        if case .object(let ad) = ab, case .bool(let aborted) = ad["aborted"] {
+            try expect(aborted == true, "git_merge --abort should set aborted:true")
+        }
+    }
+
+    await test("git_worktree add+remove round-trip against a sibling worktree (live)") {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("nb-w3-wt-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let runtime = GitRuntime.shared
+        let init1 = try await runtime.runGit(["init", "-q", "-b", "main"], cwd: tmp.path)
+        guard init1.exitCode == 0 else { return }
+        _ = try await runtime.runGit(["config", "user.email", "t@example.com"], cwd: tmp.path)
+        _ = try await runtime.runGit(["config", "user.name", "Test"], cwd: tmp.path)
+        let f = tmp.appendingPathComponent("a.txt")
+        try "hi\n".write(to: f, atomically: true, encoding: .utf8)
+        _ = try await runtime.runGit(["add", "a.txt"], cwd: tmp.path)
+        _ = try await runtime.runGit(["commit", "-q", "-m", "init"], cwd: tmp.path)
+        _ = try await runtime.runGit(["branch", "feature-wt"], cwd: tmp.path)
+
+        let wtPath = tmp.deletingLastPathComponent()
+            .appendingPathComponent("nb-w3-wt-sibling-\(UUID().uuidString)", isDirectory: true).path
+        defer { try? FileManager.default.removeItem(atPath: wtPath) }
+
+        let router = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
+        await GitModule.register(on: router)
+        let addRes = try await router.dispatch(toolName: "git_worktree", arguments: .object([
+            "action": .string("add"),
+            "path":   .string(wtPath),
+            "ref":    .string("feature-wt"),
+            "cwd":    .string(tmp.path)
+        ]))
+        guard case .object(let ad) = addRes, case .bool(let aok) = ad["ok"], aok else {
+            throw TestError.assertion("git_worktree add expected ok:true, got \(addRes)")
+        }
+        // List should now show 2 worktrees.
+        let listRes = try await router.dispatch(toolName: "git_worktree", arguments: .object([
+            "action": .string("list"),
+            "cwd":    .string(tmp.path)
+        ]))
+        if case .object(let ld) = listRes, case .int(let n) = ld["count"] {
+            try expect(n >= 2, "expected ≥2 worktrees after add, got \(n)")
+        }
+        // Remove the sibling worktree.
+        let rmRes = try await router.dispatch(toolName: "git_worktree", arguments: .object([
+            "action": .string("remove"),
+            "path":   .string(wtPath),
+            "cwd":    .string(tmp.path)
+        ]))
+        if case .object(let rd) = rmRes, case .bool(let rok) = rd["ok"] {
+            try expect(rok == true, "git_worktree remove expected ok:true, got \(rmRes)")
+        }
+    }
+
+    await test("git_worktree add background:true returns {background, jobId} envelope") {
+        // Hermetic temp repo so the bg-spawned `git worktree add` doesn't touch real state.
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("nb-w3-bg-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let runtime = GitRuntime.shared
+        let init1 = try await runtime.runGit(["init", "-q", "-b", "main"], cwd: tmp.path)
+        guard init1.exitCode == 0 else { return }
+        _ = try await runtime.runGit(["config", "user.email", "t@example.com"], cwd: tmp.path)
+        _ = try await runtime.runGit(["config", "user.name", "Test"], cwd: tmp.path)
+        let f = tmp.appendingPathComponent("a.txt")
+        try "hi\n".write(to: f, atomically: true, encoding: .utf8)
+        _ = try await runtime.runGit(["add", "a.txt"], cwd: tmp.path)
+        _ = try await runtime.runGit(["commit", "-q", "-m", "init"], cwd: tmp.path)
+        _ = try await runtime.runGit(["branch", "feature-bg"], cwd: tmp.path)
+
+        let wtPath = tmp.deletingLastPathComponent()
+            .appendingPathComponent("nb-w3-bg-sibling-\(UUID().uuidString)", isDirectory: true).path
+        defer { try? FileManager.default.removeItem(atPath: wtPath) }
+
+        let router = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
+        await GitModule.register(on: router)
+        let res = try await router.dispatch(toolName: "git_worktree", arguments: .object([
+            "action":     .string("add"),
+            "path":       .string(wtPath),
+            "ref":        .string("feature-bg"),
+            "cwd":        .string(tmp.path),
+            "background": .bool(true)
+        ]))
+        guard case .object(let d) = res else {
+            throw TestError.assertion("bg worktree add did not return an object")
+        }
+        // Either ok:true with background:true+jobId, OR capability_missing on hosts w/o git.
+        if case .string(let st) = d["status"], st == "capability_missing" { return }
+        try expect(d["background"] != nil, "missing background flag")
+        try expect(d["jobId"] != nil, "missing jobId")
+        // Give the bg job a beat to settle and then issue cleanup.
+        try? await Task.sleep(nanoseconds: 600_000_000)
+        _ = try? await runtime.runGit(["worktree", "remove", "--force", wtPath], cwd: tmp.path)
+    }
+
 }

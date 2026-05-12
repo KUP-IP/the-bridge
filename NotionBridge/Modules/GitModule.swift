@@ -30,6 +30,7 @@ public enum GitModule {
         await router.register(makeDiff(runtime: runtime))
         await router.register(makeLog(runtime: runtime))
         await Self.registerWave2(on: router, runtime: runtime)
+        await Self.registerWave3(on: router, runtime: runtime)
     }
 
     // ============================================================
@@ -648,6 +649,402 @@ extension GitModule {
                     return gitErrorValue("git_apply_patch", e)
                 } catch {
                     return invalidArgsValue("git_apply_patch", error.localizedDescription)
+                }
+            }
+        )
+    }
+}
+
+// ============================================================
+// MARK: - PKT-784 Wave 3 (repo-ops): git_worktree / git_create_branch / git_merge
+// ============================================================
+
+extension GitModule {
+
+    public static func registerWave3(
+        on router: ToolRouter,
+        runtime: GitRuntime,
+        bgRuntime: BgProcessRuntime = BgProcessRuntime.shared
+    ) async {
+        await router.register(makeWorktree(runtime: runtime, bgRuntime: bgRuntime))
+        await router.register(makeCreateBranch(runtime: runtime))
+        await router.register(makeMerge(runtime: runtime, bgRuntime: bgRuntime))
+    }
+
+    static func makeWorktree(runtime: GitRuntime, bgRuntime: BgProcessRuntime) -> ToolRegistration {
+        ToolRegistration(
+            name: "git_worktree",
+            module: moduleName,
+            tier: .request,
+            description: "Manage git worktrees. action='list' parses `git worktree list --porcelain` into structured entries. action='add' creates a worktree at `path` (optionally from `ref` and/or new branch `branch`). action='remove' deletes the worktree at `path`. For `add` (clone-class), pass background:true to spawn via BgProcessRuntime and return jobId immediately.",
+            inputSchema: schemaObj([
+                "action":     enumProp(["add", "list", "remove"], "Operation to perform (required)."),
+                "path":       strProp("Worktree path (required for add/remove)."),
+                "ref":        strProp("For add: ref to check out (commit-ish)."),
+                "branch":     strProp("For add: create a new branch with this name (-b <name>)."),
+                "force":      boolProp("For add: pass -f. For remove: pass --force."),
+                "cwd":        strProp("Optional working directory (defaults to Bridge process cwd)."),
+                "background": boolProp("For add: spawn via bg_process_start and return jobId immediately.")
+            ], required: ["action"]),
+            handler: { arguments in
+                let tool = "git_worktree"
+                if let capVal = await ensureCapability(tool, runtime: runtime) { return capVal }
+                guard case .object(let obj) = arguments,
+                      case .string(let action) = obj["action"] else {
+                    return invalidArgsValue(tool, "required: action ('add'|'list'|'remove')")
+                }
+                let cwd = stringArg(obj, "cwd")
+
+                switch action {
+                case "list":
+                    do {
+                        let r = try await runtime.runGit(["worktree", "list", "--porcelain"], cwd: cwd)
+                        if r.exitCode != 0 { return failedValue(tool, r, hint: nil) }
+                        let entries = GitRuntime.parseWorktreeList(r.stdout)
+                        var arr: [Value] = []
+                        for e in entries {
+                            var d: [String: Value] = [
+                                "path":     .string(e.path),
+                                "bare":     .bool(e.bare),
+                                "detached": .bool(e.detached),
+                                "locked":   .bool(e.locked),
+                                "prunable": .bool(e.prunable)
+                            ]
+                            if let s = e.head            { d["head"] = .string(s) }
+                            if let s = e.branch          { d["branch"] = .string(s) }
+                            if let s = e.lockReason, !s.isEmpty     { d["lockReason"] = .string(s) }
+                            if let s = e.prunableReason, !s.isEmpty { d["prunableReason"] = .string(s) }
+                            arr.append(.object(d))
+                        }
+                        return .object([
+                            "ok":         .bool(true),
+                            "tool":       .string(tool),
+                            "exitCode":   .int(Int(r.exitCode)),
+                            "action":     .string("list"),
+                            "count":      .int(entries.count),
+                            "worktrees":  .array(arr),
+                            "durationMs": .int(Int(r.durationMs.rounded()))
+                        ])
+                    } catch let e as GitError {
+                        return gitErrorValue(tool, e)
+                    } catch {
+                        return invalidArgsValue(tool, error.localizedDescription)
+                    }
+
+                case "add":
+                    guard let pathArg = stringArg(obj, "path") else {
+                        return invalidArgsValue(tool, "action='add' requires 'path'")
+                    }
+                    var args: [String] = ["worktree", "add"]
+                    if case .bool(true) = obj["force"] { args.append("-f") }
+                    if let br = stringArg(obj, "branch"), !br.isEmpty {
+                        args.append(contentsOf: ["-b", br])
+                    }
+                    args.append(pathArg)
+                    if let ref = stringArg(obj, "ref"), !ref.isEmpty {
+                        args.append(ref)
+                    }
+                    if case .bool(true) = obj["background"] {
+                        let cap = await runtime.capabilityCheck()
+                        guard cap.ok, let gitPath = cap.path else {
+                            return capabilityMissingValue(tool, cap.reason ?? "git not on PATH", path: nil)
+                        }
+                        let quoted = args.map { GhModule.shellQuote($0) }.joined(separator: " ")
+                        let cmd = "exec \(GhModule.shellQuote(gitPath)) \(quoted)"
+                        do {
+                            let meta = try await bgRuntime.start(
+                                command: cmd, workingDir: cwd, env: [:], label: "git_worktree_add"
+                            )
+                            return .object([
+                                "ok":         .bool(true),
+                                "tool":       .string(tool),
+                                "action":     .string("add"),
+                                "background": .bool(true),
+                                "jobId":      .string(meta.id),
+                                "pid":        .int(Int(meta.pid)),
+                                "command":    .string(cmd),
+                                "hint":       .string("poll bg_process_status / bg_process_logs with id=\(meta.id)")
+                            ])
+                        } catch {
+                            return .object([
+                                "ok":     .bool(false),
+                                "status": .string("failed"),
+                                "tool":   .string(tool),
+                                "error":  .string("bg_process_start failed: \(error)")
+                            ])
+                        }
+                    }
+                    do {
+                        let r = try await runtime.runGit(args, cwd: cwd)
+                        if r.exitCode != 0 { return failedValue(tool, r, hint: "git worktree add failed") }
+                        return .object([
+                            "ok":         .bool(true),
+                            "tool":       .string(tool),
+                            "exitCode":   .int(Int(r.exitCode)),
+                            "action":     .string("add"),
+                            "path":       .string(pathArg),
+                            "stdout":     .string(r.stdout),
+                            "durationMs": .int(Int(r.durationMs.rounded()))
+                        ])
+                    } catch let e as GitError {
+                        return gitErrorValue(tool, e)
+                    } catch {
+                        return invalidArgsValue(tool, error.localizedDescription)
+                    }
+
+                case "remove":
+                    guard let pathArg = stringArg(obj, "path") else {
+                        return invalidArgsValue(tool, "action='remove' requires 'path'")
+                    }
+                    var args: [String] = ["worktree", "remove"]
+                    if case .bool(true) = obj["force"] { args.append("--force") }
+                    args.append(pathArg)
+                    do {
+                        let r = try await runtime.runGit(args, cwd: cwd)
+                        if r.exitCode != 0 { return failedValue(tool, r, hint: "git worktree remove failed") }
+                        return .object([
+                            "ok":         .bool(true),
+                            "tool":       .string(tool),
+                            "exitCode":   .int(Int(r.exitCode)),
+                            "action":     .string("remove"),
+                            "path":       .string(pathArg),
+                            "durationMs": .int(Int(r.durationMs.rounded()))
+                        ])
+                    } catch let e as GitError {
+                        return gitErrorValue(tool, e)
+                    } catch {
+                        return invalidArgsValue(tool, error.localizedDescription)
+                    }
+
+                default:
+                    return invalidArgsValue(tool, "action must be one of: add, list, remove")
+                }
+            }
+        )
+    }
+
+    static func makeCreateBranch(runtime: GitRuntime) -> ToolRegistration {
+        ToolRegistration(
+            name: "git_create_branch",
+            module: moduleName,
+            tier: .request,
+            description: "Create a new branch via `git branch <name> [<fromRef>]`. Pass switch:true to also check it out via `git switch <name>`. Returns {branch, fromRef, switched, switchError?}.",
+            inputSchema: schemaObj([
+                "branch":  strProp("New branch name (required)."),
+                "fromRef": strProp("Optional ref to branch from (defaults to HEAD)."),
+                "switch":  boolProp("Also check out the new branch after creation."),
+                "force":   boolProp("Pass -f to overwrite an existing branch of the same name."),
+                "cwd":     strProp("Optional working directory.")
+            ], required: ["branch"]),
+            handler: { arguments in
+                let tool = "git_create_branch"
+                if let capVal = await ensureCapability(tool, runtime: runtime) { return capVal }
+                guard case .object(let obj) = arguments,
+                      let branch = stringArg(obj, "branch") else {
+                    return invalidArgsValue(tool, "required: branch (non-empty string)")
+                }
+                let cwd = stringArg(obj, "cwd")
+                let fromRef = stringArg(obj, "fromRef")
+                var args: [String] = ["branch"]
+                if case .bool(true) = obj["force"] { args.append("-f") }
+                args.append(branch)
+                if let r = fromRef, !r.isEmpty { args.append(r) }
+                do {
+                    let r = try await runtime.runGit(args, cwd: cwd)
+                    if r.exitCode != 0 { return failedValue(tool, r, hint: "git branch creation failed") }
+                    var switched = false
+                    var switchErr: String? = nil
+                    if case .bool(true) = obj["switch"] {
+                        let sw = try await runtime.runGit(["switch", branch], cwd: cwd)
+                        if sw.exitCode == 0 {
+                            switched = true
+                        } else {
+                            switchErr = sw.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+                        }
+                    }
+                    var out: [String: Value] = [
+                        "ok":         .bool(true),
+                        "tool":       .string(tool),
+                        "exitCode":   .int(Int(r.exitCode)),
+                        "branch":     .string(branch),
+                        "fromRef":    .string(fromRef?.isEmpty == false ? fromRef! : "HEAD"),
+                        "switched":   .bool(switched),
+                        "durationMs": .int(Int(r.durationMs.rounded()))
+                    ]
+                    if let s = switchErr { out["switchError"] = .string(s) }
+                    return .object(out)
+                } catch let e as GitError {
+                    return gitErrorValue(tool, e)
+                } catch {
+                    return invalidArgsValue(tool, error.localizedDescription)
+                }
+            }
+        )
+    }
+
+    static func makeMerge(runtime: GitRuntime, bgRuntime: BgProcessRuntime) -> ToolRegistration {
+        ToolRegistration(
+            name: "git_merge",
+            module: moduleName,
+            tier: .request,
+            description: "Merge `ref` into the current branch. mode: 'merge' (default, allows ff or commit), 'ff-only' (--ff-only), 'no-ff' (--no-ff), 'squash' (--squash, no commit). Pass abort:true to run `git merge --abort` instead. On conflict (non-zero exit with unmerged files), returns conflicted:[{file, hunks:[{startLine,endLine,ours,theirs}]}] parsed from the marker files. Pass background:true to spawn via BgProcessRuntime (recommended when fetch precedes merge).",
+            inputSchema: schemaObj([
+                "ref":           strProp("Ref to merge (required unless abort:true)."),
+                "mode":          enumProp(["merge", "ff-only", "no-ff", "squash"], "Merge mode (default 'merge')."),
+                "abort":         boolProp("Run `git merge --abort` instead of merging."),
+                "commitMessage": strProp("Optional commit message (-m) for non-ff merges."),
+                "background":    boolProp("Spawn via bg_process_start and return jobId immediately."),
+                "cwd":           strProp("Optional working directory.")
+            ], required: []),
+            handler: { arguments in
+                let tool = "git_merge"
+                if let capVal = await ensureCapability(tool, runtime: runtime) { return capVal }
+                guard case .object(let obj) = arguments else {
+                    return invalidArgsValue(tool, "expected object arguments")
+                }
+                let cwd = stringArg(obj, "cwd")
+
+                if case .bool(true) = obj["abort"] {
+                    do {
+                        let r = try await runtime.runGit(["merge", "--abort"], cwd: cwd)
+                        if r.exitCode != 0 { return failedValue(tool, r, hint: "git merge --abort failed") }
+                        return .object([
+                            "ok":         .bool(true),
+                            "tool":       .string(tool),
+                            "exitCode":   .int(Int(r.exitCode)),
+                            "aborted":    .bool(true),
+                            "durationMs": .int(Int(r.durationMs.rounded()))
+                        ])
+                    } catch let e as GitError {
+                        return gitErrorValue(tool, e)
+                    } catch {
+                        return invalidArgsValue(tool, error.localizedDescription)
+                    }
+                }
+
+                guard let ref = stringArg(obj, "ref") else {
+                    return invalidArgsValue(tool, "required: ref (non-empty string), or abort:true")
+                }
+                let mode: String = { if case .string(let s) = obj["mode"] { return s }; return "merge" }()
+                var args: [String] = ["merge"]
+                switch mode {
+                case "ff-only": args.append("--ff-only")
+                case "no-ff":   args.append("--no-ff")
+                case "squash":  args.append("--squash")
+                default:        break
+                }
+                if let msg = stringArg(obj, "commitMessage"), !msg.isEmpty {
+                    args.append(contentsOf: ["-m", msg])
+                }
+                args.append(ref)
+
+                if case .bool(true) = obj["background"] {
+                    let cap = await runtime.capabilityCheck()
+                    guard cap.ok, let gitPath = cap.path else {
+                        return capabilityMissingValue(tool, cap.reason ?? "git not on PATH", path: nil)
+                    }
+                    let quoted = args.map { GhModule.shellQuote($0) }.joined(separator: " ")
+                    let cmd = "exec \(GhModule.shellQuote(gitPath)) \(quoted)"
+                    do {
+                        let meta = try await bgRuntime.start(
+                            command: cmd, workingDir: cwd, env: [:], label: "git_merge"
+                        )
+                        return .object([
+                            "ok":         .bool(true),
+                            "tool":       .string(tool),
+                            "mode":       .string(mode),
+                            "ref":        .string(ref),
+                            "background": .bool(true),
+                            "jobId":      .string(meta.id),
+                            "pid":        .int(Int(meta.pid)),
+                            "command":    .string(cmd),
+                            "hint":       .string("poll bg_process_status / bg_process_logs with id=\(meta.id)")
+                        ])
+                    } catch {
+                        return .object([
+                            "ok":     .bool(false),
+                            "status": .string("failed"),
+                            "tool":   .string(tool),
+                            "error":  .string("bg_process_start failed: \(error)")
+                        ])
+                    }
+                }
+
+                do {
+                    let r = try await runtime.runGit(args, cwd: cwd)
+                    let fastForward = (r.exitCode == 0) && r.stdout.contains("Fast-forward")
+                    if r.exitCode == 0 {
+                        let rev = try? await runtime.runGit(["rev-parse", "HEAD"], cwd: cwd)
+                        let sha = rev?.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+                        var out: [String: Value] = [
+                            "ok":          .bool(true),
+                            "tool":        .string(tool),
+                            "exitCode":    .int(Int(r.exitCode)),
+                            "mode":        .string(mode),
+                            "ref":         .string(ref),
+                            "fastForward": .bool(fastForward),
+                            "stdout":      .string(r.stdout),
+                            "durationMs":  .int(Int(r.durationMs.rounded()))
+                        ]
+                        if let s = sha, !s.isEmpty { out["mergeCommitSha"] = .string(s) }
+                        return .object(out)
+                    }
+                    // Non-zero — surface conflicted files (if any).
+                    var conflicted: [GitMergeConflictFile] = []
+                    if let res = try? await runtime.runGit(
+                        ["diff", "--name-only", "--diff-filter=U"], cwd: cwd
+                    ), res.exitCode == 0 {
+                        let files = res.stdout
+                            .split(separator: "\n", omittingEmptySubsequences: true)
+                            .map(String.init)
+                        let baseDir: String = {
+                            if let c = cwd, !c.isEmpty {
+                                return (c as NSString).expandingTildeInPath
+                            }
+                            return FileManager.default.currentDirectoryPath
+                        }()
+                        for rel in files {
+                            let abs = (baseDir as NSString).appendingPathComponent(rel)
+                            if let data = try? String(contentsOfFile: abs, encoding: .utf8) {
+                                let hunks = GitRuntime.parseConflictMarkers(in: data)
+                                if !hunks.isEmpty {
+                                    conflicted.append(GitMergeConflictFile(file: rel, hunks: hunks))
+                                }
+                            }
+                        }
+                    }
+                    var arr: [Value] = []
+                    for c in conflicted {
+                        var hunkArr: [Value] = []
+                        for h in c.hunks {
+                            hunkArr.append(.object([
+                                "startLine": .int(h.startLine),
+                                "endLine":   .int(h.endLine),
+                                "ours":      .array(h.ours.map { .string($0) }),
+                                "theirs":    .array(h.theirs.map { .string($0) })
+                            ]))
+                        }
+                        arr.append(.object([
+                            "file":  .string(c.file),
+                            "hunks": .array(hunkArr)
+                        ]))
+                    }
+                    return .object([
+                        "ok":            .bool(false),
+                        "tool":          .string(tool),
+                        "exitCode":      .int(Int(r.exitCode)),
+                        "mode":          .string(mode),
+                        "ref":           .string(ref),
+                        "fastForward":   .bool(false),
+                        "conflicted":    .array(arr),
+                        "conflictCount": .int(conflicted.count),
+                        "stderr":        .string(r.stderr),
+                        "durationMs":    .int(Int(r.durationMs.rounded()))
+                    ])
+                } catch let e as GitError {
+                    return gitErrorValue(tool, e)
+                } catch {
+                    return invalidArgsValue(tool, error.localizedDescription)
                 }
             }
         )

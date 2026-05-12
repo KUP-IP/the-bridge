@@ -483,3 +483,175 @@ extension GitRuntime {
         return paths
     }
 }
+
+// ============================================================
+// MARK: - PKT-784 Wave 3 (repo-ops) types + parsers
+// ============================================================
+// Appended for git_worktree / git_create_branch / git_merge.
+
+public struct GitWorktreeEntry: Sendable, Equatable {
+    public let path: String
+    public let head: String?       // sha at HEAD, nil for bare
+    public let branch: String?     // ref like refs/heads/main, nil if detached/bare
+    public let bare: Bool
+    public let detached: Bool
+    public let locked: Bool
+    public let lockReason: String?
+    public let prunable: Bool
+    public let prunableReason: String?
+
+    public init(path: String, head: String? = nil, branch: String? = nil,
+                bare: Bool = false, detached: Bool = false,
+                locked: Bool = false, lockReason: String? = nil,
+                prunable: Bool = false, prunableReason: String? = nil) {
+        self.path = path; self.head = head; self.branch = branch
+        self.bare = bare; self.detached = detached
+        self.locked = locked; self.lockReason = lockReason
+        self.prunable = prunable; self.prunableReason = prunableReason
+    }
+}
+
+public struct GitMergeHunk: Sendable, Equatable {
+    public let startLine: Int       // 1-based, line of `<<<<<<<`
+    public let endLine: Int         // 1-based, line of `>>>>>>>`
+    public let ours: [String]
+    public let theirs: [String]
+
+    public init(startLine: Int, endLine: Int, ours: [String], theirs: [String]) {
+        self.startLine = startLine; self.endLine = endLine
+        self.ours = ours; self.theirs = theirs
+    }
+}
+
+public struct GitMergeConflictFile: Sendable, Equatable {
+    public let file: String
+    public let hunks: [GitMergeHunk]
+
+    public init(file: String, hunks: [GitMergeHunk]) {
+        self.file = file; self.hunks = hunks
+    }
+}
+
+extension GitRuntime {
+
+    /// Parse `git worktree list --porcelain` into structured entries.
+    /// Entries are separated by blank lines; each entry has lines like:
+    ///   worktree <abs path>
+    ///   HEAD <sha>
+    ///   branch refs/heads/<name>     OR     detached
+    ///   bare                                (alternative branch line)
+    ///   locked [<reason>]
+    ///   prunable [<reason>]
+    public nonisolated static func parseWorktreeList(_ porcelain: String) -> [GitWorktreeEntry] {
+        var out: [GitWorktreeEntry] = []
+        var path: String? = nil
+        var head: String? = nil
+        var branch: String? = nil
+        var bare = false
+        var detached = false
+        var locked = false
+        var lockReason: String? = nil
+        var prunable = false
+        var prunableReason: String? = nil
+
+        func flush() {
+            guard let p = path else { return }
+            out.append(GitWorktreeEntry(
+                path: p, head: head, branch: branch,
+                bare: bare, detached: detached,
+                locked: locked, lockReason: lockReason,
+                prunable: prunable, prunableReason: prunableReason
+            ))
+            path = nil; head = nil; branch = nil
+            bare = false; detached = false
+            locked = false; lockReason = nil
+            prunable = false; prunableReason = nil
+        }
+
+        for raw in porcelain.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(raw)
+            if line.isEmpty {
+                flush()
+                continue
+            }
+            if let spaceIdx = line.firstIndex(of: " ") {
+                let key = String(line[..<spaceIdx])
+                let rest = String(line[line.index(after: spaceIdx)...])
+                switch key {
+                case "worktree": path = rest
+                case "HEAD":     head = rest
+                case "branch":   branch = rest
+                case "locked":   locked = true; lockReason = rest
+                case "prunable": prunable = true; prunableReason = rest
+                default: break
+                }
+            } else {
+                switch line {
+                case "bare":     bare = true
+                case "detached": detached = true
+                case "locked":   locked = true
+                case "prunable": prunable = true
+                default: break
+                }
+            }
+        }
+        flush()
+        return out
+    }
+
+    /// Parse 2-way merge conflict markers in a file's content into structured hunks.
+    /// Recognizes:
+    ///   <<<<<<< <label>
+    ///   <ours lines>
+    ///   =======
+    ///   <theirs lines>
+    ///   >>>>>>> <label>
+    ///
+    /// Notes:
+    ///   - Ignores `|||||||` (diff3-style base markers).
+    ///   - Line numbers are 1-based.
+    ///   - Malformed marker groups are skipped.
+    public nonisolated static func parseConflictMarkers(in content: String) -> [GitMergeHunk] {
+        var out: [GitMergeHunk] = []
+        let lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var i = 0
+        while i < lines.count {
+            let line = lines[i]
+            if line.hasPrefix("<<<<<<<") {
+                let startLine = i + 1
+                var ours: [String] = []
+                var theirs: [String] = []
+                var sawSep = false
+                var j = i + 1
+                var endLine: Int? = nil
+                while j < lines.count {
+                    let l = lines[j]
+                    if l.hasPrefix(">>>>>>>") {
+                        endLine = j + 1
+                        break
+                    } else if l.hasPrefix("=======") && !sawSep {
+                        sawSep = true
+                    } else if l.hasPrefix("|||||||") {
+                        // diff3 base marker — ignore
+                    } else {
+                        if sawSep { theirs.append(l) } else { ours.append(l) }
+                    }
+                    j += 1
+                }
+                if let e = endLine, sawSep {
+                    out.append(GitMergeHunk(
+                        startLine: startLine, endLine: e,
+                        ours: ours, theirs: theirs
+                    ))
+                    i = j + 1
+                    continue
+                } else {
+                    i += 1
+                    continue
+                }
+            }
+            i += 1
+        }
+        return out
+    }
+}
