@@ -413,6 +413,7 @@ await runSecurityAuditTests()
 // MARK: - V1-06 Integration / End-to-End Tests
 // ============================================================
 
+await runCodeEditModuleTests()
 await runJobsModuleTests()
 await runBgProcessModuleTests()
 await runDevServerModuleTests()
@@ -423,6 +424,7 @@ await runLighthouseModuleTests()  // PKT-781 (v2.2 · 3.2a)
 await runRunnerParsersTests()      // PKT-782 (v2.2 · 3.2b)
 await runCronHumanizerTests()
 
+await runStripeDeprecationShimTests()
 await runEndToEndTests()
 
 // ============================================================

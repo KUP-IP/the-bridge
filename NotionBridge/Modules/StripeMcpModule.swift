@@ -70,15 +70,25 @@ public enum StripeMcpModule {
         for tool in tools {
             let tier = securityTier(for: tool.name)
             let isDestructive = isDestructiveOperation(tool.name)
+            let isDeprecated = StripeDeprecationShim.deprecatedToolNames.contains(tool.name)
 
-            await router.register(ToolRegistration(
-                name: tool.name,
-                module: moduleName,
-                tier: tier,
-                neverAutoApprove: isDestructive,
-                description: Self.customerFacingDescription(tool.description),
-                inputSchema: tool.inputSchema,
-                handler: { [name = tool.name] arguments in
+            let baseDescription = Self.customerFacingDescription(tool.description)
+            let description = isDeprecated
+                ? StripeDeprecationShim.decoratedDescription(
+                    originalDescription: baseDescription,
+                    toolName: tool.name)
+                : baseDescription
+
+            // PKT-754: For 25 long-tail Stripe tools, replace the pass-through
+            // handler with a deprecation shim that emits a warning, increments a
+            // telemetry counter, translates args, and forwards to stripe_api_execute
+            // (or stripe_api_search for the two aggregator tools). Two-release ramp:
+            // warn now (v2.2), hard-remove in v2.3.
+            let handler: @Sendable (Value) async throws -> Value
+            if isDeprecated {
+                handler = StripeDeprecationShim.wrapHandler(toolName: tool.name)
+            } else {
+                handler = { [name = tool.name] arguments in
                     do {
                         return try await StripeMcpProxy.shared.callTool(
                             name: name,
@@ -88,6 +98,16 @@ public enum StripeMcpModule {
                         return .object(["error": .string(error.localizedDescription)])
                     }
                 }
+            }
+
+            await router.register(ToolRegistration(
+                name: tool.name,
+                module: moduleName,
+                tier: tier,
+                neverAutoApprove: isDestructive,
+                description: description,
+                inputSchema: tool.inputSchema,
+                handler: handler
             ))
         }
     }
