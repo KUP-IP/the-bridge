@@ -29,6 +29,7 @@ public enum GitModule {
         await router.register(makeStatus(runtime: runtime))
         await router.register(makeDiff(runtime: runtime))
         await router.register(makeLog(runtime: runtime))
+        await Self.registerWave2(on: router, runtime: runtime)
     }
 
     // ============================================================
@@ -391,5 +392,264 @@ public enum GitModule {
             if case .string(let s) = v, !s.isEmpty { return s }
             return nil
         }
+    }
+}
+
+// ============================================================
+// MARK: - Wave 2 (PKT-784): inspect tools
+// ============================================================
+//
+// git_show / git_blame / git_apply_patch under module="dev" tier .request.
+// Additive on PKT-740 W1 (ad1cd17). Wave 3 (worktree/create_branch/merge)
+// deferred to PKT-784 follow-up dispatch per Decision #15.
+
+extension GitModule {
+
+    public static func registerWave2(
+        on router: ToolRouter,
+        runtime: GitRuntime = GitRuntime.shared
+    ) async {
+        await router.register(makeShow(runtime: runtime))
+        await router.register(makeBlame(runtime: runtime))
+        await router.register(makeApplyPatch(runtime: runtime))
+    }
+
+    // ------------------------------------------------------------
+    // MARK: - git_show
+    // ------------------------------------------------------------
+
+    static func makeShow(runtime: GitRuntime) -> ToolRegistration {
+        ToolRegistration(
+            name: "git_show",
+            module: moduleName,
+            tier: .request,
+            description: "Run `git show <ref>` and return a STRUCTURED envelope: {sha, author, authorEmail, date(ISO 8601), subject, body, files:[{path, status, insertions, deletions, isBinary, origPath?}], diff?}. Use `includeDiff:true` to also return the raw diff body (capped at maxBytes, default 200000). `ref` defaults to HEAD when omitted.",
+            inputSchema: schemaObj([
+                "cwd":         strProp("Working directory (absolute path)."),
+                "ref":         strProp("Commit-ish to show (default: HEAD)."),
+                "paths":       arrStrProp("Restrict to these paths (passed after `--`)."),
+                "includeDiff": boolProp("Also return the raw diff body (default false)."),
+                "maxBytes":    intProp("Truncate raw diff body to this many bytes (default 200000; min 1024; max 2000000).")
+            ], required: []),
+            handler: { arguments in
+                if let capVal = await ensureCapability("git_show", runtime: runtime) { return capVal }
+                guard case .object(let obj) = arguments else {
+                    return invalidArgsValue("git_show", "expected object arguments")
+                }
+                let cwd = stringArg(obj, "cwd")
+                let ref = stringArg(obj, "ref") ?? "HEAD"
+                let includeDiff: Bool = { if case .bool(true) = obj["includeDiff"] { return true }; return false }()
+                let byteCap: Int = {
+                    if case .int(let n) = obj["maxBytes"] { return Swift.max(1024, Swift.min(n, 2_000_000)) }
+                    return 200_000
+                }()
+                let paths = arrStringArg(obj, "paths")
+                let fmt = "--pretty=format:%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x00"
+                var args: [String] = ["show", fmt, "--raw", "--numstat", ref]
+                if !paths.isEmpty {
+                    args.append("--")
+                    args.append(contentsOf: paths)
+                }
+                do {
+                    let r = try await runtime.runGit(args, cwd: cwd)
+                    if r.exitCode != 0 { return failedValue("git_show", r, hint: nil) }
+                    guard let parsed = GitRuntime.parseShowOutput(r.stdout) else {
+                        return failedValue("git_show", r, hint: "could not parse show output (missing NUL header terminator)")
+                    }
+                    var dict: [String: Value] = [
+                        "ok":          .bool(true),
+                        "tool":        .string("git_show"),
+                        "exitCode":    .int(Int(r.exitCode)),
+                        "sha":         .string(parsed.sha),
+                        "author":      .string(parsed.author),
+                        "authorEmail": .string(parsed.authorEmail),
+                        "date":        .string(parsed.date),
+                        "subject":     .string(parsed.subject),
+                        "body":        .string(parsed.body),
+                        "fileCount":   .int(parsed.files.count),
+                        "files":       .array(parsed.files.map { f in
+                            var d: [String: Value] = [
+                                "path":       .string(f.path),
+                                "status":     .string(f.status),
+                                "insertions": .int(f.insertions),
+                                "deletions":  .int(f.deletions),
+                                "isBinary":   .bool(f.isBinary)
+                            ]
+                            if let o = f.origPath { d["origPath"] = .string(o) }
+                            return .object(d)
+                        }),
+                        "durationMs":  .int(Int(r.durationMs.rounded()))
+                    ]
+                    if includeDiff {
+                        var diffArgs: [String] = ["show", "--format=", ref]
+                        if !paths.isEmpty {
+                            diffArgs.append("--")
+                            diffArgs.append(contentsOf: paths)
+                        }
+                        let d2 = try await runtime.runGit(diffArgs, cwd: cwd)
+                        if d2.exitCode == 0 || d2.exitCode == 1 {
+                            let totalBytes = d2.stdout.utf8.count
+                            let truncated = totalBytes > byteCap
+                            let body = truncated ? String(d2.stdout.prefix(byteCap)) : d2.stdout
+                            dict["diff"] = .string(body)
+                            dict["diffTruncated"] = .bool(truncated)
+                            dict["diffTotalBytes"] = .int(totalBytes)
+                        }
+                    }
+                    return .object(dict)
+                } catch let e as GitError {
+                    return gitErrorValue("git_show", e)
+                } catch {
+                    return invalidArgsValue("git_show", error.localizedDescription)
+                }
+            }
+        )
+    }
+
+    // ------------------------------------------------------------
+    // MARK: - git_blame
+    // ------------------------------------------------------------
+
+    static func makeBlame(runtime: GitRuntime) -> ToolRegistration {
+        ToolRegistration(
+            name: "git_blame",
+            module: moduleName,
+            tier: .request,
+            description: "Run `git blame --porcelain <file>` (optionally `-L <start>,<end>`) and return a STRUCTURED array: [{lineNo, sha, author, authorTime(unix seconds), content}]. `file` is required; `startLine`/`endLine` form an optional inclusive range.",
+            inputSchema: schemaObj([
+                "cwd":       strProp("Working directory (absolute path)."),
+                "file":      strProp("Path to file to blame (relative to cwd or absolute)."),
+                "startLine": intProp("Inclusive start line for `-L start,end` range. Omit for full file."),
+                "endLine":   intProp("Inclusive end line for `-L start,end` range. Omit for full file."),
+                "rev":       strProp("Optional commit-ish to blame from (default: HEAD).")
+            ], required: ["file"]),
+            handler: { arguments in
+                if let capVal = await ensureCapability("git_blame", runtime: runtime) { return capVal }
+                guard case .object(let obj) = arguments else {
+                    return invalidArgsValue("git_blame", "expected object arguments")
+                }
+                guard let file = stringArg(obj, "file") else {
+                    return invalidArgsValue("git_blame", "'file' is required")
+                }
+                let cwd = stringArg(obj, "cwd")
+                var args: [String] = ["blame", "--porcelain"]
+                if case .int(let s) = obj["startLine"] {
+                    let e: Int = {
+                        if case .int(let ev) = obj["endLine"] { return ev }
+                        return s
+                    }()
+                    args.append("-L")
+                    args.append("\(Swift.max(1, s)),\(Swift.max(s, e))")
+                }
+                if let rev = stringArg(obj, "rev") { args.append(rev) }
+                args.append("--")
+                args.append(file)
+                do {
+                    let r = try await runtime.runGit(args, cwd: cwd)
+                    if r.exitCode != 0 { return failedValue("git_blame", r, hint: nil) }
+                    let entries = GitRuntime.parseBlamePorcelain(r.stdout)
+                    return .object([
+                        "ok":         .bool(true),
+                        "tool":       .string("git_blame"),
+                        "exitCode":   .int(Int(r.exitCode)),
+                        "file":       .string(file),
+                        "lineCount":  .int(entries.count),
+                        "lines":      .array(entries.map { e in
+                            .object([
+                                "lineNo":     .int(e.lineNo),
+                                "sha":        .string(e.sha),
+                                "author":     .string(e.author),
+                                "authorTime": .int(e.authorTime),
+                                "content":    .string(e.content)
+                            ])
+                        }),
+                        "durationMs": .int(Int(r.durationMs.rounded()))
+                    ])
+                } catch let e as GitError {
+                    return gitErrorValue("git_blame", e)
+                } catch {
+                    return invalidArgsValue("git_blame", error.localizedDescription)
+                }
+            }
+        )
+    }
+
+    // ------------------------------------------------------------
+    // MARK: - git_apply_patch
+    // ------------------------------------------------------------
+
+    static func makeApplyPatch(runtime: GitRuntime) -> ToolRegistration {
+        ToolRegistration(
+            name: "git_apply_patch",
+            module: moduleName,
+            tier: .request,
+            description: "Apply a unified diff via `git apply` (reading patch from stdin). Returns {ok, applied:[paths], rejected?:[paths], commitSha?}. Pass `index:true` to also stage hunks (--index). Pass `check:true` for dry-run validation. When `commit:true` AND apply succeeds, runs a follow-up `git commit -m <message>` (default 'apply patch via git_apply_patch').",
+            inputSchema: schemaObj([
+                "cwd":           strProp("Working directory (absolute path)."),
+                "diff":          strProp("Unified diff body (required; sent as git apply stdin)."),
+                "index":         boolProp("Pass --index so the patch updates both working tree AND index."),
+                "check":         boolProp("Pass --check for dry-run validation (no files written)."),
+                "p":             intProp("Strip count for diff path prefixes (-p<n>; default 1)."),
+                "commit":        boolProp("After successful apply, run `git commit -m <message>`. Requires index:true to stage changes."),
+                "commitMessage": strProp("Commit message used when commit:true (default 'apply patch via git_apply_patch').")
+            ], required: ["diff"]),
+            handler: { arguments in
+                if let capVal = await ensureCapability("git_apply_patch", runtime: runtime) { return capVal }
+                guard case .object(let obj) = arguments else {
+                    return invalidArgsValue("git_apply_patch", "expected object arguments")
+                }
+                guard let diff = stringArg(obj, "diff") else {
+                    return invalidArgsValue("git_apply_patch", "'diff' is required")
+                }
+                let cwd = stringArg(obj, "cwd")
+                let stripN: Int = {
+                    if case .int(let n) = obj["p"] { return Swift.max(0, n) }
+                    return 1
+                }()
+                var args: [String] = ["apply", "-p\(stripN)"]
+                if case .bool(true) = obj["index"] { args.append("--index") }
+                if case .bool(true) = obj["check"] { args.append("--check") }
+                args.append("-")
+                let appliedPaths = GitRuntime.parseDiffTargets(diff)
+                do {
+                    let r = try await runtime.runGit(args, cwd: cwd, stdin: diff)
+                    if r.exitCode != 0 {
+                        var fail = failedValue("git_apply_patch", r, hint: "git apply rejected the patch")
+                        if case .object(var dict) = fail {
+                            dict["rejected"] = .array(appliedPaths.map { .string($0) })
+                            fail = .object(dict)
+                        }
+                        return fail
+                    }
+                    var dict: [String: Value] = [
+                        "ok":           .bool(true),
+                        "tool":         .string("git_apply_patch"),
+                        "exitCode":     .int(Int(r.exitCode)),
+                        "applied":      .array(appliedPaths.map { .string($0) }),
+                        "appliedCount": .int(appliedPaths.count),
+                        "durationMs":   .int(Int(r.durationMs.rounded()))
+                    ]
+                    if case .bool(true) = obj["commit"] {
+                        let msg = stringArg(obj, "commitMessage") ?? "apply patch via git_apply_patch"
+                        let c = try await runtime.runGit(["commit", "-m", msg], cwd: cwd)
+                        if c.exitCode != 0 {
+                            dict["commitOk"] = .bool(false)
+                            dict["commitError"] = .string(c.stderr.trimmingCharacters(in: .whitespacesAndNewlines))
+                        } else {
+                            let hr = try await runtime.runGit(["rev-parse", "HEAD"], cwd: cwd)
+                            if hr.exitCode == 0 {
+                                dict["commitSha"] = .string(hr.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+                            }
+                            dict["commitOk"] = .bool(true)
+                        }
+                    }
+                    return .object(dict)
+                } catch let e as GitError {
+                    return gitErrorValue("git_apply_patch", e)
+                } catch {
+                    return invalidArgsValue("git_apply_patch", error.localizedDescription)
+                }
+            }
+        )
     }
 }

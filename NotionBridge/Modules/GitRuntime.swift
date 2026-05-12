@@ -286,3 +286,200 @@ public actor GitRuntime {
         return commits
     }
 }
+
+// ============================================================
+// MARK: - Wave 2 types (PKT-784 W2 v2.2 · 2.1.1)
+// ============================================================
+//
+// git_show + git_blame + git_apply_patch structured envelopes.
+// Wave 3 repo-ops (git_worktree / git_create_branch / git_merge)
+// deferred to PKT-784 follow-up dispatch per Decision #15.
+
+public struct GitShowFileChange: Sendable, Equatable {
+    public let path: String
+    public let status: String         // single-char: A, M, D, R, C, T, U, X, B, or "?"
+    public let insertions: Int
+    public let deletions: Int
+    public let isBinary: Bool
+    public let origPath: String?      // for R*/C* renames/copies
+
+    public init(path: String, status: String, insertions: Int, deletions: Int, isBinary: Bool, origPath: String?) {
+        self.path = path
+        self.status = status
+        self.insertions = insertions
+        self.deletions = deletions
+        self.isBinary = isBinary
+        self.origPath = origPath
+    }
+}
+
+public struct GitShowResult: Sendable {
+    public let sha: String
+    public let author: String
+    public let authorEmail: String
+    public let date: String           // ISO 8601
+    public let subject: String
+    public let body: String
+    public let files: [GitShowFileChange]
+}
+
+public struct GitBlameLine: Sendable, Equatable {
+    public let lineNo: Int
+    public let sha: String
+    public let author: String
+    public let authorTime: Int        // unix timestamp seconds
+    public let content: String
+
+    public init(lineNo: Int, sha: String, author: String, authorTime: Int, content: String) {
+        self.lineNo = lineNo
+        self.sha = sha
+        self.author = author
+        self.authorTime = authorTime
+        self.content = content
+    }
+}
+
+public struct GitApplyOutcome: Sendable {
+    public let ok: Bool
+    public let applied: [String]
+    public let rejected: [String]
+    public let commitSha: String?
+    public let stderr: String
+}
+
+// ============================================================
+// MARK: - Wave 2 parsers (PKT-784 W2)
+// ============================================================
+
+extension GitRuntime {
+
+    /// Parse `git show --pretty=format:%H%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x00 --raw --numstat <ref>` output.
+    /// Returns nil when the NUL header terminator is missing (malformed input).
+    nonisolated public static func parseShowOutput(_ text: String) -> GitShowResult? {
+        guard let nulIdx = text.firstIndex(of: "\u{0}") else { return nil }
+        let header = String(text[..<nulIdx])
+        let rest = String(text[text.index(after: nulIdx)...])
+        let fields = header.split(separator: "\u{1F}", omittingEmptySubsequences: false).map(String.init)
+        guard fields.count >= 6 else { return nil }
+        let sha     = fields[0]
+        let author  = fields[1]
+        let email   = fields[2]
+        let date    = fields[3]
+        let subject = fields[4]
+        let body    = fields[5]
+
+        var statuses: [String: (status: String, origPath: String?)] = [:]
+        var counts:   [String: (ins: Int, dels: Int, binary: Bool)] = [:]
+        var ordered: [String] = []
+
+        for raw in rest.split(separator: "\n", omittingEmptySubsequences: true) {
+            let line = String(raw)
+            if line.hasPrefix(":") {
+                // :<mode> <mode> <hash> <hash> <STATUS>\t<path>[\t<origPath>]
+                guard let tabIdx = line.firstIndex(of: "\t") else { continue }
+                let head = String(line[..<tabIdx])
+                let tail = String(line[line.index(after: tabIdx)...])
+                let parts = head.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+                guard let statusBlob = parts.last else { continue }
+                let firstChar = statusBlob.first.map(String.init) ?? "?"
+                let pathPieces = tail.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+                let path: String
+                let orig: String?
+                if pathPieces.count == 2 {
+                    orig = pathPieces[0]
+                    path = pathPieces[1]
+                } else {
+                    orig = nil
+                    path = pathPieces[0]
+                }
+                statuses[path] = (firstChar, orig)
+                if !ordered.contains(path) { ordered.append(path) }
+            } else if !line.isEmpty {
+                // numstat: <ins>\t<dels>\t<path>  (binary uses "-" for both counts)
+                let parts = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
+                guard parts.count == 3 else { continue }
+                let path = parts[2]
+                let binary = (parts[0] == "-" && parts[1] == "-")
+                let ins = binary ? 0 : (Int(parts[0]) ?? 0)
+                let dels = binary ? 0 : (Int(parts[1]) ?? 0)
+                counts[path] = (ins, dels, binary)
+                if !ordered.contains(path) { ordered.append(path) }
+            }
+        }
+
+        var files: [GitShowFileChange] = []
+        for p in ordered {
+            let s = statuses[p]
+            let c = counts[p]
+            files.append(GitShowFileChange(
+                path: p,
+                status: s?.status ?? "?",
+                insertions: c?.ins ?? 0,
+                deletions: c?.dels ?? 0,
+                isBinary: c?.binary ?? false,
+                origPath: s?.origPath))
+        }
+
+        return GitShowResult(
+            sha: sha, author: author, authorEmail: email,
+            date: date, subject: subject, body: body, files: files)
+    }
+
+    /// Parse `git blame --porcelain` output into per-line entries.
+    /// Porcelain layout: a header line `<sha> <origLine> <finalLine> [<groupCount>]` followed by
+    /// metadata lines (`author`, `author-time`, etc.) and a content line prefixed with `\t`.
+    /// Lines after the first in a group repeat only `<sha> <origLine> <finalLine>` + `\t<content>`.
+    nonisolated public static func parseBlamePorcelain(_ text: String) -> [GitBlameLine] {
+        var out: [GitBlameLine] = []
+        var authors: [String: String] = [:]
+        var authorTimes: [String: Int] = [:]
+        var currentSha: String = ""
+        var currentFinalLine: Int = 0
+
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        for line in lines {
+            if line.hasPrefix("\t") {
+                let content = String(line.dropFirst(1))
+                out.append(GitBlameLine(
+                    lineNo: currentFinalLine,
+                    sha: currentSha,
+                    author: authors[currentSha] ?? "",
+                    authorTime: authorTimes[currentSha] ?? 0,
+                    content: content))
+            } else if line.hasPrefix("author ") {
+                authors[currentSha] = String(line.dropFirst("author ".count))
+            } else if line.hasPrefix("author-time ") {
+                authorTimes[currentSha] = Int(line.dropFirst("author-time ".count)) ?? 0
+            } else {
+                let parts = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+                if parts.count >= 3 {
+                    let candidate = parts[0]
+                    if candidate.count >= 7,
+                       candidate.allSatisfy({ $0.isHexDigit }),
+                       let finalLine = Int(parts[2]) {
+                        currentSha = candidate
+                        currentFinalLine = finalLine
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    /// Extract `+++ b/<path>` headers from a unified diff so callers can surface
+    /// applied/rejected paths in the `git_apply_patch` envelope.
+    nonisolated public static func parseDiffTargets(_ diff: String) -> [String] {
+        var paths: [String] = []
+        for raw in diff.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(raw)
+            if line.hasPrefix("+++ b/") {
+                let p = String(line.dropFirst("+++ b/".count))
+                if !paths.contains(p) { paths.append(p) }
+            } else if line.hasPrefix("+++ ") && !line.hasPrefix("+++ /dev/null") {
+                let p = String(line.dropFirst(4))
+                if !paths.contains(p) { paths.append(p) }
+            }
+        }
+        return paths
+    }
+}
