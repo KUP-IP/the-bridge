@@ -147,6 +147,10 @@ public actor LspSession {
     private var nextRequestId: Int = 1
     private var pendingRequests: [Int: CheckedContinuation<Data?, Error>] = [:]
     private var openFiles: Set<String> = []
+    /// Per-URI push-diagnostics cache populated from `textDocument/publishDiagnostics` notifications (PKT-777 W2).
+    private var diagnosticsByUri: [String: [Any]] = [:]
+    /// Per-URI waiter list: continuations woken when the next publishDiagnostics for that URI arrives.
+    private var diagnosticsWaiters: [String: [CheckedContinuation<Void, Never>]] = [:]
     private var readTask: Task<Void, Never>?
     private var stderrTask: Task<Void, Never>?
     private var idleTask: Task<Void, Never>?
@@ -421,6 +425,42 @@ public actor LspSession {
         }
     }
 
+    // MARK: - Push-diagnostics cache accessors (PKT-777 W2)
+
+    /// Return cached diagnostics for the given URI as a JSON-encoded `Data` payload
+    /// (`[]` if empty / no diagnostics received within `timeout`). JSON encoding happens
+    /// inside actor isolation so the returned `Data` (which is `Sendable`) safely crosses
+    /// the actor boundary — the underlying `[Any]` cache contents are not `Sendable` and
+    /// must not escape this actor directly.
+    public func diagnosticsJSON(forUri uri: String, timeout: TimeInterval = 1.5) async -> Data {
+        if let cached = diagnosticsByUri[uri] {
+            return encodeDiagnostics(cached)
+        }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            diagnosticsWaiters[uri, default: []].append(cont)
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                await self?.timeoutDiagnosticsWaiters(uri: uri)
+            }
+        }
+        return encodeDiagnostics(diagnosticsByUri[uri] ?? [])
+    }
+
+    /// Best-effort JSON encode of a diagnostics array. Returns `[]` bytes on failure.
+    private func encodeDiagnostics(_ diags: [Any]) -> Data {
+        if let d = try? JSONSerialization.data(withJSONObject: diags, options: [.fragmentsAllowed]) {
+            return d
+        }
+        return Data("[]".utf8)
+    }
+
+    /// Best-effort: wake every waiter for this URI. Safe to call multiple times — `removeValue`
+    /// pops the list so a second timeout (or a `publishDiagnostics` arrival) finds it empty.
+    private func timeoutDiagnosticsWaiters(uri: String) {
+        let waiters = diagnosticsWaiters.removeValue(forKey: uri) ?? []
+        for w in waiters { w.resume() }
+    }
+
     // MARK: - Server-initiated request/notification handling (PKT-777 W1)
 
     /// Respond to server-initiated requests so the server does not hang.
@@ -457,7 +497,13 @@ public actor LspSession {
         case "window/showMessage", "window/logMessage":
             return
         case "textDocument/publishDiagnostics":
-            // W2 (push-diagnostics cache) will store params["diagnostics"] keyed by params["uri"].
+            // PKT-777 W2: cache server-pushed diagnostics keyed by URI; wake any waiters on that URI.
+            if let p = params as? [String: Any], let uri = p["uri"] as? String {
+                let diags = (p["diagnostics"] as? [Any]) ?? []
+                diagnosticsByUri[uri] = diags
+                let waiters = diagnosticsWaiters.removeValue(forKey: uri) ?? []
+                for w in waiters { w.resume() }
+            }
             return
         default:
             return

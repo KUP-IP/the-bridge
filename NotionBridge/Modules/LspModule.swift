@@ -362,7 +362,7 @@ public enum LspModule {
             name: "lsp_diagnostics",
             module: moduleName,
             tier: .request,
-            description: "LSP textDocument diagnostics on a file. Returns the server's current diagnostics (errors, warnings, hints) via textDocument/diagnostic (LSP pull-diagnostics). Auto-detects language from extension; pass 'language' to override.",
+            description: "LSP diagnostics on a file. Returns the server's current diagnostics (errors, warnings, hints) from a push-based cache populated by `textDocument/publishDiagnostics` notifications. The first call after `textDocument/didOpen` waits up to 1.5s for the initial publish; subsequent calls return cached results immediately. An empty `result` array means the server reported no issues, not an error. Auto-detects language from extension; pass 'language' to override.",
             inputSchema: schema(),
             handler: { arguments in
                 switch try await prepareSession(tool: "lsp_diagnostics", arguments: arguments) {
@@ -372,16 +372,14 @@ public enum LspModule {
                     guard let session = session, prepErr == nil else {
                         return errorValue(tool: "lsp_diagnostics", language: language, filePath: filePath, error: prepErr!)
                     }
-                    let params: [String: Any] = [
-                        "textDocument": ["uri": URL(fileURLWithPath: filePath).absoluteString]
-                    ]
-                    do {
-                        let result = try await session.sendRequest(method: "textDocument/diagnostic", params: params, timeout: 15)
-                        return successValue(tool: "lsp_diagnostics", language: language, filePath: filePath,
-                                            workspaceRoot: workspaceRoot, serverPath: session.serverPath, result: result)
-                    } catch {
-                        return errorValue(tool: "lsp_diagnostics", language: language, filePath: filePath, error: error)
-                    }
+                    // PKT-777 W2: serve from push-diagnostics cache. The cache is populated
+                    // asynchronously by the server via `textDocument/publishDiagnostics`;
+                    // the await-with-timeout below handles the cold-start case where the
+                    // first call arrives before the server has emitted its initial publish.
+                    let uri = URL(fileURLWithPath: filePath).absoluteString
+                    let resultData = await session.diagnosticsJSON(forUri: uri, timeout: 1.5)
+                    return successValue(tool: "lsp_diagnostics", language: language, filePath: filePath,
+                                        workspaceRoot: workspaceRoot, serverPath: session.serverPath, result: resultData)
                 }
             }
         )
