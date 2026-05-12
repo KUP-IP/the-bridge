@@ -1,7 +1,12 @@
-// NotificationContentExtension — SecurityGate custom notification UI
+// NotificationContentExtension — SecurityGate + Cursor agent custom notification UI
 // PKT-553 (SEQ 10): Full SwiftUI-equivalent AppKit implementation for the four
 // SecurityGate notification categories. Reads structured data from userInfo
 // populated by PKT-552 and renders a tailored layout per categoryIdentifier.
+//
+// PKT-3.4.2 Wave 3: Adds the four Cursor agent categories
+// (CURSOR_AGENT_READY / FAILED / STALLED / NEEDS_APPROVAL) on top of the
+// existing SECURITY_APPROVAL pattern. Same userInfo plumbing — the dispatcher
+// (NotionBridgeLib > CursorNotificationDispatcher) populates the keys.
 //
 // Extension point:  com.apple.usernotifications.content-extension
 // Principal class:  NotificationViewController
@@ -15,6 +20,10 @@
 //   • SECURITY_APPROVAL_NO_ALWAYS  ~140pt  warning strip + lock icon + command preview
 //   • NOTIFY_NOTION                 ~90pt  check icon + tool name + notion summary
 //   • NOTIFY_GENERIC                ~70pt  check icon + tool name + command summary
+//   • CURSOR_AGENT_READY           ~100pt  green accent + ✓ + agent identity + cost
+//   • CURSOR_AGENT_FAILED          ~120pt  red accent + ✕ + agent identity + error
+//   • CURSOR_AGENT_STALLED         ~110pt  warning strip + ⏱ + agent identity + silent duration
+//   • CURSOR_AGENT_NEEDS_APPROVAL  ~110pt  orange accent + $ + cap tier + total / threshold
 //
 // All display data is sourced from UNNotificationContent.userInfo; any
 // missing key falls back to a safe default so the extension never shows empty.
@@ -30,6 +39,10 @@ private enum NotificationCategory: String {
     case securityApprovalNoAlways  = "SECURITY_APPROVAL_NO_ALWAYS"
     case notifyNotion              = "NOTIFY_NOTION"
     case notifyGeneric             = "NOTIFY_GENERIC"
+    case cursorAgentReady          = "CURSOR_AGENT_READY"
+    case cursorAgentFailed         = "CURSOR_AGENT_FAILED"
+    case cursorAgentStalled        = "CURSOR_AGENT_STALLED"
+    case cursorAgentNeedsApproval  = "CURSOR_AGENT_NEEDS_APPROVAL"
 }
 
 // MARK: - Risk levels
@@ -64,18 +77,36 @@ private enum NotificationColors {
     static let warningBackground = NSColor.systemYellow.withAlphaComponent(0.15)
     static let warningText       = NSColor.systemOrange
     static let successAccent     = NSColor.systemGreen.withAlphaComponent(0.70)
+    static let errorAccent       = NSColor.systemRed.withAlphaComponent(0.70)
+    static let costAccent        = NSColor.systemOrange.withAlphaComponent(0.70)
     static let mutedText         = NSColor.secondaryLabelColor
 }
 
-// MARK: - userInfo key names (mirror PKT-552 contract)
+// MARK: - userInfo key names (mirror PKT-552 + PKT-3.4.2 W3 contract)
 
 private enum UserInfoKey {
+    // Shared
+    static let categoryType      = "categoryType"
+
+    // SecurityGate (PKT-552)
     static let toolName          = "toolName"
     static let argumentsSummary  = "argumentsSummary"
     static let riskLevel         = "riskLevel"
-    static let categoryType      = "categoryType"
     static let notionPageURL     = "notionPageURL"
     static let notionBlockURL    = "notionBlockURL"
+
+    // Cursor agent (PKT-3.4.2 Wave 3)
+    static let runId             = "runId"
+    static let runtime           = "runtime"
+    static let model             = "model"
+    static let repoPath          = "repoPath"
+    static let status            = "status"
+    static let costCents         = "costCents"
+    static let errorMessage      = "errorMessage"
+    static let silentForSeconds  = "silentForSeconds"
+    static let tier              = "tier"
+    static let totalCents        = "totalCents"
+    static let thresholdCents    = "thresholdCents"
 }
 
 // MARK: - View controller
@@ -141,6 +172,22 @@ final class NotificationViewController: NSViewController, UNNotificationContentE
                                 argumentsSummary: argumentsSummary)
             preferredContentSize = NSSize(width: 360, height: 70)
 
+        case .cursorAgentReady:
+            renderCursorReady(userInfo: userInfo, fallbackBody: content.body)
+            preferredContentSize = NSSize(width: 360, height: 100)
+
+        case .cursorAgentFailed:
+            renderCursorFailed(userInfo: userInfo, fallbackBody: content.body)
+            preferredContentSize = NSSize(width: 360, height: 120)
+
+        case .cursorAgentStalled:
+            renderCursorStalled(userInfo: userInfo, fallbackBody: content.body)
+            preferredContentSize = NSSize(width: 360, height: 110)
+
+        case .cursorAgentNeedsApproval:
+            renderCursorNeedsApproval(userInfo: userInfo, fallbackBody: content.body)
+            preferredContentSize = NSSize(width: 360, height: 110)
+
         case .none:
             // Unknown category — fall back to a neutral, generic layout.
             renderNotifyGeneric(toolName: toolName,
@@ -149,7 +196,7 @@ final class NotificationViewController: NSViewController, UNNotificationContentE
         }
     }
 
-    // MARK: - Category renderers
+    // MARK: - SecurityGate category renderers
 
     /// SECURITY_APPROVAL — request-tier with Always Allow available.
     /// Layout: risk-accent bar | 🔒 toolName | monospaced command preview
@@ -250,6 +297,124 @@ final class NotificationViewController: NSViewController, UNNotificationContentE
             stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
             stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
             stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -8),
+        ])
+    }
+
+    // MARK: - Cursor agent renderers (PKT-3.4.2 Wave 3)
+
+    /// CURSOR_AGENT_READY — green success accent, agent identity, cost.
+    private func renderCursorReady(userInfo: [AnyHashable: Any], fallbackBody: String) {
+        let identity = cursorIdentityString(userInfo: userInfo)
+        let costLine = cursorCostLine(userInfo: userInfo)
+
+        let accent = makeAccentBar(color: NotificationColors.successAccent)
+        let header = makeHeader(icon: "✓", title: "Cursor agent ready")
+        let identityLabel = makeBodyLabel(identity.isEmpty ? fallbackBody : identity)
+        identityLabel.maximumNumberOfLines = 2
+
+        var children: [NSView] = [header, identityLabel]
+        if !costLine.isEmpty {
+            children.append(makeMutedLabel(costLine))
+        }
+
+        let stack = verticalStack(spacing: 4, views: children)
+        container.addSubview(accent)
+        container.addSubview(stack)
+        pinAccent(accent, andStack: stack)
+    }
+
+    /// CURSOR_AGENT_FAILED — red accent, agent identity, error message.
+    private func renderCursorFailed(userInfo: [AnyHashable: Any], fallbackBody: String) {
+        let identity = cursorIdentityString(userInfo: userInfo)
+        let errorMsg = (userInfo[UserInfoKey.errorMessage] as? String) ?? ""
+
+        let accent = makeAccentBar(color: NotificationColors.errorAccent)
+        let header = makeHeader(icon: "✕", title: "Cursor agent failed")
+        let identityLabel = makeBodyLabel(identity.isEmpty ? fallbackBody : identity)
+        identityLabel.maximumNumberOfLines = 1
+        let messageView = makeCodeBlock(text: errorMsg.isEmpty ? fallbackBody : errorMsg)
+
+        let stack = verticalStack(spacing: 6, views: [header, identityLabel, messageView])
+        container.addSubview(accent)
+        container.addSubview(stack)
+        pinAccent(accent, andStack: stack)
+    }
+
+    /// CURSOR_AGENT_STALLED — yellow warning strip, agent identity, silent duration.
+    private func renderCursorStalled(userInfo: [AnyHashable: Any], fallbackBody: String) {
+        let identity = cursorIdentityString(userInfo: userInfo)
+        let silentFor = (userInfo[UserInfoKey.silentForSeconds] as? Int) ?? 0
+        let minutes = max(1, silentFor / 60)
+
+        let warning = makeWarningStrip(text: "No activity for \(minutes) min")
+        let header = makeHeader(icon: "⏱", title: "Cursor agent stalled")
+        let identityLabel = makeBodyLabel(identity.isEmpty ? fallbackBody : identity)
+        identityLabel.maximumNumberOfLines = 2
+
+        let stack = verticalStack(spacing: 4, views: [warning, header, identityLabel])
+        container.addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -10),
+        ])
+    }
+
+    /// CURSOR_AGENT_NEEDS_APPROVAL — orange cost accent, tier, total vs. threshold.
+    private func renderCursorNeedsApproval(userInfo: [AnyHashable: Any], fallbackBody: String) {
+        let tier = (userInfo[UserInfoKey.tier] as? String) ?? "soft"
+        let totalCents = (userInfo[UserInfoKey.totalCents] as? Int) ?? 0
+        let thresholdCents = (userInfo[UserInfoKey.thresholdCents] as? Int) ?? 0
+        let totalDollars = String(format: "$%.2f", Double(totalCents) / 100.0)
+        let capDollars = String(format: "$%.2f", Double(thresholdCents) / 100.0)
+
+        let title = tier == "hard" ? "Cursor hard cap reached" : "Cursor soft cap reached"
+        let body = "\(totalDollars) of \(capDollars) (\(tier))"
+
+        let accent = makeAccentBar(color: NotificationColors.costAccent)
+        let header = makeHeader(icon: "$", title: title)
+        let bodyLabel = makeBodyLabel(body)
+        let muted = makeMutedLabel(fallbackBody)
+        muted.maximumNumberOfLines = 2
+
+        let stack = verticalStack(spacing: 4, views: [header, bodyLabel, muted])
+        container.addSubview(accent)
+        container.addSubview(stack)
+        pinAccent(accent, andStack: stack)
+    }
+
+    // MARK: - Cursor helpers
+
+    private func cursorIdentityString(userInfo: [AnyHashable: Any]) -> String {
+        let repo = (userInfo[UserInfoKey.repoPath] as? String) ?? ""
+        let model = (userInfo[UserInfoKey.model] as? String) ?? ""
+        let runtime = (userInfo[UserInfoKey.runtime] as? String) ?? ""
+        var parts: [String] = []
+        if !repo.isEmpty { parts.append(repo) }
+        if !model.isEmpty { parts.append(model) }
+        if !runtime.isEmpty { parts.append(runtime) }
+        return parts.joined(separator: " · ")
+    }
+
+    private func cursorCostLine(userInfo: [AnyHashable: Any]) -> String {
+        let cents = (userInfo[UserInfoKey.costCents] as? Int) ?? 0
+        guard cents > 0 else { return "" }
+        return String(format: "Cost: $%.2f", Double(cents) / 100.0)
+    }
+
+    private func pinAccent(_ accent: NSView, andStack stack: NSStackView) {
+        NSLayoutConstraint.activate([
+            accent.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            accent.topAnchor.constraint(equalTo: container.topAnchor),
+            accent.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            accent.widthAnchor.constraint(equalToConstant: 4),
+
+            stack.leadingAnchor.constraint(equalTo: accent.trailingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -10),
         ])
     }
 
