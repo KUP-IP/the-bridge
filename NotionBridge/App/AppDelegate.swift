@@ -120,6 +120,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // the 4 registered notification categories via the Content Extension.
         CursorNotificationDispatcher.shared.start()
 
+        // PKT-3.4.2 Wave 5a: Start the heartbeat watchdog so that running
+        // agents whose SSE event stream goes silent get escalated to yellow
+        // (5 min default) and then red (10 min default). The red transition
+        // posts cursorAgentDidStall via the registry, which the notification
+        // dispatcher renders as CURSOR_AGENT_STALLED.
+        CursorHeartbeatWatchdog.shared.start()
+
         // PKT-441: One-time Stripe key migration to unified credential vault
         Task { await ConnectionRegistry.shared.migrateStripeKeyIfNeeded() }
 

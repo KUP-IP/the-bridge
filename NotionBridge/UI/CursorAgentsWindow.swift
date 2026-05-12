@@ -231,9 +231,19 @@ struct CursorAgentsView: View {
 
     private var listPane: some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 8) {
                 sectionHeader("Agents")
                 Spacer()
+                // PKT-3.4.2 Wave 5a: opens CursorNewRunWindow.
+                Button {
+                    CursorNewRunWindowController.shared.show()
+                } label: {
+                    Label("New Run", systemImage: "plus.circle.fill")
+                        .labelStyle(.titleAndIcon)
+                        .font(.callout)
+                }
+                .buttonStyle(.borderless)
+                .help("Start a new Cursor agent run")
                 Text("\(filteredStates.count)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -419,11 +429,20 @@ struct CursorAgentsView: View {
                 detailArtifactsSection(state)
                 if state.run.status == .running || state.run.status == .queued {
                     HStack {
+                        // PKT-3.4.2 Wave 5a: real Stop wiring. The runtime call
+                        // currently throws notImplemented until PKT-3.4.1.W2
+                        // lands the sidecar @cursor/sdk path; we swallow that
+                        // (logged) so the UI doesn't crash, and surface real
+                        // errors when they show up.
                         Button(role: .destructive) {
-                            // Stop wiring lives in Wave 5 (CursorRuntime.shared.agentCancel).
-                            // Wave 4 ships the surface; the button is a no-op stub
-                            // that logs the intent for now.
-                            print("[CursorAgentsWindow] Stop requested for \(state.run.id) — wiring lands in Wave 5")
+                            let runId = state.run.id
+                            Task {
+                                do {
+                                    _ = try await CursorRuntime.shared.agentCancel(id: runId)
+                                } catch {
+                                    print("[CursorAgentsWindow] Stop failed for \(runId): \(error)")
+                                }
+                            }
                         } label: {
                             Label("Stop Agent", systemImage: "stop.circle")
                         }
