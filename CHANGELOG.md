@@ -1,5 +1,52 @@
 # Changelog
 
+## [2.2.0] — 2026-05-13 — Agentic Dev Surface (consolidated release)
+
+Successor to the v2 _Done venture (PRJCT-2722, closed 2026-05-05). Closes the five highest-pain gaps from the W29 retro: long-running task supervision, code-aware editing, LSP diagnostics, dev-server/port orchestration, structured git + GitHub. Adds Cursor SDK delegation (programmatic Cursor agents via `@cursor/sdk`, local + cloud runtimes) and MAC UI extras (synthetic keyboard / mouse, mdfind, pasteboard).
+
+### Highlights
+- **65 net-new tools** across `dev/`, `cursor/`, `computer/`, `jobs/` module families. Tool surface: **154 active** (vs. v1.9.5 baseline of 89). Family count: **19** (was 16).
+- **`bg_process_*`** — long-running task supervision via `BgProcessRuntime` actor + `posix_spawn` + SIGCHLD reaping + atomic meta.json + kill cascade + orphan reaping. 6 tools.
+- **`git_*`** — 9 structured git tools: status / diff / log / show / blame / apply_patch / worktree / create_branch / merge. Long ops routed via `BgProcessRuntime`; `git_merge` surfaces conflicts as structured JSON; `git_apply_patch` round-trips against `git_diff` output. Includes diff3 base-marker handling.
+- **`gh_*`** — 9 GitHub CLI tools: actions_runs / check_status / issue_close / issue_comment / issue_open / pr_comment / pr_merge / pr_open / pr_status. Background-job dispatch for long ops.
+- **`lsp_*`** — 6 LSP tools: definition / diagnostics / hover / references / rename / session_list. JSON-RPC client + `LspSession` actor + push-based `publishDiagnostics` cache + idle-dispose lifecycle. Live-tested against sourcekit-lsp + typescript-language-server.
+- **Artifact toolkit** — 7 dev tools: `http_fetch`, `diff_render` (ANSI / HTML / markdown), `file_watch` (debounced), `tree_sitter_query` (TS / Swift / JSON / Markdown / Bash), `file_zip` / `file_unzip` (via `ditto`), `file_hash` (CryptoKit SHA-256).
+- **Runners** — `playwright_run`, `vitest_run`, `lighthouse_run` under `module="dev"` tier `.request`. Supervised by `BgProcessRuntime`; structured JSON envelopes via shared `RunnerEnvelope<Details: Codable>`.
+- **`devserver_*` + `port_inspect`** — 4 tools for dev-server lifecycle + port enumeration.
+- **MAC UI extras** — `ax_query` (consolidates 4 prior AX tools), `cgevent_send` synthetic input, `pasteboard_*`, `spotlight_query` / `mdfind`.
+- **Cursor SDK delegation** — 5 `cursor_agent_*` tools (run / status / list / cancel / artifacts). Node sidecar (`cursor-sidecar/`) over bidirectional JSON-RPC stdio; SSE event fan-out → Swift notifications; Last-Event-ID reconnect after sleep / net drop; hash-only AI LOGS Session entry per run; triple-keyed (repo, model, runtime) Always-Allow scope; redaction (16 gitleaks rules) + sensitive-repo allowlist + cost-cap auto-pause ($25 soft / $100 hard) + heartbeat watchdog. SwiftUI menu bar pill + standalone Agents window + new-run modal + 4 notification categories (READY / FAILED / STALLED / NEEDS_APPROVAL).
+- **`code_search` / `file_str_replace` / `file_apply_patch`** — code-aware editing trio under `dev/`.
+- **`wrangler_d1_status`** — Cloudflare D1 binding inspection with TOML parser.
+- **Stripe long-tail deprecation** — 25 redundant Stripe tools collapsed to deprecation shims with warning + migration path.
+
+### Changed
+- MCP transport docs: `bg_process_*` canonicalized; `Sse client timeouts` decision-spike result documented (~60–75s cap is client-side, not Bridge).
+- `LspRuntime` stdio response handling stabilized (chunked `readabilityHandler` + robust JSON-RPC id decoding).
+- `claude_mcp_http_proxy.py` recovers expired session tokens mid-stream.
+- E2E test surface repaired (`staticFeatureModuleToolCount` + tier assertions).
+- CI matrix aligned with Swift 6.2 + macOS 26.
+
+### Fixed
+- `parseConflictMarkers` correctly skips diff3 base content via `sawBase` flag.
+- LSP `workspace/configuration` server-request handled (reply with array of `null`); unknown server requests → `MethodNotFound`; `showMessage`/`logMessage` drained.
+
+### Verified
+- `swift run NotionBridgeTests` — **733 / 733 passed** on `bridge-v2.2/integration-closeout`.
+- `LSP_LIVE=1 swift run NotionBridgeTests` — full live LSP suite green: sourcekit-lsp cold-start **0.588s** + hover **0.438s**; TS-LSP cold-start **0.143s**, references **485ms** (≤500ms target), idle-dispose round-trip clean.
+- Live cross-tool integration verified: git_worktree round-trip, git_create_branch + switch, git_merge synthetic 2-way conflict surface, LSP server-init handshake on both adapters.
+
+### Deferred (v2.2.x follow-up)
+- **PKT-778** live Cursor acceptance harness (HITL): A1 local SDK round-trip ($), B2 cloud VM + PR on user-nominated repo ($$), C5 sleep/reconnect, capability auto-rollback failure injection. Environment ready (sidecar installed, SDK loadable, CURSOR_API_KEY in Keychain) — runbook in PKT-778 Output.
+- **PKT-785** Cursor hardening Wave 2 ergonomics: NotionAPIClient drain-to-AI-LOGS writer, Settings UI Cursor section, lifecycle archival (7-day auto + bulk + hard-delete + transcript export), extra-approval modal wiring, worktree FIFO enforcement.
+- **PKT-749.1** `ToolRegistration` triggers/anti-triggers schema extension.
+- **PKT-752.1** SKILLS DS authoring batch (`/git-workflows`, `/gh-cli`, `/lsp-edit`, `/artifact-toolkit`, `/long-running-jobs`, `/test-runners`, MAC Keepr expansion). `/cursor-sdk` skill page authored as part of this release (BR-1).
+- **PKT-753.1** composed dev-loop live e2e Playwright scenario (HITL-gated on billable Cursor + GitHub PR).
+
+### Retired
+- **PKT-3.2c** (good-dog Playwright + admin Lighthouse e2e) — out of scope; Good Dog is a separate project. Runner machinery ships with hermetic test coverage; live e2e against good-dog deferred to whoever owns Good Dog.
+
+---
+
 ## [2.2.0-3.4.1.W2] — 2026-05-12 — Cursor sidecar IPC + LSP live-gate repair
 
 ### Added
