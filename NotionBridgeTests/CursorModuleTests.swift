@@ -174,4 +174,114 @@ func runCursorModuleTests() async {
         try expect(code == 10001 || code == 10002,
             "expected code 10001 or 10002, got \(code)")
     }
+
+    await test("CursorRuntime JSON-RPC sidecar ping and capability probe") {
+        let root = try makeFakeCursorSidecar()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let rt = CursorRuntime(sidecarRoot: root, apiKeyOverride: "test-key")
+
+        let ping = try await rt.ping()
+        try expect(ping["pong"] == "true", "unexpected ping response \(ping)")
+
+        let cap = try await rt.capabilityProbe()
+        try expect(cap["ok"] == "true", "unexpected capability response \(cap)")
+        await rt.shutdown()
+    }
+
+    await test("CursorRuntime JSON-RPC sidecar run lifecycle maps DTOs") {
+        let root = try makeFakeCursorSidecar()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let rt = CursorRuntime(sidecarRoot: root, apiKeyOverride: "test-key")
+
+        let run = try await rt.agentRun(
+            prompt: "Refactor without leaking ghp_1234567890abcdef1234567890abcdef1234",
+            runtime: .cloud,
+            model: "composer-latest",
+            repoPath: "/Users/keepup/Developer/notion-bridge",
+            branch: "feature/test",
+            maxCostCents: 25
+        )
+        try expect(run.id == "run-fake")
+        try expect(run.runtime == .cloud)
+        try expect(run.status == .running)
+
+        let pending = await rt.pendingRedactionAudits()
+        try expect(pending.count == 1, "expected one redaction audit")
+        try expect(pending[0].count >= 1, "expected prompt redaction count")
+
+        let status = try await rt.agentStatus(id: run.id)
+        try expect(status.id == run.id)
+
+        let runs = try await rt.agentList(statusFilter: nil, runtimeFilter: .cloud)
+        try expect(runs.contains(where: { $0.id == run.id }))
+
+        let artifacts = try await rt.agentArtifacts(id: run.id)
+        try expect(artifacts.contains(where: { $0.kind == "log" }))
+
+        let cancelled = try await rt.agentCancel(id: run.id)
+        try expect(cancelled.status == .cancelled)
+        await rt.shutdown()
+    }
+}
+
+private func makeFakeCursorSidecar() throws -> URL {
+    let fm = FileManager.default
+    let root = fm.temporaryDirectory.appendingPathComponent("cursor-sidecar-test-\(UUID().uuidString)", isDirectory: true)
+    let dist = root.appendingPathComponent("dist", isDirectory: true)
+    try fm.createDirectory(at: dist, withIntermediateDirectories: true)
+    try #"{"version":"0.0.0-test","type":"module"}"#.write(
+        to: root.appendingPathComponent("package.json"),
+        atomically: true,
+        encoding: .utf8
+    )
+    let js = #"""
+import readline from "node:readline";
+let status = "running";
+const run = {
+  id: "run-fake",
+  runtime: "cloud",
+  model: "composer-latest",
+  status,
+  startedAt: "2026-05-12T00:00:00Z",
+  endedAt: null,
+  costCents: 3,
+  repoPath: "/Users/keepup/Developer/notion-bridge",
+  prURL: null,
+  lastEventId: "evt-1"
+};
+function write(message) {
+  process.stdout.write(`${JSON.stringify(message)}\n`);
+}
+function response(id, result) {
+  write({ jsonrpc: "2.0", id, result });
+}
+readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === "ping") {
+    response(msg.id, { pong: "true" });
+  } else if (msg.method === "capability_probe") {
+    response(msg.id, { ok: "true", fake: "true" });
+  } else if (msg.method === "agent_run") {
+    status = "running";
+    run.status = status;
+    run.runtime = msg.params.runtime;
+    response(msg.id, run);
+  } else if (msg.method === "agent_status") {
+    response(msg.id, run);
+  } else if (msg.method === "agent_list") {
+    response(msg.id, { runs: [run] });
+  } else if (msg.method === "agent_artifacts") {
+    response(msg.id, { artifacts: [{ kind: "log", label: "stdout", mediaType: "text/plain", url: null }] });
+  } else if (msg.method === "agent_cancel") {
+    status = "cancelled";
+    run.status = status;
+    response(msg.id, run);
+  } else {
+    write({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "unknown" } });
+  }
+});
+"""#
+    let entry = dist.appendingPathComponent("index.js")
+    try js.write(to: entry, atomically: true, encoding: .utf8)
+    return root
 }

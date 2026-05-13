@@ -1,21 +1,16 @@
 // CursorRuntime.swift — PKT-3.4.1 (Bridge v2.2) + PKT-3.4.3 Wave 1 hardening
 // NotionBridge · Modules · Cursor
 //
-// Owns the Node `cursor-sidecar` lifecycle and the (eventual) JSON-RPC 2.0
-// IPC over stdio. Wave 1 (PKT-3.4.1) shipped the capability surface, the
-// Keychain → env wire-through, and the public API contract; full bidirectional
-// IPC + sidecar runtime impl lands in Wave 2 (PKT-3.4.1.W2) once the published
-// `@cursor/sdk@1.0.12` npm tarball ships its `.d.ts` declarations (currently
-// absent — verified via `find @cursor/sdk/dist -name '*.d.ts'` returning zero
-// results), or until we vendor minimal type declarations from the SDK's
-// upstream source.
+// Owns the Node `cursor-sidecar` lifecycle and JSON-RPC 2.0 IPC over stdio.
+// Wave 1 (PKT-3.4.1) shipped the capability surface. Wave 2 replaces the
+// notImplemented stubs with live request/response correlation against the
+// sidecar process.
 //
 // PKT-3.4.3 Wave 1 (this packet) layers a pre-dispatch hardening pass on top
 // of the Wave 1 contract: `agentRun(...)` now runs sensitive-repo allowlist
 // evaluation + prompt redaction BEFORE `requireCapability()`. The scrubbed
 // prompt + effective runtime + audit entry are what W2's live IPC will
-// dispatch once @cursor/sdk types ship. Pure (never throws); the Wave 1
-// `notImplemented` contract after the capability gate is preserved.
+// dispatch through the JSON-RPC sidecar.
 //
 // Architecture notes:
 //   - Sidecar is a long-lived Node process speaking JSON-RPC 2.0 line-delimited
@@ -60,16 +55,24 @@ public actor CursorRuntime {
     private var process: Process?
     private var spawnedAt: Date?
     private var cachedCapability: CursorCapability?
+    private var stdin: FileHandle?
+    private var stdout: FileHandle?
+    private var stderr: FileHandle?
+    private var stdoutBuffer = Data()
+    private var nextRequestId = 1
+    private var pendingRequests: [Int: CheckedContinuation<Data, Error>] = [:]
 
     /// PKT-3.4.3 Wave 1: queued redaction audit entries waiting for W2's
     /// AI LOGS DS writer to drain. See `RedactionAuditEntry`.
     private var pendingAudits: [RedactionAuditEntry] = []
+    private let apiKeyOverride: String?
 
     // MARK: - Init
 
     public init(
         sidecarRoot: URL = CursorRuntime.defaultSidecarRoot(),
-        nodePath: String? = nil
+        nodePath: String? = nil,
+        apiKeyOverride: String? = nil
     ) {
         self.sidecarRoot = sidecarRoot
         if let p = nodePath, FileManager.default.isExecutableFile(atPath: p) {
@@ -77,6 +80,7 @@ public actor CursorRuntime {
         } else {
             self.configuredNodePath = nil
         }
+        self.apiKeyOverride = apiKeyOverride
     }
 
     /// Default sidecar root: `~/Library/Application Support/NotionBridge/cursor-sidecar/`.
@@ -99,6 +103,9 @@ public actor CursorRuntime {
         let entry = sidecarEntrypoint
         let hasSidecar = FileManager.default.fileExists(atPath: entry.path)
         let hasKey: Bool = {
+            if let override = apiKeyOverride, !override.isEmpty {
+                return true
+            }
             do {
                 _ = try CredentialManager.shared.read(
                     service: CursorRuntime.keychainService,
@@ -151,21 +158,31 @@ public actor CursorRuntime {
         if let p = process, p.isRunning {
             p.terminate()
         }
+        stdout?.readabilityHandler = nil
+        stderr?.readabilityHandler = nil
+        for (_, cont) in pendingRequests {
+            cont.resume(throwing: CursorError.ipcError("cursor sidecar stopped"))
+        }
+        pendingRequests.removeAll()
         process = nil
         spawnedAt = nil
         cachedCapability = nil
+        stdin = nil
+        stdout = nil
+        stderr = nil
+        stdoutBuffer.removeAll(keepingCapacity: false)
     }
 
-    // MARK: - Public API (Wave 2 wires real IPC; Wave 1 returns notImplemented after capability gate)
+    // MARK: - Public API
 
     public func ping() async throws -> [String: String] {
         try requireCapability()
-        throw CursorError.notImplemented("ping: sidecar IPC wiring deferred to PKT-3.4.1.W2")
+        return try await request(method: "ping", params: [String: String]())
     }
 
     public func capabilityProbe() async throws -> [String: String] {
         try requireCapability()
-        throw CursorError.notImplemented("capability_probe (live): sidecar IPC wiring deferred to PKT-3.4.1.W2")
+        return try await request(method: "capability_probe", params: [String: String]())
     }
 
     public func agentRun(prompt: String, runtime: CursorRuntimeKind, model: String?, repoPath: String?, branch: String?, maxCostCents: Int?) async throws -> CursorRun {
@@ -173,33 +190,43 @@ public actor CursorRuntime {
         // Audit entry queued for PKT-3.4.1.W2 AI LOGS writer; the scrubbed prompt + effective
         // runtime are what W2's live IPC will dispatch.
         let verdict = evaluateGates(prompt: prompt, runtime: runtime, repoPath: repoPath)
-        _ = (verdict, model, branch, maxCostCents)
         try requireCapability()
-        throw CursorError.notImplemented("agent_run: sidecar @cursor/sdk wiring deferred to PKT-3.4.1.W2 (SDK .d.ts not shipped in npm tarball)")
+        return try await request(method: "agent_run", params: CursorAgentRunRequest(
+            prompt: verdict.scrubbedPrompt,
+            runtime: verdict.effectiveRuntime,
+            model: model,
+            repoPath: repoPath,
+            branch: branch,
+            maxCostCents: maxCostCents
+        ))
     }
 
     public func agentStatus(id: String) async throws -> CursorRun {
-        _ = id
         try requireCapability()
-        throw CursorError.notImplemented("agent_status: sidecar @cursor/sdk wiring deferred to PKT-3.4.1.W2")
+        return try await request(method: "agent_status", params: CursorIdRequest(id: id))
     }
 
     public func agentList(statusFilter: CursorRunStatus?, runtimeFilter: CursorRuntimeKind?) async throws -> [CursorRun] {
-        _ = (statusFilter, runtimeFilter)
         try requireCapability()
-        throw CursorError.notImplemented("agent_list: sidecar @cursor/sdk wiring deferred to PKT-3.4.1.W2")
+        let response: CursorRunListResponse = try await request(
+            method: "agent_list",
+            params: CursorAgentListRequest(status: statusFilter, runtime: runtimeFilter)
+        )
+        return response.runs
     }
 
     public func agentCancel(id: String) async throws -> CursorRun {
-        _ = id
         try requireCapability()
-        throw CursorError.notImplemented("agent_cancel: sidecar @cursor/sdk wiring deferred to PKT-3.4.1.W2")
+        return try await request(method: "agent_cancel", params: CursorIdRequest(id: id))
     }
 
     public func agentArtifacts(id: String) async throws -> [CursorArtifact] {
-        _ = id
         try requireCapability()
-        throw CursorError.notImplemented("agent_artifacts: sidecar @cursor/sdk wiring deferred to PKT-3.4.1.W2")
+        let response: CursorArtifactListResponse = try await request(
+            method: "agent_artifacts",
+            params: CursorIdRequest(id: id)
+        )
+        return response.artifacts
     }
 
     // MARK: - PKT-3.4.3 Wave 1: Hardening surface (sensitive-repo allowlist + prompt redaction)
@@ -262,6 +289,146 @@ public actor CursorRuntime {
         self.cachedCapability = cap
         if !cap.ok {
             throw CursorError.capabilityMissing(cap.reason ?? "unknown")
+        }
+    }
+
+    private func ensureSidecarProcess() throws {
+        if let p = process, p.isRunning, stdin != nil {
+            return
+        }
+        guard let node = configuredNodePath ?? CursorRuntime.locateNode() else {
+            throw CursorError.capabilityMissing("node binary not found on PATH")
+        }
+        guard FileManager.default.fileExists(atPath: sidecarEntrypoint.path) else {
+            throw CursorError.capabilityMissing("sidecar entrypoint missing at \(sidecarEntrypoint.path)")
+        }
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: node)
+        proc.arguments = [sidecarEntrypoint.path]
+        proc.currentDirectoryURL = sidecarRoot
+
+        var env = ProcessInfo.processInfo.environment
+        env[CursorRuntime.envVarName] = try apiKeyOverride ?? CursorRuntime.readApiKey()
+        proc.environment = env
+
+        let inPipe = Pipe()
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        proc.standardInput = inPipe
+        proc.standardOutput = outPipe
+        proc.standardError = errPipe
+
+        do {
+            try proc.run()
+        } catch {
+            throw CursorError.spawnFailed("\(node): \(error.localizedDescription)")
+        }
+
+        process = proc
+        spawnedAt = Date()
+        stdin = inPipe.fileHandleForWriting
+        stdout = outPipe.fileHandleForReading
+        stderr = errPipe.fileHandleForReading
+        stdoutBuffer.removeAll(keepingCapacity: true)
+
+        stdout?.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            Task {
+                if data.isEmpty {
+                    await self?.handleSidecarClosed()
+                } else {
+                    await self?.ingestStdout(data)
+                }
+            }
+        }
+        stderr?.readabilityHandler = { handle in
+            _ = handle.availableData
+        }
+    }
+
+    private func request<Params: Encodable, Result: Decodable>(
+        method: String,
+        params: Params,
+        timeout: TimeInterval = 120
+    ) async throws -> Result {
+        try ensureSidecarProcess()
+        let id = nextRequestId
+        nextRequestId += 1
+        let envelope = CursorJSONRPCRequest(id: id, method: method, params: params)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let body = try encoder.encode(envelope)
+        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Data, Error>) in
+            pendingRequests[id] = cont
+            do {
+                var line = body
+                line.append(0x0A)
+                try stdin?.write(contentsOf: line)
+            } catch {
+                pendingRequests.removeValue(forKey: id)
+                cont.resume(throwing: CursorError.ipcError("sidecar stdin write failed: \(error.localizedDescription)"))
+                return
+            }
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                await self?.timeoutRequest(id: id, method: method, seconds: Int(timeout))
+            }
+        }.decoded(as: Result.self)
+    }
+
+    private func ingestStdout(_ data: Data) {
+        stdoutBuffer.append(data)
+        let newline = Data([0x0A])
+        while let range = stdoutBuffer.firstRange(of: newline) {
+            let line = stdoutBuffer.subdata(in: 0..<range.lowerBound)
+            stdoutBuffer.removeSubrange(0..<range.upperBound)
+            handleJSONRPCLine(line)
+        }
+    }
+
+    private func handleJSONRPCLine(_ line: Data) {
+        guard !line.isEmpty,
+              let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+              let id = Self.numericRequestId(from: obj["id"]),
+              let cont = pendingRequests.removeValue(forKey: id) else {
+            return
+        }
+        if let error = obj["error"] as? [String: Any] {
+            let code = error["code"] as? Int ?? 0
+            let message = error["message"] as? String ?? "unknown sidecar error"
+            let data = error["data"].map { "\($0)" }
+            cont.resume(throwing: CursorError.sidecarError(code: code, message: message, data: data))
+            return
+        }
+        if let result = obj["result"],
+           let resultData = try? JSONSerialization.data(withJSONObject: result, options: [.fragmentsAllowed]) {
+            cont.resume(returning: resultData)
+        } else {
+            cont.resume(returning: Data("{}".utf8))
+        }
+    }
+
+    private func handleSidecarClosed() {
+        for (_, cont) in pendingRequests {
+            cont.resume(throwing: CursorError.ipcError("cursor sidecar stdout closed"))
+        }
+        pendingRequests.removeAll()
+        process = nil
+        spawnedAt = nil
+    }
+
+    private func timeoutRequest(id: Int, method: String, seconds: Int) {
+        if let cont = pendingRequests.removeValue(forKey: id) {
+            cont.resume(throwing: CursorError.timeout("\(method) timed out after \(seconds)s"))
+        }
+    }
+
+    private nonisolated static func numericRequestId(from raw: Any?) -> Int? {
+        switch raw {
+        case let id as Int: return id
+        case let id as NSNumber: return id.intValue
+        default: return nil
         }
     }
 
@@ -371,5 +538,46 @@ public actor CursorRuntime {
             runtime: runtime?.rawValue,
             model: model
         )
+    }
+}
+
+private struct CursorJSONRPCRequest<Params: Encodable>: Encodable {
+    let jsonrpc = "2.0"
+    let id: Int
+    let method: String
+    let params: Params
+}
+
+private struct CursorAgentRunRequest: Encodable {
+    let prompt: String
+    let runtime: CursorRuntimeKind
+    let model: String?
+    let repoPath: String?
+    let branch: String?
+    let maxCostCents: Int?
+}
+
+private struct CursorAgentListRequest: Encodable {
+    let status: CursorRunStatus?
+    let runtime: CursorRuntimeKind?
+}
+
+private struct CursorIdRequest: Encodable {
+    let id: String
+}
+
+private struct CursorRunListResponse: Decodable {
+    let runs: [CursorRun]
+}
+
+private struct CursorArtifactListResponse: Decodable {
+    let artifacts: [CursorArtifact]
+}
+
+private extension Data {
+    func decoded<T: Decodable>(as type: T.Type) throws -> T {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(type, from: self)
     }
 }

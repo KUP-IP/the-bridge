@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.2.0-3.4.1.W2] — 2026-05-12 — Cursor sidecar IPC + LSP live-gate repair
+
+### Added
+- **`cursor-sidecar/`** — Node JSON-RPC sidecar package scaffold pinned to `@cursor/sdk` `^1.0.13`; supports `ping`, `capability_probe`, `agent_run`, `agent_status`, `agent_list`, `agent_cancel`, and `agent_artifacts` over line-delimited stdio.
+- **`CursorRuntime` live IPC** — spawns the sidecar, injects `CURSOR_API_KEY`, correlates JSON-RPC responses, tracks process state, and maps sidecar run/artifact payloads into Bridge DTOs.
+- **Cursor IPC tests** — fake sidecar coverage for ping, capability, run/status/list/cancel/artifacts, plus redaction audit enqueue on `agentRun`.
+
+### Fixed
+- **`LspRuntime` stdio reader** — replaced brittle `FileHandle.bytes` response handling with chunked `readabilityHandler` parsing and robust JSON-RPC numeric id decoding.
+- **Live LSP gate** — `LSP_LIVE=1` now passes SourceKit hover plus TypeScript initialize/idle/rename/reference checks.
+
+### Verified
+- `swift run NotionBridgeTests` ✅ **726 passed / 0 failed**
+- `LSP_LIVE=1 BRIDGE_REPO=/Users/keepup/Developer/notion-bridge KEEPUP_CLUB=/Users/keepup/Developer/keepup-club swift run NotionBridgeTests` ✅ **731 passed / 0 failed**
+- `node --check cursor-sidecar/dist/index.js` ✅
+
 ## [2.2.0-3.1] — 2026-05-12 — Artifact/diff helper toolkit (PKT-743)
 
 ### Added
