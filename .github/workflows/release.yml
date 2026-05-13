@@ -19,7 +19,7 @@ on:
 
 jobs:
   test:
-    runs-on: macos-latest
+    runs-on: macos-26
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,7 +33,7 @@ jobs:
         run: make test
 
   build-sign-notarize-dmg:
-    runs-on: macos-latest
+    runs-on: macos-26
     needs: test
     permissions:
       contents: write
