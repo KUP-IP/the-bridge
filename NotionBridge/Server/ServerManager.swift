@@ -128,6 +128,7 @@ public actor ServerManager {
         await PlaywrightModule.register(on: router) // PKT-781 (v2.2 · 3.2a): playwright_run — npx playwright under bg_process supervision
         await VitestModule.register(on: router)     // PKT-781 (v2.2 · 3.2a): vitest_run — npx vitest under bg_process supervision (cap_missing default on this host)
         await LighthouseModule.register(on: router) // PKT-781 (v2.2 · 3.2a): lighthouse_run — npx lighthouse under bg_process supervision
+        await ArtifactModule.register(on: router)   // PKT-743 (v2.2 · 3.1): http/diff/watch/tree/query/zip/hash artifact toolkit
         // Reconcile any jobs orphaned by a prior Bridge force-quit. Flips dead-pid running jobs to .unknown
         // and runs the 7-day cleanup pass for terminal jobs.
         _ = await BgProcessRuntime.shared.reconcileOrphans()

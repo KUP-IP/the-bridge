@@ -48,8 +48,9 @@ public enum BridgeConstants {
     /// v2.2 · 2.1/2.1.1 (PKT-740/784/786/788): 93 + 9 (git_* tools) = 102.
     /// v2.2 · 2.3/2.3.1 (PKT-745/777/789): 102 + 6 (lsp_* tools) = 108.
     /// v2.2 · integration closeout: 113 + 34 previously uncounted static dev/jobs/runner tools = 147.
+    /// v2.2 · 3.1 (PKT-743): 147 + 7 artifact/diff helper tools = 154.
     /// Note: jobs_pause_all / jobs_resume_all dropped; current JobsModule contributes 13 job_* tools.
-    public static let staticFeatureModuleToolCount = 147
+    public static let staticFeatureModuleToolCount = 154
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

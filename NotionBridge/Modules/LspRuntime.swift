@@ -371,14 +371,15 @@ public actor LspSession {
     }
 
     private nonisolated static func extractFramedMessage(from buffer: inout Data) throws -> Data? {
-        let sep = Data([0x0D, 0x0A, 0x0D, 0x0A])
-        guard let headerRange = buffer.firstRange(of: sep) else { return nil }
+        let crlfSep = Data([0x0D, 0x0A, 0x0D, 0x0A])
+        let lfSep = Data([0x0A, 0x0A])
+        guard let headerRange = buffer.firstRange(of: crlfSep) ?? buffer.firstRange(of: lfSep) else { return nil }
         let headerData = buffer.subdata(in: 0..<headerRange.lowerBound)
         guard let header = String(data: headerData, encoding: .ascii) else {
             throw LspRuntime.LspError.decodingFailed("non-ASCII header")
         }
         var contentLength = 0
-        for line in header.components(separatedBy: "\r\n") where !line.isEmpty {
+        for line in header.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n") where !line.isEmpty {
             let parts = line.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
             if parts.count == 2, parts[0].lowercased() == "content-length" {
                 contentLength = Int(parts[1]) ?? 0

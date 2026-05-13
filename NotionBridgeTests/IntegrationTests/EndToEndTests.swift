@@ -55,6 +55,7 @@ func runEndToEndTests() async {
     await PlaywrightModule.register(on: router)
     await VitestModule.register(on: router)
     await LighthouseModule.register(on: router)
+    await ArtifactModule.register(on: router)
 
     // ============================================================
     // E2E-1: Full pipeline — dispatch → security → handler → audit
@@ -405,7 +406,7 @@ func runEndToEndTests() async {
         try expect(scheduler.count == 13, "JobsModule scheduler family: expected 13")
 
         let dev = await router.registrations(forModule: "dev")
-        try expect(dev.count == 41, "dev module family: expected 41")
+        try expect(dev.count == 48, "dev module family: expected 48")
 
         let cursor = await router.registrations(forModule: "cursor")
         try expect(cursor.count == 5, "CursorModule: expected 5")

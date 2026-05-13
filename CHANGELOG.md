@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.2.0-3.1] — 2026-05-12 — Artifact/diff helper toolkit (PKT-743)
+
+### Added
+- **`ArtifactModule.swift`** — seven new `dev` tools: `http_fetch`, `diff_render`, `file_watch`, `tree_sitter_query`, `file_zip`, `file_unzip`, and `file_hash`.
+- **`diff_render`** — renders unified diffs as markdown, ANSI, or escaped HTML and returns hunk/add/delete counts. HTML output escapes source content before adding spans.
+- **`file_watch`** — bounded deterministic polling watcher with debounce; returns created/modified/deleted paths and leaves no persistent process behind.
+- **`tree_sitter_query`** — uses `tree-sitter query` when the CLI is installed; otherwise reports `backend=fallback` and returns deterministic structural matches for TypeScript, Swift, JSON, Markdown, and Bash. Current sprint host has no `tree-sitter` binary, so true grammar-backed parsing remains a packaging dependency.
+- **`file_zip` / `file_unzip` / `file_hash`** — macOS `ditto` zip round-trip helpers and SHA-256 hashing via CryptoKit.
+- **`ArtifactModuleTests.swift`** — registration, HTML XSS sanity, SHA-256, zip/unzip round-trip, fallback structural query, and bounded watch coverage.
+
+### Changed
+- Static feature tool count bumped **147 → 154** and dev module family count expectation bumped **41 → 48**.
+- `LspRuntime.extractFramedMessage` now accepts both CRLF and LF-only LSP headers while continuing to write spec-compliant CRLF frames.
+
+### Verified
+- `swift build` ✅
+- `swift run NotionBridgeTests` ✅ **724 passed / 0 failed**
+- `LSP_LIVE=1 swift run NotionBridgeTests` ❌ still fails the seven live LSP cases at SourceKit/TS-LSP initialize or hover timeout; the framing tolerance patch did not clear that environment/runtime gate.
+
 ## [2.2.0-2.3.1] — 2026-05-12 — LSP integration tests + live validation scaffold (PKT-789)
 
 ### Added

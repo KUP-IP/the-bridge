@@ -435,6 +435,7 @@ await runCursorNewRunFormLogicTests()
 await runPlaywrightModuleTests()  // PKT-781 (v2.2 · 3.2a)
 await runVitestModuleTests()      // PKT-781 (v2.2 · 3.2a)
 await runLighthouseModuleTests()  // PKT-781 (v2.2 · 3.2a)
+await runArtifactModuleTests()    // PKT-743 (v2.2 · 3.1)
 await runRunnerParsersTests()      // PKT-782 (v2.2 · 3.2b)
 await runCronHumanizerTests()
 
