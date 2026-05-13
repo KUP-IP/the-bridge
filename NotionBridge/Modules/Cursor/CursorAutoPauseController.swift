@@ -13,11 +13,9 @@
 //   `lockedAt` so the new-run modal can disable Submit until midnight rollover
 //   or an explicit `unlock()` (admin / test override).
 //
-// PKT-3.4.1.W2 caveat: `CursorRuntime.shared.agentCancel(id:)` currently
-// throws `notImplemented`. We swallow that error (logged) so the controller
-// keeps working as a UI/banner driver even before the sidecar ships. When
-// PKT-3.4.1.W2 lands the real cancel surface, side effects automatically
-// graduate to true cancellation with no controller changes needed.
+// Runtime cancellation is best-effort: local sidecar availability, API auth,
+// and cloud runtime state can still fail independently of this controller's
+// state-machine update.
 //
 // Testability: `cancelFn` + `runningStatesProvider` are injectable closures
 // (defaults bound to `CursorRuntime.shared.agentCancel` + `CursorAgentRegistry.shared.runningStates`).
@@ -143,8 +141,8 @@ public final class CursorAutoPauseController: ObservableObject {
                 do {
                     try await cancel(runId)
                 } catch {
-                    // Real runtime currently throws `notImplemented` until
-                    // PKT-3.4.1.W2; swallow + log so banner state stays correct.
+                    // Runtime cancellation is best-effort; swallow + log so
+                    // banner state stays correct if the sidecar/API rejects.
                     print("[CursorAutoPause] cancel failed for \(runId): \(error)")
                 }
             }

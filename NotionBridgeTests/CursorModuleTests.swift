@@ -1,11 +1,9 @@
 // CursorModuleTests.swift — PKT-3.4.1 (Bridge v2.2)
 // Coverage for CursorModule + CursorRuntime capability surface.
 //
-// Wave 1 coverage: registration (5 tools, tier .request, module="cursor"),
-// CursorTypes Codable round-trip, capabilityCheck shape, error mapping.
-// Live sidecar IPC tests (A1 local round-trip, B2 cloud + PR, C5 reconnect)
-// are scoped to PKT-3.4.1.W2 once `@cursor/sdk@1.0.12` types are vendored
-// or shipped, and require user-side authorization for real spend.
+// Coverage: registration (5 tools, tier .request, module="cursor"),
+// CursorTypes Codable round-trip, capabilityCheck shape, error mapping, and
+// JSON-RPC sidecar IPC via a fake Node sidecar that does not spend credits.
 
 import Foundation
 import MCP
@@ -138,12 +136,9 @@ func runCursorModuleTests() async {
     }
 
     // ------------------------------------------------------------------
-    // 5) Wave 1: handler proxies hit notImplemented when capability is ok,
-    //    or capabilityMissing when not. We can't test the ok path without
-    //    a real Keychain entry; this verifies the error envelope shape on
-    //    the dispatch happy path.
+    // 5) Handler returns a structured error envelope when capability is missing.
     // ------------------------------------------------------------------
-    await test("cursor_agent_run handler returns structured error envelope on Wave 1 stub path") {
+    await test("cursor_agent_run handler returns structured capability error envelope") {
         let gate = SecurityGate()
         let log = AuditLog()
         let router = ToolRouter(securityGate: gate, auditLog: log)
@@ -169,10 +164,7 @@ func runCursorModuleTests() async {
         guard case .int(let code) = dict["code"] else {
             throw TestError.assertion("expected numeric code in error envelope")
         }
-        // Either capability_missing (10002) or not_implemented (10001) is acceptable here —
-        // depends on whether the dev box has Node + Keychain entry present.
-        try expect(code == 10001 || code == 10002,
-            "expected code 10001 or 10002, got \(code)")
+        try expect(code == 10002, "expected code 10002, got \(code)")
     }
 
     await test("CursorRuntime JSON-RPC sidecar ping and capability probe") {

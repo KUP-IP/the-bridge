@@ -2,15 +2,14 @@
 // NotionBridge · Modules · Cursor
 //
 // Owns the Node `cursor-sidecar` lifecycle and JSON-RPC 2.0 IPC over stdio.
-// Wave 1 (PKT-3.4.1) shipped the capability surface. Wave 2 replaces the
-// notImplemented stubs with live request/response correlation against the
-// sidecar process.
+// Wave 1 (PKT-3.4.1) shipped the capability surface. Wave 2 wires live
+// request/response correlation against the sidecar process.
 //
 // PKT-3.4.3 Wave 1 (this packet) layers a pre-dispatch hardening pass on top
-// of the Wave 1 contract: `agentRun(...)` now runs sensitive-repo allowlist
+// of the Cursor contract: `agentRun(...)` now runs sensitive-repo allowlist
 // evaluation + prompt redaction BEFORE `requireCapability()`. The scrubbed
-// prompt + effective runtime + audit entry are what W2's live IPC will
-// dispatch through the JSON-RPC sidecar.
+// prompt + effective runtime + audit entry are dispatched through the JSON-RPC
+// sidecar.
 //
 // Architecture notes:
 //   - Sidecar is a long-lived Node process speaking JSON-RPC 2.0 line-delimited

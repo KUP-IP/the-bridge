@@ -10,13 +10,9 @@
 //   - cursor_agent_artifacts  (tier .request)
 //
 // All five are tier .request because Cursor SDK calls bill against the
-// user's Pro/Enterprise account. Always-Allow scope honored per
-// (repo, model, runtime) is wired in PKT-3.4.1.W2; Wave 1 ships with
-// the default per-call request-tier prompt.
-//
-// Wave 1 status: tool surface registered; capability path live; handlers
-// proxy to CursorRuntime which currently returns notImplemented after the
-// capability gate (sidecar @cursor/sdk live wiring lands in PKT-3.4.1.W2).
+// user's Pro/Enterprise account. Handlers proxy to CursorRuntime, which owns
+// sidecar process lifecycle, JSON-RPC request correlation, prompt redaction,
+// and sensitive-repo runtime gating.
 
 import Foundation
 import MCP
