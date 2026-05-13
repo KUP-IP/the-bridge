@@ -147,12 +147,11 @@ public actor LspSession {
     private var nextRequestId: Int = 1
     private var pendingRequests: [Int: CheckedContinuation<Data?, Error>] = [:]
     private var openFiles: Set<String> = []
+    private var stdoutBuffer = Data()
     /// Per-URI push-diagnostics cache populated from `textDocument/publishDiagnostics` notifications (PKT-777 W2).
     private var diagnosticsByUri: [String: [Any]] = [:]
     /// Per-URI waiter list: continuations woken when the next publishDiagnostics for that URI arrives.
     private var diagnosticsWaiters: [String: [CheckedContinuation<Void, Never>]] = [:]
-    private var readTask: Task<Void, Never>?
-    private var stderrTask: Task<Void, Never>?
     private var idleTask: Task<Void, Never>?
     private let idleTimeoutSeconds: TimeInterval
     private let onIdle: @Sendable () async -> Void
@@ -332,8 +331,8 @@ public actor LspSession {
         if terminated { return }
         terminated = true
         idleTask?.cancel(); idleTask = nil
-        readTask?.cancel()
-        stderrTask?.cancel()
+        stdout.readabilityHandler = nil
+        stderr.readabilityHandler = nil
         failAllPendingRequests(LspRuntime.LspError.streamClosed)
         try? stdin.close()
         if process.isRunning { process.terminate() }
@@ -342,32 +341,35 @@ public actor LspSession {
     // MARK: - Background tasks
 
     private func startBackgroundTasks() {
-        readTask = Task { [weak self] in await self?.runReadLoop() }
-        stderrTask = Task { [weak self] in await self?.runStderrDrainLoop() }
+        stdout.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            Task {
+                if data.isEmpty {
+                    await self?.handleStdoutClosed()
+                } else {
+                    await self?.ingestStdout(data)
+                }
+            }
+        }
+        stderr.readabilityHandler = { handle in
+            _ = handle.availableData
+        }
         resetIdleTimer()
     }
 
-    private func runReadLoop() async {
-        var buffer = Data()
+    private func ingestStdout(_ data: Data) async {
+        stdoutBuffer.append(data)
         do {
-            for try await byte in stdout.bytes {
-                buffer.append(byte)
-                while let message = try Self.extractFramedMessage(from: &buffer) {
-                    await handleIncomingMessage(message)
-                }
+            while let message = try Self.extractFramedMessage(from: &stdoutBuffer) {
+                await handleIncomingMessage(message)
             }
         } catch {
-            // stream closed or framing error — fall through to fail pending
+            failAllPendingRequests(error)
         }
-        failAllPendingRequests(LspRuntime.LspError.streamClosed)
     }
 
-    private func runStderrDrainLoop() async {
-        do {
-            for try await _ in stderr.bytes {
-                // drain; per-line capture deferred to W3 (diagnostics surface)
-            }
-        } catch {}
+    private func handleStdoutClosed() {
+        failAllPendingRequests(LspRuntime.LspError.streamClosed)
     }
 
     private nonisolated static func extractFramedMessage(from buffer: inout Data) throws -> Data? {
@@ -397,7 +399,7 @@ public actor LspSession {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
 
         // (1) Response to one of our outgoing requests: integer id, no `method` field.
-        if let id = obj["id"] as? Int, obj["method"] == nil {
+        if let id = Self.numericRequestId(from: obj["id"]), obj["method"] == nil {
             if let cont = pendingRequests.removeValue(forKey: id) {
                 if let error = obj["error"] as? [String: Any] {
                     let code = error["code"] as? Int ?? -32000
@@ -427,6 +429,17 @@ public actor LspSession {
     }
 
     // MARK: - Push-diagnostics cache accessors (PKT-777 W2)
+
+    private nonisolated static func numericRequestId(from raw: Any?) -> Int? {
+        switch raw {
+        case let id as Int:
+            return id
+        case let id as NSNumber:
+            return id.intValue
+        default:
+            return nil
+        }
+    }
 
     /// Return cached diagnostics for the given URI as a JSON-encoded `Data` payload
     /// (`[]` if empty / no diagnostics received within `timeout`). JSON encoding happens
