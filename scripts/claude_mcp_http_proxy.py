@@ -9,6 +9,7 @@ URL = os.environ.get("NOTION_BRIDGE_URL", "http://127.0.0.1:9700/mcp")
 BEARER = os.environ.get("NOTION_BRIDGE_BEARER", "")
 CLIENT_NAME = os.environ.get("NOTION_BRIDGE_CLIENT_NAME", "")
 SESSION_ID = None
+LAST_INITIALIZE = None
 
 
 def log(*parts):
@@ -93,47 +94,84 @@ def post_message(message):
 
 
 def handle_message(message):
-	msg_id = message.get("id") if isinstance(message, dict) else None
-	# Inject custom clientInfo.name if configured via NOTION_BRIDGE_CLIENT_NAME
-	if CLIENT_NAME and isinstance(message, dict) and message.get("method") == "initialize":
-		params = message.setdefault("params", {})
-		ci = params.setdefault("clientInfo", {})
-		ci["name"] = CLIENT_NAME
-	try:
-		status, content_type, body = post_message(message)
-	except urllib.error.HTTPError as e:
-		body = e.read().decode("utf-8", errors="replace")
-		emit_error(msg_id, f"HTTP {e.code}: {body or e.reason}")
-		return
-	except Exception as e:
-		emit_error(msg_id, str(e))
-		return
+    global LAST_INITIALIZE
+    msg_id = message.get("id") if isinstance(message, dict) else None
+    # Inject custom clientInfo.name if configured via NOTION_BRIDGE_CLIENT_NAME
+    if CLIENT_NAME and isinstance(message, dict) and message.get("method") == "initialize":
+        params = message.setdefault("params", {})
+        ci = params.setdefault("clientInfo", {})
+        ci["name"] = CLIENT_NAME
+    if isinstance(message, dict) and message.get("method") == "initialize":
+        LAST_INITIALIZE = json.loads(json.dumps(message))
+    try:
+        status, content_type, body = post_message(message)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        retry = maybe_retry_after_expired_session(message, body, e.code)
+        if retry is not None:
+            status, content_type, body = retry
+        else:
+            emit_error(msg_id, f"HTTP {e.code}: {body or e.reason}")
+            return
+    except Exception as e:
+        emit_error(msg_id, str(e))
+        return
 
-	if status == 202 and not body.strip():
-		return
+    emit_response(msg_id, status, content_type, body)
 
-	if "text/event-stream" in content_type or body.lstrip().startswith("id:") or "\nevent:" in body or "\ndata:" in body:
-		for event_name, payload in parse_sse_payload(body):
-			if event_name not in ("message", ""):
-				log("ignoring SSE event", event_name)
-				continue
-			try:
-				parsed = json.loads(payload)
-			except Exception:
-				log("non-JSON SSE payload", payload[:500])
-				continue
-			emit(parsed)
-		return
 
-	if not body.strip():
-		return
+def maybe_retry_after_expired_session(message, body, status_code):
+    global SESSION_ID
+    expired = status_code in (400, 404) and (
+        "Session not found" in body or "Session not found or expired" in body
+    )
+    if not expired:
+        return None
+    log("session expired; clearing Mcp-Session-Id and retrying")
+    SESSION_ID = None
+    if isinstance(message, dict) and message.get("method") != "initialize" and LAST_INITIALIZE is not None:
+        try:
+            post_message(LAST_INITIALIZE)
+        except Exception as e:
+            log("initialize replay failed", e)
+            return None
+    try:
+        return post_message(message)
+    except urllib.error.HTTPError as e:
+        retry_body = e.read().decode("utf-8", errors="replace")
+        log("retry failed", e.code, retry_body[:500])
+        return None
+    except Exception as e:
+        log("retry failed", e)
+        return None
 
-	try:
-		parsed = json.loads(body)
-	except Exception:
-		emit_error(msg_id, f"Unparseable response body: {body[:500]}")
-		return
-	emit(parsed)
+
+def emit_response(msg_id, status, content_type, body):
+    if status == 202 and not body.strip():
+        return
+
+    if "text/event-stream" in content_type or body.lstrip().startswith("id:") or "\nevent:" in body or "\ndata:" in body:
+        for event_name, payload in parse_sse_payload(body):
+            if event_name not in ("message", ""):
+                log("ignoring SSE event", event_name)
+                continue
+            try:
+                parsed = json.loads(payload)
+            except Exception:
+                log("non-JSON SSE payload", payload[:500])
+                continue
+            emit(parsed)
+        return
+
+    if not body.strip():
+        return
+
+    try:
+        parsed = json.loads(body)
+    except Exception:
+        emit_error(msg_id, f"Unparseable response body: {body[:500]}")
+        return
+    emit(parsed)
 
 
 def main():
