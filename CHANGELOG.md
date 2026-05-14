@@ -1,3 +1,4 @@
+<!-- e2e-b2 marker -->
 # Changelog
 
 ## [2.2.0] — 2026-05-13 — Agentic Dev Surface (consolidated release)
