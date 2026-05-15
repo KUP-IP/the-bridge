@@ -90,54 +90,27 @@ public actor ServerManager {
         )
         self.sseServer = sseServer
 
-        // 2. Register modules
-        await ShellModule.register(on: router)
-        await FileModule.register(on: router)
-        await SessionModule.register(
+        // 2. Register modules — single source of truth in BridgeModuleRegistry
+        // (consumed identically by EndToEndTests + ToolAnnotationAuditTests).
+        // Production includes StripeMcpModule and supplies SessionModule's
+        // live diagnosticsProvider; the registry owns module ordering.
+        await BridgeModuleRegistry.registerStaticFeatureModules(
             on: router,
-            auditLog: auditLog,
-            diagnosticsProvider: {
-                let diagnostics = await sseServer.sessionRuntimeDiagnostics()
-                return SessionModule.RuntimeDiagnostics(
-                    connections: diagnostics.activeClients,
-                    activeClients: diagnostics.activeClients
+            includeStripe: true,
+            registerSession: { sessionRouter in
+                await SessionModule.register(
+                    on: sessionRouter,
+                    auditLog: auditLog,
+                    diagnosticsProvider: {
+                        let diagnostics = await sseServer.sessionRuntimeDiagnostics()
+                        return SessionModule.RuntimeDiagnostics(
+                            connections: diagnostics.activeClients,
+                            activeClients: diagnostics.activeClients
+                        )
+                    }
                 )
             }
         )
-        await MessagesModule.register(on: router)
-        await SystemModule.register(on: router)
-        await ContactsModule.register(on: router)
-        await NotionModule.register(on: router)
-        await ScreenModule.register(on: router)
-        await ScreenModule.registerRecording(on: router)
-        await ScreenModule.registerAnalyze(on: router)
-        await AccessibilityModule.register(on: router)
-        await AppleScriptModule.register(on: router)
-        await ChromeModule.register(on: router)
-        await SkillsModule.register(on: router)
-        await CredentialModule.register(on: router)
-        await PaymentModule.register(on: router)
-        await StripeMcpModule.register(on: router)
-        await ConnectionsModule.register(on: router)
-        await JobsModule.register(on: router)  // PKT-340 W1: 14th module (8 job_* tools, handlers throw .notImplemented pending W2-4)
-        await DevModule.register(on: router)   // PKT-738 (v2.2 · 0.1): 15th module — dev/ scaffold (placeholder dev_module_info; real primitives in follow-ups)
-        await BgProcessModule.register(on: router)  // PKT-744 (v2.2 · 1.1): bg_process_* runtime — long-running task supervision (5 dev/ tools)
-        await DevServerModule.register(on: router)  // PKT-741 (v2.2 1.3): 16th module — port_inspect + devserver_* lifecycle
-        await GhModule.register(on: router)         // PKT-742 (v2.2 · 2.2): gh_* CLI wrappers — 7 thin shells over GitHub CLI
-        await GitModule.register(on: router)        // PKT-740/784/786/788 (v2.2 · 2.1): git_* CLI wrappers
-        await LspModule.register(on: router)        // PKT-745/777/789 (v2.2 · 2.3): lsp_* tools
-        await CodeEditModule.register(on: router)   // PKT-750 (v2.2 · 1.2): code_search · file_str_replace · file_apply_patch
-        await WranglerModule.register(on: router)   // PKT-757 (v2.2 · 0.2.2): wrangler_d1_status
-        await SpotlightModule.register(on: router)         // PKT-747 (v2.2 · 3.3): spotlight_query (mdfind wrapper)
-        await SyntheticInputModule.register(on: router)    // PKT-747 (v2.2 · 3.3): keyboard_type (CGEvent synthetic input)
-        await MouseClickModule.register(on: router)        // PKT-765 (v2.2 · 3.3.1): mouse_click (CGEvent mouse, abs/window-relative)
-        await CGEventModule.register(on: router)           // PKT-765 (v2.2 · 3.3.1): cgevent_send (raw CGEvent escape hatch)
-        await PasteboardHistoryModule.register(on: router) // PKT-765 (v2.2 · 3.3.1): pasteboard_history (NSPasteboard polling + persistence)
-        await PlaywrightModule.register(on: router) // PKT-781 (v2.2 · 3.2a): playwright_run — npx playwright under bg_process supervision
-        await VitestModule.register(on: router)     // PKT-781 (v2.2 · 3.2a): vitest_run — npx vitest under bg_process supervision (cap_missing default on this host)
-        await LighthouseModule.register(on: router) // PKT-781 (v2.2 · 3.2a): lighthouse_run — npx lighthouse under bg_process supervision
-        await ArtifactModule.register(on: router)   // PKT-743 (v2.2 · 3.1): http/diff/watch/tree/query/zip/hash artifact toolkit
-        await SnippetsModule.register(on: router)   // PKT-2135a9e9 (v2.3 · WS-D): snippets_* — local snippet store + Wispr/Espanso import-export
         // Reconcile any jobs orphaned by a prior Bridge force-quit. Flips dead-pid running jobs to .unknown
         // and runs the 7-day cleanup pass for terminal jobs.
         _ = await BgProcessRuntime.shared.reconcileOrphans()

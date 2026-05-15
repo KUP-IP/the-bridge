@@ -12,16 +12,18 @@
 # baseline). That number is stale. v2.2 closeout floor was 733/733; WS-A
 # then retired the Cursor SDK integration (deprecated/disabled, never
 # deleted, its tests) and WS-D/WS-B added the snippets + transport-router
-# suites, landing a verified-green baseline of 710. WS-C then added 5
-# fail-closed BridgeFeatureFlags tests → the gate is locked at the actual
-# verified green count of 715, not the stale stub value (504). Per the
+# suites, landing a verified-green baseline of 710. WS-C added 5
+# fail-closed BridgeFeatureFlags tests → 715. v3.0 prep 0.4 added 4
+# BridgeModuleRegistry single-source enforcement tests → the gate is now
+# locked at the actual verified green count of 719, not the stale stub
+# value (504). Per the
 # order-inversion rule we never lower a green baseline to satisfy a stale
 # DoD number. Raising the floor when the suite legitimately grows is
 # expected; lowering it requires a conscious decision recorded alongside
 # the change.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-715}"
+FLOOR="${BRIDGE_TEST_FLOOR:-719}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."

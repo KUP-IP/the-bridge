@@ -19,43 +19,15 @@ func runEndToEndTests() async {
     let auditLog = AuditLog()
     let router = ToolRouter(securityGate: securityGate, auditLog: auditLog)
 
-    // Register all modules (same static surface as `ServerManager.setup()` except `StripeMcpModule` — network-dependent).
-    await ShellModule.register(on: router)
-    await FileModule.register(on: router)
-    await SessionModule.register(on: router, auditLog: auditLog)
-    await MessagesModule.register(on: router)
-    await SystemModule.register(on: router)
-    await ContactsModule.register(on: router)
-    await NotionModule.register(on: router)
-    await ScreenModule.register(on: router)
-    await ScreenModule.registerRecording(on: router)
-    await ScreenModule.registerAnalyze(on: router)
-    await AccessibilityModule.register(on: router)
-    await AppleScriptModule.register(on: router)
-    await ChromeModule.register(on: router)
-    await SkillsModule.register(on: router)
-    await CredentialModule.register(on: router)
-    await PaymentModule.register(on: router)
-    await ConnectionsModule.register(on: router)
-    await JobsModule.register(on: router)
-    await DevModule.register(on: router)  // PKT-738 (v2.2 · 0.1): dev/ scaffold module
-    await BgProcessModule.register(on: router)
-    await DevServerModule.register(on: router)
-    await GhModule.register(on: router)
-    await GitModule.register(on: router)
-    await LspModule.register(on: router)
-    await CodeEditModule.register(on: router)  // PKT-750 (v2.2 · 1.2): code_search · file_str_replace · file_apply_patch
-    await WranglerModule.register(on: router)  // PKT-757 (v2.2 · 0.2.2): wrangler_d1_status
-    await SpotlightModule.register(on: router)
-    await SyntheticInputModule.register(on: router)
-    await MouseClickModule.register(on: router)
-    await CGEventModule.register(on: router)
-    await PasteboardHistoryModule.register(on: router)
-    await PlaywrightModule.register(on: router)
-    await VitestModule.register(on: router)
-    await LighthouseModule.register(on: router)
-    await ArtifactModule.register(on: router)
-    await SnippetsModule.register(on: router)  // PKT-2135a9e9 (v2.3 · WS-D): snippets store + 9 tools
+    // Register all modules via the single source of truth — same static
+    // surface as ServerManager.setup() minus StripeMcpModule (network-dependent).
+    await BridgeModuleRegistry.registerStaticFeatureModules(
+        on: router,
+        includeStripe: false,
+        registerSession: { sessionRouter in
+            await SessionModule.register(on: sessionRouter, auditLog: auditLog)
+        }
+    )
 
     // ============================================================
     // E2E-1: Full pipeline — dispatch → security → handler → audit
