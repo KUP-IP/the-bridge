@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.3.0] — 2026-05-15 — Cursor Retirement + Menu-Bar Quick-Page (PKT-804)
+
+v2.3 deck-clear. Retires the abandoned Cursor SDK integration and adds a menu-bar quick-page. Builds on the v2.2.1 rescue (landed per R1=Option A).
+
+### Removed
+- **Cursor SDK integration retired in full.** Deleted the 5 `cursor_agent_*` tools, `CursorRuntime`, `CursorAgentRegistry`, `CursorCostLedger`, `CursorAutoPauseController`, `CursorHeartbeatWatchdog`, `CursorNotificationDispatcher`, `CursorNewRunFormLogic`, `CursorTypes`, `CursorAudit`, `CursorModule`, the `CursorAgentsWindow` / `CursorNewRunWindow` / `CursorMenuBarLabel` UI, the `cursor-sidecar` package, the `@cursor/sdk` dependency, `SPEC.md`, and 6 Cursor test suites. Rewired `ServerManager` / `AppDelegate` / `DashboardView` / `NotionBridgeApp` / `BridgeNotifications` / `Version.swift` / `EndToEndTests`. **−5,489 LOC.** Rationale: `@cursor/sdk@1.0.12` local agents are upstream-unusable and the cloud path is economically dominated by in-subscription delegation (Decision Log #8, sk decisions, conf 0.85). Scoped split — kept the zero-coupling hygiene utilities only.
+- Tool surface 154 → **149**; module families 19 → **18**.
+
+### Added
+- **`Modules/AgentHygiene/`** — `PromptRedactor` (gitleaks-style credential scrub) + `SensitiveRepoMatcher`, relocated out of the Cursor module as standalone reusable utilities (named v3 consumers: WS-C privacy audit, WS-F scope-gating). UserDefaults keys preserved for backward-compat.
+- **Menu-bar quick-page (WS-H).** Header now exposes 3 deep-link icons — Skills, Tools, Settings — each opening the Settings window directly to that section via the new `SettingsNavigation` model + `SettingsWindowController.show(section:)`. Restart button anchored bottom-left, Quit bottom-right.
+
+### Changed
+- `SettingsSection` hoisted to file scope (was nested in `SettingsView`) so the quick-page can deep-link.
+
+### Preserved (git-only)
+- `AILogsWriter` + the `executor-sidecar` IPC pattern were dropped from `main` (hard-coupled to the Cursor DTO graph; clean retention needs out-of-scope generalization) but remain in history at `f06741b` — resurrectable by WS-E/WS-F.
+
+### Verified
+- `swift build` clean. **679 / 679 tests pass** (−67 removed Cursor suites, +6 new WS-H criteria-as-tests).
+
 ## [2.2.1] — 2026-05-13 — Cursor Module Rescue (PKT-3.4.1-RESCUE)
 
 Live-wires the five `cursor_agent_*` sidecar methods that 2.2.0 shipped as `NOT_IMPLEMENTED` scaffolds (PKT-3.4.1.W2 was prematurely closed; this release closes the gap).
