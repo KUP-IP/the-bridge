@@ -55,6 +55,7 @@ func runEndToEndTests() async {
     await VitestModule.register(on: router)
     await LighthouseModule.register(on: router)
     await ArtifactModule.register(on: router)
+    await SnippetsModule.register(on: router)  // PKT-2135a9e9 (v2.3 · WS-D): snippets store + 9 tools
 
     // ============================================================
     // E2E-1: Full pipeline — dispatch → security → handler → audit
