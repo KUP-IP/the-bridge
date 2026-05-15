@@ -37,8 +37,8 @@ struct NotionBridgeApp: App {
             DashboardView(
                 statusBar: appDelegate.statusBar,
                 permissionManager: appDelegate.permissionManager,
-                onOpenSettings: {
-                    appDelegate.openSettings()
+                onOpenSettings: { section in
+                    appDelegate.openSettings(section: section)
                 }
             )
         } label: {

@@ -16,12 +16,13 @@ import AppKit
 public struct DashboardView: View {
     let statusBar: StatusBarController
     let permissionManager: PermissionManager
-    let onOpenSettings: () -> Void
+    /// WS-H (PKT-804): deep-links the menu-bar quick-page to a Settings section.
+    let onOpenSettings: (SettingsSection) -> Void
 
     public init(
         statusBar: StatusBarController,
         permissionManager: PermissionManager,
-        onOpenSettings: @escaping () -> Void
+        onOpenSettings: @escaping (SettingsSection) -> Void
     ) {
         self.statusBar = statusBar
         self.permissionManager = permissionManager
@@ -59,18 +60,26 @@ public struct DashboardView: View {
             Spacer()
             Text("v\(appVersion)")
                 .bridgeSecondary()
-            Button {
-                onOpenSettings()
-            } label: {
-                Image(systemName: "gearshape")
-                    .symbolRenderingMode(.monochrome)
-                    .font(.callout)
-                    .foregroundStyle(BridgeColors.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Open Settings (\u{2318},)")
+            // WS-H (PKT-804): quick-page deep-link icons → Settings sections.
+            quickLink(.skills, systemImage: "book.closed", help: "Open Skills")
+            quickLink(.tools, systemImage: "hammer", help: "Open Tools")
+            quickLink(.connections, systemImage: "gearshape", help: "Open Settings (\u{2318},)")
         }
         .bridgeRow()
+    }
+
+    /// WS-H (PKT-804): one quick-page icon that deep-links to a Settings section.
+    private func quickLink(_ section: SettingsSection, systemImage: String, help: String) -> some View {
+        Button {
+            onOpenSettings(section)
+        } label: {
+            Image(systemName: systemImage)
+                .symbolRenderingMode(.monochrome)
+                .font(.callout)
+                .foregroundStyle(BridgeColors.secondary)
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 
     // MARK: - Server Status (Primary)
@@ -195,6 +204,7 @@ public struct DashboardView: View {
     // Restart uses the shared NSApplication.restartBridge() utility in
     // BridgeUtilities.swift so DashboardView and PermissionView stay in sync.
     private var quitSection: some View {
+        // WS-H (PKT-804): Restart anchored bottom-left, Quit bottom-right.
         HStack(spacing: BridgeSpacing.sm) {
             Button("Restart Bridge") {
                 NSApp.restartBridge()
@@ -203,14 +213,14 @@ public struct DashboardView: View {
             .font(.caption)
             .foregroundStyle(Color.blue.opacity(0.7))
 
+            Spacer()
+
             Button("Quit Bridge") {
                 NSApp.terminate(nil)
             }
             .buttonStyle(.plain)
             .font(.caption)
             .foregroundStyle(Color.red.opacity(0.6))
-
-            Spacer()
         }
         .bridgeRow()
     }

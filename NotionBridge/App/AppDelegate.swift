@@ -232,9 +232,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Public API (V1-QUALITY-C2)
 
-    /// Open the Settings window. Called from DashboardView gear icon.
-    public func openSettings() {
-        settingsController.show()
+    /// Open the Settings window. WS-H (PKT-804): optional `section` deep-links
+    /// the menu-bar quick-page straight to a Settings section.
+    public func openSettings(section: SettingsSection? = nil) {
+        settingsController.show(section: section)
     }
 
     /// PKT-430: Trigger manual Sparkle update check.

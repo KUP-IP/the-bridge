@@ -427,6 +427,7 @@ await runGhModuleTests()
 await runGitModuleTests()
 await runLspModuleTests()
 await runLspModuleRenameRefsLiveTests()
+await runWSHMenuBarTests()        // PKT-804 (v2.3): menu-bar quick-page
 await runPlaywrightModuleTests()  // PKT-781 (v2.2 · 3.2a)
 await runVitestModuleTests()      // PKT-781 (v2.2 · 3.2a)
 await runLighthouseModuleTests()  // PKT-781 (v2.2 · 3.2a)

@@ -35,7 +35,12 @@ public final class SettingsWindowController {
     }
 
     /// Show the Settings window, or bring it to front if already open.
-    public func show() {
+    /// WS-H (PKT-804): `section` deep-links the menu-bar quick-page straight
+    /// to a Settings section; nil keeps the last-selected section.
+    public func show(section: SettingsSection? = nil) {
+        if let section {
+            SettingsNavigation.shared.section = section
+        }
         if let existingWindow = window, existingWindow.isVisible {
             existingWindow.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -72,13 +77,51 @@ public final class SettingsWindowController {
     }
 }
 
+// MARK: - Settings Navigation
+
+/// Top-level section identity for the Settings window. Hoisted out of
+/// SettingsView (WS-H, PKT-804) so the menu-bar quick-page can deep-link
+/// directly to a section.
+public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
+    case connections = "Connections"
+    case credentials = "Credentials"
+    case permissions = "Permissions"
+    case tools = "Tools"
+    case skills = "Skills"
+    case jobs = "Jobs"
+    case advanced = "Advanced"
+
+    public var id: String { rawValue }
+
+    public var icon: String {
+        switch self {
+        case .connections: return "network"
+        case .permissions: return "lock.shield"
+        case .tools: return "hammer"
+        case .skills: return "book.closed"
+        case .credentials: return "key.fill"
+        case .jobs: return "clock.badge.checkmark"
+        case .advanced: return "wrench.and.screwdriver"
+        }
+    }
+}
+
+/// Shared selection model so the menu-bar quick-page can drive which Settings
+/// section is shown even when the window is already open (WS-H, PKT-804).
+@MainActor
+public final class SettingsNavigation: ObservableObject {
+    public static let shared = SettingsNavigation()
+    @Published public var section: SettingsSection = .connections
+    public init() {}
+}
+
 // MARK: - Settings View
 
 public struct SettingsView: View {
     let statusBar: StatusBarController
     let permissionManager: PermissionManager
 
-    @State var selectedSection: SettingsSection = .connections
+    @ObservedObject var nav: SettingsNavigation
 
     // Token editing state (PKT-350 F1)
     @State var isEditingToken = false
@@ -101,38 +144,19 @@ public struct SettingsView: View {
     @State var resetBackgroundItemsMessage: String?
     @State var showTCCResetDialog = false
 
-    enum SettingsSection: String, CaseIterable, Identifiable {
-        case connections = "Connections"
-        case credentials = "Credentials"
-        case permissions = "Permissions"
-        case tools = "Tools"
-        case skills = "Skills"
-        case jobs = "Jobs"
-        case advanced = "Advanced"
-
-        var id: String { rawValue }
-
-        var icon: String {
-            switch self {
-            case .connections: return "network"
-            case .permissions: return "lock.shield"
-            case .tools: return "hammer"
-            case .skills: return "book.closed"
-            case .credentials: return "key.fill"
-            case .jobs: return "clock.badge.checkmark"
-            case .advanced: return "wrench.and.screwdriver"
-            }
-        }
-    }
-
-    public init(statusBar: StatusBarController, permissionManager: PermissionManager) {
+    public init(
+        statusBar: StatusBarController,
+        permissionManager: PermissionManager,
+        nav: SettingsNavigation = .shared
+    ) {
         self.statusBar = statusBar
         self.permissionManager = permissionManager
+        self.nav = nav
     }
 
     public var body: some View {
         NavigationSplitView {
-            List(SettingsSection.allCases, selection: $selectedSection) { section in
+            List(SettingsSection.allCases, selection: $nav.section) { section in
                 Label(section.rawValue, systemImage: section.icon)
                     .tag(section)
             }
@@ -144,7 +168,7 @@ public struct SettingsView: View {
 
     @ViewBuilder
     private var detailContent: some View {
-        switch selectedSection {
+        switch nav.section {
         case .connections: connectionsSection
         case .permissions: permissionsSection
         case .tools: toolsSection
