@@ -27,6 +27,12 @@ public actor ServerManager {
     private var securityGate: SecurityGate?
     private let toolAllowlist: Set<String>?
 
+    /// WS-B (PKT-803): the active-transport router. Default config resolves
+    /// to `[.stdio]` only, so existing clients are unaffected;
+    /// `BRIDGE_ENABLE_HTTP=1` additively opts into streamableHTTP (skeleton
+    /// only — not served live until WS-F).
+    public nonisolated let transportRouter = TransportRouter()
+
     /// The configured SSE port (config.json -> env var -> default).
     public nonisolated let ssePort: Int
 
@@ -185,7 +191,8 @@ public actor ServerManager {
                 Tool(
                     name: reg.name,
                     description: reg.description,
-                    inputSchema: reg.inputSchema
+                    inputSchema: reg.inputSchema,
+                    annotations: ToolAnnotationCatalog.resolved(for: reg.name).mcp
                 )
             }
             return .init(tools: tools)
@@ -224,6 +231,13 @@ public actor ServerManager {
         guard let server = self.server else {
             throw ServerManagerError.notSetUp
         }
+        // WS-B (PKT-803): the stdio path now traverses TransportRouter.
+        // `.stdio` is invariantly active in the default config, so this is
+        // behaviour-preserving for existing clients; it is the seam WS-F
+        // uses to bring streamableHTTP online.
+        guard transportRouter.isActive(.stdio) else {
+            throw ServerManagerError.transportInactive(.stdio)
+        }
         let transport = StdioTransport()
         try await server.start(transport: transport)
     }
@@ -256,11 +270,14 @@ public actor ServerManager {
 
 public enum ServerManagerError: Error, LocalizedError {
     case notSetUp
+    case transportInactive(BridgeTransport)
 
     public var errorDescription: String? {
         switch self {
         case .notSetUp:
             return "ServerManager.setup() must be called before run()"
+        case .transportInactive(let t):
+            return "Transport '\(t.rawValue)' is not active in this configuration"
         }
     }
 }

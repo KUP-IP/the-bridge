@@ -418,7 +418,12 @@ public actor SSEServer {
                 registrations = registrations.filter { allowlist.contains($0.name) }
             }
             return .init(tools: registrations.map { reg in
-                Tool(name: reg.name, description: reg.description, inputSchema: reg.inputSchema)
+                Tool(
+                    name: reg.name,
+                    description: reg.description,
+                    inputSchema: reg.inputSchema,
+                    annotations: ToolAnnotationCatalog.resolved(for: reg.name).mcp
+                )
             })
         }
 

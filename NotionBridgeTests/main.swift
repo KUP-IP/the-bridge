@@ -429,6 +429,8 @@ await runLspModuleTests()
 await runLspModuleRenameRefsLiveTests()
 await runWSHMenuBarTests()        // PKT-804 (v2.3): menu-bar quick-page
 await runSnippetsModuleTests()    // PKT-2135a9e9 (v2.3 · WS-D): snippets module
+await runToolAnnotationAuditTests() // PKT-803 (v2.3 · WS-B): annotation coverage audit
+await runTransportRouterTests()     // PKT-803 (v2.3 · WS-B): transport router default/env
 await runPlaywrightModuleTests()  // PKT-781 (v2.2 · 3.2a)
 await runVitestModuleTests()      // PKT-781 (v2.2 · 3.2a)
 await runLighthouseModuleTests()  // PKT-781 (v2.2 · 3.2a)
