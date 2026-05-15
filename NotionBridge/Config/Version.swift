@@ -49,12 +49,14 @@ public enum BridgeConstants {
     /// v2.2 · 2.3/2.3.1 (PKT-745/777/789): 102 + 6 (lsp_* tools) = 108.
     /// v2.2 · integration closeout: 113 + 34 previously uncounted static dev/jobs/runner tools = 147.
     /// v2.2 · 3.1 (PKT-743): 147 + 7 artifact/diff helper tools = 154.
+    /// v2.3 · 0.1 (PKT-804): − cursor (5 cursor_agent_* tools) = 149.
     /// Note: jobs_pause_all / jobs_resume_all dropped; current JobsModule contributes 13 job_* tools.
-    public static let staticFeatureModuleToolCount = 154
+    public static let staticFeatureModuleToolCount = 149
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.
     /// v2.2 · 2.3 W2 (PKT-745): unchanged at 16 — lsp_session_list joins existing `dev` family.
     /// v2.2 · integration closeout: + jobs + cursor + computer = 19.
-    public static let staticFeatureModuleFamilyCount = 19
+    /// v2.3 · 0.1 (PKT-804): − cursor family = 18.
+    public static let staticFeatureModuleFamilyCount = 18
 }

@@ -44,7 +44,6 @@ func runEndToEndTests() async {
     await GhModule.register(on: router)
     await GitModule.register(on: router)
     await LspModule.register(on: router)
-    await CursorModule.register(on: router)
     await CodeEditModule.register(on: router)  // PKT-750 (v2.2 · 1.2): code_search · file_str_replace · file_apply_patch
     await WranglerModule.register(on: router)  // PKT-757 (v2.2 · 0.2.2): wrangler_d1_status
     await SpotlightModule.register(on: router)
@@ -407,9 +406,6 @@ func runEndToEndTests() async {
 
         let dev = await router.registrations(forModule: "dev")
         try expect(dev.count == 48, "dev module family: expected 48")
-
-        let cursor = await router.registrations(forModule: "cursor")
-        try expect(cursor.count == 5, "CursorModule: expected 5")
 
         let computer = await router.registrations(forModule: "computer")
         try expect(computer.count == 5, "computer module family: expected 5")

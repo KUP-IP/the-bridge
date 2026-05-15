@@ -1,7 +1,7 @@
 // SensitiveRepoMatcher.swift — PKT-3.4.3 (Bridge v2.2)
-// NotionBridge · Modules · Cursor
+// NotionBridge · Modules · AgentHygiene
 //
-// Sensitive-repo allowlist for Cursor agent runs. Repos matching a configured
+// Sensitive-repo allowlist for delegated agent runs. Repos matching a configured
 // glob pattern are forced to runtime=local (cloud disabled) and flagged as
 // requiring extra approval before dispatch. Default glob `~/Developer/secure/*`
 // covers the canonical "do not send to a third-party cloud" convention.

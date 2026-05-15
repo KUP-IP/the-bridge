@@ -17,19 +17,15 @@ public struct DashboardView: View {
     let statusBar: StatusBarController
     let permissionManager: PermissionManager
     let onOpenSettings: () -> Void
-    /// PKT-3.4.2 Wave 4: Open the standalone Cursor Agents window.
-    let onOpenCursorAgents: () -> Void
 
     public init(
         statusBar: StatusBarController,
         permissionManager: PermissionManager,
-        onOpenSettings: @escaping () -> Void,
-        onOpenCursorAgents: @escaping () -> Void = {}
+        onOpenSettings: @escaping () -> Void
     ) {
         self.statusBar = statusBar
         self.permissionManager = permissionManager
         self.onOpenSettings = onOpenSettings
-        self.onOpenCursorAgents = onOpenCursorAgents
     }
 
     /// Version from Bundle (single source of truth — Info.plist)
@@ -63,17 +59,6 @@ public struct DashboardView: View {
             Spacer()
             Text("v\(appVersion)")
                 .bridgeSecondary()
-            // PKT-3.4.2 Wave 4: Cursor Agents quick-access button.
-            Button {
-                onOpenCursorAgents()
-            } label: {
-                Image(systemName: "sparkles")
-                    .symbolRenderingMode(.monochrome)
-                    .font(.callout)
-                    .foregroundStyle(BridgeColors.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Open Cursor Agents")
             Button {
                 onOpenSettings()
             } label: {

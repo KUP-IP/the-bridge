@@ -1,5 +1,5 @@
 // PromptRedactor.swift — PKT-3.4.3 (Bridge v2.2)
-// NotionBridge · Modules · Cursor
+// NotionBridge · Modules · AgentHygiene
 //
 // Gitleaks-style prompt redaction. Scrubs known credential shapes (AWS keys,
 // GitHub tokens, Slack tokens, OpenAI / Anthropic / Stripe / Google keys,
