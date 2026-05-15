@@ -45,6 +45,9 @@ public struct PermissionView: View {
                 )
             }
 
+            // PKT-798 (WS-C): not-yet-live capability gates
+            upcomingCapabilitiesSection
+
             // PKT-362 D6: Batched restart banner
             if permissionManager.needsRestart {
                 restartBanner
@@ -134,6 +137,60 @@ public struct PermissionView: View {
         }
         // D3: Animate row transitions (checking ↔ result) with 0.3s fade
         .animation(.easeInOut(duration: 0.3), value: isChecking)
+    }
+
+    // MARK: - PKT-798 (WS-C) Upcoming Capability Gates
+
+    /// Network Listening (remote MCP, WS-F) + Microphone (Handy STT, WS-E).
+    /// Both are feature-flagged OFF by default — the app never requests the
+    /// underlying macOS permission until WS-E/WS-F flip BRIDGE_ENABLE_VOICE
+    /// / BRIDGE_ENABLE_HTTP. These rows are informational only; there is no
+    /// action button and no probe is ever issued from here.
+    private struct UpcomingCapability: Identifiable {
+        let id: String
+        let name: String
+        let enabled: Bool
+    }
+
+    private var upcomingCapabilities: [UpcomingCapability] {
+        let flags = BridgeFeatureFlags()
+        return [
+            UpcomingCapability(id: "network-listening",
+                               name: "Network Listening",
+                               enabled: flags.httpEnabled),
+            UpcomingCapability(id: "microphone",
+                               name: "Microphone",
+                               enabled: flags.voiceEnabled),
+        ]
+    }
+
+    @ViewBuilder
+    private var upcomingCapabilitiesSection: some View {
+        Divider()
+            .padding(.vertical, 2)
+
+        Text("Upcoming capabilities")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+
+        ForEach(upcomingCapabilities) { capability in
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(capability.enabled ? Color.blue : Color.secondary.opacity(0.4))
+                    .frame(width: 8, height: 8)
+
+                Text(capability.name)
+                    .font(.callout)
+
+                Spacer()
+
+                Text(capability.enabled
+                     ? "Enabled \u{2014} wiring pending"
+                     : "Not requested (feature disabled)")
+                    .font(.caption)
+                    .foregroundStyle(capability.enabled ? .blue : .secondary)
+            }
+        }
     }
 
     // MARK: - D6 Restart Banner

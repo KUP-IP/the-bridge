@@ -69,6 +69,11 @@ test:
 	$(DEBUG_DIR)/NotionBridgeTests
 	@echo "✅ Tests complete"
 
+# WS-C (PKT-798): runs the suite + asserts the green floor (715) and
+# zero failures. Used by CI so a shrunk/disabled suite fails the build.
+test-floor:
+	./scripts/test-floor-gate.sh
+
 # ── App Bundle (.app) ──────────────────────────────────────────
 app: build extension jobrunner
 	@echo "📦 Packaging .app bundle..."
