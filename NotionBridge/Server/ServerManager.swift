@@ -25,6 +25,7 @@ public actor ServerManager {
     private var sseServer: SSEServer?
     private var auditLog: AuditLog?
     private var securityGate: SecurityGate?
+    private let toolAllowlist: Set<String>?
 
     /// The configured SSE port (config.json -> env var -> default).
     public nonisolated let ssePort: Int
@@ -46,11 +47,13 @@ public actor ServerManager {
     public init(
         onToolCall: @escaping @MainActor @Sendable () -> Void,
         onClientConnected: @escaping @MainActor @Sendable (String, String) -> Void = { _, _ in },
-        onClientDisconnected: @escaping @MainActor @Sendable (String) -> Void = { _ in }
+        onClientDisconnected: @escaping @MainActor @Sendable (String) -> Void = { _ in },
+        toolAllowlist: Set<String>? = nil
     ) {
         self.onToolCall = onToolCall
         self.onClientConnected = onClientConnected
         self.onClientDisconnected = onClientDisconnected
+        self.toolAllowlist = toolAllowlist
         self.ssePort = ConfigManager.shared.ssePort
     }
 
@@ -170,9 +173,14 @@ public actor ServerManager {
         self.server = server
 
         // 5. Wire ListTools handler — PKT-350: filter disabled tools
-        await server.withMethodHandler(ListTools.self) { [router] _ in
+        await server.withMethodHandler(ListTools.self) { [router, toolAllowlist] _ in
             let disabledNames = CredentialsFeature.mergedDisabledToolNames()
-            let registrations = await router.enabledRegistrations(disabledNames: disabledNames)
+            var registrations = await router.enabledRegistrations(disabledNames: disabledNames)
+            
+            if let allowlist = toolAllowlist {
+                registrations = registrations.filter { allowlist.contains($0.name) }
+            }
+            
             let tools = registrations.map { reg in
                 Tool(
                     name: reg.name,
@@ -184,7 +192,10 @@ public actor ServerManager {
         }
 
         // 6. Wire CallTool handler with tool-call notification (uses dispatchFormatted)
-        await server.withMethodHandler(CallTool.self) { [router] params in
+        await server.withMethodHandler(CallTool.self) { [router, toolAllowlist] params in
+            if let allowlist = toolAllowlist, !allowlist.contains(params.name) {
+                return .init(content: [.text(.init("Error: Tool '\(params.name)' is not allowed in this session"))], isError: true)
+            }
             let arguments: Value = params.arguments.map { .object($0) } ?? .object([:])
             let (text, isError) = await router.dispatchFormatted(toolName: params.name, arguments: arguments)
             if !isError { await MainActor.run { onToolCall() } }

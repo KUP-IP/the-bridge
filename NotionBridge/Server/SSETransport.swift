@@ -113,6 +113,7 @@ public actor SSEServer {
     private let sessionTimeout: TimeInterval
     private let sessionCleanupInterval: TimeInterval
     private let maxHTTPSessions: Int
+    private let toolAllowlist: Set<String>?
     private var totalSessionsCreated = 0
     private var totalSessionsExpired = 0
     private var totalSessionsEvicted = 0
@@ -155,7 +156,8 @@ public actor SSEServer {
         onClientDisconnected: @escaping @MainActor @Sendable (String) -> Void = { _ in },
         sessionTimeout: TimeInterval = 300,
         sessionCleanupInterval: TimeInterval = 30,
-        maxHTTPSessions: Int = 48
+        maxHTTPSessions: Int = 48,
+        toolAllowlist: Set<String>? = nil
     ) {
         let normalizedSessionTimeout = sessionTimeout.isInfinite ? .infinity : max(30, sessionTimeout)
         self.host = host
@@ -169,6 +171,7 @@ public actor SSEServer {
             ? max(5, sessionCleanupInterval)
             : max(5, min(normalizedSessionTimeout, sessionCleanupInterval))
         self.maxHTTPSessions = max(8, maxHTTPSessions)
+        self.toolAllowlist = toolAllowlist
     }
 
     /// PKT-366 F13: Bridge NIO thread to MainActor disconnect UI callback without redundant `await` on stored closure.
@@ -406,16 +409,23 @@ public actor SSEServer {
 
         let router = self.router
         let onToolCall = self.onToolCall
-
+        let toolAllowlist = self.toolAllowlist
+        
         await server.withMethodHandler(ListTools.self) { _ in
             let disabledNames = CredentialsFeature.mergedDisabledToolNames()
-            let registrations = await router.enabledRegistrations(disabledNames: disabledNames)
+            var registrations = await router.enabledRegistrations(disabledNames: disabledNames)
+            if let allowlist = toolAllowlist {
+                registrations = registrations.filter { allowlist.contains($0.name) }
+            }
             return .init(tools: registrations.map { reg in
                 Tool(name: reg.name, description: reg.description, inputSchema: reg.inputSchema)
             })
         }
 
         await server.withMethodHandler(CallTool.self) { params in
+            if let allowlist = toolAllowlist, !allowlist.contains(params.name) {
+                return .init(content: [.text(.init("Error: Tool '\(params.name)' is not allowed in this session"))], isError: true)
+            }
             let arguments: Value = params.arguments.map { .object($0) } ?? .object([:])
             let (text, isError) = await router.dispatchFormatted(toolName: params.name, arguments: arguments)
             if !isError { await MainActor.run { onToolCall() } }
@@ -497,7 +507,10 @@ public actor SSEServer {
 
         case "tools/list":
             let disabledNames = CredentialsFeature.mergedDisabledToolNames()
-            let regs = await router.enabledRegistrations(disabledNames: disabledNames)
+            var regs = await router.enabledRegistrations(disabledNames: disabledNames)
+            if let allowlist = toolAllowlist {
+                regs = regs.filter { allowlist.contains($0.name) }
+            }
             let tools: [[String: Any]] = regs.map { reg in
                 var t: [String: Any] = [
                     "name": reg.name,
@@ -514,6 +527,15 @@ public actor SSEServer {
         case "tools/call":
             let params = json["params"] as? [String: Any] ?? [:]
             let name = params["name"] as? String ?? ""
+            
+            if let allowlist = toolAllowlist, !allowlist.contains(name) {
+                let text = "Error: Tool '\(name)' is not allowed in this session"
+                return buildRPCResponse(id: requestId, result: [
+                    "content": [["type": "text", "text": text] as [String: Any]],
+                    "isError": true
+                ] as [String: Any])
+            }
+            
             let args = params["arguments"] as? [String: Any] ?? [:]
 
             let argsValue: Value

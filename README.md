@@ -145,6 +145,27 @@ This is retained for clients that still use split SSE transport behavior.
 
 Use stdio when connecting local clients such as Claude Code or Cursor directly to the app process.
 
+#### Using Bridge with Antigravity
+
+Google Antigravity enforces a strict 100-tool limit per MCP server, whereas Notion Bridge exposes ~180 tools. To use Bridge with Antigravity, we have curated a subset of ~84 tools to stay under the limit.
+
+You can launch the Bridge process with a `--multi-instance` flag (bypasses single-instance GUI guard) and `--allow-tools` flag pointing to the Antigravity allowlist:
+
+```json
+{
+  "mcpServers": {
+    "Bridge MCP": {
+      "command": "/path/to/NotionBridge",
+      "args": [
+        "--multi-instance",
+        "--allow-tools",
+        "/path/to/notion-bridge/configs/antigravity-allowlist.json"
+      ]
+    }
+  }
+}
+```
+
 ---
 
 ## Security model

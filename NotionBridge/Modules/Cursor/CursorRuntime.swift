@@ -186,11 +186,9 @@ public actor CursorRuntime {
 
     public func agentRun(prompt: String, runtime: CursorRuntimeKind, model: String?, repoPath: String?, branch: String?, maxCostCents: Int?) async throws -> CursorRun {
         // PKT-3.4.3 Wave 1: pre-dispatch hardening pass (redaction + sensitive-repo allowlist).
-        // Audit entry queued for PKT-3.4.1.W2 AI LOGS writer; the scrubbed prompt + effective
-        // runtime are what W2's live IPC will dispatch.
         let verdict = evaluateGates(prompt: prompt, runtime: runtime, repoPath: repoPath)
         try requireCapability()
-        return try await request(method: "agent_run", params: CursorAgentRunRequest(
+        let run: CursorRun = try await request(method: "agent_run", params: CursorAgentRunRequest(
             prompt: verdict.scrubbedPrompt,
             runtime: verdict.effectiveRuntime,
             model: model,
@@ -198,11 +196,15 @@ public actor CursorRuntime {
             branch: branch,
             maxCostCents: maxCostCents
         ))
+        upsertCache(run)
+        return run
     }
 
     public func agentStatus(id: String) async throws -> CursorRun {
         try requireCapability()
-        return try await request(method: "agent_status", params: CursorIdRequest(id: id))
+        let run: CursorRun = try await request(method: "agent_status", params: CursorIdRequest(id: id))
+        upsertCache(run)
+        return run
     }
 
     public func agentList(statusFilter: CursorRunStatus?, runtimeFilter: CursorRuntimeKind?) async throws -> [CursorRun] {
@@ -211,12 +213,15 @@ public actor CursorRuntime {
             method: "agent_list",
             params: CursorAgentListRequest(status: statusFilter, runtime: runtimeFilter)
         )
+        for run in response.runs { upsertCache(run) }
         return response.runs
     }
 
     public func agentCancel(id: String) async throws -> CursorRun {
         try requireCapability()
-        return try await request(method: "agent_cancel", params: CursorIdRequest(id: id))
+        let run: CursorRun = try await request(method: "agent_cancel", params: CursorIdRequest(id: id))
+        upsertCache(run)
+        return run
     }
 
     public func agentArtifacts(id: String) async throws -> [CursorArtifact] {
@@ -335,6 +340,16 @@ public actor CursorRuntime {
             let data = handle.availableData
             Task {
                 if data.isEmpty {
+                    // Foundation's readabilityHandler can fire with empty data
+                    // in edge cases that are NOT true EOF (e.g. spurious wake
+                    // during pipe negotiation, brief read-side starvation when
+                    // the child has buffered output not yet flushed). Only
+                    // treat empty data as EOF when the child process is also
+                    // confirmed dead — otherwise drop the spurious wake and
+                    // keep listening.
+                    if await self?.isSidecarAlive() == true {
+                        return
+                    }
                     await self?.handleSidecarClosed()
                 } else {
                     await self?.ingestStdout(data)
@@ -388,8 +403,17 @@ public actor CursorRuntime {
 
     private func handleJSONRPCLine(_ line: Data) {
         guard !line.isEmpty,
-              let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
-              let id = Self.numericRequestId(from: obj["id"]),
+              let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else {
+            return
+        }
+        // Notification envelopes have a `method` and no `id` — route through the
+        // event dispatcher instead of the request/response correlation table.
+        if obj["id"] == nil || obj["id"] is NSNull,
+           let method = obj["method"] as? String {
+            handleNotification(method: method, params: obj["params"])
+            return
+        }
+        guard let id = Self.numericRequestId(from: obj["id"]),
               let cont = pendingRequests.removeValue(forKey: id) else {
             return
         }
@@ -406,6 +430,128 @@ public actor CursorRuntime {
         } else {
             cont.resume(returning: Data("{}".utf8))
         }
+    }
+
+    // MARK: - Event dispatch (PKT-3.4.1-RESCUE)
+
+    /// Cached per-run state populated by agent_run / agent_status responses and
+    /// updated incrementally by event payloads. Allows the event dispatcher to
+    /// post fully-formed `CursorRun` snapshots to the registry without an extra
+    /// round-trip on every status transition.
+    private var runCache: [String: CursorRun] = [:]
+
+    /// Persisted `lastEventId` per run for Last-Event-ID reconnect (SPEC §8).
+    private var lastEventIds: [String: String] = [:]
+
+    /// Update internal caches after a Bridge-issued request returns a fresh run.
+    /// Called from `agentRun`, `agentStatus`, `agentCancel`, and the response
+    /// handlers in `agentList`.
+    fileprivate func upsertCache(_ run: CursorRun) {
+        runCache[run.id] = run
+        if let leid = run.lastEventId { lastEventIds[run.id] = leid }
+        let snapshot = run
+        Task { @MainActor in
+            CursorAgentRegistry.shared.upsert(snapshot)
+        }
+    }
+
+    private func handleNotification(method: String, params raw: Any?) {
+        switch method {
+        case "cursor_event":
+            guard let params = raw as? [String: Any] else { return }
+            handleCursorEvent(params)
+        default:
+            // Unknown notification kind — drop silently for forward compatibility.
+            return
+        }
+    }
+
+    private func handleCursorEvent(_ params: [String: Any]) {
+        guard let runId = params["runId"] as? String,
+              let kind = params["kind"] as? String,
+              let eventId = params["id"] as? String,
+              let timestamp = params["timestamp"] as? String else {
+            return
+        }
+        let payload = (params["payload"] as? [String: String]) ?? [:]
+        lastEventIds[runId] = eventId
+
+        // Always emit a NotificationCenter signal — UI surfaces + watchdog reset.
+        NotificationCenter.default.post(
+            name: .cursorAgentEventReceived,
+            object: nil,
+            userInfo: [
+                "runId": runId,
+                "kind": kind,
+                "eventId": eventId,
+                "timestamp": timestamp,
+                "payload": payload
+            ]
+        )
+
+        // Update the cached run (if any) and feed the @MainActor registry.
+        let updated: CursorRun? = {
+            guard let prior = runCache[runId] else { return nil }
+            let mappedStatus: CursorRunStatus = {
+                if let s = payload["status"], let parsed = CursorRunStatus(rawValue: s) { return parsed }
+                return prior.status
+            }()
+            let isTerminal = (kind == "done") || (mappedStatus == .succeeded || mappedStatus == .failed || mappedStatus == .cancelled)
+            let next = CursorRun(
+                id: prior.id,
+                runtime: prior.runtime,
+                model: prior.model,
+                status: mappedStatus,
+                startedAt: prior.startedAt,
+                endedAt: isTerminal ? Date() : prior.endedAt,
+                costCents: prior.costCents,
+                repoPath: prior.repoPath,
+                prURL: payload["prURL"] ?? prior.prURL,
+                lastEventId: eventId
+            )
+            runCache[runId] = next
+            return next
+        }()
+
+        if let next = updated {
+            let snapshot = next
+            Task { @MainActor in
+                CursorAgentRegistry.shared.upsert(snapshot)
+            }
+        } else {
+            // No cached run yet — at minimum touch via registry to reset heartbeat.
+            Task { @MainActor in
+                CursorAgentRegistry.shared.touch(id: runId)
+            }
+        }
+
+        if kind == "error", let msg = payload["message"] {
+            Task { @MainActor in
+                CursorAgentRegistry.shared.recordError(id: runId, message: msg)
+            }
+        }
+
+        // Terminal: drain redaction audits + final run state to AI LOGS.
+        // Only fire on the explicit terminal "done" event so we never write
+        // twice for the same run.
+        if kind == "done", let finalRun = updated {
+            let drainedAudits = drainPendingRedactionAudits()
+            // Best-effort artifacts fetch — we may already have a PR URL on the
+            // CursorRun; that's the most common artifact for cloud runs.
+            var artifacts: [CursorArtifact] = []
+            if let pr = finalRun.prURL {
+                artifacts.append(CursorArtifact(kind: "pr_url", url: pr, label: "Cursor cloud PR"))
+            }
+            let snapshot = finalRun
+            Task {
+                await CursorAILogsWriter.shared.recordRun(snapshot, audits: drainedAudits, artifacts: artifacts)
+            }
+        }
+    }
+
+    private func isSidecarAlive() -> Bool {
+        if let p = process, p.isRunning { return true }
+        return false
     }
 
     private func handleSidecarClosed() {

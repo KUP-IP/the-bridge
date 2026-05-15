@@ -127,12 +127,59 @@ public actor CursorCostLedger {
 
     // MARK: Default store location
 
+    /// SPEC §7 canonical location — the sidecar dir owns the ledger.
+    /// The Swift actor still owns the writer; placing the file inside the
+    /// sidecar dir keeps the cost data co-located with the rest of the
+    /// Cursor adapter state (sessions/, dist/, etc).
     public nonisolated static func defaultStoreURL() -> URL {
+        let url = canonicalStoreURL()
+        migrateLegacyIfNeeded(to: url)
+        return url
+    }
+
+    private nonisolated static func canonicalStoreURL() -> URL {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return home.appendingPathComponent(
+            "Library/Application Support/NotionBridge/cursor-sidecar/cost-ledger.json",
+            isDirectory: false
+        )
+    }
+
+    /// Pre-PKT-3.4.1-RESCUE location. Retained for one-time migration only.
+    private nonisolated static func legacyStoreURL() -> URL {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return home.appendingPathComponent(
             "Library/Application Support/NotionBridge/cursor-cost-ledger.json",
             isDirectory: false
         )
+    }
+
+    /// One-shot migration: if a ledger exists at the legacy path but not at
+    /// the new canonical path, copy it (best-effort) and rename the legacy
+    /// file with a `.bak` suffix so future loads skip the migration.
+    private nonisolated static func migrateLegacyIfNeeded(to newURL: URL) {
+        let fm = FileManager.default
+        let legacy = legacyStoreURL()
+        guard fm.fileExists(atPath: legacy.path),
+              !fm.fileExists(atPath: newURL.path) else {
+            return
+        }
+        do {
+            let dir = newURL.deletingLastPathComponent()
+            if !fm.fileExists(atPath: dir.path) {
+                try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            }
+            try fm.copyItem(at: legacy, to: newURL)
+            let bak = legacy.appendingPathExtension("bak")
+            if fm.fileExists(atPath: bak.path) {
+                try? fm.removeItem(at: bak)
+            }
+            try fm.moveItem(at: legacy, to: bak)
+        } catch {
+            FileHandle.standardError.write(Data(
+                "[CursorCostLedger] migration failed: \(error.localizedDescription)\n".utf8
+            ))
+        }
     }
 
     // MARK: Configurable caps (UserDefaults override)

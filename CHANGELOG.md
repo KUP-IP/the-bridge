@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.2.1] — 2026-05-13 — Cursor Module Rescue (PKT-3.4.1-RESCUE)
+
+Live-wires the five `cursor_agent_*` sidecar methods that 2.2.0 shipped as `NOT_IMPLEMENTED` scaffolds (PKT-3.4.1.W2 was prematurely closed; this release closes the gap).
+
+### Fixed
+- **Sidecar `agent_run` / `agent_status` / `agent_list` / `agent_cancel` / `agent_artifacts`** now invoke `@cursor/sdk@1.0.12` (`Agent.create` → `agent.send` → `run.stream()` → `run.wait()`); each run emits structured `cursor_event` JSON-RPC notifications with monotonic `Last-Event-ID` to the Bridge.
+- **Swift event pump** in `CursorRuntime.handleJSONRPCLine` now detects notification envelopes (no `id`, has `method`) and routes through a new event dispatcher that posts `.cursorAgentEventReceived` + feeds `CursorAgentRegistry` (upsert/touch/recordError) — registry was previously inert.
+- **AI LOGS writer** (`CursorAILogsWriter`) drains terminal runs into a Session-typed entry in AI LOGS DS (`992fd5ac-d938-4be4-95fb-8ef18bd86bba`) with hash-only `Session Context` (sha256 promptHash; never the raw prompt).
+- **Info.plist** stamped to match `Version.swift` SSOT (was stuck at 1.9.5 / 26).
+
+### Changed
+- **Cost ledger relocated** to `~/Library/Application Support/NotionBridge/cursor-sidecar/cost-ledger.json` (SPEC §7 canonical path); one-shot legacy migration leaves `.bak` of the old `cursor-cost-ledger.json`.
+- Sidecar bumped to `0.2.0`; sessions persisted under `cursor-sidecar/sessions/<run_id>.json` for Last-Event-ID re-attach (SPEC §8).
+
+### Known Gaps
+- `@cursor/sdk@1.0.12` does not expose per-run cost; `costCents` recorded as `0` until SDK adds billing.
+- Sidecar re-attach loads session metadata on startup but does not reconstruct the live SDK `Run` handle (stream re-attach across Bridge restart deferred).
+
+### Verified
+- TypeScript build (`npm run build`) clean.
+- Swift `swift build -c debug` clean.
+- DoD 4 capability probe (cap_missing[10002] in 1.49s) confirmed live.
+- Live A1/B2/C5/5/6 — see PKT-778 `## Output` for receipts.
+
 ## [2.2.0] — 2026-05-13 — Agentic Dev Surface (consolidated release)
 
 Successor to the v2 _Done venture (PRJCT-2722, closed 2026-05-05). Closes the five highest-pain gaps from the W29 retro: long-running task supervision, code-aware editing, LSP diagnostics, dev-server/port orchestration, structured git + GitHub. Adds Cursor SDK delegation (programmatic Cursor agents via `@cursor/sdk`, local + cloud runtimes) and MAC UI extras (synthetic keyboard / mouse, mdfind, pasteboard).

@@ -39,4 +39,10 @@ public extension Notification.Name {
     /// userInfo: ["runId": String, "level": "yellow"|"red", "silentForSeconds": Int].
     /// At "red" level, dispatcher emits the CURSOR_AGENT_STALLED user notification.
     static let cursorAgentDidStall = Notification.Name("com.notionbridge.cursorAgentDidStall")
+
+    /// Posted for every CursorEvent received from the sidecar (PKT-3.4.1-RESCUE).
+    /// userInfo: ["runId": String, "kind": String, "eventId": String,
+    ///            "timestamp": String, "payload": [String: String]].
+    /// Observers: Dashboard agents surface (live token stream), heartbeat watchdog (reset).
+    static let cursorAgentEventReceived = Notification.Name("com.notionbridge.cursorAgentEventReceived")
 }

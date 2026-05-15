@@ -107,7 +107,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // PKT-332: Single-instance guard — prevent duplicate processes from
         // SMAppService login item + Terminal session restore + manual launch
-        guard ensureSingleInstance() else {
+        let allowMulti = CommandLine.arguments.contains("--multi-instance")
+        guard allowMulti || ensureSingleInstance() else {
             print("[Notion Bridge] Another instance is already running — exiting")
             NSApplication.shared.terminate(nil)
             return
@@ -363,12 +364,27 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             statusBar.removeClient(name: name)
         }
 
+        let args = CommandLine.arguments
+        var toolAllowlist: Set<String>? = nil
+        if let idx = args.firstIndex(of: "--allow-tools"), idx + 1 < args.count {
+            let path = args[idx + 1]
+            let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            if let data = try? Data(contentsOf: url),
+               let list = try? JSONDecoder().decode([String].self, from: data) {
+                toolAllowlist = Set(list)
+                print("[Notion Bridge] Loaded tool allowlist (\(toolAllowlist?.count ?? 0) tools) from \(path)")
+            } else {
+                print("[Notion Bridge] ⚠️ Failed to load allowlist from \(path)")
+            }
+        }
+
         let manager = ServerManager(
             onToolCall: {
                 statusBar.incrementToolCalls()
             },
             onClientConnected: onClientConnected,
-            onClientDisconnected: onClientDisconnected
+            onClientDisconnected: onClientDisconnected,
+            toolAllowlist: toolAllowlist
         )
         self.serverManager = manager
 
