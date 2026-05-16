@@ -21,13 +21,13 @@ public enum PaymentModule {
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
-                    "credential_service": .object([
+                    "credentialService": .object([
                         "type": .string("string"),
-                        "description": .string("Service name for the stored payment method credential")
+                        "description": .string("Service name for the stored payment method credential (legacy alias: credential_service)")
                     ]),
-                    "credential_account": .object([
+                    "credentialAccount": .object([
                         "type": .string("string"),
-                        "description": .string("Account name for the stored payment method credential")
+                        "description": .string("Account name for the stored payment method credential (legacy alias: credential_account)")
                     ]),
                     "amount": .object([
                         "type": .string("integer"),
@@ -41,27 +41,36 @@ public enum PaymentModule {
                         "type": .string("string"),
                         "description": .string("Optional payment description")
                     ]),
-                    "idempotency_key": .object([
+                    "idempotencyKey": .object([
                         "type": .string("string"),
-                        "description": .string("Client-supplied idempotency key (UUID recommended)")
+                        "description": .string("Client-supplied idempotency key (UUID recommended) (legacy alias: idempotency_key)")
                     ])
                 ]),
                 "required": .array([
-                    .string("credential_service"),
-                    .string("credential_account"),
+                    .string("credentialService"),
+                    .string("credentialAccount"),
                     .string("amount"),
-                    .string("idempotency_key")
+                    .string("idempotencyKey")
                 ])
             ]),
             handler: { arguments in
+                // v3.0·0.5: camelCase canonical; snake_case accepted as
+                // legacy alias (Q2 — connector-safe back-compat).
+                func str(_ camel: String, _ legacy: String) -> String? {
+                    if case .object(let a) = arguments {
+                        if case .string(let v)? = a[camel] { return v }
+                        if case .string(let v)? = a[legacy] { return v }
+                    }
+                    return nil
+                }
                 guard case .object(let args) = arguments,
-                      case .string(let credentialService) = args["credential_service"],
-                      case .string(let credentialAccount) = args["credential_account"],
+                      let credentialService = str("credentialService", "credential_service"),
+                      let credentialAccount = str("credentialAccount", "credential_account"),
                       case .int(let amount) = args["amount"],
-                      case .string(let idempotencyKey) = args["idempotency_key"] else {
+                      let idempotencyKey = str("idempotencyKey", "idempotency_key") else {
                     throw ToolRouterError.invalidArguments(
                         toolName: "payment_execute",
-                        reason: "missing required 'credential_service', 'credential_account', 'amount', or 'idempotency_key' parameter"
+                        reason: "missing required 'credentialService', 'credentialAccount', 'amount', or 'idempotencyKey' parameter"
                     )
                 }
 

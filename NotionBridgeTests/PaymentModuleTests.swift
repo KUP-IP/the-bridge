@@ -49,10 +49,12 @@ func runPaymentModuleTests() async {
             if case .string(let name) = value { return name }
             return nil
         }
-        try expect(requiredNames.contains("credential_service"), "Missing required field: credential_service")
-        try expect(requiredNames.contains("credential_account"), "Missing required field: credential_account")
+        // v3.0·0.5: keys renamed to camelCase (Q1); snake forms remain
+        // accepted by the handler as legacy aliases (Q2).
+        try expect(requiredNames.contains("credentialService"), "Missing required field: credentialService")
+        try expect(requiredNames.contains("credentialAccount"), "Missing required field: credentialAccount")
         try expect(requiredNames.contains("amount"), "Missing required field: amount")
-        try expect(requiredNames.contains("idempotency_key"), "Missing required field: idempotency_key")
+        try expect(requiredNames.contains("idempotencyKey"), "Missing required field: idempotencyKey")
     }
 
     await test("PaymentModule uses module name payment") {

@@ -417,14 +417,8 @@ public actor SSEServer {
             if let allowlist = toolAllowlist {
                 registrations = registrations.filter { allowlist.contains($0.name) }
             }
-            return .init(tools: registrations.map { reg in
-                Tool(
-                    name: reg.name,
-                    description: reg.description,
-                    inputSchema: reg.inputSchema,
-                    annotations: ToolAnnotationCatalog.resolved(for: reg.name).mcp
-                )
-            })
+            // v3.0·0.5: single source of truth — same factory as ServerManager.
+            return .init(tools: registrations.map { MCPToolFactory.tool(for: $0) })
         }
 
         await server.withMethodHandler(CallTool.self) { params in

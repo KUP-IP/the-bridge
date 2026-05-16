@@ -8,6 +8,27 @@
 import Foundation
 import MCP
 
+// MARK: - NotionQueryProjection (v3.0·0.5, PKT — agentic-usability)
+
+/// Pure, testable helper for the notion_query `properties` projection.
+/// AGENT_FEEDBACK + the v3.0·0.4 reflow both hit the same tax: results
+/// carried only id/title/url, so bucketing by Status forced N extra
+/// status-filtered queries. Given the requested column names, return the
+/// raw Notion property JSON (lossless string) per key so one query
+/// suffices.
+public enum NotionQueryProjection {
+    public static func pick(_ properties: [String: Any], keys: [String]) -> [String: String] {
+        var out: [String: String] = [:]
+        for key in keys {
+            guard let v = properties[key],
+                  let d = try? JSONSerialization.data(withJSONObject: v, options: [.fragmentsAllowed]),
+                  let s = String(data: d, encoding: .utf8) else { continue }
+            out[key] = s
+        }
+        return out
+    }
+}
+
 // MARK: - NotionModule
 
 /// Provides Notion workspace integration tools.
@@ -339,10 +360,19 @@ public enum NotionModule {
                     "sorts": .object(["type": .string("string"), "description": .string("Optional JSON string of sorts array")]),
                     "pageSize": .object(["type": .string("integer"), "description": .string("Max results (default: 100)")]),
                     "startCursor": .object(["type": .string("string"), "description": .string("Pagination cursor from previous query")]),
+                    "properties": .object(["type": .string("array"), "description": .string("Optional column names to project into each result row (raw Notion property JSON). Avoids N follow-up reads to bucket by Status/etc.")]),
                     "workspace": workspaceParam
                 ]),
                 "required": .array([.string("dataSourceId")])
             ]),
+            metadata: ToolMetadata(
+                title: "Notion: Query Data Source",
+                whenToUse: ["filtering/sorting rows of a Notion database",
+                            "need specific columns back — pass `properties` to avoid N follow-up reads"],
+                whenNotToUse: ["reading one page's body (use notion_page_markdown_read)",
+                               "discovering column names first (use notion_datasource_get)"],
+                relatedTools: ["notion_datasource_get", "notion_page_read", "notion_page_markdown_read"]
+            ),
             handler: { arguments in
                 guard case .object(let args) = arguments,
                       case .string(let dsId) = args["dataSourceId"] else {
@@ -351,6 +381,12 @@ public enum NotionModule {
 
                 let pageSize: Int = { if case .int(let ps) = args["pageSize"] { return min(ps, 100) }; return 100 }()
                 let startCursor: String? = { if case .string(let c) = args["startCursor"] { return c }; return nil }()
+                let projection: [String] = {
+                    if case .array(let arr)? = args["properties"] {
+                        return arr.compactMap { if case .string(let s) = $0 { return s }; return nil }
+                    }
+                    return []
+                }()
 
                 var filterData: Data? = nil
                 if case .string(let f) = args["filter"] { filterData = f.data(using: .utf8) }
@@ -401,11 +437,19 @@ public enum NotionModule {
                     if let properties = result["properties"] as? [String: Any] {
                         title = NotionJSON.extractTitle(from: properties)
                     }
-                    items.append(.object([
+                    var row: [String: Value] = [
                         "id": .string(id),
                         "title": .string(title),
                         "url": .string(url)
-                    ]))
+                    ]
+                    if !projection.isEmpty,
+                       let props = result["properties"] as? [String: Any] {
+                        let picked = NotionQueryProjection.pick(props, keys: projection)
+                        if !picked.isEmpty {
+                            row["properties"] = .object(picked.mapValues { .string($0) })
+                        }
+                    }
+                    items.append(.object(row))
                 }
 
                 var resultObj: [String: Value] = [
@@ -638,6 +682,14 @@ public enum NotionModule {
                 ]),
                 "required": .array([.string("pageId"), .string("text")])
             ]),
+            metadata: ToolMetadata(
+                title: "Notion: Create Comment",
+                whenToUse: ["posting a short inline comment on a page"],
+                whenNotToUse: ["text > 2000 chars (split first — preflight rejects with a structured hint)",
+                               "threaded replies (use notion_discussion_create)",
+                               "long code/text (use notion_code_block_append)"],
+                relatedTools: ["notion_discussion_create", "notion_comments_list", "notion_code_block_append"]
+            ),
             handler: { arguments in
                 guard case .object(let args) = arguments,
                       case .string(let pageId) = args["pageId"],

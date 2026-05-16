@@ -54,13 +54,24 @@ public enum SkillsModule {
 
     /// Build a compact instructions string containing the routing skill index.
     /// Called at session creation to embed in the MCP initialize response.
+    /// v3.0·0.5: tool-call contract surfaced in the MCP `instructions`
+    /// field (both transports). Dense by design — it ships in every
+    /// session's context. Tells an agent how to read/trust the tool surface.
+    public static let dispatchContract = """
+    Tool contract: parameter keys are camelCase (snake_case only for raw \
+    Notion-API value passthroughs). Each tool's description carries \
+    "When to use" / "Not for" / "Related" guidance — read it before \
+    selecting. On a wrong/missing parameter the error returns a \
+    "did you mean: x→y" hint; trust it and retry once.
+    """
+
     public static func buildRoutingInstructions() -> String {
         let skills = readAllSkills().filter {
             $0.enabled && $0.visibility == .routing
                 && NotionPageRef.isValidStoredPageId($0.notionPageId.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         guard !skills.isEmpty else {
-            return "NotionBridge MCP server. Call list_routing_skills to discover available skill-based capabilities."
+            return "NotionBridge MCP server. Call list_routing_skills to discover available skill-based capabilities.\n\n\(dispatchContract)"
         }
         // Build compact JSON routing index
         var lines: [String] = []
@@ -75,6 +86,8 @@ public enum SkillsModule {
         NotionBridge MCP server. \(skills.count) routing skill(s) available:
         \(lines.joined(separator: "\n"))
         Use fetch_skill to load full skill content by name. Call list_routing_skills to refresh this index.
+
+        \(dispatchContract)
         """
     }
 

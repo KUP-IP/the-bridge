@@ -57,9 +57,9 @@ public enum CredentialModule {
                         "type": .string("string"),
                         "description": .string("Cardholder name (card type only, optional).")
                     ]),
-                    "zip_code": .object([
+                    "zipCode": .object([
                         "type": .string("string"),
-                        "description": .string("Billing ZIP / postal code (card type only, optional).")
+                        "description": .string("Billing ZIP / postal code (card type only, optional). (legacy alias: zip_code)")
                     ]),
                     "syncToiCloud": .object([
                         "type": .string("boolean"),
@@ -99,9 +99,11 @@ public enum CredentialModule {
                     if case .string(let n) = metaDict["cardholder_name"] { metadata.cardholderName = n }
                     if case .string(let z) = metaDict["zip_code"] { metadata.zipCode = z }
                 }
-                // PKT-573: top-level name / zip_code (card type). Override metadata if provided.
+                // PKT-573: top-level name / zipCode (card type). Override metadata if provided.
+                // v3.0·0.5: zipCode is canonical; zip_code accepted as legacy alias (Q2).
                 if case .string(let n) = args["name"] { metadata.cardholderName = n }
-                if case .string(let z) = args["zip_code"] { metadata.zipCode = z }
+                if case .string(let z) = args["zipCode"] { metadata.zipCode = z }
+                else if case .string(let z) = args["zip_code"] { metadata.zipCode = z }
 
                 let sync: Bool = {
                     if case .bool(let s) = args["syncToiCloud"] { return s }

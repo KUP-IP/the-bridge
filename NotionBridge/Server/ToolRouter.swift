@@ -5,6 +5,38 @@
 import Foundation
 import MCP
 
+// MARK: - Tool Metadata (v3.0·0.5, PKT — agentic-usability)
+
+/// Structured, agent-facing selection signals. Optional and additive — a
+/// registration without metadata still works (renderer falls back to the
+/// raw `description`). These fields do NOT reach the MCP wire as distinct
+/// keys (the protocol carries only name/title/description/inputSchema/
+/// annotations); `BridgeToolDescriptionRenderer` folds them deterministically
+/// into the `description` string, and `title` populates the otherwise-unused
+/// MCP `Tool.Annotations.title`.
+public struct ToolMetadata: Sendable, Equatable, Hashable {
+    /// Short human title (e.g. "Notion Page Read"). nil → derived from name.
+    public let title: String?
+    /// 1–N concise "use this when …" clauses.
+    public let whenToUse: [String]
+    /// 1–N "do not use for … (use X)" clauses — steers away from misuse.
+    public let whenNotToUse: [String]
+    /// Sibling tool names an agent commonly needs alongside / instead.
+    public let relatedTools: [String]
+
+    public init(
+        title: String? = nil,
+        whenToUse: [String] = [],
+        whenNotToUse: [String] = [],
+        relatedTools: [String] = []
+    ) {
+        self.title = title
+        self.whenToUse = whenToUse
+        self.whenNotToUse = whenNotToUse
+        self.relatedTools = relatedTools
+    }
+}
+
 // MARK: - Tool Registration
 
 /// Metadata + handler for a single registered tool.
@@ -15,6 +47,9 @@ public struct ToolRegistration: Sendable {
     public let neverAutoApprove: Bool
     public let description: String
     public let inputSchema: Value
+    /// Optional structured selection signals (v3.0·0.5). Additive: nil for
+    /// the existing 162 call sites; the renderer degrades to `description`.
+    public let metadata: ToolMetadata?
     public let handler: @Sendable (Value) async throws -> Value
 
     public init(
@@ -24,6 +59,7 @@ public struct ToolRegistration: Sendable {
         neverAutoApprove: Bool = false,
         description: String,
         inputSchema: Value,
+        metadata: ToolMetadata? = nil,
         handler: @escaping @Sendable (Value) async throws -> Value
     ) {
         self.name = name
@@ -32,6 +68,7 @@ public struct ToolRegistration: Sendable {
         self.neverAutoApprove = neverAutoApprove
         self.description = description
         self.inputSchema = inputSchema
+        self.metadata = metadata
         self.handler = handler
     }
 }
@@ -297,7 +334,15 @@ public actor ToolRouter {
             }()
             return (text: text, isError: structuredFailure)
         } catch {
-            return (text: "Error: \(error.localizedDescription)", isError: true)
+            // v3.0·0.5: central param-misnomer recovery. If the agent sent
+            // a known wrong key, append a did-you-mean so it self-corrects
+            // without reading source. Applies to all 162 tools at once.
+            var msg = "Error: \(error.localizedDescription)"
+            if case .object(let argDict) = arguments,
+               let hint = BridgeToolAliases.didYouMean(providedKeys: Array(argDict.keys)) {
+                msg += " — \(hint)"
+            }
+            return (text: msg, isError: true)
         }
     }
 

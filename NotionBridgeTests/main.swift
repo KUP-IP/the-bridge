@@ -433,6 +433,9 @@ await runToolAnnotationAuditTests() // PKT-803 (v2.3 · WS-B): annotation covera
 await runTransportRouterTests()     // PKT-803 (v2.3 · WS-B): transport router default/env
 await runBridgeFeatureFlagsTests()  // PKT-798 (v2.3 · WS-C): fail-closed capability gates
 await runBridgeModuleRegistryTests() // PKT v3.0·0.4: single-source module registrar
+await runMCPToolFactoryTests()       // PKT v3.0·0.5: metadata contract + unified Tool factory
+await runToolConventionTests()       // PKT v3.0·0.5: P0 — aliases + key convention + dispatch contract
+await runToolMetadataAuthoringTests() // PKT v3.0·0.5: P1 — projection + authored-metadata render
 await runPlaywrightModuleTests()  // PKT-781 (v2.2 · 3.2a)
 await runVitestModuleTests()      // PKT-781 (v2.2 · 3.2a)
 await runLighthouseModuleTests()  // PKT-781 (v2.2 · 3.2a)

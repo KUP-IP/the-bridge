@@ -14,16 +14,17 @@
 # deleted, its tests) and WS-D/WS-B added the snippets + transport-router
 # suites, landing a verified-green baseline of 710. WS-C added 5
 # fail-closed BridgeFeatureFlags tests → 715. v3.0 prep 0.4 added 4
-# BridgeModuleRegistry single-source enforcement tests → the gate is now
-# locked at the actual verified green count of 719, not the stale stub
-# value (504). Per the
+# BridgeModuleRegistry single-source enforcement tests → 719. v3.0·0.5
+# added the MCP tool-metadata contract + P0/P1 guards (+13) → the gate is
+# now locked at the actual verified green count of 732, not the stale
+# stub value (504). Per the
 # order-inversion rule we never lower a green baseline to satisfy a stale
 # DoD number. Raising the floor when the suite legitimately grows is
 # expected; lowering it requires a conscious decision recorded alongside
 # the change.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-719}"
+FLOOR="${BRIDGE_TEST_FLOOR:-732}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."
