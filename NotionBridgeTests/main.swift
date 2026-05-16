@@ -390,6 +390,7 @@ await runLspModuleTests()
 await runFileModuleTests()
 await runSessionModuleTests()
 await runMessagesModuleTests()
+await runMessagesSuiteAuditTests()   // Messages-suite every-angle-of-attack audit
 await runSystemModuleTests()
 await runNotionModuleTests()
 await runAccessibilityModuleTests()

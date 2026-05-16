@@ -70,7 +70,7 @@ test:
 	@echo "✅ Tests complete"
 
 # WS-C (PKT-798) → v3.0·0.5 → Dev-suite audit: runs the suite + asserts
-# the green floor (776) and zero failures. Used by CI so a shrunk/disabled
+# the green floor (803) and zero failures. Used by CI so a shrunk/disabled
 # suite fails.
 test-floor:
 	./scripts/test-floor-gate.sh

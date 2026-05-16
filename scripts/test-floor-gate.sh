@@ -23,16 +23,26 @@
 # camelCase schema keys, non-thin rendered descriptions, inputSchema
 # sanity, requiresConfirmation/tier coherence, BridgeToolAliases
 # did-you-mean recovery), and DevSuiteEdgeTests (wrong-type / empty /
-# idempotency / capability-missing envelope hardening) → the gate is
-# now locked at the actual verified green count of 776, not the stale
-# stub value (504). Per the
+# idempotency / capability-missing envelope hardening) → 776. The
+# Messages-suite every-angle-of-attack audit then added 27 tests in
+# MessagesSuiteAuditTests (attributedBody decoder defect: stray leading
+# C0 control byte + U+FFFC object-replacement glyph in previews —
+# reproduced with deterministic typedstream fixtures and fixed at the
+# decodeAttributedBody boundary via sanitizeDecodedText; plus per-tool
+# wrong-type/empty/wrong-key hardening, camelCase schema-key + alias
+# convention, explicit-annotation + requiresConfirmation/tier coherence,
+# messages_send confirm-gate + raw-chatNNN ghost-thread guard — all
+# network/Messages.app-free, no live send — and ToolMetadata authored
+# steers rendered into the MCP description) → the gate is now locked at
+# the actual verified green count of 803, not the stale stub value (504).
+# Per the
 # order-inversion rule we never lower a green baseline to satisfy a stale
 # DoD number. Raising the floor when the suite legitimately grows is
 # expected; lowering it requires a conscious decision recorded alongside
 # the change.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-776}"
+FLOOR="${BRIDGE_TEST_FLOOR:-803}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."

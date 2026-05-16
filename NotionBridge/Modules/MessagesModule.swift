@@ -22,6 +22,24 @@
 // - Added performQuery() serialized query method
 // - Removed direct getConnection().query() calls from all handler closures
 //
+// V1-PATCH-004 changes (decode-boundary sanitizer — Messages-suite audit):
+// - BUGFIX: messages_recent / messages_chat / messages_content / messages_search
+//   previews carried a stray leading C0 control byte (e.g. "\u{0001}Sup dude",
+//   "\u{0001}Hello Isaiah") plus U+FFFC object-replacement glyphs. Root cause:
+//   the typedstream length-prefix heuristic miscounts 1–2 framing/object-version
+//   bytes into the text slice; trimmingCharacters(.whitespacesAndNewlines) does
+//   NOT remove control chars or U+FFFC.
+// - FIX: added sanitizeDecodedText() applied at the single decodeAttributedBody
+//   boundary (covers all three decode stages → all four read tools, one site).
+//   Strips leading/trailing C0/C1 control scalars (keeps \n \r \t) and removes
+//   U+FFFC anywhere. Behaviour-preserving for clean bodies.
+// - DEFERRAL (named): the *deeper* fix is an exact Apple typedstream
+//   length-framing parser so the framing prefix is never sliced into the
+//   payload (vs. stripped after). Deferred: the current parser handles ~99%
+//   of live blobs; a full rewrite risks regressing that 99% for a cosmetic
+//   gain the boundary sanitizer already neutralizes. Reason recorded here +
+//   in the executor return. Re-open if a non-prefix framing artifact surfaces.
+//
 // V1-PATCH-003 changes (typedstream decoder):
 // - BUGFIX: Replaced broken NSKeyedUnarchiver decode (silently fails on typedstream blobs)
 //   with proper typedstream binary parser that extracts NSString payload directly
@@ -202,18 +220,68 @@ public enum MessagesModule {
     private static func decodeAttributedBody(_ data: Data) -> String? {
         // Stage 1: Typedstream parser (handles ~99% of iMessage blobs)
         if let text = decodeTypedStream(data) {
-            return text
+            return sanitizeDecodedText(text)
         }
 
         // Stage 2: NSKeyedUnarchiver fallback (for rare bplist00 format blobs)
         if data.count > 8, data[0...7] == Data([0x62, 0x70, 0x6C, 0x69, 0x73, 0x74, 0x30, 0x30]) {
             if let text = decodeViaNSKeyedUnarchiver(data) {
-                return text
+                return sanitizeDecodedText(text)
             }
         }
 
         // Stage 3: Raw blob text extraction (last resort)
-        return extractTextFromBlob(data)
+        return extractTextFromBlob(data).flatMap(sanitizeDecodedText)
+    }
+
+    // MARK: - Decode Boundary Sanitizer
+
+    /// Scrub artifacts that the typedstream length-prefix heuristic and the
+    /// raw-blob scan can leak into an otherwise-correct decode:
+    ///
+    ///   1. Leading/trailing C0/C1 control bytes (U+0000–U+001F, U+007F–U+009F,
+    ///      except \n \r \t). Live evidence: previews rendered as
+    ///      "\u{0001}Sup dude" / "\u{0001}Hello Isaiah" — a stray 1–2 byte
+    ///      typedstream framing/object-version prefix the length decode
+    ///      miscounts into the slice. These degrade exactly the
+    ///      personal-thread previews triage depends on.
+    ///   2. U+FFFC OBJECT REPLACEMENT CHARACTER (the `￼` glyph) — emitted by
+    ///      iMessage for inline attachments/stickers; pure noise in a text
+    ///      preview, never user-authored content.
+    ///
+    /// This is a deterministic, behaviour-preserving boundary fix: a clean
+    /// ASCII/UTF-8 body is returned unchanged (no interior control bytes are
+    /// touched — only the leading/trailing framing artifact is stripped, so a
+    /// legitimate embedded tab/newline survives). The deeper fix (exact
+    /// typedstream length-framing so the prefix is never sliced in) is
+    /// recorded as a named deferral — see header DEFERRAL note.
+    public static func sanitizeDecodedText(_ raw: String) -> String? {
+        func isStrippableControl(_ s: Unicode.Scalar) -> Bool {
+            if s == "\n" || s == "\r" || s == "\t" { return false }
+            return (s.value <= 0x1F) || (s.value >= 0x7F && s.value <= 0x9F)
+        }
+        // Remove all U+FFFC object-replacement glyphs anywhere in the string.
+        var scalars = Array(raw.unicodeScalars.filter { $0.value != 0xFFFC })
+        // Strip leading strippable control scalars (the framing-prefix artifact).
+        while let first = scalars.first, isStrippableControl(first) {
+            scalars.removeFirst()
+        }
+        // Strip trailing strippable control scalars (rare trailing framing byte).
+        while let last = scalars.last, isStrippableControl(last) {
+            scalars.removeLast()
+        }
+        var out = ""
+        out.unicodeScalars.append(contentsOf: scalars)
+        let trimmed = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Public test seam: decode an `attributedBody` blob exactly as the read
+    /// tools do (all three stages + boundary sanitizer). Network/chat.db-free,
+    /// deterministic — used by MessagesSuiteAuditTests to assert no stray
+    /// control/U+FFFC artifacts leak into previews.
+    public static func decodeAttributedBodyForTesting(_ data: Data) -> String? {
+        decodeAttributedBody(data)
     }
 
     // MARK: - Typedstream Decoder
@@ -478,7 +546,7 @@ public enum MessagesModule {
             name: "messages_search",
             module: moduleName,
             tier: .open,
-            description: "Keyword-search message bodies across all Messages conversations. For sender-only lookups use contacts_resolve_handle.",
+            description: "Keyword-search message bodies across all Messages conversations.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -487,6 +555,14 @@ public enum MessagesModule {
                 ]),
                 "required": .array([.string("query")])
             ]),
+            metadata: ToolMetadata(
+                title: "Messages: Search",
+                whenToUse: ["finding messages that contain a specific word/phrase across every conversation",
+                            "locating a message before fetching its full content with messages_content"],
+                whenNotToUse: ["resolving who a phone/email belongs to (use contacts_resolve_handle)",
+                               "reading one person's whole thread (use messages_chat)"],
+                relatedTools: ["messages_chat", "messages_content", "contacts_resolve_handle"]
+            ),
             handler: { arguments in
                 guard case .object(let args) = arguments,
                       case .string(let query) = args["query"] else {
@@ -524,6 +600,14 @@ public enum MessagesModule {
                 ]),
                 "required": .array([])
             ]),
+            metadata: ToolMetadata(
+                title: "Messages: Recent Conversations",
+                whenToUse: ["triaging inbox — who messaged most recently and the last-message preview",
+                            "picking a contact/chat id to then drill into with messages_chat"],
+                whenNotToUse: ["reading the full thread for one contact (use messages_chat)",
+                               "fetching one specific message body (use messages_content)"],
+                relatedTools: ["messages_chat", "messages_content", "messages_participants"]
+            ),
             handler: { arguments in
                 let limit: Int = {
                     if case .object(let args) = arguments,
@@ -566,6 +650,14 @@ public enum MessagesModule {
                 ]),
                 "required": .array([.string("contact")])
             ]),
+            metadata: ToolMetadata(
+                title: "Messages: Read Thread",
+                whenToUse: ["reading the back-and-forth history with one person by phone/email",
+                            "after messages_recent surfaced the contact you want to drill into"],
+                whenNotToUse: ["keyword search across all chats (use messages_search)",
+                               "listing who is in a group chat (use messages_participants)"],
+                relatedTools: ["messages_recent", "messages_search", "messages_participants", "contacts_resolve_handle"]
+            ),
             handler: { arguments in
                 guard case .object(let args) = arguments,
                       case .string(let contact) = args["contact"] else {
@@ -603,6 +695,13 @@ public enum MessagesModule {
                 ]),
                 "required": .array([.string("messageId")])
             ]),
+            metadata: ToolMetadata(
+                title: "Messages: Message Detail",
+                whenToUse: ["pulling full text + service/attachment metadata for a ROWID returned by messages_search or messages_chat"],
+                whenNotToUse: ["browsing a conversation (use messages_chat)",
+                               "you only have a phone/email, not a ROWID (use messages_chat)"],
+                relatedTools: ["messages_search", "messages_chat"]
+            ),
             handler: { arguments in
                 guard case .object(let args) = arguments,
                       case .int(let msgId) = args["messageId"] else {
@@ -635,6 +734,14 @@ public enum MessagesModule {
                 ]),
                 "required": .array([.string("chatIdentifier")])
             ]),
+            metadata: ToolMetadata(
+                title: "Messages: Chat Participants",
+                whenToUse: ["resolving a group-chat id to the individual phones/emails in it",
+                            "before messages_send — turn a raw chatNNN id into real recipients"],
+                whenNotToUse: ["reading the messages themselves (use messages_chat)",
+                               "looking up a contact name (use contacts_search / contacts_resolve_handle)"],
+                relatedTools: ["messages_chat", "messages_send", "contacts_resolve_handle"]
+            ),
             handler: { arguments in
                 guard case .object(let args) = arguments,
                       case .string(let chatId) = args["chatIdentifier"] else {
@@ -657,17 +764,24 @@ public enum MessagesModule {
             name: "messages_send",
             module: moduleName,
             tier: .request,
-            description: "Send an iMessage/SMS to a recipient. Requires confirm: 'SEND'. Service auto-detected unless specified.",
+            description: "Send an iMessage/SMS to a recipient. Requires confirm: 'SEND' (exact, uppercase). Service auto-detected from chat history unless specified.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
-                    "recipient": .object(["type": .string("string"), "description": .string("Recipient phone number or email")]),
+                    "recipient": .object(["type": .string("string"), "description": .string("Recipient phone number or email (NOT a raw chatNNN id — resolve those with messages_participants first)")]),
                     "body": .object(["type": .string("string"), "description": .string("Message body text")]),
                     "confirm": .object(["type": .string("string"), "description": .string("Must be exactly 'SEND' to proceed")]),
                     "service": .object(["type": .string("string"), "description": .string("Optional: 'iMessage' or 'SMS'. Auto-detected from chat history if omitted. RCS recipients use 'SMS'.")])
                 ]),
                 "required": .array([.string("recipient"), .string("body"), .string("confirm")])
             ]),
+            metadata: ToolMetadata(
+                title: "Messages: Send",
+                whenToUse: ["sending an iMessage/SMS to a known phone or email — pass confirm:'SEND'"],
+                whenNotToUse: ["recipient is a raw chatNNN group id (resolve via messages_participants first)",
+                               "you only have a contact name (resolve via contacts_resolve_handle first)"],
+                relatedTools: ["messages_participants", "contacts_resolve_handle", "messages_chat"]
+            ),
             handler: { arguments in
                 guard case .object(let args) = arguments,
                       case .string(let recipient) = args["recipient"],
