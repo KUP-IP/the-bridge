@@ -415,6 +415,9 @@ await runSecurityAuditTests()
 // ============================================================
 
 await runCodeEditModuleTests()
+await runDevModuleTests()              // dev-suite audit: dev_module_info coverage
+await runDevSuiteAuditTests()          // dev-suite audit: cross-tool invariants
+await runDevSuiteEdgeTests()           // dev-suite audit: edge / attack surface
 await runSpotlightModuleTests()        // PKT-747 (v2.2 · 3.3)
 await runSyntheticInputModuleTests()   // PKT-747 (v2.2 · 3.3)
 await runMouseClickModuleTests()        // PKT-765 (v2.2 · 3.3.1)

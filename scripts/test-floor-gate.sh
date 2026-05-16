@@ -15,8 +15,16 @@
 # suites, landing a verified-green baseline of 710. WS-C added 5
 # fail-closed BridgeFeatureFlags tests → 715. v3.0 prep 0.4 added 4
 # BridgeModuleRegistry single-source enforcement tests → 719. v3.0·0.5
-# added the MCP tool-metadata contract + P0/P1 guards (+13) → the gate is
-# now locked at the actual verified green count of 732, not the stale
+# added the MCP tool-metadata contract + P0/P1 guards (+13) → 732. The
+# Dev-suite every-angle-of-attack audit then added 44 tests across three
+# new files: DevModuleTests (first-ever dev_module_info coverage — the
+# tool had shipped with zero tests and no runner), DevSuiteAuditTests
+# (48-tool cross-tool invariants: explicit annotation coverage,
+# camelCase schema keys, non-thin rendered descriptions, inputSchema
+# sanity, requiresConfirmation/tier coherence, BridgeToolAliases
+# did-you-mean recovery), and DevSuiteEdgeTests (wrong-type / empty /
+# idempotency / capability-missing envelope hardening) → the gate is
+# now locked at the actual verified green count of 776, not the stale
 # stub value (504). Per the
 # order-inversion rule we never lower a green baseline to satisfy a stale
 # DoD number. Raising the floor when the suite legitimately grows is
@@ -24,7 +32,7 @@
 # the change.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-732}"
+FLOOR="${BRIDGE_TEST_FLOOR:-776}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."
