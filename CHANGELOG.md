@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.0.0] — 2026-05-17 — Remote OAuth MCP Connector GA (PKT-800 S1–S3)
+
+v3.0 GA. Bridge is now reachable as a remote, OAuth-secured Streamable-HTTP MCP connector (the sellable surface), additive and isolated — stdio and legacy SSE are byte-for-byte unchanged when `BRIDGE_ENABLE_HTTP` is unset.
+
+### Added
+- **Streamable-HTTP transport gate** (`BRIDGE_ENABLE_HTTP=1`) via `TransportRouter`; route dispatch unified through a single-source `MCPHTTPRoute` classifier (no shadowing of `/health`, `/sse`, `/messages`, `/mcp`).
+- **RFC 9728 Protected Resource Metadata** at `/.well-known/oauth-protected-resource` — env-configurable issuer (`BRIDGE_OAUTH_ISSUER`), `resource` derived from the resolved SSE port, snake_case wire keys.
+- **OAuth 2.1 bearer validation** on the `/mcp` connector path via JWTKit (pinned `exact: 5.5.0`): JWS/JWKS verification, `iss`/`aud`/`exp`/`nbf`, fail-closed when unconfigured; `401` + `WWW-Authenticate` on missing/invalid bearer. Path B = WorkOS AuthKit managed IdP (Decision Log row 21).
+- **ScopeGate** mapping connector scopes → tool surface (default-deny allowlist; read vs write/destructive split); `403` on scope-deny, no dispatch.
+- **Step-up consent** on `destructiveHint` tools, **confused-deputy** session/principal binding (token-derived only), and a **bearer-leak redaction sweep** of connector diagnostics.
+
+### Notes
+- Validation against live WorkOS/Cloudflare/Claude/ChatGPT is deferred until that infra is provisioned (built + green against synthetic JWKS/test vectors). Connector-directory submission artifacts prepared for operator submission.
+
 ## [2.3.0] — 2026-05-15 — Cursor Retirement + Menu-Bar Quick-Page (PKT-804)
 
 v2.3 deck-clear. Retires the abandoned Cursor SDK integration and adds a menu-bar quick-page. Builds on the v2.2.1 rescue (landed per R1=Option A).
