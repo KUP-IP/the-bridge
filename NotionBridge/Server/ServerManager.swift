@@ -250,24 +250,33 @@ public actor ServerManager {
         try await sseServer.start()
     }
 
-    /// PKT-800 S1: the gated streamableHTTP seam, symmetric to `run()`'s
-    /// stdio guard. `BridgeTransport.streamableHTTP` is inactive in the
-    /// default config (stdio-only), so this throws unless
+    /// PKT-800 S1/S3 (corrected): the gated streamableHTTP seam, symmetric
+    /// to `run()`'s stdio guard. `BridgeTransport.streamableHTTP` is
+    /// inactive in the default config (stdio-only), so this throws unless
     /// `BRIDGE_ENABLE_HTTP=1` — keeping default behaviour byte-for-byte
-    /// unchanged. When active it serves the MCP session over the SDK's
-    /// `StatefulHTTPServerTransport`, sharing the exact same `ToolRouter`
-    /// / `MCPToolFactory` single source as stdio and legacy SSE (the
-    /// `SSEServer` actor owns the per-session transports). This is the
-    /// seam a later slice promotes to a first-class concurrent task; it
-    /// does NOT perturb stdio or the legacy SSE listener.
+    /// unchanged.
+    ///
+    /// IMPORTANT: the connector's `/mcp` endpoint is ALREADY served by the
+    /// shared `runSSE()` listener (the single `SSEServer` NIO listener
+    /// hosts `/mcp` via `StatefulHTTPServerTransport` since PKT-318/336).
+    /// This entrypoint exists ONLY as the gated seam/guard and must NEVER
+    /// bind a second listener: calling `sseServer.start()` here would
+    /// double-`bind` the same `127.0.0.1:<ssePort>` already bound by
+    /// `runSSE()` (second bind fails "address in use", silently swallowed).
+    /// It therefore enforces the gate and returns a non-binding NO-OP. The
+    /// invariant is exactly ONE listener bind ever; connector-auth gating
+    /// is handled independently in `setup()` where `connectorAuth` is built
+    /// iff `transportRouter.isActive(.streamableHTTP)`.
     public func runStreamableHTTP() async throws {
-        guard let sseServer = self.sseServer else {
+        guard self.sseServer != nil else {
             throw ServerManagerError.notSetUp
         }
         guard transportRouter.isActive(.streamableHTTP) else {
             throw ServerManagerError.transportInactive(.streamableHTTP)
         }
-        try await sseServer.start()
+        // Gated NO-OP: `/mcp` is served by the shared `runSSE()` listener.
+        // Do NOT call `sseServer.start()` — that would bind a second
+        // listener on the SSE port. This seam only proves the gate.
     }
 
     /// Whether the streamableHTTP transport is active in this process

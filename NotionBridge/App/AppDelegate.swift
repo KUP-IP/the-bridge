@@ -405,31 +405,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
 
-                // PKT-800 S3: streamableHTTP connector transport — ADDITIVE
-                // ISOLATION. This task is added to the group ONLY when the
-                // transport router has streamableHTTP active
-                // (`BRIDGE_ENABLE_HTTP=1`). With the env var unset
-                // `isStreamableHTTPActive` is false, this branch is not
-                // taken, and the task group is byte-for-byte the prior
-                // stdio+SSE pair — startup is unchanged. The gating
-                // decision itself is proven by a pure unit test
-                // (`ServerManager.isStreamableHTTPActive`) so the GUI app
-                // need not be launched to verify it. `runStreamableHTTP()`
-                // additionally re-checks the gate and throws if inactive,
-                // so this is a belt-and-suspenders guard, and it shares the
-                // exact same SSEServer/ToolRouter — it does not perturb
-                // `runSSE()` or stdio.
-                if manager.isStreamableHTTPActive {
-                    group.addTask {
-                        do {
-                            try await manager.runStreamableHTTP()
-                        } catch is CancellationError {
-                            print("[SSE] streamableHTTP connector transport cancelled")
-                        } catch {
-                            print("[SSE] streamableHTTP connector transport error: \(error.localizedDescription)")
-                        }
-                    }
-                }
+                // PKT-800 S3 (corrected): NO streamableHTTP task is added
+                // here. The connector's `/mcp` endpoint is already served
+                // by the unconditional `runSSE()` task above (the shared
+                // `SSEServer` NIO listener hosts `/mcp` via
+                // `StatefulHTTPServerTransport` since PKT-318/336). Adding a
+                // gated `runStreamableHTTP()` task would call
+                // `SSEServer.start()` a SECOND time concurrently and
+                // double-`bind` the same `127.0.0.1:<ssePort>` — the second
+                // bind fails "address in use" and is silently swallowed.
+                // Connector auth gating is independent of this task: it is
+                // built in `ServerManager.setup()` iff
+                // `transportRouter.isActive(.streamableHTTP)`
+                // (`BRIDGE_ENABLE_HTTP=1`), unchanged. With the env var
+                // unset this task group is byte-for-byte the prior
+                // stdio+SSE pair; with it set the only difference is the
+                // connector-auth context in the single shared listener — no
+                // second bind ever occurs.
             }
 
             await MainActor.run {

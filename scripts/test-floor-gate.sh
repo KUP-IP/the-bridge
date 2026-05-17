@@ -113,12 +113,25 @@
 # Bearer / JWS-triple / code_verifier / client_secret / access_token
 # redactor before storage; the bearer-leak sweep drives valid / invalid /
 # expired / scope-deny / step-up and asserts 0 token/secret occurrences in
-# the captured transcript (and in the redactor itself). (4) Promoted the
-# gated `runStreamableHTTP()` seam into AppDelegate's concurrent task group
-# ONLY when `manager.isStreamableHTTPActive` (BRIDGE_ENABLE_HTTP=1); env
-# unset ⇒ the task group is byte-for-byte the prior stdio+SSE pair (proven
-# by a pure gating-decision test — no GUI launch; runStreamableHTTP() also
-# re-checks the gate and throws when inactive). Folded the S2 hardening
+# the captured transcript (and in the redactor itself). (4) The connector
+# gate. Connector AUTH is constructed in `ServerManager.setup()` iff
+# `transportRouter.isActive(.streamableHTTP)` (BRIDGE_ENABLE_HTTP=1); env
+# unset ⇒ the AppDelegate task group is byte-for-byte the prior stdio+SSE
+# pair (proven by a pure gating-decision test — no GUI launch). S3-fix
+# correction (2026-05-17, this change): an earlier S3 draft ALSO added a
+# gated `runStreamableHTTP()` task to the AppDelegate task group. That was
+# a defect — `/mcp` is already served by the unconditional `runSSE()`
+# listener, so the extra task double-`bind`'d the SSE port (2nd bind
+# "address in use", silently swallowed; benign but misleading). Reconciled:
+# the redundant AppDelegate task is REMOVED and `runStreamableHTTP()` is
+# now a non-binding gated guard (throws transportInactive when off; a
+# NO-OP that returns when on — it never calls `sseServer.start()`). Net
+# invariant: exactly ONE listener bind ever; env-unset startup is
+# byte-for-byte identical to pre-S3; connector auth is still built iff
+# BRIDGE_ENABLE_HTTP=1 (unchanged in setup). The two gating tests were
+# re-titled/re-commented to assert the corrected single-bind invariant
+# (premises preserved — count unchanged at 897, no floor movement;
+# order-inversion rule honoured). Folded the S2 hardening
 # nit: explicit `alg:none` and `alg:HS256` (asymmetric→symmetric
 # confusion) literal token vectors are asserted rejected. Added
 # RemoteOAuthHardeningTests (23 harness `test()` blocks): step-up

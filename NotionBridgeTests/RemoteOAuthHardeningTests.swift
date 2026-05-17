@@ -14,9 +14,13 @@
 //     step-up through the connector path and assert the captured
 //     diagnostics transcript (and the redactor itself) contain ZERO
 //     bearer / code_verifier / client_secret occurrences.
-//   • AppDelegate gating decision: streamableHTTP task is added ONLY when
-//     the transport router has it active (env on/off) — proven via the
-//     pure `ServerManager.isStreamableHTTPActive` gate, no GUI launch.
+//   • Connector gating decision (single-bind invariant): connector auth
+//     is constructed ONLY when the transport router has streamableHTTP
+//     active (env on/off) — proven via the pure
+//     `ServerManager.isStreamableHTTPActive` gate, no GUI launch. There is
+//     NO second listener bind: `/mcp` is served by the unconditional
+//     `runSSE()` listener and `runStreamableHTTP()` is a non-binding gated
+//     guard (throws when inactive, NO-OP when active).
 //   • S2 hardening nit: explicit `alg:none` and `alg:HS256`
 //     (asymmetric→symmetric confusion) literal token vectors are rejected.
 //   • Non-regression: stdio / health / legacy SSE classification needs no
@@ -386,27 +390,40 @@ func runRemoteOAuthHardeningTests() async {
         try expect(!txt.contains("topsecret"), "client_secret stored unredacted")
     }
 
-    // MARK: - AppDelegate gating decision (no GUI launch)
+    // MARK: - Connector gating decision (no GUI launch, single-bind invariant)
 
-    await test("Gating: streamableHTTP task is added ONLY when transport active (env=1)") {
+    await test("Gating: streamableHTTP is active ONLY when transport enabled (env=1)") {
+        // CORRECTED (S3 fix): there is NO second AppDelegate task and NO
+        // second listener bind. `/mcp` is served by the single
+        // unconditional `runSSE()` listener; this gate decides only
+        // whether connector AUTH is constructed (in `ServerManager.setup`,
+        // `connectorAuth != nil` iff streamableHTTP active). This test
+        // proves the pure gating read — both arms — without binding.
         let m = ServerManager(onToolCall: {})
         // The harness must not set BRIDGE_ENABLE_HTTP → default off.
         try expect(!m.isStreamableHTTPActive,
-                   "default config must NOT add the streamableHTTP task")
-        // The gate is a pure read of TransportRouter — prove both arms.
+                   "default config must keep the connector gate off")
         let off = TransportRouter(environment: [:])
-        try expect(!off.isActive(.streamableHTTP), "env-unset must keep connector task off")
+        try expect(!off.isActive(.streamableHTTP), "env-unset must keep connector gate off")
         let on = TransportRouter(environment: ["BRIDGE_ENABLE_HTTP": "1"])
-        try expect(on.isActive(.streamableHTTP), "env=1 must add the connector task")
+        try expect(on.isActive(.streamableHTTP), "env=1 must open the connector gate")
         try expect(on.isActive(.stdio), "stdio non-regression: stdio still active with HTTP on")
     }
 
-    await test("Gating: runStreamableHTTP() throws when inactive (belt-and-suspenders)") {
+    await test("Gating: runStreamableHTTP() is a non-binding gated guard (throws when inactive, never a 2nd bind)") {
+        // CORRECTED INVARIANT (S3 fix): `/mcp` is served by the shared
+        // `runSSE()` listener. `runStreamableHTTP()` is ONLY the gated
+        // seam/guard — it MUST NOT call `sseServer.start()` (a second bind
+        // on the SSE port). When inactive it throws transportInactive;
+        // when active it is a non-binding NO-OP that returns. The default
+        // (harness) config is inactive, so we assert the throw arm here —
+        // the assertion message records that the contract is "throw, not
+        // bind", which is exactly the single-bind invariant.
         let m = ServerManager(onToolCall: {})
         _ = await m.setup()
         do {
             try await m.runStreamableHTTP()
-            throw TestError.assertion("inactive streamableHTTP must throw, not bind")
+            throw TestError.assertion("inactive streamableHTTP must throw, not bind a 2nd listener")
         } catch let e as ServerManagerError {
             guard case .transportInactive(let t) = e, t == .streamableHTTP else {
                 throw TestError.assertion("expected transportInactive(.streamableHTTP), got \(e)")

@@ -118,6 +118,14 @@ public struct ConnectorStepUpGate: Sendable {
         }
         let hasStepUpScope = grantedScopes.contains { $0.name == Self.stepUpScopeName }
         if hasStepUpScope { return .satisfied }
+        // THREAT MODEL (honest): the per-call `_stepUp`/`stepUpToken`
+        // argument is a *consent signal only*, NOT an anti-automation
+        // control. `hasConfirmationToken` accepts ANY non-empty string —
+        // there is no nonce, binding, or server-side verification of its
+        // value, so an automated client can trivially supply one. The
+        // strong, non-bypassable factor is the AS-minted
+        // `connector.step_up` scope above; this per-call path only records
+        // that the caller asserted an explicit per-action confirmation.
         if Self.hasConfirmationToken(in: body) { return .satisfied }
         return .required(
             reason: .stepUpRequired,
@@ -130,10 +138,11 @@ public struct ConnectorStepUpGate: Sendable {
 
 // MARK: - 2. Confused-deputy isolation
 
-/// The verified identity a bearer asserts: its subject and the connector
-/// client it was minted for. The client id is the token's `azp`/`client_id`
-/// when present, otherwise the subject — either way it is derived from the
-/// *verified* token, never from caller-supplied request fields.
+/// The verified identity a bearer asserts. `BridgeAccessToken` carries no
+/// `azp`/`client_id` claim, so in practice `clientID == subject` always
+/// (see `BridgeAccessToken.connectorPrincipal`): isolation is per-subject,
+/// not per-client. Either field is derived ONLY from the *verified* token,
+/// never from caller-supplied request fields.
 public struct ConnectorPrincipal: Sendable, Equatable, Hashable {
     public let subject: String
     public let clientID: String
@@ -317,10 +326,14 @@ public actor ConnectorAuthDiagnostics {
 // MARK: - Principal extraction from a verified token
 
 public extension BridgeAccessToken {
-    /// The connector principal this verified token asserts. `clientID`
-    /// prefers an explicit client claim if the token carried one; absent
-    /// that it falls back to the subject. Derived ONLY from verified
-    /// claims — never from request-supplied fields — so it cannot be
+    /// The connector principal this verified token asserts. NOTE:
+    /// `BridgeAccessToken` decodes only `iss, aud, sub, exp, nbf, scope` —
+    /// there is no `azp`/`client_id` claim — so `clientID` is ALWAYS the
+    /// `subject` (the principal is subject-only / sub-derived). This is an
+    /// accepted model: two OAuth clients that share one `sub` are NOT
+    /// distinguished from each other, i.e. there is no per-client
+    /// isolation, only per-subject isolation. Derived ONLY from verified
+    /// claims — never from request-supplied fields — so it still cannot be
     /// spoofed by a confused-deputy caller.
     var connectorPrincipal: ConnectorPrincipal {
         ConnectorPrincipal(subject: subject, clientID: subject)
