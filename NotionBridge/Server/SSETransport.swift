@@ -408,10 +408,24 @@ public actor SSEServer {
             let authHeader = request.header(HTTPHeaderName.authorization)
             do {
                 let token = try await auth.validator.validate(authorizationHeader: authHeader)
+                // Diagnostic: bearer accepted. `detail` is redacted by the
+                // sink; we deliberately pass NO token material here.
+                await auth.diagnostics.record(
+                    outcome: "bearer.accepted",
+                    detail: "method=\(request.method) sub-len=\(token.subject.count)"
+                )
                 return await dispatchAuthorizedConnectorRequest(request, token: token, auth: auth)
             } catch let err as BearerValidationError {
+                await auth.diagnostics.record(
+                    outcome: "bearer.rejected",
+                    detail: "reason=\(err.wwwAuthenticateError) header=\(authHeader ?? "<none>")"
+                )
                 return Self.unauthorizedResponse(for: err, auth: auth)
             } catch {
+                await auth.diagnostics.record(
+                    outcome: "bearer.rejected",
+                    detail: "reason=opaque \(error)"
+                )
                 return Self.unauthorizedResponse(
                     for: .malformedToken("\(error)"), auth: auth
                 )
@@ -484,30 +498,100 @@ public actor SSEServer {
         return name
     }
 
-    /// Post-bearer connector dispatch. The bearer is already verified; if
-    /// the body is a `tools/call`, the scope gate must allow it before the
-    /// request reaches the shared session machinery. Non-`tools/call`
-    /// connector traffic (initialize, tools/list, ping, notifications,
-    /// DELETE) passes the bearer gate only — scope binds tool *dispatch*.
+    /// Builds a structured, machine-readable `403`-class connector refusal
+    /// (authenticated, but the request is not authorized to proceed). The
+    /// `reason` token is stable and distinct from the 401 bearer challenge
+    /// so a client can branch on it. Pure given its inputs.
+    public static func forbiddenResponse(
+        reason: String,
+        message: String
+    ) -> HTTPResponse {
+        .error(
+            statusCode: 403,
+            .invalidRequest("Forbidden [\(reason)]: \(message)")
+        )
+    }
+
+    /// Post-bearer connector dispatch. The bearer is already verified.
+    ///
+    /// Order (all NO-dispatch on failure, distinct machine-readable
+    /// reasons):
+    ///   1. Confused-deputy isolation — the verified principal is bound to
+    ///      the MCP session; a later request on that session with a
+    ///      different principal is rejected (token substitution / session
+    ///      hijack across connector clients).
+    ///   2. Scope gate — the granted scopes must reach the target tool.
+    ///   3. Step-up consent — a `destructiveHint: true` connector tool
+    ///      additionally requires a verified step-up scope or a per-call
+    ///      confirmation token.
+    ///
+    /// Non-`tools/call` connector traffic (initialize, tools/list, ping,
+    /// notifications, DELETE) passes the bearer + confused-deputy gates
+    /// only — scope and step-up bind tool *dispatch*.
     private func dispatchAuthorizedConnectorRequest(
         _ request: HTTPRequest,
         token: BridgeAccessToken,
         auth: ConnectorAuthContext
     ) async -> HTTPResponse {
+        // 1. Confused-deputy isolation. The principal is derived from the
+        //    VERIFIED token only (never request-supplied fields), then
+        //    bound to the session id. A mismatch ⇒ a different client's
+        //    token is being replayed through this session.
+        let sessionID = request.header(HTTPHeaderName.sessionID)
+        let admission = await auth.sessionBinding.admit(
+            sessionID: sessionID,
+            principal: token.connectorPrincipal
+        )
+        if case .rejected(let refusal) = admission {
+            await auth.diagnostics.record(
+                outcome: "confused-deputy.rejected",
+                detail: "session principal substitution refused"
+            )
+            return Self.forbiddenResponse(
+                reason: refusal.rawValue,
+                message: "this session is bound to a different connector "
+                    + "principal; cross-client token substitution is refused"
+            )
+        }
+
         if let toolName = Self.toolCallTarget(in: request.body) {
+            // 2. Scope gate.
             let decision = await auth.scopeGate.evaluate(
                 toolName: toolName,
                 grantedScopes: token.connectorScopes
             )
             if case .deny(let reason) = decision {
-                // Structured refusal — NO dispatch. 403 = authenticated
-                // but scope-insufficient (distinct from the 401 bearer
-                // challenge).
-                return .error(
-                    statusCode: 403,
-                    .invalidRequest("Forbidden: \(reason)")
+                await auth.diagnostics.record(
+                    outcome: "scope.denied",
+                    detail: "tool=\(toolName)"
+                )
+                // 403 = authenticated but scope-insufficient (distinct
+                // from the 401 bearer challenge).
+                return Self.forbiddenResponse(
+                    reason: "insufficient_scope", message: reason
                 )
             }
+
+            // 3. Step-up consent on destructive connector tools.
+            let stepUp = auth.stepUpGate.evaluate(
+                toolName: toolName,
+                grantedScopes: token.connectorScopes,
+                body: request.body
+            )
+            if case .required(let reason, let message) = stepUp {
+                await auth.diagnostics.record(
+                    outcome: "step-up.required",
+                    detail: "tool=\(toolName)"
+                )
+                // 403-class structured refusal — NO dispatch.
+                return Self.forbiddenResponse(
+                    reason: reason.rawValue, message: message
+                )
+            }
+            await auth.diagnostics.record(
+                outcome: "dispatch.authorized",
+                detail: "tool=\(toolName)"
+            )
         }
         return await processStreamableHTTP(request)
     }

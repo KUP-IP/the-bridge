@@ -91,6 +91,48 @@
 # unaffected), and the PRM-port-override fix. 827 + 47 = 874. The literal
 # harness summary was `Results: 874 passed, 0 failed, 874 total`. No other
 # suite changed; the prior 827 ran byte-for-byte unchanged.
+# PKT-800 S3 (remote OAuth/HTTP, slice 3, final, 2026-05-17): landed the
+# four S3 hardening primitives on the connector path ONLY (additive
+# isolation preserved — connectorAuth is still nil in every default
+# stdio-only config, so the prior 874 ran byte-for-byte unchanged).
+# (1) ConnectorStepUpGate: a connector `tools/call` whose target is
+# `destructiveHint:true` (single-source ToolAnnotationCatalog) now needs,
+# beyond a valid bearer+scope, an explicit step-up signal — a verified
+# `connector.step_up` scope OR a per-call `_stepUp`/`stepUpToken`
+# confirmation token; absent ⇒ a structured 403 with stable
+# machine-readable reason `step_up_required`, NO dispatch. Non-destructive
+# tools and stdio/local dispatch are unaffected (no step-up there).
+# (2) ConnectorSessionBinding: confused-deputy isolation — the principal
+# derived from the VERIFIED token (never request fields) is bound to the
+# MCP session on first authorized use; a later request on that session
+# carrying a different principal is refused (403,
+# `session_principal_mismatch`), so a token minted for one connector
+# client/session cannot act through another's. (3) ConnectorAuthDiagnostics:
+# a redaction-asserting sink — the connector path emits structured auth
+# events through a recorder that runs every detail through a shape-based
+# Bearer / JWS-triple / code_verifier / client_secret / access_token
+# redactor before storage; the bearer-leak sweep drives valid / invalid /
+# expired / scope-deny / step-up and asserts 0 token/secret occurrences in
+# the captured transcript (and in the redactor itself). (4) Promoted the
+# gated `runStreamableHTTP()` seam into AppDelegate's concurrent task group
+# ONLY when `manager.isStreamableHTTPActive` (BRIDGE_ENABLE_HTTP=1); env
+# unset ⇒ the task group is byte-for-byte the prior stdio+SSE pair (proven
+# by a pure gating-decision test — no GUI launch; runStreamableHTTP() also
+# re-checks the gate and throws when inactive). Folded the S2 hardening
+# nit: explicit `alg:none` and `alg:HS256` (asymmetric→symmetric
+# confusion) literal token vectors are asserted rejected. Added
+# RemoteOAuthHardeningTests (23 harness `test()` blocks): step-up
+# required-vs-satisfied (scope + per-call token + blank-token negative) on
+# a destructive tool, non-destructive unaffected, three step-up E2E
+# drives, confused-deputy pure+E2E (bind/match/reject/sessionless/release/
+# cross-client substitution), the redactor + full-path bearer-leak sweep
+# (0 hits) + record-cannot-store-unredacted, the AppDelegate on/off gating
+# decision + inactive-throws guard, alg:none + HS256-confusion vectors,
+# and stdio/health/legacy non-regression. 874 + 23 = 897. The literal
+# harness summary was `Results: 897 passed, 0 failed, 897 total`. No other
+# suite changed; the prior 874 ran byte-for-byte unchanged. NOT in this
+# slice (explicit carry-forward, not implemented): splitting a dedicated
+# `contacts.read` scope out of `voice.resolve`.
 # Per the
 # order-inversion rule we never lower a green baseline to satisfy a stale
 # DoD number. Raising the floor when the suite legitimately grows is
@@ -98,7 +140,7 @@
 # the change.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-874}"
+FLOOR="${BRIDGE_TEST_FLOOR:-897}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."

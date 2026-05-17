@@ -18,6 +18,16 @@ import Foundation
 public struct ConnectorAuthContext: Sendable {
     public let validator: ConnectorBearerValidator
     public let scopeGate: ConnectorScopeGate
+    /// WS-F S3: step-up consent on destructive connector tools.
+    public let stepUpGate: ConnectorStepUpGate
+    /// WS-F S3: confused-deputy isolation — binds the verified principal
+    /// to its MCP session and rejects cross-client/token substitution.
+    public let sessionBinding: ConnectorSessionBinding
+    /// WS-F S3: redaction-asserting connector-auth diagnostics sink. The
+    /// only place the connector path emits auth events; every detail is
+    /// redacted before storage so the bearer-leak sweep can prove zero
+    /// secret occurrences.
+    public let diagnostics: ConnectorAuthDiagnostics
     /// Absolute URL of the RFC 9728 Protected Resource Metadata document,
     /// referenced from the `WWW-Authenticate` challenge so a client knows
     /// where to discover the authorization server.
@@ -26,10 +36,16 @@ public struct ConnectorAuthContext: Sendable {
     public init(
         validator: ConnectorBearerValidator,
         scopeGate: ConnectorScopeGate = ConnectorScopeGate(),
+        stepUpGate: ConnectorStepUpGate = ConnectorStepUpGate(),
+        sessionBinding: ConnectorSessionBinding = ConnectorSessionBinding(),
+        diagnostics: ConnectorAuthDiagnostics = ConnectorAuthDiagnostics(),
         resourceMetadataURL: String
     ) {
         self.validator = validator
         self.scopeGate = scopeGate
+        self.stepUpGate = stepUpGate
+        self.sessionBinding = sessionBinding
+        self.diagnostics = diagnostics
         self.resourceMetadataURL = resourceMetadataURL
     }
 

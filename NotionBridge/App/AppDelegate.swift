@@ -404,6 +404,32 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                         print("[SSE] Transport error: \(error.localizedDescription)")
                     }
                 }
+
+                // PKT-800 S3: streamableHTTP connector transport — ADDITIVE
+                // ISOLATION. This task is added to the group ONLY when the
+                // transport router has streamableHTTP active
+                // (`BRIDGE_ENABLE_HTTP=1`). With the env var unset
+                // `isStreamableHTTPActive` is false, this branch is not
+                // taken, and the task group is byte-for-byte the prior
+                // stdio+SSE pair — startup is unchanged. The gating
+                // decision itself is proven by a pure unit test
+                // (`ServerManager.isStreamableHTTPActive`) so the GUI app
+                // need not be launched to verify it. `runStreamableHTTP()`
+                // additionally re-checks the gate and throws if inactive,
+                // so this is a belt-and-suspenders guard, and it shares the
+                // exact same SSEServer/ToolRouter — it does not perturb
+                // `runSSE()` or stdio.
+                if manager.isStreamableHTTPActive {
+                    group.addTask {
+                        do {
+                            try await manager.runStreamableHTTP()
+                        } catch is CancellationError {
+                            print("[SSE] streamableHTTP connector transport cancelled")
+                        } catch {
+                            print("[SSE] streamableHTTP connector transport error: \(error.localizedDescription)")
+                        }
+                    }
+                }
             }
 
             await MainActor.run {
