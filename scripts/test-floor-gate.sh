@@ -57,6 +57,39 @@
 # mis-described an arithmetically-correct result; corrected here per the
 # honest-ledger rule. No other suite changed.) No token/bearer
 # validation, ScopeGate conformer, DCR or consent in this slice (deferred).
+# PKT-800 S2 (remote OAuth/HTTP, slice 2, 2026-05-17): landed the deferred
+# token/bearer + ScopeGate pieces. Added JWTKit 5.5.0 (vapor/jwt-kit,
+# swift-tools 6.0, swift-crypto backed — no vendored BoringSSL; pinned
+# `exact: 5.5.0`, Package.resolved committed) for RFC 7515/7517 JWS+JWKS
+# verification. New ConnectorBearerValidator validates
+# `Authorization: Bearer <jwt>` on the `/mcp` Streamable-HTTP connector
+# funnel ONLY (signature vs an injectable JWTKeyCollection / env
+# BRIDGE_OAUTH_JWKS inline-JSON-or-local-file — never the network; iss ==
+# resolved issuer, aud == resolved resource, exp/nbf), with fail-closed
+# behaviour when no keys are configured. New ConnectorScopeGate is the
+# ScopeGating conformer (snippets.read/write read-vs-write split with
+# write⊇read, runners.exec → command/process/job surface, voice.resolve →
+# handle resolution; non-connector tools denied — allowlist not blocklist).
+# Both are wired behind an Optional ConnectorAuthContext on SSEServer that
+# is nil in every default (stdio-only) configuration, so stdio / legacy
+# SSE / /health / job-callback / the /mcp session contract stay
+# byte-for-byte identical (additive isolation; the existing 827 are
+# unchanged). Missing/invalid bearer on a gated /mcp → 401 +
+# `WWW-Authenticate: Bearer …, resource_metadata="…"` (RFC 6750 §3 + RFC
+# 9728 §5.1); scope-insufficient tools/call → 403 with NO dispatch. Also
+# fixed the S1 finding: ProtectedResourceMetadataProvider.resource now
+# derives from the resolved SSE port (config.json → NOTION_BRIDGE_PORT →
+# 9700) instead of a hardcoded 9700, and the NotionBridgeTests target now
+# declares explicit NIOHTTP1 + NIOCore products. Added RemoteOAuthBearerTests
+# (47 harness `test()` blocks): header extraction, accept/expired/nbf/
+# wrong-iss/wrong-aud/bad-sig/malformed/missing/fail-closed validation,
+# ScopeGate allow-vs-deny + write⊇read + non-connector denial + exhaustive
+# required-scope table, 401/WWW-Authenticate challenge shape + injection
+# safety, the connectorAuth==nil additive-isolation non-regression
+# (default SSEServer requires no bearer on /mcp; /health & legacy SSE
+# unaffected), and the PRM-port-override fix. 827 + 47 = 874. The literal
+# harness summary was `Results: 874 passed, 0 failed, 874 total`. No other
+# suite changed; the prior 827 ran byte-for-byte unchanged.
 # Per the
 # order-inversion rule we never lower a green baseline to satisfy a stale
 # DoD number. Raising the floor when the suite legitimately grows is
@@ -64,7 +97,7 @@
 # the change.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-827}"
+FLOOR="${BRIDGE_TEST_FLOOR:-874}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."

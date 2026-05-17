@@ -79,6 +79,30 @@ public actor ServerManager {
         let onToolCall = self.onToolCall
         let onClientConnected = self.onClientConnected
         let onClientDisconnected = self.onClientDisconnected
+
+        // PKT-800 S2: connector bearer/scope context is built ONLY when
+        // the streamableHTTP transport is gated on (`BRIDGE_ENABLE_HTTP=1`).
+        // In every default install the transport router is stdio-only, so
+        // this stays `nil` and `SSEServer` runs byte-for-byte as before —
+        // the legacy SSE listener / `/health` / job callback / stdio are
+        // untouched. Keys are resolved from `BRIDGE_OAUTH_JWKS` (inline
+        // JSON or a local file — never the network); absent ⇒ a
+        // fail-closed validator that rejects every bearer.
+        let connectorAuth: ConnectorAuthContext? = await {
+            guard transportRouter.isActive(.streamableHTTP) else { return nil }
+            let issuer = ProtectedResourceMetadataProvider.resolvedIssuer()
+            let resource = ProtectedResourceMetadataProvider.resolvedResource(port: ssePort)
+            let validator = await ConnectorBearerValidator.fromEnvironment(
+                expectedIssuer: issuer,
+                expectedAudience: resource
+            )
+            return ConnectorAuthContext(
+                validator: validator,
+                resourceMetadataURL:
+                    "http://127.0.0.1:\(ssePort)/.well-known/oauth-protected-resource"
+            )
+        }()
+
         let sseServer = SSEServer(
             host: "127.0.0.1",
             port: ssePort,
@@ -86,7 +110,8 @@ public actor ServerManager {
             onToolCall: onToolCall,
             onClientConnected: onClientConnected,
             onClientDisconnected: onClientDisconnected,
-            sessionTimeout: ConfigManager.shared.sessionTimeout
+            sessionTimeout: ConfigManager.shared.sessionTimeout,
+            connectorAuth: connectorAuth
         )
         self.sseServer = sseServer
 

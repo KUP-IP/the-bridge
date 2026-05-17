@@ -154,6 +154,16 @@ public actor SSEServer {
     private let sessionCleanupInterval: TimeInterval
     private let maxHTTPSessions: Int
     private let toolAllowlist: Set<String>?
+
+    /// PKT-800 S2: connector bearer/scope enforcement bundle. **`nil` in
+    /// every default configuration** (stdio-only — `BRIDGE_ENABLE_HTTP`
+    /// unset / no JWKS configured), which is the additive-isolation
+    /// invariant: when `nil`, `handleHTTPRequest` runs exactly as it did
+    /// pre-S2, so stdio, legacy SSE, `/health`, the job callback, and the
+    /// `/mcp` path itself are byte-for-byte behaviour-identical. Bearer +
+    /// scope are enforced ONLY when this is non-nil AND only on the
+    /// Streamable-HTTP connector funnel (`handleHTTPRequest`).
+    private let connectorAuth: ConnectorAuthContext?
     private var totalSessionsCreated = 0
     private var totalSessionsExpired = 0
     private var totalSessionsEvicted = 0
@@ -197,7 +207,8 @@ public actor SSEServer {
         sessionTimeout: TimeInterval = 300,
         sessionCleanupInterval: TimeInterval = 30,
         maxHTTPSessions: Int = 48,
-        toolAllowlist: Set<String>? = nil
+        toolAllowlist: Set<String>? = nil,
+        connectorAuth: ConnectorAuthContext? = nil
     ) {
         let normalizedSessionTimeout = sessionTimeout.isInfinite ? .infinity : max(30, sessionTimeout)
         self.host = host
@@ -212,6 +223,7 @@ public actor SSEServer {
             : max(5, min(normalizedSessionTimeout, sessionCleanupInterval))
         self.maxHTTPSessions = max(8, maxHTTPSessions)
         self.toolAllowlist = toolAllowlist
+        self.connectorAuth = connectorAuth
     }
 
     /// PKT-366 F13: Bridge NIO thread to MainActor disconnect UI callback without redundant `await` on stored closure.
@@ -382,7 +394,37 @@ public actor SSEServer {
 
     // MARK: - Request Routing (Streamable HTTP — POST /mcp)
 
-    func handleHTTPRequest(_ request: HTTPRequest) async -> HTTPResponse {
+    public func handleHTTPRequest(_ request: HTTPRequest) async -> HTTPResponse {
+        // PKT-800 S2 — connector bearer gate. ADDITIVE ISOLATION: this
+        // block is a no-op (early-returns nothing, falls straight through)
+        // whenever `connectorAuth == nil`, which is the case for every
+        // default configuration. It is reached ONLY on the Streamable-HTTP
+        // `/mcp` funnel (the NIO handler routes `/health`, `/sse`,
+        // `/messages`, the job callback, and the PRM doc *before* ever
+        // calling `httpRequestHandler` → `handleHTTPRequest`), so no other
+        // transport or endpoint can hit it. stdio never constructs an
+        // `SSEServer` request at all.
+        if let auth = connectorAuth {
+            let authHeader = request.header(HTTPHeaderName.authorization)
+            do {
+                let token = try await auth.validator.validate(authorizationHeader: authHeader)
+                return await dispatchAuthorizedConnectorRequest(request, token: token, auth: auth)
+            } catch let err as BearerValidationError {
+                return Self.unauthorizedResponse(for: err, auth: auth)
+            } catch {
+                return Self.unauthorizedResponse(
+                    for: .malformedToken("\(error)"), auth: auth
+                )
+            }
+        }
+
+        return await processStreamableHTTP(request)
+    }
+
+    /// The original (pre-S2) Streamable-HTTP session handling, unchanged.
+    /// Split out so both the unauthenticated default path and the
+    /// post-bearer authorized path funnel through identical session logic.
+    private func processStreamableHTTP(_ request: HTTPRequest) async -> HTTPResponse {
         let sessionID = request.header(HTTPHeaderName.sessionID)
 
         if let sessionID, var session = sessions[sessionID] {
@@ -409,6 +451,65 @@ public actor SSEServer {
             return .error(statusCode: 404, .invalidRequest("Session not found or expired"))
         }
         return .error(statusCode: 400, .invalidRequest("Missing Mcp-Session-Id header"))
+    }
+
+    // MARK: - Connector Authorization (PKT-800 S2)
+
+    /// Builds the RFC 6750 `401 Unauthorized` + `WWW-Authenticate: Bearer`
+    /// challenge for a failed/missing connector bearer. Pure given its
+    /// inputs (static) so it is unit-testable without a live server.
+    public static func unauthorizedResponse(
+        for error: BearerValidationError,
+        auth: ConnectorAuthContext
+    ) -> HTTPResponse {
+        .error(
+            statusCode: 401,
+            .invalidRequest("Unauthorized: \(error.challengeDescription)"),
+            extraHeaders: [
+                HTTPHeaderName.wwwAuthenticate: auth.wwwAuthenticateValue(for: error)
+            ]
+        )
+    }
+
+    /// JSON-RPC method + tool name a Streamable-HTTP body is requesting,
+    /// if it is a `tools/call`. Pure — extracted for unit testing the
+    /// scope-gate decision without a live transport.
+    public static func toolCallTarget(in body: Data?) -> String? {
+        guard let body,
+              let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              (json["method"] as? String) == "tools/call",
+              let params = json["params"] as? [String: Any],
+              let name = params["name"] as? String
+        else { return nil }
+        return name
+    }
+
+    /// Post-bearer connector dispatch. The bearer is already verified; if
+    /// the body is a `tools/call`, the scope gate must allow it before the
+    /// request reaches the shared session machinery. Non-`tools/call`
+    /// connector traffic (initialize, tools/list, ping, notifications,
+    /// DELETE) passes the bearer gate only — scope binds tool *dispatch*.
+    private func dispatchAuthorizedConnectorRequest(
+        _ request: HTTPRequest,
+        token: BridgeAccessToken,
+        auth: ConnectorAuthContext
+    ) async -> HTTPResponse {
+        if let toolName = Self.toolCallTarget(in: request.body) {
+            let decision = await auth.scopeGate.evaluate(
+                toolName: toolName,
+                grantedScopes: token.connectorScopes
+            )
+            if case .deny(let reason) = decision {
+                // Structured refusal — NO dispatch. 403 = authenticated
+                // but scope-insufficient (distinct from the 401 bearer
+                // challenge).
+                return .error(
+                    statusCode: 403,
+                    .invalidRequest("Forbidden: \(reason)")
+                )
+            }
+        }
+        return await processStreamableHTTP(request)
     }
 
     // MARK: - Session Factory (Streamable HTTP)

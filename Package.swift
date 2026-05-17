@@ -7,6 +7,10 @@
 // PKT-551: Added NotificationContentExtension executable target. Built as a
 //   standalone binary and packaged into a .appex bundle by the Makefile
 //   (SPM does not natively support .appExtension targets).
+// PKT-800 S2: Added JWTKit 5.5.0 (vapor/jwt-kit, swift-tools 6.0, pure-Swift
+//   swift-crypto — no vendored BoringSSL) for RFC 7515/7517 JWS+JWKS bearer
+//   validation on the remote /mcp connector path. Pinned to a stable line
+//   that builds cleanly under the Swift 6.2 toolchain on macOS 26.
 import PackageDescription
 
 let package = Package(
@@ -22,6 +26,7 @@ let package = Package(
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0"),
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.65.0"),
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0"),
+        .package(url: "https://github.com/vapor/jwt-kit.git", exact: "5.5.0"),
     ],
     targets: [
         .target(
@@ -32,6 +37,7 @@ let package = Package(
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
                 .product(name: "Sparkle", package: "Sparkle"),
+                .product(name: "JWTKit", package: "jwt-kit"),
             ],
             path: "NotionBridge",
             exclude: ["App/NotionBridgeApp.swift", "App/Resources"]
@@ -50,7 +56,13 @@ let package = Package(
             name: "NotionBridgeTests",
             dependencies: ["NotionBridgeLib",
                 .product(name: "MCP", package: "swift-sdk"),
-                .product(name: "NIOEmbedded", package: "swift-nio")
+                .product(name: "NIOEmbedded", package: "swift-nio"),
+                // PKT-800 S2 (fix #4b): NIOHTTP1 + NIOCore are used directly
+                // by RemoteOAuthHTTPTests (NIOEmbedded request-part decode)
+                // and RemoteOAuthBearerTests; make the dependency explicit
+                // rather than relying on transitive NIOEmbedded re-export.
+                .product(name: "NIOHTTP1", package: "swift-nio"),
+                .product(name: "NIOCore", package: "swift-nio")
             ],
             path: "NotionBridgeTests"
         ),
