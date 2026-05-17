@@ -60,7 +60,8 @@
 # PKT-800 S2 (remote OAuth/HTTP, slice 2, 2026-05-17): landed the deferred
 # token/bearer + ScopeGate pieces. Added JWTKit 5.5.0 (vapor/jwt-kit,
 # swift-tools 6.0, swift-crypto backed — no vendored BoringSSL; pinned
-# `exact: 5.5.0`, Package.resolved committed) for RFC 7515/7517 JWS+JWKS
+# `exact: 5.5.0` in Package.swift, Package.resolved kept untracked per
+# the repo .gitignore convention, see commit 5ea34ba) for RFC 7515/7517 JWS+JWKS
 # verification. New ConnectorBearerValidator validates
 # `Authorization: Bearer <jwt>` on the `/mcp` Streamable-HTTP connector
 # funnel ONLY (signature vs an injectable JWTKeyCollection / env
