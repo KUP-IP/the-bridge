@@ -1,11 +1,18 @@
-// AuthorizationServer.swift — WS-B (v2.3, PKT-803)
+// AuthorizationServer.swift — WS-B (v2.3, PKT-803) · WS-F S1 (PKT-800)
 // NotionBridge · Modules · Auth
 //
-// Scaffold only — protocol + type declarations, zero implementation.
-// Implemented in WS-F (auth server + live HTTP transport). Shapes here
-// follow Decision D3 (v3 hub Decision Log): OAuth 2.1 + PKCE, RFC 9728
-// Protected Resource Metadata (MUST), CIMD client identity preferred
-// over DCR (Nov-2025 MCP spec), WorkOS AuthKit as the managed IdP.
+// WS-B landed scaffold only (protocol + type declarations). PKT-800 S1
+// fills the RFC 9728 ProtectedResourceMetadata type with an
+// env-configurable factory + canonical JSON serialization so the
+// `/.well-known/oauth-protected-resource` endpoint can advertise the
+// protected MCP resource. Token/bearer validation, the ScopeGate
+// conformer, DCR and consent remain deferred to a later slice — there is
+// NO live WorkOS tenant in S1; the authorization-server issuer is a
+// documented placeholder unless overridden via `BRIDGE_OAUTH_ISSUER`.
+// Shapes follow Decision D3 (v3 hub Decision Log): OAuth 2.1 + PKCE,
+// RFC 9728 Protected Resource Metadata (MUST), CIMD client identity
+// preferred over DCR (Nov-2025 MCP spec), WorkOS AuthKit as the managed
+// IdP.
 
 import Foundation
 
@@ -13,11 +20,23 @@ import Foundation
 
 /// RFC 9728 Protected Resource Metadata document advertised at
 /// `/.well-known/oauth-protected-resource`.
+///
+/// JSON member names are the snake_case identifiers mandated by RFC 9728
+/// §2 (`resource`, `authorization_servers`, `scopes_supported`,
+/// `bearer_methods_supported`); the Swift properties stay camelCase via
+/// `CodingKeys`, so encode/decode round-trips through the wire form.
 public struct ProtectedResourceMetadata: Codable, Sendable, Equatable {
     public let resource: String
     public let authorizationServers: [String]
     public let scopesSupported: [String]
     public let bearerMethodsSupported: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case resource
+        case authorizationServers = "authorization_servers"
+        case scopesSupported = "scopes_supported"
+        case bearerMethodsSupported = "bearer_methods_supported"
+    }
 
     public init(
         resource: String,
@@ -29,6 +48,75 @@ public struct ProtectedResourceMetadata: Codable, Sendable, Equatable {
         self.authorizationServers = authorizationServers
         self.scopesSupported = scopesSupported
         self.bearerMethodsSupported = bearerMethodsSupported
+    }
+}
+
+// MARK: - Protected Resource Metadata Factory (PKT-800 S1)
+
+/// Builds the RFC 9728 Protected Resource Metadata document for the
+/// remote-MCP connector. Pure value logic computed from the environment
+/// so it is deterministic under test (no live IdP, no network).
+public enum ProtectedResourceMetadataProvider {
+
+    /// Environment variable that overrides the advertised OAuth
+    /// authorization-server issuer. There is no live WorkOS tenant in
+    /// S1; unset falls back to `defaultIssuer` (a documented,
+    /// non-resolvable placeholder per RFC 6761 `.invalid`).
+    public static let issuerEnvKey = "BRIDGE_OAUTH_ISSUER"
+
+    /// Documented placeholder issuer used when `BRIDGE_OAUTH_ISSUER` is
+    /// unset. Uses the reserved `.invalid` TLD so it can never resolve
+    /// to a real host — this slice ships no live authorization server.
+    public static let defaultIssuer = "https://auth.example.invalid"
+
+    /// Connector scopes advertised in `scopes_supported`. Stable wire
+    /// identifiers consumed by the (later) ScopeGate conformer.
+    public static let connectorScopes: [String] = [
+        "snippets.read",
+        "snippets.write",
+        "voice.resolve",
+        "runners.exec",
+    ]
+
+    /// Resolves the authorization-server issuer: `BRIDGE_OAUTH_ISSUER`
+    /// (trimmed, non-empty) if set, else the documented default.
+    public static func resolvedIssuer(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String {
+        let raw = environment[issuerEnvKey]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return raw.isEmpty ? defaultIssuer : raw
+    }
+
+    /// Builds the metadata document.
+    ///
+    /// - Parameters:
+    ///   - resource: the canonical resource identifier (the MCP server's
+    ///     externally-visible base URL or endpoint). Defaults to the
+    ///     localhost Streamable HTTP endpoint.
+    ///   - environment: process environment (injectable for tests).
+    public static func metadata(
+        resource: String = "http://127.0.0.1:\(BridgeConstants.defaultSSEPort)/mcp",
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> ProtectedResourceMetadata {
+        ProtectedResourceMetadata(
+            resource: resource,
+            authorizationServers: [resolvedIssuer(environment: environment)],
+            scopesSupported: connectorScopes,
+            bearerMethodsSupported: ["header"]
+        )
+    }
+
+    /// Canonical JSON body for the `/.well-known/oauth-protected-resource`
+    /// response (sorted keys, RFC 9728 snake_case members).
+    public static func jsonBody(
+        resource: String = "http://127.0.0.1:\(BridgeConstants.defaultSSEPort)/mcp",
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Data {
+        let doc = metadata(resource: resource, environment: environment)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return (try? encoder.encode(doc)) ?? Data("{}".utf8)
     }
 }
 

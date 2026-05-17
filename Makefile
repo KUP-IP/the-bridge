@@ -69,9 +69,10 @@ test:
 	$(DEBUG_DIR)/NotionBridgeTests
 	@echo "✅ Tests complete"
 
-# WS-C (PKT-798) → v3.0·0.5 → Dev-suite audit: runs the suite + asserts
-# the green floor (803) and zero failures. Used by CI so a shrunk/disabled
-# suite fails.
+# WS-C (PKT-798) → v3.0·0.5 → Dev-suite audit → PKT-800 S1: runs the
+# suite + asserts the green floor (827) and zero failures. Used by CI so
+# a shrunk/disabled suite fails. Floor provenance lives in
+# scripts/test-floor-gate.sh.
 test-floor:
 	./scripts/test-floor-gate.sh
 

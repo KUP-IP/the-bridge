@@ -435,6 +435,7 @@ await runWSHMenuBarTests()        // PKT-804 (v2.3): menu-bar quick-page
 await runSnippetsModuleTests()    // PKT-2135a9e9 (v2.3 · WS-D): snippets module
 await runToolAnnotationAuditTests() // PKT-803 (v2.3 · WS-B): annotation coverage audit
 await runTransportRouterTests()     // PKT-803 (v2.3 · WS-B): transport router default/env
+await runRemoteOAuthHTTPTests()     // PKT-800 (S1): RFC 9728 PRM + transport gating + route
 await runBridgeFeatureFlagsTests()  // PKT-798 (v2.3 · WS-C): fail-closed capability gates
 await runBridgeModuleRegistryTests() // PKT v3.0·0.4: single-source module registrar
 await runMCPToolFactoryTests()       // PKT v3.0·0.5: metadata contract + unified Tool factory

@@ -210,11 +210,46 @@ public actor ServerManager {
     }
 
     /// Start the SSE transport. Blocks until the server stops or the task is cancelled.
+    ///
+    /// Behaviour-preserving: this hosts the legacy SSE path (`GET /sse` +
+    /// `POST /messages`), `GET /health`, the job callback, and — already,
+    /// since PKT-318/336 — the Streamable HTTP `/mcp` endpoint backed by
+    /// `StatefulHTTPServerTransport`. It runs unconditionally exactly as
+    /// before; the streamableHTTP *transport gate* is the separate
+    /// `runStreamableHTTP()` seam below so the legacy SSE listener is
+    /// untouched by `BRIDGE_ENABLE_HTTP`.
     public func runSSE() async throws {
         guard let sseServer = self.sseServer else {
             throw ServerManagerError.notSetUp
         }
         try await sseServer.start()
+    }
+
+    /// PKT-800 S1: the gated streamableHTTP seam, symmetric to `run()`'s
+    /// stdio guard. `BridgeTransport.streamableHTTP` is inactive in the
+    /// default config (stdio-only), so this throws unless
+    /// `BRIDGE_ENABLE_HTTP=1` — keeping default behaviour byte-for-byte
+    /// unchanged. When active it serves the MCP session over the SDK's
+    /// `StatefulHTTPServerTransport`, sharing the exact same `ToolRouter`
+    /// / `MCPToolFactory` single source as stdio and legacy SSE (the
+    /// `SSEServer` actor owns the per-session transports). This is the
+    /// seam a later slice promotes to a first-class concurrent task; it
+    /// does NOT perturb stdio or the legacy SSE listener.
+    public func runStreamableHTTP() async throws {
+        guard let sseServer = self.sseServer else {
+            throw ServerManagerError.notSetUp
+        }
+        guard transportRouter.isActive(.streamableHTTP) else {
+            throw ServerManagerError.transportInactive(.streamableHTTP)
+        }
+        try await sseServer.start()
+    }
+
+    /// Whether the streamableHTTP transport is active in this process
+    /// (i.e. `BRIDGE_ENABLE_HTTP=1`). Pure read of the transport router;
+    /// stdio is always active so this never affects the stdio invariant.
+    public nonisolated var isStreamableHTTPActive: Bool {
+        transportRouter.isActive(.streamableHTTP)
     }
 
     /// Request notification permission for the same SecurityGate used by ToolRouter.

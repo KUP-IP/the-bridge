@@ -91,6 +91,46 @@ public final class LegacySSEBridge: @unchecked Sendable {
     }
 }
 
+// MARK: - HTTP Route Classifier (PKT-800 S1)
+
+/// Pure, deterministic classification of an inbound HTTP request on the
+/// Bridge NIO listener into exactly one route. Single source of truth for
+/// dispatch order so the live handler and tests cannot drift: the new
+/// PRM route is provably distinct from `/health`, `/sse`, `/messages`,
+/// the job callback, and the Streamable HTTP `/mcp` endpoint.
+public enum MCPHTTPRoute: Equatable, Sendable {
+    case corsPreflight
+    case health
+    /// RFC 9728 Protected Resource Metadata (`GET /.well-known/oauth-protected-resource`).
+    case protectedResourceMetadata
+    case legacySSE
+    case legacyMessages
+    /// `POST /jobs/{id}/run` — the captured job id.
+    case jobsRun(String)
+    /// The Streamable HTTP MCP endpoint (`endpoint`, e.g. `/mcp`).
+    case mcpEndpoint
+    case notFound
+
+    /// Classifies `method` + `path` against `endpoint`. `path` must be the
+    /// query-stripped request path. Order mirrors the live handler exactly.
+    public static func classify(method: String, path: String, endpoint: String) -> MCPHTTPRoute {
+        let m = method.uppercased()
+        if m == "OPTIONS" { return .corsPreflight }
+        if m == "GET" && path == "/health" { return .health }
+        if m == "GET" && path == "/.well-known/oauth-protected-resource" {
+            return .protectedResourceMetadata
+        }
+        if m == "GET" && path == "/sse" { return .legacySSE }
+        if m == "POST" && path == "/messages" { return .legacyMessages }
+        if m == "POST" && path.hasPrefix("/jobs/") && path.hasSuffix("/run") {
+            let jobId = String(path.dropFirst("/jobs/".count).dropLast("/run".count))
+            return .jobsRun(jobId)
+        }
+        if path == endpoint { return .mcpEndpoint }
+        return .notFound
+    }
+}
+
 // MARK: - SSE Server
 
 /// Manages an SSE-based MCP server on a configurable port.
@@ -781,40 +821,56 @@ private final class SSEHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
         let path = fullURI.split(separator: "?").first.map(String.init) ?? fullURI
         let startTime = CFAbsoluteTimeGetCurrent()
 
-        if head.method == .OPTIONS {
+        // PKT-800 S1: single-source route classification (same order /
+        // outcomes as before). The new PRM route is provably distinct
+        // from /health, /sse, /messages, the job callback, and /mcp.
+        let route = MCPHTTPRoute.classify(
+            method: head.method.rawValue,
+            path: path,
+            endpoint: endpoint
+        )
+
+        switch route {
+        case .corsPreflight:
             await writeCORSPreflight(version: head.version, context: context)
             return  // skip access log for CORS preflight
-        }
 
-        // V1-QUALITY-C2: Health endpoint (GET /health) — no authentication required
-        if head.method == .GET && path == "/health" {
+        case .health:
+            // V1-QUALITY-C2: Health endpoint (GET /health) — no authentication required
             let healthData = await healthHandler()
             await writeJSONResponse(data: healthData, version: head.version, context: context)
             return  // skip access log for health (too noisy)
-        }
 
-        if head.method == .GET && path == "/sse" {
+        case .protectedResourceMetadata:
+            // PKT-800 S1: RFC 9728 Protected Resource Metadata — no
+            // authentication (it advertises *where* to authenticate;
+            // carries no secret). The issuer is env-configurable
+            // (BRIDGE_OAUTH_ISSUER) and defaults to a documented
+            // placeholder — there is no live authorization server in
+            // this slice.
+            let prmData = ProtectedResourceMetadataProvider.jsonBody()
+            logAccess(method: "GET", path: path, sessionID: nil, status: 200, start: startTime)
+            await writeJSONResponse(data: prmData, version: head.version, context: context)
+            return
+
+        case .legacySSE:
             logAccess(method: "GET", path: path, sessionID: nil, status: 200, start: startTime)
             await handleLegacySSE(head: head, context: context)
             return
-        }
 
-        if head.method == .POST && path == "/messages" {
+        case .legacyMessages:
             logAccess(method: "POST", path: path, sessionID: nil, status: 200, start: startTime)
             await handleLegacyMessage(head: head, body: body, uri: fullURI, context: context)
             return
-        }
 
-        // PKT-340 V2-SCHEDULER: POST /jobs/{id}/run -- invoked by launchd via curl
-        if head.method == .POST && path.hasPrefix("/jobs/") && path.hasSuffix("/run") {
-            let jobId = String(path.dropFirst("/jobs/".count).dropLast("/run".count))
+        case .jobsRun(let jobId):
+            // PKT-340 V2-SCHEDULER: POST /jobs/{id}/run -- invoked by launchd via curl
             let data = await jobsCallbackHandler(jobId)
             logAccess(method: "POST", path: path, sessionID: nil, status: 200, start: startTime)
             await writeJSONResponse(data: data, version: head.version, context: context)
             return
-        }
 
-        guard path == endpoint else {
+        case .notFound:
             logAccess(method: head.method.rawValue, path: path, sessionID: nil, status: 404, start: startTime)
             await writeResponse(
                 .error(statusCode: 404, .invalidRequest("Not Found")),
@@ -822,6 +878,9 @@ private final class SSEHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
                 context: context
             )
             return
+
+        case .mcpEndpoint:
+            break  // fall through to Streamable HTTP handling below
         }
 
         var headers: [String: String] = [:]

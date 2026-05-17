@@ -35,6 +35,28 @@
 # network/Messages.app-free, no live send — and ToolMetadata authored
 # steers rendered into the MCP description) → the gate is now locked at
 # the actual verified green count of 803, not the stale stub value (504).
+# PKT-800 S1 (remote OAuth/HTTP, slice 1, 2026-05-17): added the RFC 9728
+# Protected Resource Metadata factory + the env-configurable
+# BRIDGE_OAUTH_ISSUER seam (default https://auth.example.invalid — no
+# live WorkOS tenant in S1), wired the gated streamableHTTP seam on
+# ServerManager (symmetric to the stdio guard; default config stays
+# stdio-only so existing clients are byte-for-byte unchanged), served
+# GET /.well-known/oauth-protected-resource on the existing NIO listener
+# (new distinct path — does NOT shadow /health,/sse,/messages,/mcp;
+# routing unified through the new single-source MCPHTTPRoute classifier),
+# and added RemoteOAuthHTTPTests (PRM required-members /
+# issuer override+default / snake_case wire form / Codable round-trip,
+# TransportRouter default-vs-env with the stdio non-regression invariant,
+# exhaustive non-shadowing route classification, and two NIOEmbedded
+# real-request-decode drives). Reconciled delta: the prior green base
+# is 803 (independently re-verified on f65fee1 this session); this file
+# contributes exactly 24 harness `test()` blocks (55 internal checks),
+# so 803 + 24 = 827. The literal harness summary was
+# `Results: 827 passed, 0 failed, 827 total`. (An earlier working note
+# in this block described it as "+22 on a 805 base" — that prose
+# mis-described an arithmetically-correct result; corrected here per the
+# honest-ledger rule. No other suite changed.) No token/bearer
+# validation, ScopeGate conformer, DCR or consent in this slice (deferred).
 # Per the
 # order-inversion rule we never lower a green baseline to satisfy a stale
 # DoD number. Raising the floor when the suite legitimately grows is
@@ -42,7 +64,7 @@
 # the change.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-803}"
+FLOOR="${BRIDGE_TEST_FLOOR:-827}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."
