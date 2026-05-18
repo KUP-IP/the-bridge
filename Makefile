@@ -71,7 +71,8 @@ test:
 
 # WS-C (PKT-798) → v3.0·0.5 → Dev-suite audit → PKT-800 S1 → S2 → S3 → S4
 # → cmd-w2 (Commands data layer) → cmd-w4 (fetch_skill /markdown switch,
-# 2026-05-18): runs the suite + asserts the green floor (974) and zero
+# 2026-05-18): runs the suite + asserts the green floor (1029, integrated:
+# cmd-w2+w4b+w4+w3, measured) and zero
 # failures. Used by CI so a shrunk/disabled
 # suite fails. Floor provenance lives in scripts/test-floor-gate.sh.
 test-floor:

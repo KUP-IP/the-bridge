@@ -269,9 +269,21 @@
 # No other suite changed; the prior 955 ran byte-for-byte unchanged
 # (additive isolation). The orchestrator reconciles the true integrated
 # floor at merge; this is THIS branch's honestly-measured green.
+#
+# 2026-05-18 Commands-sprint integration reconcile: base 924 -> 955 (cmd-w2
+# Commands data layer +31) -> flakefix (cmd-w4b isolated the pre-existing
+# non-isolated SecurityGate permanent-access UserDefaults tests; count
+# unchanged) -> +19 (cmd-w4 fetch_skill /markdown + shared MentionResolver)
+# -> +55 (cmd-w3 wired Commands palette: 21 imported spike + 34 new). True
+# integrated green independently measured = 1029 (NOT the per-branch
+# numbers 974/1010). FLOOR set to the measured integrated count per the
+# order-inversion rule. cmd-w1 spike was a donor folded into cmd-w3, not
+# merged. Commands palette GUI behaviour is operator-manual-smoke (cannot
+# be headlessly verified); the real Commands Notion data source is a
+# deferred operator dependency.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-974}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1029}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."
