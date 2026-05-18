@@ -70,12 +70,17 @@ public enum ProtectedResourceMetadataProvider {
     public static let defaultIssuer = "https://auth.example.invalid"
 
     /// Connector scopes advertised in `scopes_supported`. Stable wire
-    /// identifiers consumed by the (later) ScopeGate conformer.
+    /// identifiers consumed by the ScopeGate conformer. S4 (PKT-800)
+    /// added `contacts.read`: a dedicated scope for contact-record /
+    /// personal-data tools (`contacts_get`/`contacts_search`), split out
+    /// of the previously over-broad `voice.resolve` so a voice-handle
+    /// grant can no longer read the full address book (least-privilege).
     public static let connectorScopes: [String] = [
         "snippets.read",
         "snippets.write",
         "voice.resolve",
         "runners.exec",
+        "contacts.read",
     ]
 
     /// Resolves the authorization-server issuer: `BRIDGE_OAUTH_ISSUER`

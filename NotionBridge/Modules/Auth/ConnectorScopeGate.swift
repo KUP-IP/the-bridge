@@ -17,7 +17,21 @@
 //                         delete/import) — a write also implies read,
 //                         so snippets.write satisfies read-only tools too
 //   • runners.exec     → command / process / job execution + dev runners
-//   • voice.resolve    → contact-handle / identity resolution
+//   • contacts.read    → tools that RETURN contact records / personal
+//                         data (`contacts_get`, `contacts_search`). S4
+//                         (PKT-800): split out of `voice.resolve` so a
+//                         grant that only needs voice-handle resolution
+//                         can no longer read the full address book —
+//                         least-privilege per data-sensitivity tier.
+//   • voice.resolve    → voice-resolution-specific tools ONLY: handle →
+//                         identity resolution + the resolver health probe
+//                         (`contacts_resolve_handle`, `contacts_health`).
+//                         These take/return a handle or a liveness bool,
+//                         NOT a contact record, so they remain on the
+//                         narrower voice scope. A `contacts.read` grant
+//                         does NOT implicitly satisfy `voice.resolve` and
+//                         vice-versa: the two are independent surfaces
+//                         (no superset relationship — distinct data).
 //   • a tool the connector does not expose (everything else) is DENIED
 //     by default — the connector surface is an explicit allowlist, not
 //     "everything minus a blocklist".
@@ -31,9 +45,14 @@ public enum ConnectorScopeName {
     public static let snippetsWrite = "snippets.write"
     public static let voiceResolve = "voice.resolve"
     public static let runnersExec = "runners.exec"
+    /// S4 (PKT-800): a dedicated scope for tools that return contact
+    /// RECORDS / personal data, split out of the over-broad
+    /// `voice.resolve`. Independent of `voice.resolve` (neither implies
+    /// the other) — see the mapping policy in the file header.
+    public static let contactsRead = "contacts.read"
 
     public static let all: [String] = [
-        snippetsRead, snippetsWrite, voiceResolve, runnersExec,
+        snippetsRead, snippetsWrite, voiceResolve, runnersExec, contactsRead,
     ]
 }
 
@@ -72,19 +91,35 @@ public struct ConnectorScopeGate: ScopeGating {
         "devserver_start", "devserver_stop", "devserver_health",
     ]
 
-    /// Identity / handle resolution: requires `voice.resolve`.
-    private static let voiceResolveTools: Set<String> = [
-        "contacts_resolve_handle", "contacts_search", "contacts_get",
-        "contacts_health",
+    /// Contact-RECORD / personal-data tools: require `contacts.read`.
+    /// S4 (PKT-800): split out of `voiceResolveTools`. These return the
+    /// caller's address-book entries (name, phones, emails, etc.) — the
+    /// highest-sensitivity contact surface — so they sit behind their own
+    /// scope and are NOT reachable with only `voice.resolve`.
+    private static let contactsReadTools: Set<String> = [
+        "contacts_get", "contacts_search",
     ]
 
-    /// The complete connector-reachable tool set (union of the four
+    /// Voice-resolution-specific tools: require `voice.resolve`. RETAINED
+    /// on the narrower scope because neither returns a contact record:
+    ///   • `contacts_resolve_handle` — maps a single phone/email handle to
+    ///     a display identity (handle→name resolution for a known handle,
+    ///     the literal "voice resolve" use-case), not address-book search.
+    ///   • `contacts_health` — a liveness/availability probe of the
+    ///     contacts subsystem (returns a status bool, no personal data).
+    /// `voice.resolve` does NOT grant `contactsReadTools` and vice-versa.
+    private static let voiceResolveTools: Set<String> = [
+        "contacts_resolve_handle", "contacts_health",
+    ]
+
+    /// The complete connector-reachable tool set (union of the five
     /// buckets). Anything outside this set is not exposed to remote
     /// connector clients at all and is denied regardless of scope.
     public static var connectorReachableTools: Set<String> {
         snippetReadTools
             .union(snippetWriteTools)
             .union(runnerExecTools)
+            .union(contactsReadTools)
             .union(voiceResolveTools)
     }
 
@@ -104,6 +139,9 @@ public struct ConnectorScopeGate: ScopeGating {
         }
         if Self.runnerExecTools.contains(toolName) {
             return [ConnectorScope(name: ConnectorScopeName.runnersExec)]
+        }
+        if Self.contactsReadTools.contains(toolName) {
+            return [ConnectorScope(name: ConnectorScopeName.contactsRead)]
         }
         if Self.voiceResolveTools.contains(toolName) {
             return [ConnectorScope(name: ConnectorScopeName.voiceResolve)]

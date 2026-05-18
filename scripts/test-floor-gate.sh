@@ -146,6 +146,70 @@
 # suite changed; the prior 874 ran byte-for-byte unchanged. NOT in this
 # slice (explicit carry-forward, not implemented): splitting a dedicated
 # `contacts.read` scope out of `voice.resolve`.
+# PKT-800 S4 (remote OAuth/HTTP, connector hardening, 2026-05-17):
+# additive-isolation preserved — every change is confined to the remote
+# `/mcp` connector path + its scope/step-up logic; stdio, legacy SSE
+# (`/sse`,`/messages`), `/health`, local dispatch, and the
+# `BRIDGE_ENABLE_HTTP`-unset path are byte-for-byte unchanged; the prior
+# 897 ran unchanged (modulo the four reconciled tests below, count-neutral).
+# Three axes:
+#  • A1 — `contacts.read` scope split. Added the connector scope
+#    `contacts.read`; re-mapped the contact-RECORD tools `contacts_get` /
+#    `contacts_search` off the over-broad `voice.resolve` and onto the
+#    dedicated `contacts.read` (least-privilege per data-sensitivity).
+#    `voice.resolve` is RETAINED for the genuinely voice-resolution-only
+#    tools `contacts_resolve_handle` (handle→identity) and
+#    `contacts_health` (status probe — no personal data). The two scopes
+#    are independent (neither implies the other; no superset). Added
+#    `contacts.read` to ProtectedResourceMetadataProvider.connectorScopes
+#    (PRM `scopes_supported` is now the 5-element contract) and updated
+#    docs/operator/connector-directory-submission.md. Default-deny
+#    (allowlist-not-blocklist) preserved.
+#  • A2 — TransportRouter injection seam. `ServerManager`'s hardcoded
+#    `let transportRouter = TransportRouter()` became an injected init
+#    parameter defaulting to `TransportRouter()` (the no-arg init reads
+#    `ProcessInfo` exactly as the prior `let` did ⇒ production behaviour
+#    byte-for-byte unchanged). The seam lets the harness drive the
+#    streamableHTTP-ACTIVE path of `runStreamableHTTP()` deterministically:
+#    with an injected active router it RETURNS as a non-binding gated no-op
+#    (never a second listener bind — `/mcp` is served by the shared
+#    `runSSE()` listener) and `isStreamableHTTPActive == true`; with an
+#    inactive injection it throws `transportInactive(.streamableHTTP)`;
+#    pre-`setup()` it throws `notSetUp`. No GUI launch.
+#  • A3 — step-up model hardening (THREAT-MODEL CORRECTION). The AS-minted
+#    `connector.step_up` scope on the VERIFIED token is now the SOLE
+#    authorization factor for `destructiveHint:true` connector tools. The
+#    per-call `_stepUp`/`stepUpToken` argument is corrected to a
+#    non-authoritative consent echo: it is still recognized
+#    (`hasConfirmationToken`, for the consent/UX trail) but is NEVER
+#    consulted by `evaluate(...)`. The prior S3 logic accepted "scope OR a
+#    non-empty token"; since the echo has no nonce/binding/server
+#    verification, any automated client could forge `{"_stepUp":"x"}` and
+#    bypass step-up — a defect, now fixed (scope REQUIRED; token
+#    non-authoritative). Code comments + the operator doc state this
+#    honestly (token = consent signal, scope = security boundary).
+# Reconciled S2/S3 tests (rewritten to the corrected STRONGER invariant —
+# never weakened/deleted; net count unchanged; order-inversion rule
+# honoured): RemoteOAuthHardeningTests — the two step-up tests that
+# asserted "a non-empty per-call token satisfies step-up" were rewritten
+# to assert "a token alone NEVER authorizes; only the AS-minted scope
+# does" (2→2, count-neutral). RemoteOAuthHTTPTests — the
+# "scopes_supported equals the connector scopes contract" test was
+# rewritten from the pre-S4 4-element list to the corrected 5-element
+# contract (in-place, count-neutral). RemoteOAuthBearerTests — the
+# "connector-reachable set matches the four scope buckets" test was
+# renamed/strengthened ("four"→"all"; same assertions plus the new
+# contact-record reachability) (in-place, count-neutral). New
+# RemoteOAuthHardeningS4Tests.swift adds exactly 27 harness `test()`
+# blocks (A1 pure+E2E scope split incl. independence + PRM wire form +
+# default-deny — 13; A2 active/inactive/pre-setup injection-seam coverage
+# incl. the non-binding no-op + idempotency — 5; A3 scope-only
+# authorization E2E + pure exhaustive token-value sweep +
+# echo-recognized-but-non-authoritative + non-destructive unaffected — 6;
+# stdio/health/legacy/stdio-always-active non-regression — 3). The four
+# reconciled tests above are count-neutral, so the prior verified-green
+# base of 897 is unchanged and 897 + 27 = 924. The literal harness summary
+# was `Results: 924 passed, 0 failed, 924 total`. No other suite changed.
 # Per the
 # order-inversion rule we never lower a green baseline to satisfy a stale
 # DoD number. Raising the floor when the suite legitimately grows is
@@ -153,7 +217,7 @@
 # the change.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-897}"
+FLOOR="${BRIDGE_TEST_FLOOR:-924}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."

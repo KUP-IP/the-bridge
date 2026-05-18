@@ -69,9 +69,17 @@ func runRemoteOAuthHTTPTests() async {
     }
 
     await test("PRM: scopes_supported equals the connector scopes contract") {
+        // S4 (PKT-800): the contract grew by `contacts.read` — a dedicated
+        // scope for contact-record tools split out of the over-broad
+        // `voice.resolve` (least-privilege). This S2 test asserted the
+        // pre-S4 4-element list; REWRITTEN (not deleted — count preserved)
+        // to assert the corrected stronger 5-element contract.
         let m = ProtectedResourceMetadataProvider.metadata(environment: [:])
         try expect(
-            m.scopesSupported == ["snippets.read", "snippets.write", "voice.resolve", "runners.exec"],
+            m.scopesSupported == [
+                "snippets.read", "snippets.write", "voice.resolve",
+                "runners.exec", "contacts.read",
+            ],
             "connector scopes drifted: \(m.scopesSupported)"
         )
         try expect(

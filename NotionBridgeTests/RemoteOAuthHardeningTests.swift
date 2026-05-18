@@ -3,10 +3,12 @@
 //
 // All against a synthetic in-test ES256 keypair (no network, no live IdP).
 // Covers, exhaustively:
-//   • Step-up consent on a `destructiveHint: true` connector tool:
-//     required when absent, satisfied by the step-up scope OR a per-call
-//     confirmation token; a non-destructive connector tool is unaffected;
-//     stdio/local dispatch has no step-up.
+//   • Step-up authorization on a `destructiveHint: true` connector tool:
+//     required when absent, satisfied ONLY by the AS-minted
+//     `connector.step_up` scope (S4 PKT-800 correction — the per-call
+//     `_stepUp`/`stepUpToken` argument is a non-authoritative consent
+//     echo and can NEVER authorize on its own); a non-destructive
+//     connector tool is unaffected; stdio/local dispatch has no step-up.
 //   • Confused-deputy isolation: a session is bound to its first verified
 //     principal; a different principal on that session is rejected; same
 //     principal is matched; sessionless requests cannot be cross-bound.
@@ -125,36 +127,71 @@ func runRemoteOAuthHardeningTests() async {
         }
     }
 
-    await test("StepUp: destructive tool satisfied by a per-call CONFIRMATION token") {
+    await test("StepUp: a per-call confirmation token alone does NOT authorize (S4 corrected invariant)") {
+        // S4 (PKT-800) THREAT-MODEL CORRECTION. The prior S3 test asserted
+        // the WEAKER invariant "a non-empty `_stepUp`/`stepUpToken`
+        // satisfies step-up". That was a security defect: the token has no
+        // nonce/binding/server verification, so any automated client could
+        // forge `{"_stepUp":"x"}` and bypass step-up entirely. This test
+        // is REWRITTEN to assert the STRONGER, corrected invariant — the
+        // AS-minted `connector.step_up` scope is the SOLE security factor;
+        // a per-call echo (any value, either accepted key) NEVER
+        // authorizes a destructive call on its own. (Rewritten, not
+        // deleted — net `test()` count preserved; order-inversion rule.)
         let body = Data(#"{"method":"tools/call","params":{"name":"snippets_delete","arguments":{"_stepUp":"confirmed-abc"}}}"#.utf8)
         let d = stepUp.evaluate(
             toolName: "snippets_delete",
             grantedScopes: [ConnectorScope(name: "snippets.write")],
             body: body
         )
-        guard case .satisfied = d else {
-            throw TestError.assertion("per-call confirmation token must satisfy, got \(d)")
+        guard case .required(let reason, _) = d else {
+            throw TestError.assertion("token alone must NOT authorize a destructive call, got \(d)")
         }
-        // alternate accepted key
+        try expect(reason == .stepUpRequired, "must still report step_up_required")
+        // The alternate key must be equally non-authoritative.
         let body2 = Data(#"{"method":"tools/call","params":{"name":"snippets_delete","arguments":{"stepUpToken":"x"}}}"#.utf8)
-        guard case .satisfied = stepUp.evaluate(
+        guard case .required = stepUp.evaluate(
             toolName: "snippets_delete",
             grantedScopes: [ConnectorScope(name: "snippets.write")],
             body: body2
         ) else {
-            throw TestError.assertion("stepUpToken key must also satisfy")
+            throw TestError.assertion("stepUpToken key must also be non-authoritative")
         }
+        // Sanity: the echo IS still detectable (diagnostics/UX trail) —
+        // it is recognized, just not an authorization input.
+        try expect(ConnectorStepUpGate.hasConfirmationToken(in: body),
+                   "echo must still be recognizable for the consent trail")
     }
 
-    await test("StepUp: empty/whitespace confirmation token does NOT satisfy") {
-        let body = Data(#"{"method":"tools/call","params":{"name":"snippets_delete","arguments":{"_stepUp":"   "}}}"#.utf8)
-        let d = stepUp.evaluate(
+    await test("StepUp: a confirmation token does NOT rescue a call lacking the step-up scope, regardless of value (S4)") {
+        // Companion to the rewrite above: the prior S3 suite had a test
+        // whose premise was "blank token does NOT satisfy but a non-blank
+        // one DOES". Under the corrected model NEITHER authorizes — the
+        // token's value is irrelevant to authorization. Rewritten to
+        // assert that corrected stronger invariant across blank,
+        // whitespace, and a long non-empty value (count preserved).
+        for tok in ["", "   ", "a-very-long-but-still-forgeable-token-zzzzzzzzzz"] {
+            let body = Data(#"{"method":"tools/call","params":{"name":"snippets_delete","arguments":{"_stepUp":"\#(tok)"}}}"#.utf8)
+            let d = stepUp.evaluate(
+                toolName: "snippets_delete",
+                grantedScopes: [ConnectorScope(name: "snippets.write")],
+                body: body
+            )
+            guard case .required = d else {
+                throw TestError.assertion("token value '\(tok)' must NOT authorize without the step-up scope, got \(d)")
+            }
+        }
+        // With the AS-minted scope present it IS authorized — proving the
+        // scope (not the token) is the boundary.
+        guard case .satisfied = stepUp.evaluate(
             toolName: "snippets_delete",
-            grantedScopes: [ConnectorScope(name: "snippets.write")],
-            body: body
-        )
-        guard case .required = d else {
-            throw TestError.assertion("blank confirmation token must NOT satisfy, got \(d)")
+            grantedScopes: [
+                ConnectorScope(name: "snippets.write"),
+                ConnectorScope(name: ConnectorStepUpGate.stepUpScopeName),
+            ],
+            body: nil
+        ) else {
+            throw TestError.assertion("the AS-minted step-up scope must authorize")
         }
     }
 

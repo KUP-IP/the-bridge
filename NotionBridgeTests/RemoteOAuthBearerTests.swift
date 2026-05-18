@@ -394,12 +394,21 @@ func runRemoteOAuthBearerTests() async {
         try expect(req.isEmpty, "non-connector tool must have no required scopes")
     }
 
-    await test("ScopeGate: connector-reachable set matches the four scope buckets") {
+    await test("ScopeGate: connector-reachable set spans all scope buckets") {
+        // S4 (PKT-800): the bucket count grew from four to five
+        // (`contacts.read` split out of `voice.resolve`). Test name
+        // corrected from "four" → "all"; the reachability assertions are
+        // unchanged-and-still-true (rewrite for accuracy, not a weakening)
+        // plus a strengthening assertion that the new contact-record tool
+        // is reachable while a non-connector tool still is not.
         let reachable = ConnectorScopeGate.connectorReachableTools
         try expect(reachable.contains("snippets_list"))
         try expect(reachable.contains("snippets_create"))
         try expect(reachable.contains("shell_exec"))
         try expect(reachable.contains("contacts_resolve_handle"))
+        try expect(reachable.contains("contacts_get"),
+                   "S4: the contacts.read bucket must be connector-reachable")
+        try expect(reachable.contains("contacts_search"))
         try expect(!reachable.contains("file_write"), "file_write must NOT be connector-reachable")
         try expect(!reachable.contains("notion_page_create"))
     }

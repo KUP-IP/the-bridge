@@ -29,9 +29,16 @@ public actor ServerManager {
 
     /// WS-B (PKT-803): the active-transport router. Default config resolves
     /// to `[.stdio]` only, so existing clients are unaffected;
-    /// `BRIDGE_ENABLE_HTTP=1` additively opts into streamableHTTP (skeleton
-    /// only — not served live until WS-F).
-    public nonisolated let transportRouter = TransportRouter()
+    /// `BRIDGE_ENABLE_HTTP=1` additively opts into streamableHTTP.
+    ///
+    /// S4 (PKT-800): now an injected init parameter (default
+    /// `TransportRouter()` — production behaviour is byte-for-byte
+    /// unchanged: the no-arg init reads `ProcessInfo` exactly as the
+    /// prior hardcoded `let` did). The seam lets a test drive the
+    /// streamableHTTP-active path of `runStreamableHTTP()` /
+    /// `isStreamableHTTPActive` deterministically without setting a
+    /// process-wide env var or launching the GUI.
+    public nonisolated let transportRouter: TransportRouter
 
     /// The configured SSE port (config.json -> env var -> default).
     public nonisolated let ssePort: Int
@@ -50,16 +57,23 @@ public actor ServerManager {
     ///   Use this to increment StatusBarController.totalToolCalls.
     /// - Parameter onClientConnected: Closure called on MainActor when an MCP client connects.
     ///   Use this to update StatusBarController.connectedClients.
+    /// - Parameter transportRouter: S4 (PKT-800) test seam. Defaults to
+    ///   `TransportRouter()` (reads `ProcessInfo` — production callers omit
+    ///   this and behaviour is byte-for-byte unchanged). A test may inject
+    ///   one built from an explicit environment to exercise the
+    ///   streamableHTTP-active path without a process-wide env var.
     public init(
         onToolCall: @escaping @MainActor @Sendable () -> Void,
         onClientConnected: @escaping @MainActor @Sendable (String, String) -> Void = { _, _ in },
         onClientDisconnected: @escaping @MainActor @Sendable (String) -> Void = { _ in },
-        toolAllowlist: Set<String>? = nil
+        toolAllowlist: Set<String>? = nil,
+        transportRouter: TransportRouter = TransportRouter()
     ) {
         self.onToolCall = onToolCall
         self.onClientConnected = onClientConnected
         self.onClientDisconnected = onClientDisconnected
         self.toolAllowlist = toolAllowlist
+        self.transportRouter = transportRouter
         self.ssePort = ConfigManager.shared.ssePort
     }
 

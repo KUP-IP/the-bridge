@@ -10,11 +10,16 @@
 // configuration. With `BRIDGE_ENABLE_HTTP` unset every existing transport
 // stays byte-for-byte behaviour-identical.
 //
-//   1. ConnectorStepUpGate — step-up consent on `destructiveHint: true`
-//      tools. Base bearer + scope is necessary but NOT sufficient to
-//      dispatch a destructive connector tool; an explicit, verifiable
-//      step-up signal is additionally required. Absent ⇒ a structured,
-//      machine-readable refusal (no dispatch).
+//   1. ConnectorStepUpGate — step-up authorization on `destructiveHint:
+//      true` tools. Base bearer + scope is necessary but NOT sufficient
+//      to dispatch a destructive connector tool; the AS-minted
+//      `connector.step_up` scope on the VERIFIED token is additionally
+//      and SOLELY required. S4 (PKT-800) correction: the per-call
+//      `_stepUp`/`stepUpToken` argument is a non-authoritative UX consent
+//      echo ONLY — it can never by itself authorize a destructive call
+//      (the prior "scope OR non-empty token" logic was a security defect:
+//      any automated client could forge the token). Absent the scope ⇒ a
+//      structured, machine-readable refusal (no dispatch).
 //
 //   2. ConnectorSessionBinding — confused-deputy isolation. A verified
 //      bearer's (subject, client) identity is bound to the MCP session on
@@ -49,19 +54,25 @@ public enum StepUpDecision: Sendable, Equatable {
     case required(reason: StepUpRefusalReason, message: String)
 }
 
-/// Enforces explicit step-up consent for destructive connector tools.
+/// Enforces step-up AUTHORIZATION for destructive connector tools.
 ///
 /// A connector `tools/call` whose target tool is annotated
 /// `destructiveHint: true` (per `ToolAnnotationCatalog`) requires, IN
-/// ADDITION to a valid bearer and a satisfying scope, one of:
+/// ADDITION to a valid bearer and a satisfying capability scope, the
+/// AS-minted **step-up scope** in the VERIFIED access token's `scope`
+/// claim (`connector.step_up`) — the authorization server elevated this
+/// grant. That scope is the SOLE security boundary.
 ///
-///   • a verified **step-up scope** in the access token's `scope` claim
-///     (`connector.step_up`) — the authorization server elevated the
-///     grant for this session; OR
-///   • a per-call **confirmation token** in the request params: a
-///     `_stepUp` (or `stepUpToken`) string field on the `tools/call`
-///     `arguments`, proving the caller performed an explicit per-action
-///     confirmation handshake.
+/// S4 (PKT-800) THREAT-MODEL CORRECTION — the per-call `_stepUp` /
+/// `stepUpToken` argument is a **non-authoritative consent echo only**.
+/// It is recorded (so the UX layer can show "the caller asserted an
+/// explicit per-action confirmation") but it MUST NOT, by itself,
+/// authorize a destructive dispatch. The prior S3 logic accepted "scope
+/// OR a non-empty token"; because `hasConfirmationToken` accepts ANY
+/// non-empty string (no nonce, no binding, no server-side verification),
+/// that let any automated client trivially bypass step-up by sending
+/// `{"_stepUp":"x"}`. Corrected here to "scope REQUIRED; token is
+/// non-authoritative".
 ///
 /// Non-destructive tools, and ALL non-connector transports, never reach
 /// this gate (stdio/local dispatch is unchanged — no step-up there).
@@ -72,7 +83,9 @@ public struct ConnectorStepUpGate: Sendable {
     /// step-up.
     public static let stepUpScopeName = "connector.step_up"
 
-    /// `arguments` keys accepted as a per-call confirmation token.
+    /// `arguments` keys recognized as a per-call consent echo. S4
+    /// (PKT-800): these are a UX signal ONLY — recorded for the consent
+    /// trail, never an authorization factor. See `evaluate(...)`.
     public static let confirmationArgumentKeys: [String] = ["_stepUp", "stepUpToken"]
 
     public init() {}
@@ -83,9 +96,16 @@ public struct ConnectorStepUpGate: Sendable {
         ToolAnnotationCatalog.resolved(for: toolName).destructiveHint
     }
 
-    /// True iff `body` carries an acceptable per-call confirmation token
-    /// on the `tools/call` arguments (non-empty string under any accepted
-    /// key). Pure — no side effects, body is parsed read-only.
+    /// True iff `body` carries a non-empty per-call consent echo on the
+    /// `tools/call` arguments under any recognized key. Pure — no side
+    /// effects, body is parsed read-only.
+    ///
+    /// S4 (PKT-800): this is DIAGNOSTIC ONLY. It is NOT consulted by
+    /// `evaluate(...)` to authorize anything (the AS-minted
+    /// `connector.step_up` scope is the sole security factor); it exists
+    /// so the diagnostics/UX layer can record that the caller asserted an
+    /// explicit per-action confirmation. Treating its return as an
+    /// authorization signal is a defect — see the type doc.
     public static func hasConfirmationToken(in body: Data?) -> Bool {
         guard let body,
               let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
@@ -102,12 +122,24 @@ public struct ConnectorStepUpGate: Sendable {
         return false
     }
 
-    /// Decide step-up for a connector `tools/call`.
+    /// Decide step-up AUTHORIZATION for a connector `tools/call`.
+    ///
+    /// S4 (PKT-800) corrected contract: a destructive tool is authorized
+    /// ONLY if the verified token carries the AS-minted
+    /// `connector.step_up` scope. The per-call `_stepUp`/`stepUpToken`
+    /// argument is a non-authoritative consent echo — it is NEVER
+    /// consulted here and can never substitute for the scope (the prior
+    /// "scope OR non-empty token" logic was a bypass: the token has no
+    /// nonce/binding/verification, so any automated client could forge
+    /// it). The scope is the sole security boundary; the echo is recorded
+    /// by the caller (see `hasConfirmationToken`) for the consent trail.
     ///
     /// - Parameters:
     ///   - toolName: the `tools/call` target.
-    ///   - grantedScopes: scopes carried out of the verified bearer.
-    ///   - body: the raw request body (for the per-call token path).
+    ///   - grantedScopes: scopes carried out of the VERIFIED bearer.
+    ///   - body: the raw request body. Retained in the signature for the
+    ///     diagnostics/consent-trail caller and source compatibility; it
+    ///     is INTENTIONALLY NOT used as an authorization input here.
     public func evaluate(
         toolName: String,
         grantedScopes: [ConnectorScope],
@@ -116,22 +148,19 @@ public struct ConnectorStepUpGate: Sendable {
         guard isDestructive(toolName: toolName) else {
             return .satisfied   // non-destructive ⇒ step-up not applicable
         }
+        // SECURITY BOUNDARY: the AS-minted step-up scope on the verified
+        // token is the SOLE authorization factor. `body` (the per-call
+        // `_stepUp`/`stepUpToken` echo) is deliberately not consulted — a
+        // non-empty string there proves nothing (no nonce/binding/server
+        // verification) and an automated client can trivially supply one.
         let hasStepUpScope = grantedScopes.contains { $0.name == Self.stepUpScopeName }
         if hasStepUpScope { return .satisfied }
-        // THREAT MODEL (honest): the per-call `_stepUp`/`stepUpToken`
-        // argument is a *consent signal only*, NOT an anti-automation
-        // control. `hasConfirmationToken` accepts ANY non-empty string —
-        // there is no nonce, binding, or server-side verification of its
-        // value, so an automated client can trivially supply one. The
-        // strong, non-bypassable factor is the AS-minted
-        // `connector.step_up` scope above; this per-call path only records
-        // that the caller asserted an explicit per-action confirmation.
-        if Self.hasConfirmationToken(in: body) { return .satisfied }
         return .required(
             reason: .stepUpRequired,
-            message: "tool '\(toolName)' is destructive; a step-up signal "
-                + "(scope '\(Self.stepUpScopeName)' or a per-call "
-                + "confirmation token) is required"
+            message: "tool '\(toolName)' is destructive; the AS-minted "
+                + "step-up scope '\(Self.stepUpScopeName)' on the verified "
+                + "token is required (a per-call confirmation argument is a "
+                + "consent signal only and does not authorize this call)"
         )
     }
 }
