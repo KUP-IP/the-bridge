@@ -240,9 +240,58 @@
 # resolver routes every non-page tag through the same safe path so it is
 # correct regardless of those unverified wire shapes. Deferred: real-DS
 # query/validation (operator dependency).
+# cmd-w3 (Commands palette: wired hot-key → panel → fuzzy-search → W2
+# body fetch → paste, 2026-05-18): additive-isolated, DEFAULT-OFF. Two
+# things land in the suite on this branch: (1) the cmd-w1 feasibility
+# spike's GUI-free units, imported verbatim
+# (NotionBridge/App/CommandBox.swift + CommandBoxSpikeTests.swift —
+# Carbon RegisterEventHotKey config, NSPasteboard save→set→restore +
+# changeCount guard, prior-app capture/return, plain-text paste policy,
+# Cmd-V CGEvent construction; 21 harness `test()` blocks NOT previously
+# registered on this branch) and (2) the new W3 glue
+# NotionBridge/Modules/Commands/CommandPalette.swift (a metadata-only
+# `CommandDescriptor` + injectable provider, a PURE deterministic fuzzy
+# matcher/ranker `CommandPaletteSearch` with a stable
+# score↓/name↑/id↑ tie-break, the default-OFF `CommandsPaletteGate`
+# modelled byte-for-byte on TransportRouter's `== "1"` env pattern
+# [BRIDGE_ENABLE_COMMANDS], and a GUI-free `CommandPaletteCoordinator`
+# actor that CONSUMES the W2 CommandsManager for the selected command's
+# body — never re-implementing fetch/cache). CommandBox.swift's
+# controller is extended to delegate commit to the coordinator (fuzzy
+# query → W2-resolved plain-text body → the spike's tested
+# capture→reactivate→stash→Cmd-V→restore paste-back); AppDelegate gains
+# `nonisolated static shouldStartCommandsPalette(environment:)` (the pure
+# gating decision, unit-testable headlessly with NO NSApp/hot-key/panel —
+# same proof shape as the streamableHTTP connector-gating test) and a
+# `maybeStartCommandsPalette()` that constructs NOTHING when the gate is
+# off (no Carbon hot-key, no NSPanel, no CommandsManager — the app is
+# byte-for-byte its prior stdio+SSE self; the only off-path delta is one
+# log line, exactly like the BRIDGE_ENABLE_HTTP precedent). HONEST GUI
+# CEILING (NOT papered over): the hot-key actually firing, the
+# non-activating NSPanel receiving keystrokes, and a real cross-app
+# Cmd-V paste require a live WindowServer/login session and CANNOT be
+# verified headlessly — those are an explicit operator manual-smoke
+# (documented in the W3 return). Green here = the GUI-free logic only:
+# fuzzy match/rank + deterministic tie-break, command-not-found
+# (.notFound never pastes a guess), CommandsManager integration via the
+# injected synthetic BodyFetcher (zero network), W2-cache-consumption
+# (fetcher runs once on repeat — no duplicate cache), the resync-eviction
+# .unavailable propagation (offline-fallback-on-EXPIRY stays covered by
+# W2's own clock-injected CommandsDataTests — not reachable
+# deterministically through the no-clock coordinator commit, stated
+# honestly rather than faked), the gate fail-closed matrix, and the
+# AppDelegate ON/OFF gating decision. New CommandPaletteTests.swift
+# contributes exactly 34 harness `test()` blocks; the imported spike adds
+# 21; 955 + 21 + 34 = 1010. The literal harness summary was
+# `Results: 1010 passed, 0 failed, 1010 total`. No other suite changed;
+# the prior 955 ran byte-for-byte unchanged (the palette is default-OFF
+# and the harness never sets BRIDGE_ENABLE_COMMANDS). Deferred (explicit,
+# NOT implemented): the real operator Commands-DS query that populates
+# the descriptor provider (same operator dependency cmd-w2 documented —
+# the production provider default is the safe empty list).
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-955}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1010}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."
