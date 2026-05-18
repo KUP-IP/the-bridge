@@ -57,6 +57,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var serverTask: Task<Void, Never>?
     private var serverManager: ServerManager?
 
+    /// cmd-w3: the Commands palette. Default-OFF and additive-isolated —
+    /// constructed ONLY when `BRIDGE_ENABLE_COMMANDS=1`
+    /// (`CommandsPaletteGate`). When the gate is off this stays `nil`, no
+    /// Carbon hot-key is registered, no NSPanel exists, and the app is
+    /// byte-for-byte its prior stdio+SSE self (same proof shape as the
+    /// streamableHTTP connector-gating decision). The gating DECISION is
+    /// unit-tested headlessly; the hot-key firing / panel / cross-app
+    /// paste are an explicit operator manual-smoke (W3 GUI ceiling).
+    private var commandBox: CommandBoxController?
+
     // PKT-357 F15: Activity token to prevent App Nap
     private var activityToken: NSObjectProtocol?
 
@@ -158,6 +168,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         startMCPServer()
         validateNotionToken()
 
+        // cmd-w3: opt-in Commands palette (default-OFF, additive-isolated).
+        maybeStartCommandsPalette()
+
         // PKT-353: Set up right-click context menu for Quit action on status item
         statusBar.setupContextMenu()
 
@@ -205,6 +218,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         if let manager = serverManager {
             Task { await manager.stopSSE() }
         }
+
+        // cmd-w3: tear down the palette hot-key if it was registered.
+        // No-op when the gate was off (commandBox == nil).
+        commandBox?.unregisterHotkey()
+        commandBox = nil
 
         // PKT-357 F15: End activity assertion
         if let token = activityToken {
@@ -428,6 +446,41 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 statusBar.markServerStopped()
             }
         }
+    }
+
+    // MARK: - Commands Palette (cmd-w3 — default-OFF, additive-isolated)
+
+    /// Pure gating decision, factored OUT of the GUI path so it is
+    /// unit-testable headlessly (no NSApp, no hot-key, no panel) — the
+    /// same shape as the streamableHTTP connector-gating decision test.
+    /// Returns `true` iff the palette should be constructed for this
+    /// environment. ONLY a literal "1" enables it; unset / "0" / "true"
+    /// keep it OFF (fail-closed), so the default app is byte-for-byte
+    /// unchanged.
+    public nonisolated static func shouldStartCommandsPalette(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        CommandsPaletteGate(environment: environment).isEnabled
+    }
+
+    /// Construct + register the palette IFF the gate is on. No-op (and no
+    /// side effects whatsoever — no hot-key, no panel, no CommandsManager)
+    /// when off. The descriptor provider is the safe empty default until
+    /// the operator Commands-DS query lands (the same deferred operator
+    /// dependency W2 documented); a non-empty operator provider is wired
+    /// in later without touching this gate.
+    private func maybeStartCommandsPalette() {
+        guard Self.shouldStartCommandsPalette() else {
+            print("[Notion Bridge] Commands palette disabled (set \(CommandsPaletteGate.enableEnvKey)=1 to enable)")
+            return
+        }
+        let provider = StaticCommandDescriptorProvider([])
+        let manager = CommandsManager()
+        let coordinator = CommandPaletteCoordinator(provider: provider, manager: manager)
+        let box = CommandBoxController(coordinator: coordinator)
+        let registered = box.registerHotkey()
+        self.commandBox = box
+        print("[Notion Bridge] Commands palette enabled — hot-key \(registered ? "registered" : "registration FAILED") (\(HotkeyConfig.spikeDefault.displayString))")
     }
 
     // MARK: - Notion Token Validation
