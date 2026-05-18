@@ -41,6 +41,16 @@ private actor SkillCache {
     }
 }
 
+/// Per-fetch cache for `<mention-page>` title resolution: one Notion
+/// `getPage` per distinct page URL within a single `fetch_skill` call
+/// (mirrors the cmd-w2 cached-lookup rule). Caches `nil` too so an
+/// unresolved URL is not re-fetched.
+private actor MentionTitleCache {
+    private var titles: [String: String?] = [:]
+    func get(_ url: String) -> String?? { titles[url] }
+    func set(_ url: String, title: String?) { titles[url] = title }
+}
+
 // MARK: - SkillsModule
 
 /// Provides the `fetch_skill` MCP tool for runtime Notion page injection.
@@ -183,12 +193,20 @@ public enum SkillsModule {
                     ])
                 }
 
+                // cmd-w4: includeNested / maxBlocks / maxDepth are retained
+                // for input-schema + cache-key stability (existing callers
+                // and cached entries keyed on them stay valid) but no
+                // longer drive a block-tree walk — the /markdown path
+                // returns one server-rendered document in a single call.
+                _ = includeNested; _ = maxBlocks; _ = maxDepth
+
                 // Fetch from Notion API
                 do {
                     let client = try NotionClient()
                     let pageId = pageIdRaw
 
-                    // Fetch page properties
+                    // Properties/title still come from getPage — the skill
+                    // envelope carries title + url (the block tree does not).
                     let pageData = try await client.getPage(pageId: pageId)
                     guard let pageJSON = try? JSONSerialization.jsonObject(with: pageData) as? [String: Any] else {
                         return .object(["error": .string("Failed to parse Notion page response")])
@@ -200,53 +218,23 @@ public enum SkillsModule {
                         title = NotionJSON.extractTitle(from: properties)
                     }
 
-                    let collected = try await client.collectBlocksDepthFirst(
-                        rootBlockId: pageId,
-                        includeNested: includeNested,
-                        maxBlocks: maxBlocks,
-                        maxDepth: maxDepth
+                    // cmd-w4: body via the server /markdown render (one call;
+                    // preserves headings/lists/code/tables) instead of the
+                    // depth-first block walk + extractPlainText join.
+                    let markdownData = try await client.getPageMarkdown(pageId: pageId)
+                    let rawMarkdown = Self.skillMarkdownString(fromMarkdownJSON: markdownData)
+
+                    // Skill-body <mention-page> tags now render as
+                    // [Title](url) via the shared MentionResolver (cmd-w2),
+                    // resolved through the cached getPage title lookup;
+                    // unresolved / non-page subtypes → safe [link](url).
+                    let result = await Self.buildSkillResult(
+                        skill: skillConfig,
+                        title: title,
+                        url: url,
+                        markdownJSONOrText: rawMarkdown,
+                        titleLookup: Self.makeSkillMentionTitleLookup()
                     )
-                    let blockResults = collected.blocks
-                    let truncated = collected.truncated
-                    let truncationReason = collected.truncationReason
-
-                    if blockResults.isEmpty {
-                        var base: [String: Value] = [
-                            "name": .string(skillConfig.name),
-                            "title": .string(title),
-                            "url": .string(url),
-                            "blockCount": .int(0),
-                            "truncated": .bool(false),
-                            "content": .string("(no blocks)")
-                        ]
-                        base.merge(Self.mcpMetadataObject(skillConfig)) { _, new in new }
-                        let result: Value = .object(base)
-                        await cache.set(cacheKey, content: result)
-                        return result
-                    }
-
-                    var textParts: [String] = []
-                    for block in blockResults {
-                        let line = NotionJSON.extractPlainTextFromBlock(block)
-                        if !line.isEmpty {
-                            textParts.append(line)
-                        }
-                    }
-
-                    var resultObj: [String: Value] = [
-                        "name": .string(skillConfig.name),
-                        "title": .string(title),
-                        "url": .string(url),
-                        "blockCount": .int(blockResults.count),
-                        "truncated": .bool(truncated),
-                        "content": .string(textParts.joined(separator: "\n"))
-                    ]
-                    resultObj.merge(Self.mcpMetadataObject(skillConfig)) { _, new in new }
-                    if let r = truncationReason {
-                        resultObj["truncationReason"] = .string(r)
-                    }
-
-                    let result: Value = .object(resultObj)
                     await cache.set(cacheKey, content: result)
                     return result
 
@@ -1094,6 +1082,184 @@ public enum SkillsModule {
             "triggerPhrases": .array(s.triggerPhrases.map { .string($0) }),
             "antiTriggerPhrases": .array(s.antiTriggerPhrases.map { .string($0) })
         ]
+    }
+
+    // MARK: - cmd-w4: /markdown body retrieval + mention resolution
+
+    /// Decode the `markdown` string from a `GET /v1/pages/{id}/markdown`
+    /// response (`{ "markdown": String }`). Falls back to the raw UTF-8
+    /// bytes when the payload is not the JSON envelope — identical decode
+    /// contract to `notion_page_markdown_read` and
+    /// `CommandsManager.markdownString(fromMarkdownJSON:)`. Public so the
+    /// synthetic-fixture tests exercise the exact production decode.
+    public static func skillMarkdownString(fromMarkdownJSON data: Data) -> String {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return String(data: data, encoding: .utf8) ?? ""
+        }
+        return (json["markdown"] as? String) ?? String(data: data, encoding: .utf8) ?? ""
+    }
+
+    /// String overload of `skillMarkdownString(fromMarkdownJSON:)`.
+    public static func skillMarkdownString(fromMarkdownJSON jsonString: String) -> String {
+        skillMarkdownString(fromMarkdownJSON: Data(jsonString.utf8))
+    }
+
+    /// Pure, network-free builder for the `fetch_skill` return envelope.
+    ///
+    /// cmd-w4 behavior delta: `content` is now the *server-rendered*
+    /// page markdown (headings / lists / code fences / tables preserved)
+    /// run through the shared `MentionResolver`, instead of the old
+    /// depth-first block walk joined as bare `extractPlainText` lines
+    /// (which flattened structure and rendered `<mention-page>` as plain
+    /// title text with no link).
+    ///
+    /// The envelope SHAPE is preserved byte-for-byte for existing MCP
+    /// consumers — same keys (`name`, `title`, `url`, `blockCount`,
+    /// `truncated`, `content`, the merged skill metadata, optional
+    /// `truncationReason`) in the same value types. `blockCount` no longer
+    /// maps to a Notion block count (the /markdown path returns one
+    /// document, not a block tree); it is kept for shape stability and
+    /// reported honestly as the number of non-empty markdown lines.
+    /// `truncated` is always `false` on this path (one server call, no
+    /// pagination cap) — `truncationReason` is therefore omitted.
+    ///
+    /// - Parameters:
+    ///   - skill: the resolved skill config (supplies `name` + metadata).
+    ///   - title: page title for the envelope (from `getPage` properties).
+    ///   - url: page url for the envelope (from `getPage`).
+    ///   - markdownJSONOrText: the raw `/markdown` body — either the JSON
+    ///     envelope or already-extracted markdown; decoded defensively.
+    ///   - titleLookup: injected `<mention-page>` title resolver
+    ///     (unresolved → `[link](url)`; never throws, never drops).
+    private static func buildSkillResult(
+        skill: SkillConfig,
+        title: String,
+        url: String,
+        markdownJSONOrText: String,
+        titleLookup: MentionResolver.TitleLookup
+    ) async -> Value {
+        let markdown = looksLikeMarkdownJSON(markdownJSONOrText)
+            ? skillMarkdownString(fromMarkdownJSON: markdownJSONOrText)
+            : markdownJSONOrText
+
+        let resolved = await MentionResolver.resolve(
+            markdown: markdown,
+            titleLookup: titleLookup
+        )
+
+        // Honest non-block "blockCount": count non-empty lines so an
+        // empty body still reports 0 and the envelope key stays stable.
+        let nonEmptyLineCount = resolved
+            .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+            .reduce(into: 0) { acc, line in
+                if !line.trimmingCharacters(in: .whitespaces).isEmpty { acc += 1 }
+            }
+
+        let contentValue: String = resolved.isEmpty ? "(no content)" : resolved
+
+        var resultObj: [String: Value] = [
+            "name": .string(skill.name),
+            "title": .string(title),
+            "url": .string(url),
+            "blockCount": .int(nonEmptyLineCount),
+            "truncated": .bool(false),
+            "content": .string(contentValue)
+        ]
+        resultObj.merge(mcpMetadataObject(skill)) { _, new in new }
+        return .object(resultObj)
+    }
+
+    /// Public, network-free entry point mirroring `buildSkillResult` but
+    /// taking primitives instead of the private `SkillConfig`, so the
+    /// synthetic-fixture suite (separate test target) drives the EXACT
+    /// production envelope path: decode → MentionResolver → envelope.
+    /// `summary` / `triggerPhrases` / `antiTriggerPhrases` reproduce the
+    /// merged skill-metadata block of the live result.
+    public static func buildSkillResultForTesting(
+        name: String,
+        title: String,
+        url: String,
+        markdownJSONOrText: String,
+        summary: String = "",
+        triggerPhrases: [String] = [],
+        antiTriggerPhrases: [String] = [],
+        titleLookup: @escaping MentionResolver.TitleLookup
+    ) async -> Value {
+        let cfg = SkillConfig(
+            name: name,
+            notionPageId: "00000000000000000000000000000000",
+            enabled: true,
+            visibility: .standard,
+            summary: summary,
+            triggerPhrases: triggerPhrases,
+            antiTriggerPhrases: antiTriggerPhrases
+        )
+        return await buildSkillResult(
+            skill: cfg,
+            title: title,
+            url: url,
+            markdownJSONOrText: markdownJSONOrText,
+            titleLookup: titleLookup
+        )
+    }
+
+    /// Heuristic: is this the `/markdown` JSON envelope vs. already-
+    /// extracted markdown? Conservative — only true when it parses to an
+    /// object carrying a `markdown` key (mirrors CommandsManager).
+    private static func looksLikeMarkdownJSON(_ s: String) -> Bool {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.hasPrefix("{") else { return false }
+        guard let obj = try? JSONSerialization.jsonObject(with: Data(t.utf8)) as? [String: Any]
+        else { return false }
+        return obj["markdown"] != nil
+    }
+
+    /// Build the injectable `<mention-page>` title resolver used by
+    /// `fetch_skill`. Mirrors the cmd-w2 cached-lookup pattern: one Notion
+    /// `getPage` per distinct page URL, title via `NotionJSON.extractTitle`,
+    /// failures degrade to `nil` (→ `MentionResolver` emits `[link](url)`).
+    /// Never throws.
+    private static func makeSkillMentionTitleLookup() -> MentionResolver.TitleLookup {
+        // Per-fetch cache: one network lookup per distinct page URL.
+        let cache = MentionTitleCache()
+        return { pageURL in
+            if let hit = await cache.get(pageURL) { return hit }
+            guard let pid = Self.pageIdFromMentionURL(pageURL) else {
+                await cache.set(pageURL, title: nil)
+                return nil
+            }
+            guard let client = try? NotionClient(),
+                  let data = try? await client.getPage(pageId: pid),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let props = json["properties"] as? [String: Any] else {
+                await cache.set(pageURL, title: nil)
+                return nil
+            }
+            let t = NotionJSON.extractTitle(from: props)
+            let resolved = (t == "Untitled" || t.isEmpty) ? nil : t
+            await cache.set(pageURL, title: resolved)
+            return resolved
+        }
+    }
+
+    /// Extract a 32-hex page id from a Notion mention `url=` value
+    /// (`https://www.notion.so/<slug-><id>` or a bare id). Returns nil
+    /// when no plausible id is present (caller → `[link](url)`).
+    private static func pageIdFromMentionURL(_ url: String) -> String? {
+        let hexset = CharacterSet(charactersIn: "0123456789abcdefABCDEF")
+        // Last 32-hex run in the string is the page id for notion.so URLs.
+        let scalars = url.unicodeScalars
+        var run = ""
+        var best = ""
+        for sc in scalars {
+            if hexset.contains(sc) {
+                run.unicodeScalars.append(sc)
+                if run.count >= 32 { best = String(run.suffix(32)) }
+            } else {
+                run = ""
+            }
+        }
+        return best.count == 32 ? best : nil
     }
 
     private static func skillRowFields(_ s: SkillConfig) -> [String: Value] {

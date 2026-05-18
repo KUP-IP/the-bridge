@@ -240,9 +240,38 @@
 # resolver routes every non-page tag through the same safe path so it is
 # correct regardless of those unverified wire shapes. Deferred: real-DS
 # query/validation (operator dependency).
+# cmd-w4 (fetch_skill /markdown switch, 2026-05-18): additive — switched
+# fetch_skill's body retrieval from the depth-first block walk +
+# extractPlainText join to the server `GET /v1/pages/{id}/markdown`
+# render (one call; preserves headings / lists / code fences / tables)
+# run through the shared cmd-w2 MentionResolver, so skill-body
+# <mention-page> tags now render as portable [Title](url) (title via a
+# cached one-getPage-per-distinct-URL injectable lookup; unresolved /
+# non-page subtypes → safe [link](url); never dropped, never thrown).
+# getPage is RETAINED only for the page title + url the skill envelope
+# carries. The fetch_skill return envelope SHAPE is byte-for-byte
+# preserved (same keys/value-types: name/title/url/blockCount/truncated/
+# content + merged skill metadata); `blockCount` no longer maps to a
+# Notion block count (the /markdown path returns one document) and is
+# reported honestly as the non-empty markdown line count; `truncated`
+# is always false and `truncationReason` is omitted (single call, no
+# pagination cap). includeNested/maxBlocks/maxDepth are kept in the
+# input schema + cache key for caller + cached-entry stability but no
+# longer drive a block walk. New FetchSkillMarkdownTests.swift
+# contributes exactly 19 harness `test()` blocks (structure-fidelity
+# headings/list/code/table-survive vs the modelled legacy plain-text
+# join; before/after page-mention → [Title](url); unresolved → [link]
+# never dropped; envelope-shape-unchanged; empty/whitespace/malformed/
+# mention-only/raw-markdown safety; skillMarkdownString decode parity) —
+# all synthetic /markdown fixtures, ZERO network. 955 + 19 = 974. The
+# literal harness summary was
+# `Results: 974 passed, 0 failed, 974 total` (verified on this branch).
+# No other suite changed; the prior 955 ran byte-for-byte unchanged
+# (additive isolation). The orchestrator reconciles the true integrated
+# floor at merge; this is THIS branch's honestly-measured green.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-955}"
+FLOOR="${BRIDGE_TEST_FLOOR:-974}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."
