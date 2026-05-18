@@ -149,16 +149,47 @@ await test("NotionPageRef rejects non-Notion URL") {
 }
 
 await test("Permanent access can be granted and revoked") {
-    let testPath = "~/.ssh"
-    await gate.grantPermanentAccess(path: testPath)
+    // Test isolation (flake fix): grant/revokePermanentAccess mutate
+    // process-global UserDefaults.standard under a key derived purely from
+    // the path. A hardcoded shared path ("~/.ssh") made this key collide
+    // with the sibling "permanent allow passes through" test, so concurrent
+    // or order-dependent suite execution raced on the same global key and
+    // produced nondeterministic pass/fail. This test only needs a
+    // round-trip on the raw key, so use a per-test UNIQUE path → unique key
+    // that can never collide with any other test or the seeded defaults.
+    // Belt-and-suspenders: snapshot & restore the exact key so neither
+    // direction of contamination is possible regardless of harness order.
+    let testPath = "~/.notionbridge-test-permaccess-\(UUID().uuidString)"
     let key = "com.notionbridge.security.pathAllow." + testPath
+    let saved = UserDefaults.standard.object(forKey: key)
+    defer {
+        if let saved { UserDefaults.standard.set(saved, forKey: key) }
+        else { UserDefaults.standard.removeObject(forKey: key) }
+    }
+    await gate.grantPermanentAccess(path: testPath)
     try expect(UserDefaults.standard.bool(forKey: key) == true, "Expected permanent access granted")
     await gate.revokePermanentAccess(path: testPath)
     try expect(UserDefaults.standard.bool(forKey: key) == false, "Expected permanent access revoked")
 }
 
 await test("Sensitive path with permanent allow passes through") {
+    // Test isolation (flake fix): this test MUST use a real configured
+    // sensitive path ("~/.ssh" — a ConfigManager default) because
+    // checkSensitivePaths only honors the permanent key when the path
+    // matches the sensitive-paths list, so a UUID path cannot exercise it.
+    // The shared global key is therefore structurally unavoidable here;
+    // serialize safety by snapshotting the exact key, force-clearing it to
+    // a known state before the grant, and restoring the original value in a
+    // guaranteed cleanup that runs on BOTH the success and failure path so
+    // this test can neither be contaminated by nor leak into any sibling.
     let testPath = "~/.ssh"
+    let key = "com.notionbridge.security.pathAllow." + testPath
+    let saved = UserDefaults.standard.object(forKey: key)
+    defer {
+        if let saved { UserDefaults.standard.set(saved, forKey: key) }
+        else { UserDefaults.standard.removeObject(forKey: key) }
+    }
+    UserDefaults.standard.removeObject(forKey: key)
     await gate.grantPermanentAccess(path: testPath)
     // With permanent allow, checkSensitivePaths should return nil (allow)
     let result = await gate.checkSensitivePaths(["~/.ssh/id_rsa"], toolName: "file_read")
