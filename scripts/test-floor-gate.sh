@@ -215,9 +215,34 @@
 # DoD number. Raising the floor when the suite legitimately grows is
 # expected; lowering it requires a conscious decision recorded alongside
 # the change.
+# cmd-w2 (Commands data layer, 2026-05-18): additive-isolated new files
+# only — NotionBridge/Modules/Commands/MentionResolver.swift +
+# CommandsManager.swift (a Snippet-shaped `Command` model, an in-memory
+# TTL `CommandCache` cloned from SkillsModule.SkillCache + offline-
+# fallback semantics, and a `CommandsManager` actor that fetches a
+# command page body via the /markdown path through an INJECTABLE
+# BodyFetcher so tests run on synthetic recorded `/markdown` JSON with
+# zero network) plus the shared, standalone `MentionResolver` (Notion
+# `<mention-*/>` → portable Markdown: page→[Title](url) via an injectable
+# cached title-lookup, every other subtype→[link](url) or verbatim
+# pass-through; never drops content, never throws). No stdio /
+# existing-tool / existing-test change; no MCP registration, no UI, no
+# hotkey (deferred slices). New CommandsDataTests.swift contributes
+# exactly 31 harness `test()` blocks (17 MentionResolver subtype-matrix +
+# never-drop/never-throw/scan + 14 CommandsManager/CommandCache fetch-
+# cache-hit-miss-offline-fallback-resync-Codable), so 924 + 31 = 955. The
+# literal harness summary was
+# `Results: 955 passed, 0 failed, 955 total` (independently re-verified on
+# this change). No other suite changed; the
+# prior 924 ran byte-for-byte unchanged. Mention-subtype honesty: only
+# `mention-page` / `mention-user` shapes are stated verified in the
+# brief; date / database / inline-link are modelled from spec — the
+# resolver routes every non-page tag through the same safe path so it is
+# correct regardless of those unverified wire shapes. Deferred: real-DS
+# query/validation (operator dependency).
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-924}"
+FLOOR="${BRIDGE_TEST_FLOOR:-955}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."
