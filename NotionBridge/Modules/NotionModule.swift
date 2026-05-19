@@ -1315,6 +1315,53 @@ public enum NotionModule {
             }
         ))
 
+        // MARK: 22b. notion_datasource_delete - notify (soft-delete, recoverable)
+        await router.register(ToolRegistration(
+            name: "notion_datasource_delete",
+            module: moduleName,
+            tier: .notify,
+            description: "Move a data source to Notion's trash (soft-delete, recoverable). Notion has no hard delete — the data source is trashed via in_trash:true. Requires confirm:true. Use mode:'restore' to untrash.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "dataSourceId": .object(["type": .string("string"), "description": .string("Data source ID (with or without hyphens)")]),
+                    "mode": .object(["type": .string("string"), "description": .string("'delete' (trash, default) or 'restore' (untrash)")]),
+                    "confirm": .object(["type": .string("boolean"), "description": .string("Must be true — guard against accidental deletion")]),
+                    "workspace": workspaceParam
+                ]),
+                "required": .array([.string("dataSourceId"), .string("confirm")])
+            ]),
+            handler: { arguments in
+                guard case .object(let args) = arguments,
+                      case .string(let dsId) = args["dataSourceId"] else {
+                    throw ToolRouterError.invalidArguments(toolName: "notion_datasource_delete", reason: "missing 'dataSourceId'")
+                }
+                guard case .bool(true)? = args["confirm"] else {
+                    return .object(["error": .string("Refused: pass confirm:true to trash a data source")])
+                }
+                let mode: String = {
+                    if case .string(let m) = args["mode"] { return m }
+                    return "delete"
+                }()
+                let inTrash = (mode != "restore")
+
+                let client = try await registryHolder.getClient(workspace: extractWorkspace(args))
+                let resultData = try await client.deleteDataSource(dataSourceId: dsId, inTrash: inTrash)
+
+                guard let resultJSON = try? JSONSerialization.jsonObject(with: resultData) as? [String: Any] else {
+                    return .object(["error": .string("Failed to parse delete response")])
+                }
+
+                let id = resultJSON["id"] as? String ?? dsId
+                let trashed = resultJSON["in_trash"] as? Bool ?? inTrash
+                return .object([
+                    "success": .bool(true),
+                    "id": .string(id),
+                    "in_trash": .bool(trashed)
+                ])
+            }
+        ))
+
         // MARK: 23. notion_discussion_create – notify (E5, v1.9.1)
         // Starts a NEW discussion thread on a page. Same endpoint as notion_comment_create
         // (POST /v1/comments) but semantically distinct: no discussion_id hint, so Notion

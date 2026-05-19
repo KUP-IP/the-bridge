@@ -844,6 +844,24 @@ public actor NotionClient {
         return data
     }
 
+    /// Move a data source to (or restore from) Notion's trash — soft-delete.
+    /// PATCH /v1/data_sources/{data_source_id} with { "in_trash": true }.
+    /// Notion exposes no hard-delete for data sources; trashed items are recoverable.
+    public func deleteDataSource(dataSourceId: String, inTrash: Bool = true) async throws -> Data {
+        let cleanId = dataSourceId.replacingOccurrences(of: "-", with: "")
+        let body = try JSONSerialization.data(withJSONObject: ["in_trash": inTrash])
+        let (data, response) = try await request(
+            method: "PATCH",
+            path: "/data_sources/" + cleanId,
+            body: body
+        )
+        guard (200...299).contains(response.statusCode) else {
+            let msg = String(data: data, encoding: .utf8) ?? ""
+            throw NotionClientError.httpError(response.statusCode, msg)
+        }
+        return data
+    }
+
     /// B4 (v1.8.5): Create a new data source under a database.
     /// POST /v1/data_sources
     public func createDataSource(databaseId: String, properties: Data, title: String? = nil, parentType: String = "database_id") async throws -> Data {

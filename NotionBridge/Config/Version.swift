@@ -52,7 +52,8 @@ public enum BridgeConstants {
     /// v2.3 · 0.1 (PKT-804): − cursor (5 cursor_agent_* tools) = 149.
     /// v2.3 · WS-D (PKT-2135a9e9): + snippets (9 snippets_* tools) = 158.
     /// Note: jobs_pause_all / jobs_resume_all dropped; current JobsModule contributes 13 job_* tools.
-    public static let staticFeatureModuleToolCount = 158
+    /// run-app re-platform: + notion_datasource_delete (NotionModule 23→24) = 159.
+    public static let staticFeatureModuleToolCount = 159
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

@@ -22,9 +22,9 @@ func runNotionModuleTests() async {
     // MARK: - Tool Registration (23 tools)
     // ============================================================
 
-    await test("NotionModule registers 23 tools") {
+    await test("NotionModule registers 24 tools") {
         let tools = await router.registrations(forModule: "notion")
-        try expect(tools.count == 23, "Expected 23 notion tools, got \(tools.count)")
+        try expect(tools.count == 24, "Expected 24 notion tools, got \(tools.count)")
     }
 
     let expectedTools: [String] = [
