@@ -316,9 +316,24 @@
 # formula/rollup envelopes) are built from the Notion API spec, not a
 # recorded live page — the flatten routes every unknown/odd shape
 # through the same safe skip so it is correct regardless.
+#
+# 2026-05-18 Commands-unification integration reconcile: base 1029 (cmd
+# sprint) -> +30 (cu-sa: additive simplified `properties` map on the
+# fetch_skill return) -> +15 net (cu-sb: palette re-pointed to the
+# existing skills registry, clipboard-only, the cmd-w1 paste-back
+# subsystem DELETED — 21 paste-back test() blocks removed, +18 palette
+# tests, net +15). True integrated green independently measured 3x
+# deterministic = 1074 (NOT the per-branch 1059/1044). FLOOR = the
+# measured integrated count per the order-inversion rule. Decisions:
+# skills/commands unified on ONE store (the existing UserDefaults
+# registry — no new Notion data source); fetch_skill (agents) returns
+# DB properties (simplified) + markdown body; the command palette
+# (humans) writes the page body to the clipboard only (no paste-back,
+# no new MCP tool, no kind flag). DS-binding / OAuth / multi-tenant
+# explicitly retired-deferred. Not pushed.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1059}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1074}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."
