@@ -471,6 +471,7 @@ await runCommandBoxSpikeTests()   // cmd-w1 spike (imported): GUI-free command-b
 await runCommandPaletteTests()    // cmd-w3: palette search + gate + AppDelegate gating + coordinator
 await runSkillVsCommandSplitTests() // cmd-ux: LOCK the skill-vs-command body/properties split
 await runCommandsControllerTests()  // cmd-ux W1/W2: CommandsController observable state machine + status/focus model
+await runCommandVisibilityTests()   // cmd-ux W3: .command visibility axis — Codable, palette filter, picker write-back, empty-state
 await runToolAnnotationAuditTests() // PKT-803 (v2.3 · WS-B): annotation coverage audit
 await runTransportRouterTests()     // PKT-803 (v2.3 · WS-B): transport router default/env
 await runRemoteOAuthHTTPTests()     // PKT-800 (S1): RFC 9728 PRM + transport gating + route

@@ -472,10 +472,13 @@ public enum CommandPalettePresenter {
     /// The auto-dismiss delay (ms) for the "Copied ‹name›" confirmation.
     public static let confirmationDismissMillis = 900
 
-    /// Empty-registry guidance shown when the palette opens with zero
-    /// commands available.
+    /// cmd-ux W3 (Q1=b): empty-state guidance shown when the palette has
+    /// ZERO command-type descriptors. The palette now filters to skills
+    /// explicitly marked `.command`, so the actionable guidance is to
+    /// mark one — not merely "add a skill" (a user may have skills that
+    /// just aren't `.command`). Single source of the string.
     public static let emptyRegistryMessage =
-        "No commands yet — add skills in Settings → Commands"
+        "No commands yet — mark a skill as Command in Settings → Commands"
 
     /// Map a commit result to its presentation. `name` is the label to
     /// echo in the success confirmation (the selected/best descriptor's
@@ -615,5 +618,40 @@ public enum CommandsSettingsStatus: Sendable, Equatable {
         case .active, .disabled:
             return false
         }
+    }
+}
+
+// ============================================================
+// MARK: - 8. CommandPaletteEmptyState (pure empty-state decision, W3)
+//
+//   Q1=b: when the palette has ZERO command-type descriptors the panel
+//   shows an inline HINT line instead of a blank list. The DECISION
+//   (show a list vs show the hint, and the exact hint text) is this
+//   pure type — unit-tested headlessly; only the NSView rendering of it
+//   is the operator-smoke ceiling.
+// ============================================================
+
+/// Pure decision for what the palette body should present given how many
+/// command descriptors are available. Total + deterministic so the
+/// "blank vs hint" rule and the exact copy are unit-asserted without a
+/// WindowServer.
+public enum CommandPaletteEmptyState: Sendable, Equatable {
+    /// There is at least one command — render the results list normally.
+    case hasCommands
+    /// Zero command-type descriptors — show the inline guidance hint
+    /// (NOT a blank list) so the user knows the actionable next step.
+    case hint(message: String)
+
+    /// Decide from the available command count. Pure: `count → state`.
+    public static func decide(commandCount: Int) -> CommandPaletteEmptyState {
+        commandCount > 0
+            ? .hasCommands
+            : .hint(message: CommandPalettePresenter.emptyRegistryMessage)
+    }
+
+    /// The inline hint text to show, or `nil` when a list should render.
+    public var hintMessage: String? {
+        if case .hint(let m) = self { return m }
+        return nil
     }
 }

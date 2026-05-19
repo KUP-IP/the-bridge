@@ -39,20 +39,39 @@ public struct SkillMetadataLimits: Sendable {
 }
 
 /// Visibility for MCP discovery vs fetch-only registry entries.
+///
+/// cmd-ux W3: `.command` is a NEW, ORTHOGONAL axis — it controls only
+/// whether an enabled skill appears in the global Commands PALETTE
+/// (`RegistrySkillsCommandProvider`). It is deliberately single-enum
+/// (Q3=a): a `.command` skill is palette-only-for-DISCOVERY. It is NOT
+/// in the `list_routing_skills` discovery list (that stays
+/// `enabled && .routing`), and — critically — `fetch_skill` is
+/// name-based and visibility-AGNOSTIC, so a `.command` skill is STILL
+/// fetchable by name exactly like before. The retrieval split locked by
+/// SkillVsCommandSplitTests is a different axis and is unaffected.
 public enum SkillVisibility: String, Sendable, CaseIterable, Equatable {
     /// Listed by `list_routing_skills` when enabled (lightweight discovery).
     case routing
     /// Fetchable via `fetch_skill` only; omitted from routing list.
     case standard
+    /// cmd-ux W3: appears in the global Commands palette (the hot-key
+    /// command box copies the page body to the clipboard). Still
+    /// fetchable by name via `fetch_skill`; NOT in the routing list.
+    case command
 }
 
 extension SkillVisibility: Codable {
-    /// Decodes legacy persisted value `adminOnly` as `.standard`.
+    /// Round-trips all cases incl. `.command`. Decodes the legacy
+    /// persisted value `adminOnly` as `.standard`; any
+    /// unknown/missing/corrupt raw value degrades safely to `.standard`
+    /// (the conservative default — never silently promotes a skill into
+    /// the palette or the routing list).
     public init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
         let raw = try c.decode(String.self).trimmingCharacters(in: .whitespacesAndNewlines)
         switch raw {
         case "routing": self = .routing
+        case "command": self = .command
         case "adminOnly": self = .standard
         case "standard": self = .standard
         default: self = .standard
@@ -62,6 +81,21 @@ extension SkillVisibility: Codable {
     public func encode(to encoder: Encoder) throws {
         var c = encoder.singleValueContainer()
         try c.encode(rawValue)
+    }
+}
+
+extension SkillVisibility {
+    /// cmd-ux W3: the single source of the human-readable picker label
+    /// for each case. Both visibility pickers (add-form + per-row) and
+    /// the Settings help block render from this — no more hardcoded,
+    /// drift-prone tag/label lists. Iterating `SkillVisibility.allCases`
+    /// + this label is the ONE place a future case shows up.
+    public var pickerLabel: String {
+        switch self {
+        case .routing:  return "Routing (discovery list)"
+        case .standard: return "Standard (fetch only)"
+        case .command:  return "Command (palette)"
+        }
     }
 }
 

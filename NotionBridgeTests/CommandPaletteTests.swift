@@ -50,13 +50,28 @@ private enum PaletteTestError: Error { case boom }
     _ defaults: UserDefaults, key: String,
     _ rows: [(name: String, pageId: String, enabled: Bool)]
 ) {
+    // cmd-ux W3: the palette now filters to `.command`-marked skills.
+    // The legacy 3-arg helper seeds rows AS `.command` so the existing
+    // mapping/decoding/tolerance tests (which only care about the
+    // enabled/page-id/decode behaviour, not the visibility axis) keep
+    // exercising that behaviour against the new filter. The visibility
+    // filter ITSELF is covered by dedicated mixed-registry W3 tests.
+    seedRegistry(defaults, key: key, rows.map {
+        (name: $0.name, pageId: $0.pageId, enabled: $0.enabled, visibility: "command")
+    })
+}
+
+@Sendable private func seedRegistry(
+    _ defaults: UserDefaults, key: String,
+    _ rows: [(name: String, pageId: String, enabled: Bool, visibility: String)]
+) {
     let arr: [[String: Any]] = rows.map {
         [
             "name": $0.name,
             "notionPageId": $0.pageId,
             "enabled": $0.enabled,
+            "visibility": $0.visibility,
             // Extra persisted fields the provider must tolerate/ignore:
-            "visibility": "standard",
             "summary": "ignored-by-palette",
             "triggerPhrases": ["t1"],
             "antiTriggerPhrases": [],
@@ -529,11 +544,16 @@ func runCommandPaletteTests() async {
         try expect(got.isEmpty, "corrupt registry bytes must fail safe to empty, got \(got.count)")
     }
 
-    await test("RegistryProvider tolerates legacy rows missing the 'enabled' flag") {
+    await test("RegistryProvider tolerates legacy rows missing the 'enabled' flag (visibility=command)") {
         // SkillsManager treats a missing `enabled` as enabled; the
-        // provider's decoder must mirror that exactly.
+        // provider's decoder must mirror that exactly. cmd-ux W3: the
+        // row is `.command` so it passes the new visibility filter —
+        // this test pins the missing-`enabled` tolerance, not the
+        // visibility axis (which has its own dedicated W3 tests).
         let (d, suite) = makeIsolatedDefaults()
-        let legacy: [[String: Any]] = [["name": "Legacy", "notionPageId": pidSig]]
+        let legacy: [[String: Any]] = [
+            ["name": "Legacy", "notionPageId": pidSig, "visibility": "command"]
+        ]
         d.set(try JSONSerialization.data(withJSONObject: legacy), forKey: BridgeDefaults.skills)
         let got = await RegistrySkillsCommandProvider(
             suiteName: suite, storageKey: BridgeDefaults.skills).descriptors()
@@ -567,19 +587,37 @@ func runCommandPaletteTests() async {
                    "a registry-name prefix must still rank the entry first, got \(pref.first?.descriptor.name ?? "nil")")
     }
 
-    await test("RegistryProvider maps EVERY enabled entry (no skill/command kind filter)") {
-        // Slice decision: there is no skill-vs-command distinction — every
-        // enabled registry entry is selectable, regardless of visibility.
+    await test("W3 RegistryProvider filters to enabled `.command` ONLY (mixed registry)") {
+        // cmd-ux W3 (Q3=a): the slice's "every enabled entry is a
+        // command" rule is REPLACED — the palette now shows ONLY skills
+        // explicitly marked `.command` (and enabled). A mixed registry
+        // (routing / standard / command / disabled-command) must yield
+        // ONLY the enabled `.command` rows. This does NOT change the
+        // routing-discovery or fetch_skill axes (locked separately).
         let (d, suite) = makeIsolatedDefaults()
+        let pidCmd1 = pidSig
+        let pidCmd2 = "dddd1111eeee2222ffff33334444aaaa"
         seedRegistry(d, key: BridgeDefaults.skills, [
-            (name: "Routing-ish", pageId: pidSig, enabled: true),
-            (name: "Standard-ish", pageId: pidAddr, enabled: true),
-            (name: "Third", pageId: "cccc1111dddd2222eeee3333ffff4444", enabled: true),
+            (name: "Routing One",  pageId: pidAddr, enabled: true,  visibility: "routing"),
+            (name: "Standard One", pageId: "bbbb1111cccc2222dddd3333eeee4444", enabled: true, visibility: "standard"),
+            (name: "Command One",  pageId: pidCmd1, enabled: true,  visibility: "command"),
+            (name: "Command Two",  pageId: pidCmd2, enabled: true,  visibility: "command"),
+            (name: "Disabled Cmd", pageId: "cccc1111dddd2222eeee3333ffff4444", enabled: false, visibility: "command"),
+            (name: "Legacy AdminOnly", pageId: "eeee1111ffff222233334444aaaabbbb", enabled: true, visibility: "adminOnly"),
+            (name: "Unknown Vis",  pageId: "ffff1111aaaa2222bbbb3333cccc4444", enabled: true, visibility: "totally-bogus"),
         ])
         let got = await RegistrySkillsCommandProvider(
             suiteName: suite, storageKey: BridgeDefaults.skills).descriptors()
-        try expect(got.count == 3,
-                   "all three enabled entries are selectable commands, got \(got.count)")
+        let names = Set(got.map { $0.name })
+        try expect(got.count == 2,
+                   "only the 2 enabled `.command` rows are palette commands, got \(got.count): \(names.sorted())")
+        try expect(names == ["Command One", "Command Two"],
+                   "exactly the enabled `.command` rows; routing/standard/disabled/legacy-admin/unknown all excluded, got \(names.sorted())")
+        // adminOnly → .standard and unknown → .standard (the tolerant
+        // SkillVisibility decoder), so BOTH are correctly excluded —
+        // never silently promoted into the palette.
+        try expect(!names.contains("Legacy AdminOnly") && !names.contains("Unknown Vis"),
+                   "legacy/unknown visibility must degrade to .standard (excluded), not leak into the palette")
     }
 
     await test("RegistryProvider default storageKey is the shared BridgeDefaults.skills") {
@@ -857,8 +895,12 @@ func runCommandPaletteTests() async {
     }
 
     await test("Presenter: empty-registry message + dismiss delay constants") {
+        // cmd-ux W3 (Q1=b): the palette now filters to `.command`-marked
+        // skills, so the actionable empty-state guidance is to MARK a
+        // skill as Command — not merely "add a skill" (a user may have
+        // skills that simply aren't `.command`).
         try expect(CommandPalettePresenter.emptyRegistryMessage
-                       == "No commands yet — add skills in Settings → Commands",
+                       == "No commands yet — mark a skill as Command in Settings → Commands",
                    "got '\(CommandPalettePresenter.emptyRegistryMessage)'")
         try expect(CommandPalettePresenter.confirmationDismissMillis == 900,
                    "the confirmation auto-dismiss is ~900ms, got \(CommandPalettePresenter.confirmationDismissMillis)")

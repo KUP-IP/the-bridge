@@ -714,10 +714,14 @@ public final class CommandBoxController: NSObject {
             self.selection.updateResultCount(ranked.count)
             self.resultsTable?.reloadData()
             self.syncTableSelection()
-            if ranked.isEmpty {
-                self.showStatus(CommandPalettePresenter.emptyRegistryMessage,
-                                warning: false)
-            } else {
+            // cmd-ux W3 (Q1=b): the empty-vs-hint DECISION is the pure,
+            // unit-tested `CommandPaletteEmptyState` — this only renders
+            // what it decides (an inline guidance line instead of a
+            // blank list when zero command-type descriptors exist).
+            switch CommandPaletteEmptyState.decide(commandCount: ranked.count) {
+            case .hint(let message):
+                self.showStatus(message, warning: false)
+            case .hasCommands:
                 self.clearStatus()
             }
         }
