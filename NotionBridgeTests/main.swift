@@ -467,8 +467,9 @@ await runSnippetsModuleTests()    // PKT-2135a9e9 (v2.3 · WS-D): snippets modul
 await runCommandsDataTests()      // cmd-w2: Commands data layer (CommandsManager + MentionResolver + cache)
 await runFetchSkillMarkdownTests() // cmd-w4: fetch_skill /markdown + shared MentionResolver
 await runFetchSkillPropertiesTests() // cu-sa: fetch_skill simplified `properties` map (additive)
-await runCommandBoxSpikeTests()   // cmd-w1 spike (imported): GUI-free command-box units
+await runCommandBoxSpikeTests()   // cmd-w1 spike (imported): GUI-free command-box units + cmd-ux recorder/persist
 await runCommandPaletteTests()    // cmd-w3: palette search + gate + AppDelegate gating + coordinator
+await runSkillVsCommandSplitTests() // cmd-ux: LOCK the skill-vs-command body/properties split
 await runToolAnnotationAuditTests() // PKT-803 (v2.3 · WS-B): annotation coverage audit
 await runTransportRouterTests()     // PKT-803 (v2.3 · WS-B): transport router default/env
 await runRemoteOAuthHTTPTests()     // PKT-800 (S1): RFC 9728 PRM + transport gating + route

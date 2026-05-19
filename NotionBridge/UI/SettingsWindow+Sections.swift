@@ -221,33 +221,37 @@ extension SettingsView {
         )
     }
 
-    // MARK: - Skills (PKT-366 F9)
+    // MARK: - Commands (cmd-ux, Change A + B)
 
-    var skillsSection: some View {
-        let disabledTools = Set(UserDefaults.standard.stringArray(forKey: BridgeDefaults.disabledTools) ?? [])
-        return SkillsView(
-            skillsManager: skillsManager,
-            fetchSkillDisabled: disabledTools.contains("fetch_skill")
-        )
-    }
-
-
-    // MARK: - Commands (cmd-ux)
-
-    /// Settings → Commands. (a) a persisted master Toggle that live-
-    /// registers / unregisters the global hot-key via the AppDelegate
-    /// (no relaunch); (b) a status row driven by
-    /// `CommandsSettingsStatus` (Active — ⌃B / red shortcut-unavailable
-    /// / Disabled); (c) the commands list = the existing `SkillsView`
-    /// (Commands ARE the enabled Skills). The toggle/status string
-    /// mapping is the pure `CommandsSettingsStatus` (unit-tested); only
-    /// the SwiftUI rendering here is the operator-smoke ceiling.
+    /// Settings → **Commands** (the single, de-duplicated tab — the old
+    /// redundant "Skills" tab was removed in Change A; this IS the
+    /// command manager). It stacks, top-to-bottom:
+    ///
+    ///   (a) the persisted master Toggle that live-registers /
+    ///       unregisters the global hot-key via the AppDelegate (no
+    ///       relaunch);
+    ///   (b) a status row driven by the pure `CommandsSettingsStatus`
+    ///       ("Active — ⌃⌥⌘C" / red "⚠ unavailable" / "Disabled"), the
+    ///       glyph read LIVE from the registered combo;
+    ///   (c) the in-Settings hot-key RECORDER (Change B): shows the
+    ///       current combo, "Record shortcut" enters capture, the next
+    ///       valid chord live-rebinds via `AppDelegate.setCommandsHotkey`,
+    ///       and "Reset to default" restores `productionDefault`;
+    ///   (d) the FULL existing `SkillsView` CRUD list — add / edit /
+    ///       delete a command is unchanged (Commands ARE the enabled
+    ///       Skills; the page body is what the palette copies).
+    ///
+    /// The status string mapping is the pure `CommandsSettingsStatus`
+    /// and the recorded-chord mapping is the pure `HotkeyConfig.from`
+    /// (both unit-tested headlessly); only the SwiftUI rendering + the
+    /// raw `NSEvent` capture gesture are the operator-smoke ceiling.
     var commandsSection: some View {
         let disabledTools = Set(UserDefaults.standard.stringArray(forKey: BridgeDefaults.disabledTools) ?? [])
+        let current = commandsHotkeyConfig
         let status = CommandsSettingsStatus(
             enabled: commandsPaletteEnabled,
             isRegistered: commandsPaletteRegistered,
-            hotkey: HotkeyConfig.productionDefault.displayString
+            hotkey: current.displayString
         )
         return Form {
             Section("Commands Palette") {
@@ -273,6 +277,35 @@ extension SettingsView {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("Commands palette status: \(status.message)")
+
+                // (c) Change B: in-Settings hot-key recorder.
+                HStack(spacing: BridgeSpacing.sm) {
+                    Text("Shortcut")
+                    Spacer()
+                    HotkeyRecorderField(
+                        currentDisplay: current.displayString,
+                        isRecording: $isRecordingHotkey,
+                        onCapture: { keyCode, mods in
+                            guard let cfg = HotkeyConfig.from(
+                                keyCode: keyCode, cocoaModifiers: mods
+                            ) else { return false }
+                            _ = (NSApp.delegate as? AppDelegate)?.setCommandsHotkey(cfg)
+                            return true
+                        }
+                    )
+                    .frame(width: 150)
+                    Button(isRecordingHotkey ? "Press shortcut\u{2026}" : "Record shortcut") {
+                        isRecordingHotkey.toggle()
+                    }
+                    .disabled(!commandsPaletteEnabled)
+                    Button("Reset to default") {
+                        isRecordingHotkey = false
+                        _ = (NSApp.delegate as? AppDelegate)?
+                            .setCommandsHotkey(.productionDefault)
+                    }
+                    .disabled(!commandsPaletteEnabled)
+                }
+                .help("Click \u{201C}Record shortcut\u{201D}, then press the new combo. A modifier (\u{2318}/\u{2325}/\u{2303}/\u{21E7}) is required.")
             }
 
             Section {
@@ -281,7 +314,7 @@ extension SettingsView {
                     fetchSkillDisabled: disabledTools.contains("fetch_skill")
                 )
             } header: {
-                Text("Commands are your enabled Skills. Manage them here or via the manage_skill tool.")
+                Text("Commands are Notion-page skills; the palette hot-key copies the selected command\u{2019}s page body to your clipboard. Add, edit, or remove commands below (or via the manage_skill tool).")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .textCase(nil)
@@ -848,5 +881,98 @@ extension SettingsView {
     @ViewBuilder
     var jobsSection: some View {
         JobsView()
+    }
+}
+
+// MARK: - Hotkey Recorder Field (Change B)
+
+/// A focusable field that, while `isRecording`, captures the next
+/// physical key-down (with held modifiers) and hands `(keyCode, Cocoa
+/// ModifierFlags)` to `onCapture`. The PURE part — translating that pair
+/// into a validated `HotkeyConfig` and persisting/re-registering it — is
+/// `HotkeyConfig.from` + `AppDelegate.setCommandsHotkey`, both unit-
+/// tested headlessly. ONLY the raw `NSEvent` capture gesture here is the
+/// documented operator-smoke ceiling.
+///
+/// `onCapture` returns whether the chord was accepted (a valid
+/// modifier+key); a rejected chord (modifier-less / pure-modifier) keeps
+/// the field in capture mode so the user can try again. Escape cancels.
+struct HotkeyRecorderField: NSViewRepresentable {
+    let currentDisplay: String
+    @Binding var isRecording: Bool
+    /// `(carbonVirtualKeyCode, NSEvent.ModifierFlags) -> accepted`.
+    let onCapture: (UInt32, NSEvent.ModifierFlags) -> Bool
+
+    func makeNSView(context: Context) -> RecorderNSView {
+        let v = RecorderNSView()
+        v.onCapture = { code, mods in
+            let accepted = onCapture(code, mods)
+            if accepted { isRecording = false }
+            return accepted
+        }
+        v.onCancel = { isRecording = false }
+        return v
+    }
+
+    func updateNSView(_ nsView: RecorderNSView, context: Context) {
+        nsView.display = isRecording ? "Press shortcut\u{2026}" : currentDisplay
+        nsView.isRecording = isRecording
+        if isRecording {
+            // Grab focus only if we don't already hold it — avoids a
+            // redundant makeFirstResponder on every SwiftUI re-render
+            // while capture mode stays on.
+            DispatchQueue.main.async {
+                guard let window = nsView.window,
+                      window.firstResponder !== nsView else { return }
+                window.makeFirstResponder(nsView)
+            }
+        }
+        nsView.needsDisplay = true
+    }
+
+    /// The AppKit capture surface. First-responder while recording;
+    /// `keyDown` forwards the raw `(keyCode, modifierFlags)` to the pure
+    /// mapping. Holds NO mapping/validation logic itself.
+    final class RecorderNSView: NSView {
+        var display: String = ""
+        var isRecording = false
+        /// Returns whether the chord was accepted.
+        var onCapture: ((UInt32, NSEvent.ModifierFlags) -> Bool)?
+        var onCancel: (() -> Void)?
+
+        override var acceptsFirstResponder: Bool { isRecording }
+
+        /// AppKit virtual keycode for Escape (kVK_Escape) — named here so
+        /// this SwiftUI file needn't import Carbon for a single constant.
+        private static let escapeKeyCode: UInt16 = 53
+
+        override func keyDown(with event: NSEvent) {
+            guard isRecording else { super.keyDown(with: event); return }
+            // Escape cancels capture without changing the binding.
+            if event.keyCode == Self.escapeKeyCode {
+                onCancel?()
+                return
+            }
+            _ = onCapture?(UInt32(event.keyCode), event.modifierFlags)
+        }
+
+        override func draw(_ dirtyRect: NSRect) {
+            let bg = isRecording
+                ? NSColor.controlAccentColor.withAlphaComponent(0.15)
+                : NSColor.unemphasizedSelectedContentBackgroundColor
+            bg.setFill()
+            let path = NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6)
+            path.fill()
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 13),
+                .foregroundColor: NSColor.labelColor
+            ]
+            let str = NSAttributedString(string: display, attributes: attrs)
+            let size = str.size()
+            str.draw(at: NSPoint(
+                x: (bounds.width - size.width) / 2,
+                y: (bounds.height - size.height) / 2
+            ))
+        }
     }
 }

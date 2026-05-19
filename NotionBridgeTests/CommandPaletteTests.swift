@@ -876,15 +876,18 @@ func runCommandPaletteTests() async {
     // MARK: (K) P2 — pure Settings status row + multi-monitor math
     // ============================================================
 
-    await test("CommandsSettingsStatus: enabled + registered ⇒ \"Active — ⌃B\"") {
-        let st = CommandsSettingsStatus(enabled: true, isRegistered: true, hotkey: "⌃B")
-        try expect(st == .active(hotkey: "⌃B"))
-        try expect(st.message == "Active — ⌃B", "got '\(st.message)'")
+    // Change C: the shipping default glyph is now ⌃⌥⌘C — these pure
+    // status tests use it as the representative combo (the mapping
+    // itself is glyph-agnostic; the sample tracks the real default).
+    await test("CommandsSettingsStatus: enabled + registered ⇒ \"Active — ⌃⌥⌘C\"") {
+        let st = CommandsSettingsStatus(enabled: true, isRegistered: true, hotkey: "⌃⌥⌘C")
+        try expect(st == .active(hotkey: "⌃⌥⌘C"))
+        try expect(st.message == "Active — ⌃⌥⌘C", "got '\(st.message)'")
         try expect(!st.isWarning, "the active state is not a warning")
     }
 
     await test("CommandsSettingsStatus: enabled + NOT registered ⇒ red shortcut-unavailable") {
-        let st = CommandsSettingsStatus(enabled: true, isRegistered: false, hotkey: "⌃B")
+        let st = CommandsSettingsStatus(enabled: true, isRegistered: false, hotkey: "⌃⌥⌘C")
         try expect(st == .shortcutUnavailable)
         try expect(st.message == "⚠ Shortcut unavailable (in use by another app)",
                    "got '\(st.message)'")
@@ -893,7 +896,7 @@ func runCommandPaletteTests() async {
 
     await test("CommandsSettingsStatus: disabled ⇒ \"Disabled\", no warning (regardless of registration)") {
         for reg in [true, false] {
-            let st = CommandsSettingsStatus(enabled: false, isRegistered: reg, hotkey: "⌃B")
+            let st = CommandsSettingsStatus(enabled: false, isRegistered: reg, hotkey: "⌃⌥⌘C")
             try expect(st == .disabled, "off ⇒ .disabled even if isRegistered=\(reg)")
             try expect(st.message == "Disabled" && !st.isWarning)
         }

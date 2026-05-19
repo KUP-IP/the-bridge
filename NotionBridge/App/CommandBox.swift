@@ -76,21 +76,22 @@ public struct HotkeyConfig: Equatable, Sendable, Codable {
 
     /// The original spike default: ⌥⌘Space (Option+Command+Space).
     /// RETAINED only so historical references / Codable fixtures stay
-    /// valid — the SHIPPING default is `productionDefault` (⌃B). Chosen
+    /// valid — the SHIPPING default is `productionDefault` (⌃⌥⌘C). Chosen
     /// originally to avoid Spotlight (⌘Space) and macOS dictation.
     public static let spikeDefault = HotkeyConfig(
         keyCode: UInt32(kVK_Space),
         carbonModifiers: UInt32(cmdKey | optionKey)
     )
 
-    /// The SHIPPING production default: ⌃B (Control+B). Carbon
-    /// `kVK_ANSI_B` (11) + `controlKey`. `hasModifier` is true (control
-    /// counts) so the controller will register it. This is the approved
-    /// default for the enterprise Commands-palette UX; a future increment
-    /// can make it user-configurable + conflict-checked.
+    /// The SHIPPING production default: ⌃⌥⌘C (Control+Option+Command+C).
+    /// Carbon `kVK_ANSI_C` (8) + `controlKey | optionKey | cmdKey`.
+    /// `hasModifier` is true so the controller will register it. The
+    /// triple-modifier combo is collision-resistant (no default macOS or
+    /// common-app binding owns ⌃⌥⌘C), and the in-Settings recorder
+    /// (Change B) lets the operator rebind it live if it ever conflicts.
     public static let productionDefault = HotkeyConfig(
-        keyCode: UInt32(kVK_ANSI_B),
-        carbonModifiers: UInt32(controlKey)
+        keyCode: UInt32(kVK_ANSI_C),
+        carbonModifiers: UInt32(controlKey | optionKey | cmdKey)
     )
 
     /// Whether at least one modifier is set. A modifier-less global
@@ -121,9 +122,112 @@ public struct HotkeyConfig: Equatable, Sendable, Codable {
         return s
     }
 
+    // ============================================================
+    // MARK: Cocoa → Carbon recorder mapping (pure, Change B)
+    // ============================================================
+
+    /// Map a recorded key-down — its Carbon virtual `keyCode` plus the
+    /// Cocoa `NSEvent.ModifierFlags` that were held — into a validated
+    /// `HotkeyConfig`, or `nil` if the chord is REJECTED.
+    ///
+    /// This is the headlessly-testable heart of the in-Settings recorder
+    /// (the actual `NSEvent` capture gesture is the operator-smoke
+    /// ceiling; THIS mapping/validation is not). It does two jobs:
+    ///
+    ///   1. Translate the Cocoa modifier bitset (`.control/.option/
+    ///      .shift/.command`) into the Carbon modifier mask
+    ///      (`controlKey/optionKey/shiftKey/cmdKey`) — they are DIFFERENT
+    ///      bit layouts, so a literal copy would silently mis-register.
+    ///   2. Reject an invalid chord by returning `nil`:
+    ///        • no modifier at all (a bare key would swallow that key for
+    ///          every app — `CommandBoxController.registerHotkey()` also
+    ///          refuses it, but we reject earlier so the recorder never
+    ///          even offers to persist it), and
+    ///        • a "pure-modifier" press with no real key. A modifier-only
+    ///          key-down (the recorder must wait for an actual key) has a
+    ///          `keyCode` that is itself a modifier virtual key
+    ///          (⌘/⌥/⌃/⇧/CapsLock/Fn); those are not bindable.
+    ///
+    /// Pure: no `NSEvent`, no GUI, no global state — `(keyCode, flags) →
+    /// HotkeyConfig?` is a total function, unit-tested exhaustively.
+    public static func from(
+        keyCode: UInt32,
+        cocoaModifiers: NSEvent.ModifierFlags
+    ) -> HotkeyConfig? {
+        // (2a) Reject a modifier-key-only press (no real key yet).
+        if Self.isPureModifierKeyCode(keyCode) { return nil }
+
+        // (1) Cocoa bitset → Carbon mask. `.deviceIndependentFlagsMask`
+        // strips device/Fn noise so e.g. left/right ⌘ both map cleanly.
+        let cocoa = cocoaModifiers.intersection(.deviceIndependentFlagsMask)
+        var carbon: UInt32 = 0
+        if cocoa.contains(.control) { carbon |= UInt32(controlKey) }
+        if cocoa.contains(.option)  { carbon |= UInt32(optionKey) }
+        if cocoa.contains(.shift)   { carbon |= UInt32(shiftKey) }
+        if cocoa.contains(.command) { carbon |= UInt32(cmdKey) }
+
+        // (2b) Reject a modifier-less chord (would hijack a bare key).
+        guard carbon != 0 else { return nil }
+
+        return HotkeyConfig(keyCode: keyCode, carbonModifiers: carbon)
+    }
+
+    /// True iff `keyCode` is itself a modifier / non-bindable virtual key
+    /// (⌘/⌥/⌃/⇧/CapsLock/Fn, left or right). A recorder key-down with one
+    /// of these is a "still holding modifiers, no key yet" event and must
+    /// not become a hot-key. Pure + exhaustively unit-testable.
+    public static func isPureModifierKeyCode(_ keyCode: UInt32) -> Bool {
+        switch Int(keyCode) {
+        case kVK_Command, kVK_RightCommand,
+             kVK_Shift, kVK_RightShift,
+             kVK_Option, kVK_RightOption,
+             kVK_Control, kVK_RightControl,
+             kVK_CapsLock, kVK_Function:
+            return true
+        default:
+            return false
+        }
+    }
+
+    // ============================================================
+    // MARK: Persistence (Change B)
+    // ============================================================
+
+    /// Load the persisted Commands hot-key from `UserDefaults`, falling
+    /// back to `productionDefault` when the key is unset OR the stored
+    /// bytes fail to decode (corrupt write / schema drift). Pure given an
+    /// injected `UserDefaults` so the fallback ladder is unit-tested with
+    /// zero process-global coupling.
+    public static func loadPersisted(
+        from defaults: UserDefaults = .standard,
+        key: String = BridgeDefaults.commandsHotkey
+    ) -> HotkeyConfig {
+        guard
+            let data = defaults.data(forKey: key),
+            let decoded = try? JSONDecoder().decode(HotkeyConfig.self, from: data)
+        else {
+            return .productionDefault
+        }
+        return decoded
+    }
+
+    /// Persist this config as JSON under `key`. Returns `false` if
+    /// encoding somehow fails (it cannot for this fixed shape, but the
+    /// caller treats a false as "kept the prior registration"). Pure
+    /// given an injected `UserDefaults`.
+    @discardableResult
+    public func persist(
+        to defaults: UserDefaults = .standard,
+        key: String = BridgeDefaults.commandsHotkey
+    ) -> Bool {
+        guard let data = try? JSONEncoder().encode(self) else { return false }
+        defaults.set(data, forKey: key)
+        return true
+    }
+
     /// Map a Carbon virtual key code to its display glyph. Pure +
     /// exhaustively unit-testable (no GUI). Covers Space and the ANSI
-    /// letter row used by the shipping default (⌃B → "B"); unknown codes
+    /// letter row used by the shipping default (⌃⌥⌘C → "C"); unknown codes
     /// fall back to `key#N` so the string is never empty.
     public static func keyGlyph(for keyCode: UInt32) -> String {
         switch Int(keyCode) {
@@ -275,7 +379,10 @@ public final class CommandBoxPanel: NSPanel {
 /// genuinely require a WindowServer and are operator manual-smoke.
 @MainActor
 public final class CommandBoxController: NSObject {
-    private let hotkey: HotkeyConfig
+    /// The combo the controller registers. `var` (not `let`) so the
+    /// in-Settings recorder can live-rebind without a relaunch via
+    /// `rebind(to:)` — see Change B.
+    private var hotkey: HotkeyConfig
     private let clipboard: ClipboardWriting
     /// The GUI-free search + W2-body-fetch core. Required — the palette
     /// always resolves the typed text as a fuzzy QUERY against the
@@ -303,6 +410,11 @@ public final class CommandBoxController: NSObject {
 
     public private(set) var isRegistered = false
     public private(set) var isVisible = false
+
+    /// The combo this controller currently registers (or last tried to).
+    /// Read by the Settings status row + the live-rebind path so the
+    /// displayed glyph always tracks the controller's real config.
+    public var hotkeyConfig: HotkeyConfig { hotkey }
 
     // MARK: Pure placement (multi-monitor) — unit-tested headlessly
 
@@ -413,6 +525,29 @@ public final class CommandBoxController: NSObject {
         if let ref = hotKeyRef { UnregisterEventHotKey(ref); hotKeyRef = nil }
         if let h = eventHandler { RemoveEventHandler(h); eventHandler = nil }
         isRegistered = false
+    }
+
+    /// Live-rebind to a new combo WITHOUT a relaunch (Change B). Uses the
+    /// existing idempotent `unregisterHotkey()` + `registerHotkey()`
+    /// path. On success the controller now owns the new combo. On FAILURE
+    /// (the new combo is taken by another app) the prior working combo is
+    /// restored and re-registered so the palette is never left dead — the
+    /// caller surfaces the ⚠ and lets the user try another combo.
+    ///
+    /// Returns whether the NEW combo registered successfully.
+    @discardableResult
+    public func rebind(to newHotkey: HotkeyConfig) -> Bool {
+        let previous = hotkey
+        unregisterHotkey()
+        hotkey = newHotkey
+        if registerHotkey() {
+            return true
+        }
+        // New combo failed — fall back to the prior working combo so the
+        // palette keeps responding to the old shortcut (best-effort).
+        hotkey = previous
+        _ = registerHotkey()
+        return false
     }
 
     // MARK: Show / commit

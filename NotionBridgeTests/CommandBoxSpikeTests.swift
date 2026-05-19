@@ -65,24 +65,29 @@ func runCommandBoxSpikeTests() async {
         try expect(back == h, "Codable round-trip changed the config")
     }
 
-    // ---- cmd-ux: the SHIPPING default is ⌃B (Control+B) --------------
+    // ---- cmd-ux Change C: SHIPPING default is ⌃⌥⌘C ------------------
 
-    await test("HotkeyConfig.productionDefault is ⌃B (kVK_ANSI_B + controlKey)") {
+    await test("HotkeyConfig.productionDefault is ⌃⌥⌘C (kVK_ANSI_C + ctrl|opt|cmd)") {
         let h = HotkeyConfig.productionDefault
-        try expect(h.keyCode == UInt32(kVK_ANSI_B),
-                   "keyCode must be B (\(kVK_ANSI_B)), got \(h.keyCode)")
-        try expect(h.keyCode == 11, "kVK_ANSI_B is virtual key 11, got \(h.keyCode)")
-        try expect(h.carbonModifiers == UInt32(controlKey),
-                   "modifier must be controlKey only, got \(h.carbonModifiers)")
+        try expect(h.keyCode == UInt32(kVK_ANSI_C),
+                   "keyCode must be C (\(kVK_ANSI_C)), got \(h.keyCode)")
+        try expect(h.keyCode == 8, "kVK_ANSI_C is virtual key 8 (0x08), got \(h.keyCode)")
+        try expect(h.carbonModifiers == UInt32(controlKey | optionKey | cmdKey),
+                   "modifier must be controlKey|optionKey|cmdKey, got \(h.carbonModifiers)")
+        // It must NOT carry the spike's cmd|option-Space shape.
+        try expect(h != HotkeyConfig.spikeDefault,
+                   "productionDefault must differ from the retained spikeDefault")
     }
 
-    await test("HotkeyConfig.productionDefault.hasModifier is true (control counts)") {
+    await test("HotkeyConfig.productionDefault.hasModifier is true (triple modifier)") {
         try expect(HotkeyConfig.productionDefault.hasModifier,
-                   "⌃B must report hasModifier=true so the controller registers it")
+                   "⌃⌥⌘C must report hasModifier=true so the controller registers it")
     }
 
-    await test("HotkeyConfig.productionDefault.displayString renders \"⌃B\"") {
-        try expect(HotkeyConfig.productionDefault.displayString == "⌃B",
+    await test("HotkeyConfig.productionDefault.displayString renders \"⌃⌥⌘C\"") {
+        // Canonical Apple order: ⌃ ⌥ ⇧ ⌘ then the key glyph. ⌃⌥⌘C has
+        // no shift, so the rendered string is exactly ⌃⌥⌘C.
+        try expect(HotkeyConfig.productionDefault.displayString == "⌃⌥⌘C",
                    "got '\(HotkeyConfig.productionDefault.displayString)'")
     }
 
@@ -254,5 +259,176 @@ func runCommandBoxSpikeTests() async {
         let cb = InMemoryClipboard(initial: "seeded")
         try expect(cb.readString() == "seeded" && cb.writeCount == 0,
                    "an initial value is visible with zero writes, got \(cb.readString() ?? "nil")/\(cb.writeCount)")
+    }
+
+    // ---- (d) Change B: Cocoa→Carbon recorder mapping (PURE) ---------
+    //
+    //   The headlessly-testable heart of the in-Settings hot-key
+    //   recorder. The raw NSEvent capture gesture is the documented
+    //   operator-smoke ceiling; `HotkeyConfig.from(keyCode:cocoaModifiers:)`
+    //   and `isPureModifierKeyCode` are NOT — exhaustively asserted here:
+    //   every single modifier, all combinations, the Cocoa→Carbon bit
+    //   translation, and every rejection case.
+
+    await test("recorder map: ⌃ alone → controlKey (single-modifier bit)") {
+        let h = HotkeyConfig.from(keyCode: UInt32(kVK_ANSI_C), cocoaModifiers: [.control])
+        try expect(h != nil, "⌃C is a valid chord")
+        try expect(h?.carbonModifiers == UInt32(controlKey),
+                   "expected controlKey, got \(h?.carbonModifiers ?? 999)")
+        try expect(h?.keyCode == UInt32(kVK_ANSI_C), "keyCode must pass through unchanged")
+    }
+
+    await test("recorder map: ⌥ alone → optionKey") {
+        let h = HotkeyConfig.from(keyCode: UInt32(kVK_ANSI_K), cocoaModifiers: [.option])
+        try expect(h?.carbonModifiers == UInt32(optionKey),
+                   "expected optionKey, got \(h?.carbonModifiers ?? 999)")
+    }
+
+    await test("recorder map: ⇧ alone → shiftKey") {
+        let h = HotkeyConfig.from(keyCode: UInt32(kVK_ANSI_K), cocoaModifiers: [.shift])
+        try expect(h?.carbonModifiers == UInt32(shiftKey),
+                   "expected shiftKey, got \(h?.carbonModifiers ?? 999)")
+    }
+
+    await test("recorder map: ⌘ alone → cmdKey") {
+        let h = HotkeyConfig.from(keyCode: UInt32(kVK_ANSI_K), cocoaModifiers: [.command])
+        try expect(h?.carbonModifiers == UInt32(cmdKey),
+                   "expected cmdKey, got \(h?.carbonModifiers ?? 999)")
+    }
+
+    await test("recorder map: ⌃⌥⌘ → controlKey|optionKey|cmdKey (the new default shape)") {
+        let h = HotkeyConfig.from(
+            keyCode: UInt32(kVK_ANSI_C),
+            cocoaModifiers: [.control, .option, .command]
+        )
+        try expect(h != nil, "the triple-modifier chord is valid")
+        try expect(h?.carbonModifiers == UInt32(controlKey | optionKey | cmdKey),
+                   "Cocoa ⌃⌥⌘ must OR to the exact Carbon mask, got \(h?.carbonModifiers ?? 999)")
+        // Identical to the shipping productionDefault (round-trip proof
+        // that the recorder can reproduce the default by hand).
+        try expect(h == HotkeyConfig.productionDefault,
+                   "recording ⌃⌥⌘C must equal productionDefault")
+    }
+
+    await test("recorder map: ⌃⇧⌘ all four-minus-option combine correctly") {
+        let h = HotkeyConfig.from(
+            keyCode: UInt32(kVK_ANSI_P),
+            cocoaModifiers: [.control, .shift, .command]
+        )
+        try expect(h?.carbonModifiers == UInt32(controlKey | shiftKey | cmdKey),
+                   "got \(h?.carbonModifiers ?? 999)")
+    }
+
+    await test("recorder map: all four modifiers → full Carbon mask") {
+        let h = HotkeyConfig.from(
+            keyCode: UInt32(kVK_ANSI_A),
+            cocoaModifiers: [.control, .option, .shift, .command]
+        )
+        try expect(h?.carbonModifiers == UInt32(controlKey | optionKey | shiftKey | cmdKey),
+                   "all four Cocoa flags must map to the OR of all four Carbon bits, got \(h?.carbonModifiers ?? 999)")
+    }
+
+    await test("recorder map: device-dependent / Fn noise is stripped before mapping") {
+        // .function + caps-lock noise must not leak into the Carbon mask;
+        // only ⌘ should survive (deviceIndependentFlagsMask intersection).
+        let h = HotkeyConfig.from(
+            keyCode: UInt32(kVK_ANSI_C),
+            cocoaModifiers: [.command, .function, .capsLock]
+        )
+        try expect(h?.carbonModifiers == UInt32(cmdKey),
+                   "Fn/CapsLock must be stripped — only cmdKey survives, got \(h?.carbonModifiers ?? 999)")
+    }
+
+    await test("recorder REJECTS a modifier-less chord (nil — would hijack a bare key)") {
+        let h = HotkeyConfig.from(keyCode: UInt32(kVK_ANSI_C), cocoaModifiers: [])
+        try expect(h == nil, "a bare key with no modifier must be rejected, got \(String(describing: h))")
+    }
+
+    await test("recorder REJECTS Fn/CapsLock-only as modifier-less (they are not Carbon modifiers)") {
+        let h = HotkeyConfig.from(
+            keyCode: UInt32(kVK_ANSI_C),
+            cocoaModifiers: [.function, .capsLock]
+        )
+        try expect(h == nil,
+                   "Fn/CapsLock are not cmd/opt/ctrl/shift → no Carbon modifier → reject, got \(String(describing: h))")
+    }
+
+    await test("recorder REJECTS a pure-modifier key-down (⌘ held, no real key yet)") {
+        // The recorder fires keyDown on the modifier key itself before a
+        // real key arrives — keyCode is a modifier virtual key. Reject so
+        // it never becomes a binding even though .command is "set".
+        for code in [kVK_Command, kVK_RightCommand, kVK_Shift, kVK_RightShift,
+                     kVK_Option, kVK_RightOption, kVK_Control, kVK_RightControl,
+                     kVK_CapsLock, kVK_Function] {
+            let h = HotkeyConfig.from(keyCode: UInt32(code), cocoaModifiers: [.command])
+            try expect(h == nil,
+                       "pure-modifier keyCode \(code) must be rejected, got \(String(describing: h))")
+            try expect(HotkeyConfig.isPureModifierKeyCode(UInt32(code)),
+                       "isPureModifierKeyCode must be true for modifier virtual key \(code)")
+        }
+    }
+
+    await test("isPureModifierKeyCode is FALSE for ordinary keys (letters/Space)") {
+        for code in [kVK_ANSI_A, kVK_ANSI_C, kVK_ANSI_Z, kVK_Space, kVK_ANSI_0, kVK_ANSI_9] {
+            try expect(!HotkeyConfig.isPureModifierKeyCode(UInt32(code)),
+                       "ordinary key \(code) must NOT be a pure-modifier code")
+        }
+    }
+
+    await test("recorder map: a valid chord round-trips through Codable (recorder→persist shape)") {
+        let h = HotkeyConfig.from(keyCode: UInt32(kVK_ANSI_J), cocoaModifiers: [.control, .command])
+        let data = try JSONEncoder().encode(h!)
+        let back = try JSONDecoder().decode(HotkeyConfig.self, from: data)
+        try expect(back == h, "the recorded config must survive the persistence Codable seam")
+    }
+
+    // ---- (e) Change B: hot-key persistence (PURE, injected defaults) -
+
+    await test("loadPersisted falls back to productionDefault when the key is UNSET") {
+        let d = UserDefaults(suiteName: "cmd-ux.persist.unset.\(UUID().uuidString)")!
+        let loaded = HotkeyConfig.loadPersisted(from: d, key: BridgeDefaults.commandsHotkey)
+        try expect(loaded == HotkeyConfig.productionDefault,
+                   "an absent key must yield productionDefault (⌃⌥⌘C), got \(loaded.displayString)")
+    }
+
+    await test("loadPersisted falls back to productionDefault when the stored bytes are CORRUPT") {
+        let suite = "cmd-ux.persist.corrupt.\(UUID().uuidString)"
+        let d = UserDefaults(suiteName: suite)!
+        d.set(Data("not valid hotkey json".utf8), forKey: BridgeDefaults.commandsHotkey)
+        let loaded = HotkeyConfig.loadPersisted(from: d, key: BridgeDefaults.commandsHotkey)
+        try expect(loaded == HotkeyConfig.productionDefault,
+                   "corrupt bytes must degrade to productionDefault, not crash, got \(loaded.displayString)")
+    }
+
+    await test("persist → loadPersisted round-trips an operator-recorded combo") {
+        let suite = "cmd-ux.persist.roundtrip.\(UUID().uuidString)"
+        let d = UserDefaults(suiteName: suite)!
+        // Record ⌥⌘J via the pure mapping, persist, reload.
+        let recorded = HotkeyConfig.from(keyCode: UInt32(kVK_ANSI_J),
+                                         cocoaModifiers: [.option, .command])!
+        let ok = recorded.persist(to: d, key: BridgeDefaults.commandsHotkey)
+        try expect(ok, "persist must succeed for a well-formed config")
+        let loaded = HotkeyConfig.loadPersisted(from: d, key: BridgeDefaults.commandsHotkey)
+        try expect(loaded == recorded,
+                   "a persisted rebind must survive reload exactly, got \(loaded.displayString)")
+        try expect(loaded != HotkeyConfig.productionDefault,
+                   "the reloaded value must be the recorded combo, NOT the default")
+    }
+
+    await test("persist overwrites a prior persisted combo (latest rebind wins)") {
+        let suite = "cmd-ux.persist.overwrite.\(UUID().uuidString)"
+        let d = UserDefaults(suiteName: suite)!
+        HotkeyConfig(keyCode: UInt32(kVK_ANSI_A),
+                     carbonModifiers: UInt32(controlKey)).persist(to: d, key: BridgeDefaults.commandsHotkey)
+        let second = HotkeyConfig(keyCode: UInt32(kVK_ANSI_B),
+                                  carbonModifiers: UInt32(cmdKey | shiftKey))
+        second.persist(to: d, key: BridgeDefaults.commandsHotkey)
+        try expect(HotkeyConfig.loadPersisted(from: d, key: BridgeDefaults.commandsHotkey) == second,
+                   "the most recent persist must win")
+    }
+
+    await test("loadPersisted default key is the shared BridgeDefaults.commandsHotkey") {
+        try expect(BridgeDefaults.commandsHotkey == "com.notionbridge.commandsHotkey",
+                   "the persistence key constant must be stable, got \(BridgeDefaults.commandsHotkey)")
     }
 }

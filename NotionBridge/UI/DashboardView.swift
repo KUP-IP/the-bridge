@@ -61,7 +61,7 @@ public struct DashboardView: View {
             Text("v\(appVersion)")
                 .bridgeSecondary()
             // WS-H (PKT-804): quick-page deep-link icons → Settings sections.
-            quickLink(.skills, systemImage: "book.closed", help: "Open Skills")
+            quickLink(.commands, systemImage: "command", help: "Open Commands")
             quickLink(.tools, systemImage: "hammer", help: "Open Tools")
             quickLink(.connections, systemImage: "gearshape", help: "Open Settings (\u{2318},)")
         }
