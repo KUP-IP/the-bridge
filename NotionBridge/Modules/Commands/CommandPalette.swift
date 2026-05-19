@@ -423,6 +423,15 @@ public struct CommandPaletteSelection: Sendable, Equatable {
         case .down: index = min(count - 1, i + 1)
         }
     }
+
+    /// Directly seat the selection at `i` (e.g. a mouse click in the
+    /// results list). Clamps into `[0, count-1]`; an empty list keeps
+    /// the selection `nil`. O(1) — the click handler must NOT step the
+    /// model row-by-row.
+    public mutating func select(index i: Int) {
+        guard count > 0 else { index = nil; return }
+        index = min(max(0, i), count - 1)
+    }
 }
 
 // ============================================================

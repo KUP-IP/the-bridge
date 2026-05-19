@@ -798,6 +798,28 @@ func runCommandPaletteTests() async {
         try expect(s.selectedIndex == nil && s.count == 0, "negative refresh clamps to empty")
     }
 
+    await test("Selection: select(index:) seats directly + clamps both ends (mouse click, O(1))") {
+        var s = CommandPaletteSelection(count: 5)
+        s.select(index: 3)
+        try expect(s.selectedIndex == 3, "a click on row 3 must select 3, got \(String(describing: s.selectedIndex))")
+        s.select(index: 99)
+        try expect(s.selectedIndex == 4, "an out-of-range click clamps to the last row, got \(String(describing: s.selectedIndex))")
+        s.select(index: -7)
+        try expect(s.selectedIndex == 0, "a negative click clamps to the first row, got \(String(describing: s.selectedIndex))")
+        // Equivalence with the old O(n) step-down re-seat it replaces.
+        var stepped = CommandPaletteSelection(count: 5)
+        for _ in 0..<3 { stepped.move(.down) }
+        var seated = CommandPaletteSelection(count: 5)
+        seated.select(index: 3)
+        try expect(stepped == seated, "select(index:) must equal the stepped re-seat it replaced")
+    }
+
+    await test("Selection: select(index:) on an empty list keeps nil") {
+        var s = CommandPaletteSelection(count: 0)
+        s.select(index: 2)
+        try expect(s.selectedIndex == nil, "selecting into an empty list must stay nil")
+    }
+
     // ============================================================
     // MARK: (J) P2 — pure commit → UI presentation mapping
     //   Each CommandPaletteCommitResult → the EXACT inline message +

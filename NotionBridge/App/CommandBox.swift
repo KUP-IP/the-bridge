@@ -736,11 +736,9 @@ extension CommandBoxController: NSTableViewDataSource, NSTableViewDelegate {
         let row = table.selectedRow
         guard row >= 0, row < results.count else { return }
         selection.updateResultCount(results.count)
-        // Re-seat the pure model's index to the clicked row by stepping
-        // it (keeps CommandPaletteSelection the single source of truth).
-        var s = CommandPaletteSelection(count: results.count)
-        for _ in 0..<row { s.move(.down) }
-        selection = s
+        // O(1) direct seat (keeps CommandPaletteSelection the single
+        // source of truth) so a subsequent ⏎ commits the clicked row.
+        selection.select(index: row)
     }
 }
 

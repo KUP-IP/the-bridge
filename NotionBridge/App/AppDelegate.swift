@@ -482,7 +482,20 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// (the hot-key stays registered). Used by both startup and the
     /// live Settings toggle.
     private func startCommandsPalette() {
-        guard commandBox == nil else { return }
+        if let existing = commandBox {
+            // Already constructed. If a prior Carbon registration failed
+            // (the combo was owned by another app at the time), retry it
+            // now — the conflicting app may have since released the
+            // hot-key. registerHotkey() is idempotent (a no-op `true`
+            // when already registered), so this is safe on every call
+            // and is the recovery path for a ⌃B collision without a
+            // full relaunch.
+            if !existing.isRegistered {
+                let ok = existing.registerHotkey()
+                print("[Notion Bridge] Commands palette hot-key re-registration \(ok ? "succeeded" : "still FAILED") (\(HotkeyConfig.productionDefault.displayString))")
+            }
+            return
+        }
         let provider = RegistrySkillsCommandProvider()
         let manager = CommandsManager()
         let coordinator = CommandPaletteCoordinator(provider: provider, manager: manager)

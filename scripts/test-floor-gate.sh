@@ -366,9 +366,21 @@
 # rewritten to an honest behavioral anti-restore invariant (count
 # unchanged). Integrated green measured = 1080 (1076 +4). FLOOR raised
 # per order-inversion. Not pushed.
+#
+# 2026-05-19 Commands palette P1+P2 (enterprise UX): +30 test() —
+# worktree-isolated implementer + independent reviewer (GREENLIGHT) +
+# orchestrator gate re-run. Env-only gate → persisted default-ON master
+# toggle (env override kept for CI); default hotkey ⌃B; Settings
+# "Commands" section (toggle + status + Skills-as-commands list); live
+# results list + ↑↓ + copy-confirmation + states; pure
+# gate/selection/presenter/placement cores exhaustively tested, AppKit/
+# WindowServer parts the documented operator-smoke ceiling. +2
+# orchestrator nit-fix tests (O(1) select(index:) seat; ⌃B-collision
+# re-registration retry). Integrated green independently measured =
+# 1110 (1080 +28 impl +2 nit). FLOOR raised per order-inversion.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1080}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1110}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."

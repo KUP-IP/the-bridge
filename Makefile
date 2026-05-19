@@ -72,10 +72,10 @@ test:
 # WS-C (PKT-798) → v3.0·0.5 → Dev-suite audit → PKT-800 S1 → S2 → S3 → S4
 # → cmd-w2 (Commands data layer) → cmd-w4 (fetch_skill /markdown switch)
 # → cu-sa (fetch_skill simplified `properties` map, 2026-05-18): runs the
-# suite + asserts the green floor (1080 as of 2026-05-19: L5 +1
-# live-Notion fixture, +1 datasource_delete sec-remediation guard, +4
-# datasource_delete behavioral/audit-closeout tests; measured on main;
-# provenance in scripts/test-floor-gate.sh) and zero failures.
+# suite + asserts the green floor (1110 as of 2026-05-19: prior 1080 +30
+# Commands-palette P1+P2 enterprise-UX tests, worktree impl + independent
+# review + orchestrator gate; measured on main; provenance in
+# scripts/test-floor-gate.sh) and zero failures.
 # Used by CI so a shrunk/disabled suite fails. Floor provenance lives in
 # scripts/test-floor-gate.sh.
 test-floor:
