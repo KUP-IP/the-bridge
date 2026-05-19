@@ -1,11 +1,11 @@
 // CommandPalette.swift — cmd-w3 (Commands palette: search + gate + wiring)
 // NotionBridge · Modules · Commands
 //
-// W3 consumes the W1 spike's proven GUI shell (CommandBox.swift —
-// Carbon hot-key + non-activating NSPanel + clipboard-stash paste-back)
-// and the W2 data layer (CommandsManager — /markdown fetch + mention
-// resolve + TTL cache + offline-fallback). This file owns the GUI-FREE
-// glue that joins them, all of it headlessly testable:
+// This consumes the GUI shell (CommandBox.swift — Carbon hot-key +
+// non-activating NSPanel + a single clipboard write) and the W2 data
+// layer (CommandsManager — /markdown fetch + mention resolve + TTL
+// cache + offline-fallback). This file owns the GUI-FREE glue that
+// joins them, all of it headlessly testable:
 //
 //   1. CommandDescriptor          — palette-row metadata (id/name/abbr/
 //                                    group/tags). The BODY is NOT held
@@ -35,14 +35,15 @@
 //                                    the resolved body via the injected
 //                                    CommandsManager (NO duplicate fetch/
 //                                    cache — it calls W2). Returns the
-//                                    plain-text string the spike's
-//                                    clipboard-stash paste-back pastes.
+//                                    plain-text body the GUI shell writes
+//                                    to the system clipboard.
 //
-// HONEST GUI CEILING (NOT papered over): the hot-key actually firing,
-// the NSPanel receiving keystrokes, and a real cross-app Cmd-V paste
-// require a live WindowServer/login session and cannot be asserted
-// headlessly. Those are an explicit operator manual-smoke (see the W3
-// report). Everything in THIS file is pure and 100%-green-tested.
+// HONEST GUI CEILING (NOT papered over): the hot-key actually firing and
+// the NSPanel receiving keystrokes require a live WindowServer/login
+// session and cannot be asserted headlessly — an explicit operator
+// manual-smoke. The clipboard WRITE itself is headlessly verified (write
+// → read back via the ClipboardWriting seam). Everything in THIS file is
+// pure and 100%-green-tested.
 
 import Foundation
 
@@ -257,8 +258,11 @@ public struct CommandsPaletteGate: Sendable, Equatable {
 
 /// What happens when the user commits (Enter) on a query/selection.
 public enum CommandPaletteCommitResult: Sendable, Equatable {
-    /// Resolved body to paste (plain text — Q2 decision). The GUI shell
-    /// stashes this on the pasteboard and synthesises Cmd-V.
+    /// Resolved body (plain text). The GUI shell writes this to the
+    /// system clipboard (replace contents — no save/restore); the user
+    /// pastes it themselves. The case name is retained for source/test
+    /// stability — it now means "this is the body to put on the
+    /// clipboard", NOT a synthetic paste into another app.
     case paste(String)
     /// The query matched no command — nothing to paste. The GUI shell
     /// keeps the panel open (no destructive paste of a wrong command).

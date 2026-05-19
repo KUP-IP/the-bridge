@@ -1,40 +1,37 @@
-// CommandBoxSpikeTests.swift — Feasibility spike (cmd-w1-spike)
+// CommandBoxSpikeTests.swift — cmd-sb (Commands palette: clipboard-only)
 // NotionBridge · Tests
 //
-// Covers the PURE, GUI-free units of the command-box architecture:
-//   (a) prior-app capture / return model       — PriorAppCapture
-//   (b) clipboard save→set→restore round-trip   — ClipboardStasher (stub pb)
-//   (c) plain-text paste-format selection       — CommandBoxParameters
-//   (d) hotkey-config model                     — HotkeyConfig
-//   (+) Cmd-V CGEvent construction (no posting) — PasteKeystroke
+// The cmd-w1-spike paste-back subsystem was DELETED (prior-app capture,
+// reactivate, synthetic Cmd-V, clipboard save/restore round-trip,
+// focus-restore + timing policy). Its 13 paste-back `test()` blocks
+// (ClipboardStasher save/restore/guard/unconditional, PriorAppCapture
+// record/self/returnFocus/no-op/vanished/reset, CommandBoxParameters
+// plain-text/invalid/restore-ordering, PasteKeystroke keycode/Cmd-V
+// construction) are SUPERSEDED here by corrected-invariant tests for the
+// surviving + new units of the clipboard-only design:
+//   (a) HotkeyConfig model               — RETAINED verbatim (5 tests)
+//   (b) ClipboardWriting seam            — NEW: write fully replaces,
+//       no snapshot/no restore, read-back, write-count, idempotent
+//       overwrite, empty/unicode payloads (the corrected invariant —
+//       "replace, never restore" — that supersedes the deleted
+//       save/restore/guard round-trip tests)
+//   (c) SystemClipboard live adapter     — NSPasteboard.general round
+//       trips a real write→read (replaces the deleted SystemPasteboard
+//       save/restore coverage with the corrected replace-only contract)
 //
 // HONEST SCOPE: the global hot-key actually FIRING and a non-activating
 // NSPanel receiving key events both require a live WindowServer session
-// and a real frontmost app — those are NOT faked here. Only the
-// injectable logic is asserted.
+// — those are NOT faked here. Only the injectable logic is asserted.
 
 import Foundation
 import AppKit
 import Carbon.HIToolbox
 import NotionBridgeLib
 
-// Test double for FrontmostAppProviding.
-private final class StubFrontmost: FrontmostAppProviding {
-    var frontmost: PriorApp?
-    var activatedPIDs: [pid_t] = []
-    var activateResult = true
-    init(_ f: PriorApp?) { frontmost = f }
-    func currentFrontmost() -> PriorApp? { frontmost }
-    func activate(_ app: PriorApp) -> Bool {
-        activatedPIDs.append(app.processIdentifier)
-        return activateResult
-    }
-}
-
 func runCommandBoxSpikeTests() async {
-    print("\n\u{2328}\u{FE0F}  CommandBox Spike Tests")
+    print("\n\u{2328}\u{FE0F}  CommandBox Tests (cmd-sb · clipboard-only)")
 
-    // ---- (d) HotkeyConfig model -------------------------------------
+    // ---- (a) HotkeyConfig model (RETAINED) --------------------------
 
     await test("HotkeyConfig spikeDefault is ⌥⌘Space (Carbon mask)") {
         let h = HotkeyConfig.spikeDefault
@@ -68,152 +65,138 @@ func runCommandBoxSpikeTests() async {
         try expect(back == h, "Codable round-trip changed the config")
     }
 
-    // ---- (c) plain-text paste-format / timing policy ----------------
+    // ---- (b) ClipboardWriting seam (NEW — supersedes save/restore) --
+    //
+    //   Corrected invariant vs the deleted ClipboardStasher: there is NO
+    //   snapshot and NO restore. A write fully REPLACES the contents and
+    //   the user's prior clipboard is intentionally NOT preserved (they
+    //   WANT the resolved body left on the clipboard).
 
-    await test("CommandBoxParameters default is plain-text-only and valid") {
-        let p = CommandBoxParameters.spikeDefault
-        try expect(p.pasteFormatIsPlainTextOnly, "spike must paste PLAIN TEXT only")
-        try expect(p.isValid, "default policy must be self-consistent")
+    await test("InMemoryClipboard.writeString fully replaces the contents") {
+        let cb = InMemoryClipboard(initial: "user-original-clip")
+        cb.writeString("the resolved command body")
+        try expect(cb.readString() == "the resolved command body",
+                   "clipboard must now hold ONLY the command body, got \(cb.readString() ?? "nil")")
     }
 
-    await test("CommandBoxParameters invalid if rich-text selected") {
-        let p = CommandBoxParameters(reactivateToPasteDelayMs: 60,
-                                     pasteToRestoreDelayMs: 250,
-                                     pasteFormatIsPlainTextOnly: false)
-        try expect(!p.isValid, "non-plain-text policy must be rejected as invalid")
+    await test("InMemoryClipboard does NOT preserve / restore the prior value") {
+        // The corrected invariant that supersedes the deleted
+        // save→set→restore round-trip: the original is GONE on purpose.
+        let cb = InMemoryClipboard(initial: "user-original-clip")
+        cb.writeString("body")
+        try expect(cb.readString() == "body",
+                   "there is no restore — the original must be overwritten, got \(cb.readString() ?? "nil")")
     }
 
-    await test("CommandBoxParameters invalid if restore delay <= reactivate delay") {
-        let p = CommandBoxParameters(reactivateToPasteDelayMs: 300,
-                                     pasteToRestoreDelayMs: 100)
-        try expect(!p.isValid, "restore must come strictly after reactivate+paste")
+    await test("InMemoryClipboard tracks an exact write count (wrote-once proof)") {
+        let cb = InMemoryClipboard()
+        try expect(cb.writeCount == 0, "no writes yet")
+        cb.writeString("a")
+        try expect(cb.writeCount == 1, "exactly one write, got \(cb.writeCount)")
     }
 
-    // ---- (b) clipboard save → set → restore round-trip --------------
-
-    await test("ClipboardStasher saves original, writes command text") {
-        let pb = InMemoryPasteboard(initial: "user-original-clip")
-        let token = ClipboardStasher(pb).stash("the typed command")
-        try expect(pb.readString() == "the typed command",
-                   "pasteboard should now hold the command text")
-        try expect(token.postWriteChangeCount == pb.changeCount,
-                   "token must capture the post-write changeCount")
+    await test("InMemoryClipboard repeated writes each fully replace + bump count") {
+        let cb = InMemoryClipboard(initial: nil)
+        cb.writeString("first")
+        cb.writeString("second")
+        try expect(cb.readString() == "second",
+                   "the latest write wins (replace, not append), got \(cb.readString() ?? "nil")")
+        try expect(cb.writeCount == 2, "two writes, got \(cb.writeCount)")
     }
 
-    await test("ClipboardStasher restores the user's original clipboard") {
-        let pb = InMemoryPasteboard(initial: "user-original-clip")
-        let token = ClipboardStasher(pb).stash("cmd")
-        token.restore()
-        try expect(pb.readString() == "user-original-clip",
-                   "original clipboard must be restored, got \(pb.readString() ?? "nil")")
+    await test("InMemoryClipboard round-trips an empty-string body") {
+        let cb = InMemoryClipboard(initial: "x")
+        cb.writeString("")
+        try expect(cb.readString() == "",
+                   "an empty write must be readable back as empty, got \(cb.readString() ?? "nil")")
     }
 
-    await test("ClipboardStasher round-trips a nil (empty) original") {
-        let pb = InMemoryPasteboard(initial: nil)
-        let token = ClipboardStasher(pb).stash("cmd")
-        try expect(pb.readString() == "cmd", "command text should be set")
-        token.restore()
-        try expect(pb.readString() == nil,
-                   "an originally-empty clipboard must restore to empty")
+    await test("InMemoryClipboard round-trips unicode / multiline markdown") {
+        let cb = InMemoryClipboard()
+        let body = "# Heading\n- bullet — em-dash\n[link](https://notion.so/p)\n✅ ünïçødé"
+        cb.writeString(body)
+        try expect(cb.readString() == body,
+                   "the exact markdown bytes must survive the seam, got \(cb.readString() ?? "nil")")
     }
 
-    await test("ClipboardStasher guarded restore does NOT clobber a newer write") {
-        let pb = InMemoryPasteboard(initial: "original")
-        let token = ClipboardStasher(pb).stash("cmd")
-        // Simulate the user/another app copying something AFTER our paste.
-        pb.writeString("user-copied-something-new")
-        token.restore()   // guarded: changeCount advanced past our write
-        try expect(pb.readString() == "user-copied-something-new",
-                   "guarded restore must not overwrite a newer clipboard write")
+    await test("ClipboardWriting protocol is value-stable across the seam") {
+        // Drive purely through the protocol type (proves the controller's
+        // dependency is exactly this write-only surface).
+        let cb: ClipboardWriting = InMemoryClipboard()
+        cb.writeString("via-protocol")
+        try expect(cb.readString() == "via-protocol",
+                   "the protocol seam must carry the write, got \(cb.readString() ?? "nil")")
     }
 
-    await test("ClipboardStasher unconditional restore overrides the guard") {
-        let pb = InMemoryPasteboard(initial: "original")
-        let token = ClipboardStasher(pb).stash("cmd")
-        pb.writeString("newer")
-        token.restoreUnconditionally()
-        try expect(pb.readString() == "original",
-                   "unconditional restore must force the original back")
+    // ---- (c) SystemClipboard live adapter (replace-only) ------------
+    //
+    //   Replaces the deleted SystemPasteboard save/restore coverage with
+    //   the corrected contract: clearContents()+setString, no restore.
+    //   Uses a PRIVATE NSPasteboard (uniquely named) so the test never
+    //   clobbers the developer's real `.general` clipboard.
+
+    await test("SystemClipboard replaces a private NSPasteboard's contents") {
+        let pb = NSPasteboard(name: NSPasteboard.Name(
+            "kup.solutions.notion-bridge.cmd-sb.test.\(UUID().uuidString)"))
+        pb.clearContents()
+        pb.setString("pre-existing-user-clip", forType: .string)
+        let cb = SystemClipboard(pb)
+        cb.writeString("resolved-body")
+        try expect(cb.readString() == "resolved-body",
+                   "live adapter must REPLACE the pasteboard string, got \(cb.readString() ?? "nil")")
+        try expect(pb.string(forType: .string) == "resolved-body",
+                   "the underlying NSPasteboard must hold the body directly")
     }
 
-    // ---- (a) prior-app capture / return model -----------------------
-
-    await test("PriorAppCapture records the frontmost app") {
-        let app = PriorApp(bundleIdentifier: "com.apple.Notes", processIdentifier: 4242)
-        let cap = PriorAppCapture(provider: StubFrontmost(app),
-                                  selfBundleID: "kup.solutions.notion-bridge")
-        let got = cap.capture()
-        try expect(got == app, "capture() should return the frontmost app")
-        try expect(cap.capturedApp == app, "capturedApp should be stored")
+    await test("SystemClipboard read-back is nil when nothing was written") {
+        let pb = NSPasteboard(name: NSPasteboard.Name(
+            "kup.solutions.notion-bridge.cmd-sb.test.\(UUID().uuidString)"))
+        pb.clearContents()
+        let cb = SystemClipboard(pb)
+        try expect(cb.readString() == nil,
+                   "an empty private pasteboard must read back nil, got \(cb.readString() ?? "nil")")
     }
 
-    await test("PriorAppCapture ignores self (never returns focus to us)") {
-        let me = PriorApp(bundleIdentifier: "kup.solutions.notion-bridge",
-                          processIdentifier: 999)
-        let cap = PriorAppCapture(provider: StubFrontmost(me),
-                                  selfBundleID: "kup.solutions.notion-bridge")
-        try expect(cap.capture() == nil,
-                   "frontmost==self must capture nil (nothing to return to)")
+    await test("SystemClipboard second write fully replaces the first (no append/restore)") {
+        // Corrected invariant superseding the deleted guarded/unconditional
+        // restore: there is NO change-count guard and NO restore — the
+        // newest write simply wins, every time.
+        let pb = NSPasteboard(name: NSPasteboard.Name(
+            "kup.solutions.notion-bridge.cmd-sb.test.\(UUID().uuidString)"))
+        let cb = SystemClipboard(pb)
+        cb.writeString("first-body")
+        cb.writeString("second-body")
+        try expect(cb.readString() == "second-body",
+                   "the latest write must fully replace the prior (no restore semantics), got \(cb.readString() ?? "nil")")
     }
 
-    await test("PriorAppCapture returnFocus reactivates the captured app") {
-        let app = PriorApp(bundleIdentifier: "com.apple.TextEdit", processIdentifier: 7777)
-        let stub = StubFrontmost(app)
-        let cap = PriorAppCapture(provider: stub, selfBundleID: "x.y.z")
-        cap.capture()
-        try expect(cap.returnFocus(), "returnFocus should succeed when app present")
-        try expect(stub.activatedPIDs == [7777],
-                   "activate must be called with the captured pid, got \(stub.activatedPIDs)")
+    await test("SystemClipboard writing an empty string replaces (no nil round-trip footgun)") {
+        let pb = NSPasteboard(name: NSPasteboard.Name(
+            "kup.solutions.notion-bridge.cmd-sb.test.\(UUID().uuidString)"))
+        let cb = SystemClipboard(pb)
+        cb.writeString("non-empty")
+        cb.writeString("")
+        // NSPasteboard.setString("") records an empty string type; readback
+        // is the empty string (NOT nil) — the controller's own empty-body
+        // guard (applyCommit) is what prevents a blank write reaching here.
+        try expect(cb.readString() == "",
+                   "an explicit empty write reads back as empty, got \(cb.readString() ?? "nil")")
     }
 
-    await test("PriorAppCapture returnFocus is a no-op when nothing captured") {
-        let cap = PriorAppCapture(provider: StubFrontmost(nil), selfBundleID: "x")
-        try expect(!cap.returnFocus(),
-                   "returnFocus with no capture must return false")
+    await test("ClipboardWriting seam exposes ONLY write + read-back (no save/restore surface)") {
+        // Structural proof the paste-back surface is gone: the seam has
+        // exactly writeString + readString. A snapshot/restore/guard API
+        // (the deleted ClipboardStasher contract) no longer exists — the
+        // controller cannot accidentally re-introduce restore behaviour.
+        let cb: ClipboardWriting = InMemoryClipboard(initial: "orig")
+        cb.writeString("only-op-is-replace")
+        try expect(cb.readString() == "only-op-is-replace",
+                   "the seam's sole mutation is a replacing write, got \(cb.readString() ?? "nil")")
     }
 
-    await test("PriorAppCapture returnFocus false if app vanished") {
-        let app = PriorApp(bundleIdentifier: "com.gone", processIdentifier: 1)
-        let stub = StubFrontmost(app)
-        stub.activateResult = false   // app disappeared between show and commit
-        let cap = PriorAppCapture(provider: stub, selfBundleID: "x")
-        cap.capture()
-        try expect(!cap.returnFocus(),
-                   "returnFocus must report false when the app can't be reactivated")
-    }
-
-    await test("PriorAppCapture reset clears the captured app") {
-        let app = PriorApp(bundleIdentifier: "a", processIdentifier: 2)
-        let cap = PriorAppCapture(provider: StubFrontmost(app), selfBundleID: "x")
-        cap.capture()
-        cap.reset()
-        try expect(cap.capturedApp == nil, "reset must clear capturedApp")
-    }
-
-    // ---- (+) Cmd-V keystroke construction (no posting) --------------
-
-    await test("PasteKeystroke uses the 'V' virtual keycode") {
-        try expect(PasteKeystroke.vKeyCode == CGKeyCode(kVK_ANSI_V),
-                   "paste key must be ANSI V, got \(PasteKeystroke.vKeyCode)")
-    }
-
-    await test("PasteKeystroke builds a Cmd-V down/up pair with .maskCommand") {
-        // CGEventSource may be nil in a headless CI sandbox; only assert
-        // the flags/keycode when the WindowServer hands us real events.
-        if let pair = PasteKeystroke.makeCommandVEvents() {
-            try expect(pair.down.flags.contains(.maskCommand),
-                       "key-down must carry the Command modifier flag")
-            try expect(pair.up.flags.contains(.maskCommand),
-                       "key-up must carry the Command modifier flag")
-            try expect(pair.down.getIntegerValueField(.keyboardEventKeycode)
-                        == Int64(kVK_ANSI_V),
-                       "key-down keycode must be V")
-        } else {
-            // Honest: no WindowServer event source available here. The
-            // construction path is structurally exercised; posting is
-            // GUI-time only. Not a failure.
-            print("    (CGEventSource unavailable in this environment — " +
-                  "Cmd-V posting is manual-smoke only, as documented)")
-        }
+    await test("InMemoryClipboard initial value is readable before any write") {
+        let cb = InMemoryClipboard(initial: "seeded")
+        try expect(cb.readString() == "seeded" && cb.writeCount == 0,
+                   "an initial value is visible with zero writes, got \(cb.readString() ?? "nil")/\(cb.writeCount)")
     }
 }

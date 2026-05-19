@@ -21,6 +21,7 @@
 // GUI-free units are retained verbatim in CommandBoxSpikeTests.swift.
 
 import Foundation
+import AppKit
 import NotionBridgeLib
 
 // Synthetic /markdown JSON envelope helper (file-scoped @Sendable so it
@@ -31,6 +32,40 @@ import NotionBridgeLib
 }
 
 private enum PaletteTestError: Error { case boom }
+
+// A private, uniquely-keyed UserDefaults suite so the registry-provider
+// tests never read/write the process-global `com.notionbridge.skills`
+// (the same isolation discipline the SecurityGate flakefix established).
+@Sendable private func makeIsolatedDefaults() -> (UserDefaults, String) {
+    let suite = "kup.solutions.notion-bridge.cmd-sb.tests.\(UUID().uuidString)"
+    let d = UserDefaults(suiteName: suite)!
+    return (d, suite)
+}
+
+/// Write a skills-registry JSON array (the exact `com.notionbridge.skills`
+/// shape) into `defaults[key]`. Mirrors how `manage_skill` / SkillsManager
+/// persist — name + notionPageId + enabled (+ benign extra fields the
+/// provider's tolerant decoder must ignore).
+@Sendable private func seedRegistry(
+    _ defaults: UserDefaults, key: String,
+    _ rows: [(name: String, pageId: String, enabled: Bool)]
+) {
+    let arr: [[String: Any]] = rows.map {
+        [
+            "name": $0.name,
+            "notionPageId": $0.pageId,
+            "enabled": $0.enabled,
+            // Extra persisted fields the provider must tolerate/ignore:
+            "visibility": "standard",
+            "summary": "ignored-by-palette",
+            "triggerPhrases": ["t1"],
+            "antiTriggerPhrases": [],
+            "platform": "notion",
+        ]
+    }
+    let data = try! JSONSerialization.data(withJSONObject: arr)
+    defaults.set(data, forKey: key)
+}
 
 func runCommandPaletteTests() async {
     print("\n\u{1F5C3}\u{FE0F}  CommandPalette Tests (cmd-w3 · palette wiring)")
@@ -386,5 +421,276 @@ func runCommandPaletteTests() async {
         let empty = await StaticCommandDescriptorProvider().descriptors()
         try expect(empty.isEmpty,
                    "the production-default provider must be empty (no operator DS wired yet) — fail-safe, never a crash")
+    }
+
+    // ============================================================
+    // MARK: (G) RegistrySkillsCommandProvider — palette ← skills registry
+    //   The descriptor source is now the EXISTING skills registry
+    //   (`com.notionbridge.skills`). Every ENABLED entry is a selectable
+    //   command. Driven entirely off an ISOLATED UserDefaults suite —
+    //   zero process-global / network coupling.
+    // ============================================================
+
+    await test("RegistryProvider maps ENABLED registry entries → descriptors") {
+        let (d, suite) = makeIsolatedDefaults()
+        seedRegistry(d, key: BridgeDefaults.skills, [
+            (name: "Email Signature", pageId: pidSig, enabled: true),
+            (name: "Mailing Address", pageId: pidAddr, enabled: true),
+        ])
+        let provider = RegistrySkillsCommandProvider(
+            suiteName: suite, storageKey: BridgeDefaults.skills)
+        let got = await provider.descriptors()
+        try expect(got.count == 2, "both enabled entries must map, got \(got.count)")
+        let byId = Dictionary(uniqueKeysWithValues: got.map { ($0.id, $0) })
+        try expect(byId[pidSig]?.name == "Email Signature",
+                   "page id must come from notionPageId; name from the registry name")
+        try expect(byId[pidSig]?.abbreviation == "Email Signature",
+                   "name is BOTH the descriptor name AND the abbreviation/trigger (registry has no short form)")
+    }
+
+    await test("RegistryProvider EXCLUDES disabled entries") {
+        let (d, suite) = makeIsolatedDefaults()
+        seedRegistry(d, key: BridgeDefaults.skills, [
+            (name: "On Skill", pageId: pidSig, enabled: true),
+            (name: "Off Skill", pageId: pidAddr, enabled: false),
+        ])
+        let got = await RegistrySkillsCommandProvider(
+            suiteName: suite, storageKey: BridgeDefaults.skills).descriptors()
+        try expect(got.count == 1, "only the enabled entry is selectable, got \(got.count)")
+        try expect(got.first?.id == pidSig, "the disabled entry must be filtered out")
+    }
+
+    await test("RegistryProvider drops entries with a blank page id") {
+        let (d, suite) = makeIsolatedDefaults()
+        seedRegistry(d, key: BridgeDefaults.skills, [
+            (name: "Has Page", pageId: pidSig, enabled: true),
+            (name: "No Page", pageId: "   ", enabled: true),
+        ])
+        let got = await RegistrySkillsCommandProvider(
+            suiteName: suite, storageKey: BridgeDefaults.skills).descriptors()
+        try expect(got.count == 1 && got.first?.id == pidSig,
+                   "a page-id-less row can never resolve a body — not a command, got \(got.map { $0.name })")
+    }
+
+    await test("RegistryProvider on a MISSING registry key → empty (no crash)") {
+        let (_, suite) = makeIsolatedDefaults()  // nothing seeded
+        let got = await RegistrySkillsCommandProvider(
+            suiteName: suite, storageKey: BridgeDefaults.skills).descriptors()
+        try expect(got.isEmpty, "an unset registry must yield an empty list, got \(got.count)")
+    }
+
+    await test("RegistryProvider on MALFORMED registry data → empty (no crash)") {
+        let (d, suite) = makeIsolatedDefaults()
+        d.set(Data("not json".utf8), forKey: BridgeDefaults.skills)
+        let got = await RegistrySkillsCommandProvider(
+            suiteName: suite, storageKey: BridgeDefaults.skills).descriptors()
+        try expect(got.isEmpty, "corrupt registry bytes must fail safe to empty, got \(got.count)")
+    }
+
+    await test("RegistryProvider tolerates legacy rows missing the 'enabled' flag") {
+        // SkillsManager treats a missing `enabled` as enabled; the
+        // provider's decoder must mirror that exactly.
+        let (d, suite) = makeIsolatedDefaults()
+        let legacy: [[String: Any]] = [["name": "Legacy", "notionPageId": pidSig]]
+        d.set(try JSONSerialization.data(withJSONObject: legacy), forKey: BridgeDefaults.skills)
+        let got = await RegistrySkillsCommandProvider(
+            suiteName: suite, storageKey: BridgeDefaults.skills).descriptors()
+        try expect(got.count == 1 && got.first?.name == "Legacy",
+                   "a legacy row with no 'enabled' key must default to enabled, got \(got.map { $0.name })")
+    }
+
+    await test("RegistryProvider feeds CommandPaletteSearch end-to-end (registry name == abbreviation ⇒ exact-abbr 1000)") {
+        // The provider maps the registry NAME onto BOTH descriptor.name
+        // AND descriptor.abbreviation (registry rows have no short form).
+        // CommandPaletteSearch scores an exact abbreviation match 1000
+        // (it dominates exact-name 700). So an exact registry-name query
+        // is ALSO an exact-abbreviation match and must score 1000 — the
+        // correct invariant for this name-is-the-trigger projection.
+        let (d, suite) = makeIsolatedDefaults()
+        seedRegistry(d, key: BridgeDefaults.skills, [
+            (name: "Email Signature", pageId: pidSig, enabled: true),
+            (name: "Mailing Address", pageId: pidAddr, enabled: true),
+        ])
+        let mgr = CommandsManager(fetcher: { _ in mdJSON("body") })
+        let coord = CommandPaletteCoordinator(
+            provider: RegistrySkillsCommandProvider(suiteName: suite, storageKey: BridgeDefaults.skills),
+            manager: mgr)
+        let ranked = await coord.search("Email Signature")
+        try expect(ranked.first?.descriptor.id == pidSig && ranked.first?.score == 1000,
+                   "an exact registry-name query is an exact-abbr match ⇒ #1 @ 1000, got \(ranked.first?.score ?? -1)")
+        // And a strict name-PREFIX still resolves that entry (sanity that
+        // the projection is genuinely searchable, not just exact-keyed).
+        let pref = await coord.search("Email Sign")
+        try expect(pref.first?.descriptor.id == pidSig,
+                   "a registry-name prefix must still rank the entry first, got \(pref.first?.descriptor.name ?? "nil")")
+    }
+
+    await test("RegistryProvider maps EVERY enabled entry (no skill/command kind filter)") {
+        // Slice decision: there is no skill-vs-command distinction — every
+        // enabled registry entry is selectable, regardless of visibility.
+        let (d, suite) = makeIsolatedDefaults()
+        seedRegistry(d, key: BridgeDefaults.skills, [
+            (name: "Routing-ish", pageId: pidSig, enabled: true),
+            (name: "Standard-ish", pageId: pidAddr, enabled: true),
+            (name: "Third", pageId: "cccc1111dddd2222eeee3333ffff4444", enabled: true),
+        ])
+        let got = await RegistrySkillsCommandProvider(
+            suiteName: suite, storageKey: BridgeDefaults.skills).descriptors()
+        try expect(got.count == 3,
+                   "all three enabled entries are selectable commands, got \(got.count)")
+    }
+
+    await test("RegistryProvider default storageKey is the shared BridgeDefaults.skills") {
+        // The provider must read the SAME key SkillsManager / manage_skill
+        // write — proven by seeding that exact key and using the default
+        // (un-overridden) storageKey on an isolated suite.
+        let (d, suite) = makeIsolatedDefaults()
+        seedRegistry(d, key: BridgeDefaults.skills, [
+            (name: "Shared Key Skill", pageId: pidSig, enabled: true),
+        ])
+        let got = await RegistrySkillsCommandProvider(suiteName: suite).descriptors()
+        try expect(got.count == 1 && got.first?.name == "Shared Key Skill",
+                   "the provider's default key must be com.notionbridge.skills, got \(got.map { $0.name })")
+        try expect(BridgeDefaults.skills == "com.notionbridge.skills",
+                   "registry key identity guard")
+    }
+
+    await test("RegistryProvider preserves registry order (stable descriptor list)") {
+        let (d, suite) = makeIsolatedDefaults()
+        seedRegistry(d, key: BridgeDefaults.skills, [
+            (name: "Zebra", pageId: pidSig, enabled: true),
+            (name: "Apple", pageId: pidAddr, enabled: true),
+        ])
+        let got = await RegistrySkillsCommandProvider(
+            suiteName: suite, storageKey: BridgeDefaults.skills).descriptors()
+        try expect(got.map { $0.name } == ["Zebra", "Apple"],
+                   "the provider must not re-order; ranking is CommandPaletteSearch's job, got \(got.map { $0.name })")
+    }
+
+    await test("RegistryProvider empty registry → palette opens, search safe (no crash)") {
+        let (d, suite) = makeIsolatedDefaults()
+        d.set(try JSONSerialization.data(withJSONObject: [[String: Any]]()), forKey: BridgeDefaults.skills)
+        let mgr = CommandsManager(fetcher: { _ in mdJSON("x") })
+        let coord = CommandPaletteCoordinator(
+            provider: RegistrySkillsCommandProvider(suiteName: suite, storageKey: BridgeDefaults.skills),
+            manager: mgr)
+        let ranked = await coord.search("anything")
+        try expect(ranked.isEmpty, "empty registry → no rows (and no crash), got \(ranked.count)")
+        let commit = await coord.commit(query: "anything")
+        guard case .notFound = commit else {
+            throw TestError.assertion("empty registry commit must be .notFound, got \(commit)")
+        }
+    }
+
+    // ============================================================
+    // MARK: (H) Clipboard-only commit — CommandBoxController.applyCommit
+    //   The on-Enter behaviour: .paste → WRITE the body to the clipboard
+    //   (replace contents, NO save/restore); .notFound / .unavailable →
+    //   write NOTHING. Driven through an InMemoryClipboard so the write
+    //   is read back in-test (now headlessly verifiable). NO panel / NO
+    //   hot-key constructed — only the pure commit decision.
+    // ============================================================
+
+    await test("applyCommit(.paste) WRITES the resolved body to the clipboard") {
+        let cb = InMemoryClipboard(initial: "user-prior-clip")
+        let mgr = CommandsManager(fetcher: { _ in mdJSON("x") })
+        let ctrl = await CommandBoxController(
+            clipboard: cb,
+            coordinator: CommandPaletteCoordinator(
+                provider: StaticCommandDescriptorProvider(), manager: mgr))
+        await ctrl.applyCommit(.paste("=== resolved body ==="))
+        try expect(cb.readString() == "=== resolved body ===",
+                   "the clipboard must hold exactly the resolved body, got \(cb.readString() ?? "nil")")
+        try expect(cb.writeCount == 1, "exactly one clipboard write, got \(cb.writeCount)")
+    }
+
+    await test("applyCommit(.paste) does NOT preserve the prior clipboard (replace-only)") {
+        // The corrected invariant superseding the deleted save/restore:
+        // the user WANTS the body on the clipboard; the original is gone.
+        let cb = InMemoryClipboard(initial: "user-prior-clip")
+        let mgr = CommandsManager(fetcher: { _ in mdJSON("x") })
+        let ctrl = await CommandBoxController(
+            clipboard: cb,
+            coordinator: CommandPaletteCoordinator(
+                provider: StaticCommandDescriptorProvider(), manager: mgr))
+        await ctrl.applyCommit(.paste("new-body"))
+        try expect(cb.readString() == "new-body",
+                   "there is NO restore — prior clip must be overwritten, got \(cb.readString() ?? "nil")")
+    }
+
+    await test("applyCommit(.notFound) writes NOTHING (no guessed command on the clipboard)") {
+        let cb = InMemoryClipboard(initial: "user-prior-clip")
+        let mgr = CommandsManager(fetcher: { _ in mdJSON("x") })
+        let ctrl = await CommandBoxController(
+            clipboard: cb,
+            coordinator: CommandPaletteCoordinator(
+                provider: StaticCommandDescriptorProvider(), manager: mgr))
+        await ctrl.applyCommit(.notFound(query: "zzz-no-such"))
+        try expect(cb.writeCount == 0, "a not-found commit must NOT write, got writeCount=\(cb.writeCount)")
+        try expect(cb.readString() == "user-prior-clip",
+                   "the clipboard must be left untouched on no-match, got \(cb.readString() ?? "nil")")
+    }
+
+    await test("applyCommit(.unavailable) writes NOTHING (no destructive clobber)") {
+        let cb = InMemoryClipboard(initial: "user-prior-clip")
+        let mgr = CommandsManager(fetcher: { _ in mdJSON("x") })
+        let ctrl = await CommandBoxController(
+            clipboard: cb,
+            coordinator: CommandPaletteCoordinator(
+                provider: StaticCommandDescriptorProvider(), manager: mgr))
+        await ctrl.applyCommit(.unavailable(name: "Some Skill", reason: "fetch failed"))
+        try expect(cb.writeCount == 0, "an unavailable commit must NOT write, got \(cb.writeCount)")
+        try expect(cb.readString() == "user-prior-clip", "clipboard untouched on unavailable")
+    }
+
+    await test("applyCommit(.paste) with an EMPTY body writes nothing (no blank clobber)") {
+        let cb = InMemoryClipboard(initial: "user-prior-clip")
+        let mgr = CommandsManager(fetcher: { _ in mdJSON("x") })
+        let ctrl = await CommandBoxController(
+            clipboard: cb,
+            coordinator: CommandPaletteCoordinator(
+                provider: StaticCommandDescriptorProvider(), manager: mgr))
+        await ctrl.applyCommit(.paste(""))
+        try expect(cb.writeCount == 0,
+                   "an empty resolved body must NOT blank-clobber the clipboard, got \(cb.writeCount)")
+        try expect(cb.readString() == "user-prior-clip", "clipboard untouched on empty body")
+    }
+
+    await test("applyCommit(.paste) preserves exact markdown bytes onto the clipboard") {
+        let cb = InMemoryClipboard()
+        let mgr = CommandsManager(fetcher: { _ in mdJSON("x") })
+        let ctrl = await CommandBoxController(
+            clipboard: cb,
+            coordinator: CommandPaletteCoordinator(
+                provider: StaticCommandDescriptorProvider(), manager: mgr))
+        let body = "# H1\n\n- a — b\n[link](https://www.notion.so/p)\n✅ ünïçødé"
+        await ctrl.applyCommit(.paste(body))
+        try expect(cb.readString() == body,
+                   "the resolved markdown must reach the clipboard byte-for-byte, got \(cb.readString() ?? "nil")")
+    }
+
+    await test("Coordinator(query) → applyCommit writes the W2-resolved body end-to-end") {
+        // The full headless path: typed query → registry fuzzy match →
+        // W2 body fetch+resolve → clipboard write (read back in-test).
+        let (d, suite) = makeIsolatedDefaults()
+        seedRegistry(d, key: BridgeDefaults.skills, [
+            (name: "Email Signature", pageId: pidSig, enabled: true),
+        ])
+        nonisolated(unsafe) var fetched = ""
+        let mgr = CommandsManager(fetcher: { id in
+            fetched = id
+            return mdJSON("RESOLVED SIGNATURE BODY")
+        })
+        let coord = CommandPaletteCoordinator(
+            provider: RegistrySkillsCommandProvider(suiteName: suite, storageKey: BridgeDefaults.skills),
+            manager: mgr)
+        let cb = InMemoryClipboard()
+        let ctrl = await CommandBoxController(clipboard: cb, coordinator: coord)
+        let result = await coord.commit(query: "Email Signature")
+        await ctrl.applyCommit(result)
+        try expect(cb.readString() == "RESOLVED SIGNATURE BODY",
+                   "the end-to-end path must land the W2-resolved body on the clipboard, got \(cb.readString() ?? "nil")")
+        try expect(fetched.replacingOccurrences(of: "-", with: "") == pidSig,
+                   "must fetch the matched registry entry's page id, got \(fetched)")
     }
 }

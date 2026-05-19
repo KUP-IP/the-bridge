@@ -281,9 +281,31 @@
 # merged. Commands palette GUI behaviour is operator-manual-smoke (cannot
 # be headlessly verified); the real Commands Notion data source is a
 # deferred operator dependency.
+#
+# 2026-05-18 cmd-sb (re-point palette → skills registry + clipboard-only):
+# the empty StaticCommandDescriptorProvider was replaced by
+# RegistrySkillsCommandProvider (every ENABLED com.notionbridge.skills
+# entry is a selectable command); the cmd-w1-spike paste-back subsystem
+# (prior-app capture, reactivate, synthetic Cmd-V, clipboard save/restore
+# round-trip, focus-restore + timing policy) was DELETED in full and
+# replaced by a single replace-only clipboard write behind the
+# ClipboardWriting seam (write→read-back headlessly verified). Test math:
+# 21 deleted paste-back blocks SUPERSEDED by corrected-invariant tests —
+# CommandBoxSpikeTests 21 -> 18 (-3: HotkeyConfig retained + new
+# ClipboardWriting/SystemClipboard replace-only invariants),
+# CommandPaletteTests 34 -> 52 (+18: RegistrySkillsCommandProvider mapping
+# + clipboard-only applyCommit). NET +15, count did NOT drop. This branch
+# measured green on base 1029 = 1029 + 15 = 1044 (additive-isolated: no
+# other suite changed; default-OFF gate preserved — app byte-for-byte
+# unchanged with BRIDGE_ENABLE_COMMANDS unset). Literal harness summary:
+# `Results: 1044 passed, 0 failed, 1044 total`. FLOOR set to this branch's
+# honestly-measured green per the per-branch rule; the orchestrator
+# reconciles the true integrated floor at merge. The Carbon hot-key
+# actually firing + the NSPanel appearing remain operator-manual-smoke
+# (cannot be headlessly verified); the clipboard WRITE itself IS verified.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1029}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1044}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."

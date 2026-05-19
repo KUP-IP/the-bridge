@@ -465,22 +465,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Construct + register the palette IFF the gate is on. No-op (and no
     /// side effects whatsoever — no hot-key, no panel, no CommandsManager)
-    /// when off. The descriptor provider is the safe empty default until
-    /// the operator Commands-DS query lands (the same deferred operator
-    /// dependency W2 documented); a non-empty operator provider is wired
-    /// in later without touching this gate.
+    /// when off. The descriptor source is the EXISTING skills registry
+    /// (`RegistrySkillsCommandProvider` over `BridgeDefaults.skills`):
+    /// every enabled registry entry is a selectable command. On Enter the
+    /// resolved page body is written to the system clipboard.
     private func maybeStartCommandsPalette() {
         guard Self.shouldStartCommandsPalette() else {
             print("[Notion Bridge] Commands palette disabled (set \(CommandsPaletteGate.enableEnvKey)=1 to enable)")
             return
         }
-        let provider = StaticCommandDescriptorProvider([])
+        let provider = RegistrySkillsCommandProvider()
         let manager = CommandsManager()
         let coordinator = CommandPaletteCoordinator(provider: provider, manager: manager)
         let box = CommandBoxController(coordinator: coordinator)
         let registered = box.registerHotkey()
         self.commandBox = box
-        print("[Notion Bridge] Commands palette enabled — hot-key \(registered ? "registered" : "registration FAILED") (\(HotkeyConfig.spikeDefault.displayString))")
+        print("[Notion Bridge] Commands palette enabled — registry-backed, clipboard-only — hot-key \(registered ? "registered" : "registration FAILED") (\(HotkeyConfig.spikeDefault.displayString))")
     }
 
     // MARK: - Notion Token Validation
