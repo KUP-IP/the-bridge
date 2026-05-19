@@ -79,6 +79,28 @@ func runToolAnnotationAuditTests() async {
                    "file_read must be read-only, non-destructive")
     }
 
+    // Regression guard for the 2026-05-19 security remediation (v3-hub
+    // Decision row 29): notion_datasource_delete trashes an ENTIRE data
+    // source. It must stay human-gated (.request) AND non-auto-approvable
+    // (neverAutoApprove — wins over a user tier override), with the
+    // catalog accurately mirroring that as destructive + requires
+    // confirmation. The mirror-invariant test above only checks
+    // annotation == (tier==.request||nap); this pins the INTENDED posture
+    // so a future edit that drops neverAutoApprove (and flips the
+    // annotation to keep the mirror green) is still caught.
+    await test("notion_datasource_delete is human-gated + non-auto-approvable + destructive (sec remediation)") {
+        guard let reg = regs.first(where: { $0.name == "notion_datasource_delete" }) else {
+            throw TestError.assertion("notion_datasource_delete must be registered")
+        }
+        try expect(reg.tier == .request,
+                   "notion_datasource_delete tier must be .request; got \(reg.tier.rawValue)")
+        try expect(reg.neverAutoApprove == true,
+                   "notion_datasource_delete must be neverAutoApprove (non-downgradable destructive delete)")
+        let ann = ToolAnnotationCatalog.annotations(for: "notion_datasource_delete")
+        try expect(ann?.destructiveHint == true && ann?.requiresConfirmation == true,
+                   "notion_datasource_delete annotation must be destructive + requiresConfirmation; got \(String(describing: ann))")
+    }
+
     await test("MCP projection drops requiresConfirmation, keeps the 3 hint fields") {
         let a = BridgeToolAnnotations(readOnlyHint: true, destructiveHint: false,
                                       requiresConfirmation: true, openWorld: false)

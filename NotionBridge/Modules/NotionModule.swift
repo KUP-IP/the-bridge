@@ -1315,12 +1315,20 @@ public enum NotionModule {
             }
         ))
 
-        // MARK: 22b. notion_datasource_delete - notify (soft-delete, recoverable)
+        // MARK: 22b. notion_datasource_delete - request + neverAutoApprove
+        //   Destructive: trashes an ENTIRE data source (a whole DB). The
+        //   soft-delete is trash-recoverable, but the blast radius is a
+        //   full collection, so this is human-gated (.request) AND
+        //   non-auto-approvable (neverAutoApprove wins over any user tier
+        //   override — see ToolRouter effectiveTier resolution), mirroring
+        //   the snippets_delete posture. The in-handler confirm:true guard
+        //   stays as defense-in-depth against an accidental LLM call.
         await router.register(ToolRegistration(
             name: "notion_datasource_delete",
             module: moduleName,
-            tier: .notify,
-            description: "Move a data source to Notion's trash (soft-delete, recoverable). Notion has no hard delete — the data source is trashed via in_trash:true. Requires confirm:true. Use mode:'restore' to untrash.",
+            tier: .request,
+            neverAutoApprove: true,
+            description: "Move a data source to Notion's trash (soft-delete, recoverable). Notion has no hard delete — the data source is trashed via in_trash:true. Destructive: requires confirm:true AND human approval (neverAutoApprove). Use mode:'restore' to untrash.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([

@@ -193,7 +193,7 @@ public enum ToolAnnotationCatalog {
         "notion_connections_list": .init(readOnlyHint: true, destructiveHint: false, requiresConfirmation: false, openWorld: true),
         "notion_database_get": .init(readOnlyHint: true, destructiveHint: false, requiresConfirmation: false, openWorld: true),
         "notion_datasource_create": .init(readOnlyHint: false, destructiveHint: false, requiresConfirmation: false, openWorld: true),
-        "notion_datasource_delete": .init(readOnlyHint: false, destructiveHint: true, requiresConfirmation: false, openWorld: true),
+        "notion_datasource_delete": .init(readOnlyHint: false, destructiveHint: true, requiresConfirmation: true, openWorld: true),
         "notion_datasource_get": .init(readOnlyHint: true, destructiveHint: false, requiresConfirmation: false, openWorld: true),
         "notion_datasource_update": .init(readOnlyHint: false, destructiveHint: true, requiresConfirmation: false, openWorld: true),
         "notion_discussion_create": .init(readOnlyHint: false, destructiveHint: false, requiresConfirmation: false, openWorld: true),

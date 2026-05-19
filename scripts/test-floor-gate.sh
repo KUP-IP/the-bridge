@@ -343,9 +343,20 @@
 # argued. True integrated green independently measured = 1075 (1074 +1).
 # FLOOR raised to the measured count per the order-inversion rule. Test/
 # floor change only; not pushed.
+#
+# 2026-05-19 security remediation (Decision row 29): +1 test() —
+# ToolAnnotationAuditTests pins notion_datasource_delete as human-gated
+# (.request) + neverAutoApprove + destructive/requiresConfirmation. The
+# tool was registered .notify (post-hoc notification, NOT a human gate)
+# while destructiveHint:true — a destructive whole-data-source trash that
+# could auto-execute on an LLM-supplied confirm:true. Remediated to the
+# snippets_delete posture (tier .request + neverAutoApprove; annotation
+# requiresConfirmation:true so the mirror-invariant stays exact). Source
+# behavior change (gating) + 1 regression test. Integrated green
+# measured = 1076 (1075 +1). FLOOR raised per order-inversion. Not pushed.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1075}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1076}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."
