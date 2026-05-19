@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.1.0] — 2026-05-19 — Commands Palette (enterprise UX) + security remediation
+
+A global-hotkey command palette: press the shortcut, type a skill name, `⏎` — the resolved Skill page body is on your clipboard. "Commands" ARE your enabled Skills (one registry, one source of truth). Graduated from an env-gated spike to an on-by-default, Settings-governed feature. Also hardens a destructive Notion tool and closes a behavioral-coverage gap.
+
+### Added
+- **Commands palette (P1+P2).** Default-ON, governed by a persisted **Settings → Commands** master toggle (the `BRIDGE_ENABLE_COMMANDS` env override is retained for CI). Default global hotkey **⌃B**, registered via Carbon (no Input Monitoring permission). Live results list with `↑/↓` selection, fuzzy ranking, and an inline "Copied ‹name›" confirmation; `Esc` dismisses; a non-matching query never copies a guess. New Settings section: master toggle (live enable/disable, no relaunch), a hot-key status row (Active / ⚠ unavailable), and the Skills list surfaced as the command manager.
+- Pure, exhaustively-tested cores (gate precedence, selection state machine, commit→message presentation, multi-monitor placement); the AppKit/WindowServer surface is a documented operator-smoke ceiling.
+
+### Changed
+- **`notion_datasource_delete` security remediation.** Was registered `tier:.notify` (post-hoc notification, not a human gate) while `destructiveHint:true` — a destructive whole-data-source trash that could auto-execute on an LLM-supplied `confirm:true`. Now `tier:.request` + `neverAutoApprove` (non-downgradable; mirrors `snippets_delete`); annotation `requiresConfirmation:true` so the audit mirror-invariant stays exact. In-handler `confirm:true` retained as defense-in-depth.
+
+### Notes
+- Test-suite audit (66 files) against recent churn: closed the one HIGH gap (`notion_datasource_delete` had zero behavioral tests) with network-free handler + wire-body tests; one overclaiming test rewritten honestly. CI green floor 1074 → 1110.
+- Hotkey is fixed at ⌃B this release (in-Settings rebinding + conflict-recorder is the planned P3).
+
 ## [3.0.0] — 2026-05-17 — Remote OAuth MCP Connector GA (PKT-800 S1–S3)
 
 v3.0 GA. Bridge is now reachable as a remote, OAuth-secured Streamable-HTTP MCP connector (the sellable surface), additive and isolated — stdio and legacy SSE are byte-for-byte unchanged when `BRIDGE_ENABLE_HTTP` is unset.
