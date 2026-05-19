@@ -492,17 +492,21 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             // full relaunch.
             if !existing.isRegistered {
                 let ok = existing.registerHotkey()
-                print("[Notion Bridge] Commands palette hot-key re-registration \(ok ? "succeeded" : "still FAILED") (\(HotkeyConfig.productionDefault.displayString))")
+                print("[Notion Bridge] Commands palette hot-key re-registration \(ok ? "succeeded" : "still FAILED") (\(existing.hotkeyConfig.displayString))")
             }
             return
         }
+        // Change B: load the operator-recorded hot-key (falls back to
+        // productionDefault when unset/corrupt) so a rebind survives a
+        // relaunch and a fresh install still gets the default ⌃⌥⌘C.
+        let hotkey = HotkeyConfig.loadPersisted()
         let provider = RegistrySkillsCommandProvider()
         let manager = CommandsManager()
         let coordinator = CommandPaletteCoordinator(provider: provider, manager: manager)
-        let box = CommandBoxController(coordinator: coordinator)
+        let box = CommandBoxController(hotkey: hotkey, coordinator: coordinator)
         let registered = box.registerHotkey()
         self.commandBox = box
-        print("[Notion Bridge] Commands palette enabled — registry-backed, clipboard-only — hot-key \(registered ? "registered" : "registration FAILED") (\(HotkeyConfig.productionDefault.displayString))")
+        print("[Notion Bridge] Commands palette enabled — registry-backed, clipboard-only — hot-key \(registered ? "registered" : "registration FAILED") (\(hotkey.displayString))")
     }
 
     /// Whether the Commands-palette global hot-key is currently
@@ -511,6 +515,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Carbon registration failed (the combo is owned by another app).
     public var isCommandsPaletteHotkeyRegistered: Bool {
         commandBox?.isRegistered ?? false
+    }
+
+    /// The combo the Settings recorder should display. The live
+    /// controller's config when the palette is running, else the
+    /// persisted value (falls back to `productionDefault`). Lets the
+    /// recorder show the right glyph even while the palette is OFF.
+    public var commandsHotkeyConfig: HotkeyConfig {
+        commandBox?.hotkeyConfig ?? HotkeyConfig.loadPersisted()
     }
 
     /// Live enable/disable entrypoint for the Settings master toggle.
@@ -535,6 +547,32 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             commandBox = nil
             print("[Notion Bridge] Commands palette disabled via Settings — hot-key unregistered")
         }
+    }
+
+    /// Live-rebind the Commands-palette global hot-key from the Settings
+    /// recorder (Change B). Persists the new `HotkeyConfig` FIRST (so a
+    /// relaunch keeps it even if the live re-register loses a race), then
+    /// re-registers without a relaunch via the controller's idempotent
+    /// unregister+register path. Returns whether the NEW combo registered
+    /// successfully so the recorder can reflect Active vs the red
+    /// "⚠ unavailable" status. On failure the controller restores the
+    /// prior working registration; the persisted value still reflects the
+    /// user's intent so they can free the combo and relaunch, or pick
+    /// another in-place.
+    ///
+    /// If the palette is currently OFF (no `commandBox`) we still persist
+    /// — the recorded combo takes effect when the palette is next enabled
+    /// — and report `false` (nothing is registered while disabled).
+    @discardableResult
+    public func setCommandsHotkey(_ config: HotkeyConfig) -> Bool {
+        config.persist()
+        guard let box = commandBox else {
+            print("[Notion Bridge] Commands hot-key recorded (\(config.displayString)) — palette is OFF; applies when re-enabled")
+            return false
+        }
+        let ok = box.rebind(to: config)
+        print("[Notion Bridge] Commands hot-key rebind \(ok ? "succeeded" : "FAILED (combo taken — kept prior)") (\(config.displayString))")
+        return ok
     }
 
     // MARK: - Notion Token Validation

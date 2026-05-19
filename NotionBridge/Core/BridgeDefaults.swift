@@ -33,6 +33,13 @@ public enum BridgeDefaults {
     /// explicit `BRIDGE_ENABLE_COMMANDS` env var still overrides this pref.
     public static let commandsPaletteEnabled = "com.notionbridge.commandsPaletteEnabled"
 
+    /// Persisted `HotkeyConfig` for the Commands-palette global hot-key.
+    /// Data (JSON-encoded `HotkeyConfig`). Written by Settings → Commands
+    /// (the in-Settings recorder), read at hot-key registration. ABSENT or
+    /// corrupt ⇒ `HotkeyConfig.productionDefault` (the gate falls back so a
+    /// fresh install / decode failure never loses the palette).
+    public static let commandsHotkey = "com.notionbridge.commandsHotkey"
+
     // MARK: - Onboarding & Legal
 
     /// Whether the user has completed the onboarding wizard. Bool.

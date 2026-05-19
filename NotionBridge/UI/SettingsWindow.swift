@@ -87,7 +87,6 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
     case credentials = "Credentials"
     case permissions = "Permissions"
     case tools = "Tools"
-    case skills = "Skills"
     case commands = "Commands"
     case jobs = "Jobs"
     case advanced = "Advanced"
@@ -99,7 +98,6 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
         case .connections: return "network"
         case .permissions: return "lock.shield"
         case .tools: return "hammer"
-        case .skills: return "book.closed"
         case .commands: return "command"
         case .credentials: return "key.fill"
         case .jobs: return "clock.badge.checkmark"
@@ -174,7 +172,6 @@ public struct SettingsView: View {
         case .connections: connectionsSection
         case .permissions: permissionsSection
         case .tools: toolsSection
-        case .skills: skillsSection
         case .commands: commandsSection
         case .credentials: credentialsSection
         case .jobs: jobsSection
@@ -202,6 +199,18 @@ public struct SettingsView: View {
     var commandsPaletteRegistered: Bool {
         (NSApp.delegate as? AppDelegate)?.isCommandsPaletteHotkeyRegistered ?? false
     }
+
+    /// Change B: the combo the recorder should DISPLAY — the live
+    /// controller's config when running, else the persisted value
+    /// (falls back to `productionDefault`). Re-read on each render so a
+    /// just-recorded combo shows immediately.
+    var commandsHotkeyConfig: HotkeyConfig {
+        (NSApp.delegate as? AppDelegate)?.commandsHotkeyConfig ?? HotkeyConfig.loadPersisted()
+    }
+
+    /// Change B: when true the recorder control is in capture mode —
+    /// the next valid key-down with modifiers becomes the new combo.
+    @State var isRecordingHotkey = false
 
     var ssePort: Int {
         ConfigManager.shared.ssePort
