@@ -183,15 +183,31 @@ func runCommandBoxSpikeTests() async {
                    "an explicit empty write reads back as empty, got \(cb.readString() ?? "nil")")
     }
 
-    await test("ClipboardWriting seam exposes ONLY write + read-back (no save/restore surface)") {
-        // Structural proof the paste-back surface is gone: the seam has
-        // exactly writeString + readString. A snapshot/restore/guard API
-        // (the deleted ClipboardStasher contract) no longer exists — the
-        // controller cannot accidentally re-introduce restore behaviour.
-        let cb: ClipboardWriting = InMemoryClipboard(initial: "orig")
-        cb.writeString("only-op-is-replace")
-        try expect(cb.readString() == "only-op-is-replace",
-                   "the seam's sole mutation is a replacing write, got \(cb.readString() ?? "nil")")
+    await test("ClipboardWriting is replace-only: no prior value is recoverable through the seam (anti-paste-back)") {
+        // Honest rewrite (2026-05-19 test audit): the prior version
+        // claimed a "structural proof" but only did a write/read
+        // round-trip — a re-added restore() would NOT have failed it.
+        // The TYPE is the structural guarantee (the protocol declares
+        // exactly writeString/readString); this test pins the
+        // *behavioral* consequence the deleted ClipboardStasher would
+        // have violated: once a value is overwritten there is NO seam
+        // operation that yields the prior value back.
+        //
+        // (1) Signature witness — these exact members must exist with
+        //     these types; a signature drift breaks compilation here.
+        let cb: ClipboardWriting = InMemoryClipboard(initial: "ORIG")
+        let write: (String) -> Void = cb.writeString
+        let read: () -> String? = cb.readString
+        // (2) Replace-only + non-recoverable invariant.
+        try expect(read() == "ORIG", "initial value visible, got \(read() ?? "nil")")
+        write("FIRST")
+        write("SECOND")
+        try expect(read() == "SECOND", "a write fully replaces, got \(read() ?? "nil")")
+        // The only way to see ORIG/FIRST again is to write them again —
+        // there is no snapshot/restore/guard entry point, and re-read is
+        // idempotent (never resurrects an earlier value).
+        try expect(read() == "SECOND" && read() == "SECOND",
+                   "re-read is stable and never restores an earlier value")
     }
 
     await test("InMemoryClipboard initial value is readable before any write") {

@@ -354,9 +354,21 @@
 # requiresConfirmation:true so the mirror-invariant stays exact). Source
 # behavior change (gating) + 1 regression test. Integrated green
 # measured = 1076 (1075 +1). FLOOR raised per order-inversion. Not pushed.
+#
+# 2026-05-19 test-suite audit close-out: +4 test() — closes the HIGH gap
+# the audit + Decision row 27 flagged (notion_datasource_delete had ZERO
+# behavioral tests). NotionModuleTests now exercises the handler's
+# network-free safety guards directly (confirm:false refusal, omitted
+# confirm refusal, missing-dataSourceId throw) + a new pure
+# NotionClient.buildDeleteDataSourceBody wire-body builder (the
+# confirm:true live path is intentionally NOT tested — forbidden live
+# trash). CommandBoxSpikeTests' overclaiming "structural proof" test
+# rewritten to an honest behavioral anti-restore invariant (count
+# unchanged). Integrated green measured = 1080 (1076 +4). FLOOR raised
+# per order-inversion. Not pushed.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1076}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1080}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."

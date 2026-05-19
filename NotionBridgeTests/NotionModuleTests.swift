@@ -666,4 +666,82 @@ func runNotionModuleTests() async {
             }
         }
     }
+
+    // ============================================================
+    // MARK: - notion_datasource_delete behavioral coverage
+    //   Closes the gap the v3-hub ledger (Decision row 27) admitted and
+    //   the 2026-05-19 test audit flagged HIGH: the destructive tool had
+    //   ZERO behavioral tests. We exercise the handler's network-free
+    //   safety guards DIRECTLY (bypassing the SecurityGate, which is the
+    //   .request/neverAutoApprove gate tested elsewhere) and the pure
+    //   wire-body builder. The confirm:true + real dataSourceId path is
+    //   intentionally NOT tested — it would risk a live data-source
+    //   trash, which is forbidden.
+    // ============================================================
+
+    func datasourceDeleteReg() async throws -> ToolRegistration {
+        let regs = await router.registrations(forModule: "notion")
+        guard let del = regs.first(where: { $0.name == "notion_datasource_delete" }) else {
+            throw TestError.assertion("notion_datasource_delete must be registered")
+        }
+        return del
+    }
+
+    await test("notion_datasource_delete REFUSES without confirm:true (explicit false)") {
+        let del = try await datasourceDeleteReg()
+        let result = try await del.handler(.object([
+            "dataSourceId": .string("992fd5ac-d938-4be4-95fb-8ef18bd86bba"),
+            "confirm": .bool(false)
+        ]))
+        guard case .object(let o) = result, case .string(let err)? = o["error"] else {
+            throw TestError.assertion("confirm:false must return an {error:…} envelope, got \(result)")
+        }
+        try expect(err.contains("Refused"), "refusal must say 'Refused', got: \(err)")
+        try expect(o["success"] == nil, "a refusal must NOT report success; got \(o)")
+    }
+
+    await test("notion_datasource_delete REFUSES when confirm is omitted entirely") {
+        let del = try await datasourceDeleteReg()
+        // Guard is `case .bool(true)?` — a missing confirm key also refuses.
+        let result = try await del.handler(.object([
+            "dataSourceId": .string("992fd5ac-d938-4be4-95fb-8ef18bd86bba")
+        ]))
+        guard case .object(let o) = result, case .string(let err)? = o["error"] else {
+            throw TestError.assertion("omitted confirm must refuse, got \(result)")
+        }
+        try expect(err.contains("Refused"), "refusal must say 'Refused', got: \(err)")
+    }
+
+    await test("notion_datasource_delete throws on missing dataSourceId (pre-network)") {
+        let del = try await datasourceDeleteReg()
+        do {
+            // confirm:true but no dataSourceId — the dataSourceId guard is
+            // FIRST, so this throws before the confirm check and before
+            // any client/network call.
+            _ = try await del.handler(.object(["confirm": .bool(true)]))
+            throw TestError.assertion("missing dataSourceId must throw, not return a value")
+        } catch let e as TestError {
+            throw e
+        } catch {
+            let d = "\(error)"
+            try expect(d.contains("dataSourceId") || d.lowercased().contains("invalid"),
+                       "error should reference the missing dataSourceId, got: \(d)")
+        }
+    }
+
+    await test("NotionClient.buildDeleteDataSourceBody emits exactly {in_trash:<bool>}") {
+        let trash = NotionClient.buildDeleteDataSourceBody(inTrash: true)
+        try expect(trash.count == 1, "body must have exactly one key, got \(trash)")
+        try expect((trash["in_trash"] as? Bool) == true,
+                   "delete body must be in_trash:true, got \(String(describing: trash["in_trash"]))")
+        let restore = NotionClient.buildDeleteDataSourceBody(inTrash: false)
+        try expect((restore["in_trash"] as? Bool) == false,
+                   "restore body must be in_trash:false, got \(String(describing: restore["in_trash"]))")
+        // Exact wire bytes (this builder IS the production path —
+        // deleteDataSource serializes precisely this object).
+        let data = try JSONSerialization.data(withJSONObject: trash)
+        let round = try JSONSerialization.jsonObject(with: data) as? [String: Bool]
+        try expect(round == ["in_trash": true],
+                   "wire round-trip must be {\"in_trash\":true}, got \(String(describing: round))")
+    }
 }

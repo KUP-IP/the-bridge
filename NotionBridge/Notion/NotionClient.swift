@@ -844,12 +844,22 @@ public actor NotionClient {
         return data
     }
 
+    /// Pure, network-free builder for the `deleteDataSource` PATCH body —
+    /// the sole destructive-intent payload (`{ "in_trash": true|false }`).
+    /// Extracted so the wire contract is unit-testable WITHOUT a live
+    /// data-source trash (mirrors `buildAppendBlocksRequestBody`).
+    nonisolated public static func buildDeleteDataSourceBody(inTrash: Bool) -> [String: Any] {
+        ["in_trash": inTrash]
+    }
+
     /// Move a data source to (or restore from) Notion's trash — soft-delete.
     /// PATCH /v1/data_sources/{data_source_id} with { "in_trash": true }.
     /// Notion exposes no hard-delete for data sources; trashed items are recoverable.
     public func deleteDataSource(dataSourceId: String, inTrash: Bool = true) async throws -> Data {
         let cleanId = dataSourceId.replacingOccurrences(of: "-", with: "")
-        let body = try JSONSerialization.data(withJSONObject: ["in_trash": inTrash])
+        let body = try JSONSerialization.data(
+            withJSONObject: NotionClient.buildDeleteDataSourceBody(inTrash: inTrash)
+        )
         let (data, response) = try await request(
             method: "PATCH",
             path: "/data_sources/" + cleanId,
