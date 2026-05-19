@@ -378,9 +378,22 @@
 # orchestrator nit-fix tests (O(1) select(index:) seat; ⌃B-collision
 # re-registration retry). Integrated green independently measured =
 # 1110 (1080 +28 impl +2 nit). FLOOR raised per order-inversion.
+#
+# 2026-05-19 Commands UX increment (operator feedback): +22 test() —
+# worktree implementer + independent reviewer (GREENLIGHT) + orchestrator
+# gate. (A) collapsed redundant Skills+Commands tabs into ONE 'Commands'
+# section (SettingsSection 8→7, all .skills refs repointed). (B) in-
+# Settings hot-key recorder (P3): pure Cocoa→Carbon (keyCode,flags)→
+# HotkeyConfig mapping + validation + BridgeDefaults.commandsHotkey
+# persistence + live re-register; the NSEvent capture gesture is the
+# documented operator-smoke ceiling. (C) new default ⌃⌥⌘C (kVK_ANSI_C +
+# ctrl|opt|cmd) replacing the colliding ⌃B; spikeDefault untouched.
+# Skill-vs-command split preserved + 4 LOCK tests (fetch_skill = props +
+# body in one call / hotkey-cmd = body-only /markdown). Integrated green
+# independently measured = 1132 (1110 +22). FLOOR raised per order-inversion.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1110}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1132}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."
