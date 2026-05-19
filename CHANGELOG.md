@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.1.1] — 2026-05-19 — Commands UX: one tab, editable hotkey, ⌃⌥⌘C default
+
+Operator-feedback refinement of the 3.1.0 Commands palette. One unified place to manage commands, a user-editable global shortcut, and a collision-resistant default.
+
+### Changed
+- **One "Commands" section.** The redundant separate Skills and Commands Settings tabs are collapsed into a single **Commands** tab (`command` icon): the enable toggle + hot-key status pinned on top, the full Skills add/edit/delete list below it as the command manager. `SettingsSection` 8 → 7; the menu-bar/Dashboard quick-link now opens Commands.
+- **Default global hot-key is now ⌃⌥⌘C** (was ⌃B). ⌃B collided with emacs/readline "back" and was already taken on some setups; the triple-modifier ⌃⌥⌘C is collision-resistant and rebindable. The legacy `spikeDefault` (⌥⌘Space) is retained only for Codable-fixture stability.
+
+### Added
+- **In-Settings hot-key recorder.** Record a new global shortcut directly in Settings → Commands; persisted (`commandsHotkey`), validated (rejects modifier-less / pure-modifier chords), live re-registered without a relaunch, with a reset-to-default and a clear ⚠ status when a combo is unavailable.
+
+### Notes
+- Skill-vs-command retrieval split is unchanged and now lock-tested: agent `fetch_skill` returns **properties + page body** in one call; the hot-key command path returns **page body only** (`/markdown`, no properties). 4 regression tests fail loudly if the asymmetry is ever blurred. CI green floor 1110 → 1132. The NSEvent capture gesture remains a documented operator-smoke ceiling; the Cocoa→Carbon mapping/validation/persistence beneath it is fully unit-tested.
+
 ## [3.1.0] — 2026-05-19 — Commands Palette (enterprise UX) + security remediation
 
 A global-hotkey command palette: press the shortcut, type a skill name, `⏎` — the resolved Skill page body is on your clipboard. "Commands" ARE your enabled Skills (one registry, one source of truth). Graduated from an env-gated spike to an on-by-default, Settings-governed feature. Also hardens a destructive Notion tool and closes a behavioral-coverage gap.
