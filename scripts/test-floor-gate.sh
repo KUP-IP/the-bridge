@@ -391,9 +391,28 @@
 # Skill-vs-command split preserved + 4 LOCK tests (fetch_skill = props +
 # body in one call / hotkey-cmd = body-only /markdown). Integrated green
 # independently measured = 1132 (1110 +22). FLOOR raised per order-inversion.
+#
+# 2026-05-19 Commands remediation + .command (3-wave UEP sprint): +30
+# test() — worktree implementer + independent reviewer (GREENLIGHT) +
+# orchestrator gate. W1: @MainActor @Observable CommandsController
+# (single source isRegistered/hotkeyConfig/enabled/lastRegisterStatus),
+# AppDelegate-owned, .environment-injected on the NSHostingController
+# root → status row REACTIVE (fixes false "unavailable"; the NSApp.delegate
+# cast was never the cause — verified @NSApplicationDelegateAdaptor). W2:
+# RecorderNSView.mouseDown synchronous makeFirstResponder same run-loop
+# turn (fixes "cannot record"); real Carbon OSStatus surfaced →
+# collision-vs-plumbing diagnosable, status copy no longer falsely blames
+# another app. W3: SkillVisibility.command (+Codable/legacy-tolerant,
+# CaseIterable), both pickers → allCases, RegistrySkillsCommandProvider
+# filters enabled && ==.command, pure CommandPaletteEmptyState hint,
+# per-row write-back persists. Routing/fetch_skill unaffected; 4 LOCK
+# tests green unchanged. Residual ceiling = the literal NSEvent/Carbon
+# fire only (operator smoke-checklist at docs/operator/). Integrated
+# green independently measured = 1162 (1132 +30). FLOOR raised per
+# order-inversion.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1132}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1162}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."

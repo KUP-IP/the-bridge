@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.2.0] — 2026-05-19 — Commands: recorder/status fixed + Command visibility
+
+Fixes the two reported Commands defects and adds a Command skill type so the palette shows only commands.
+
+### Fixed
+- **Hot-key recorder now captures.** Clicking the Shortcut field enters recording and grabs focus synchronously (was a best-effort async path that often never acquired first-responder, so keystrokes were dropped). Escape cancels; VoiceOver label/role added.
+- **"Shortcut unavailable" no longer false.** The Settings status row now reads a single `@MainActor @Observable CommandsController` (owned by the app, injected into Settings) and re-renders live on every registration change — it was previously a one-shot snapshot that never refreshed. A genuine combo collision is now distinguished from a plumbing failure via the real Carbon `RegisterEventHotKey` status, and the generic state no longer falsely blames another app.
+
+### Added
+- **`Command` skill visibility.** A third type alongside Routing and Standard. The global Commands palette now shows **only** skills marked `Command` (enabled). Routing discovery (`list_routing_skills`) and `fetch_skill` (by name) are unchanged — a Command skill is palette-scoped for discovery but still fetchable by name. Both Settings pickers now derive from a single source (no hardcoded option lists). Empty palette shows a hint ("mark a skill as Command in Settings") instead of a blank list. `manage_skill` accepts `command`.
+
+### Notes
+- 3.2.0 is a SemVer-minor bump (new user-facing `Command` capability). Suite floor 1132 → 1162 (+30). The `@Observable` restructure converts most of the former "operator-smoke ceiling" into unit-tested logic; the irreducible ceiling (live Carbon hot-key fire + NSEvent capture) is documented and covered by `docs/operator/commands-smoke-checklist.md`.
+
 ## [3.1.1] — 2026-05-19 — Commands UX: one tab, editable hotkey, ⌃⌥⌘C default
 
 Operator-feedback refinement of the 3.1.0 Commands palette. One unified place to manage commands, a user-editable global shortcut, and a collision-resistant default.
