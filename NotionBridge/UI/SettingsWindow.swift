@@ -88,6 +88,7 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
     case permissions = "Permissions"
     case tools = "Tools"
     case skills = "Skills"
+    case commands = "Commands"
     case jobs = "Jobs"
     case advanced = "Advanced"
 
@@ -99,6 +100,7 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
         case .permissions: return "lock.shield"
         case .tools: return "hammer"
         case .skills: return "book.closed"
+        case .commands: return "command"
         case .credentials: return "key.fill"
         case .jobs: return "clock.badge.checkmark"
         case .advanced: return "wrench.and.screwdriver"
@@ -173,6 +175,7 @@ public struct SettingsView: View {
         case .permissions: permissionsSection
         case .tools: toolsSection
         case .skills: skillsSection
+        case .commands: commandsSection
         case .credentials: credentialsSection
         case .jobs: jobsSection
         case .advanced: advancedSection
@@ -186,6 +189,19 @@ public struct SettingsView: View {
     }
 
     @AppStorage("launchAtLogin") var launchAtLogin: Bool = false
+
+    /// cmd-ux: the persisted Commands-palette master toggle. Default
+    /// `true` (palette ships ON) — matches `CommandsPaletteGate`'s
+    /// default-enabled contract when the key has never been written.
+    @AppStorage(BridgeDefaults.commandsPaletteEnabled) var commandsPaletteEnabled: Bool = true
+
+    /// cmd-ux: whether the global hot-key is currently registered (drives
+    /// the Active vs "⚠ Shortcut unavailable" status row). Read live from
+    /// the AppDelegate's `CommandBoxController`; `false` when the palette
+    /// is off or registration failed (combo owned by another app).
+    var commandsPaletteRegistered: Bool {
+        (NSApp.delegate as? AppDelegate)?.isCommandsPaletteHotkeyRegistered ?? false
+    }
 
     var ssePort: Int {
         ConfigManager.shared.ssePort
