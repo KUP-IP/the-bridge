@@ -559,4 +559,129 @@ func runFetchSkillPropertiesTests() async {
         try expect(try bc(noProps) == bc(withProps),
                    "blockCount must be properties-independent")
     }
+
+    // ============================================================
+    // MARK: (f) REAL live-Notion FOCUS-DB-row fixture
+    // ============================================================
+    //
+    // Closes the cu-sa honest residual recorded in v3-hub Decision Log
+    // row 26 ("Notion property wire-shapes are modelled-from-spec, not
+    // live-verified"). The blob below is the VERBATIM `properties` object
+    // returned by the live Notion REST API for FOCUS-DB row PKT-798
+    // (WS-C, page 85d9aa02515f40e1b44e7540373f2fe4), captured 2026-05-19
+    // via `notion_page_read includeBlocks:false`. It carries the genuine
+    // wire noise the synthetic builders above omit: percent-encoded
+    // property `id`s, `has_more` on relations, `annotations`/`href`/
+    // `text` on rich_text/title runs, `color`/`id` on select/status/
+    // multi_select options, `formula` with inner `boolean`/`string`
+    // types, and `number: null`. Driving it through the EXACT production
+    // flatten proves the modelled mapping matches reality AND locks the
+    // real safe-skip behavior on shapes the model does not surface.
+    let realPKT798Properties = #"""
+    {
+      "AI LOGS": { "has_more": false, "id": "f%40av", "type": "relation",
+        "relation": [ { "id": "361cbb58-889e-814e-bd95-f3c4a494272f" } ] },
+      "Blocked by": { "has_more": false, "id": "%3FS%3F%3F", "type": "relation",
+        "relation": [] },
+      "Blocking": { "has_more": false, "id": "qjgT", "type": "relation",
+        "relation": [ { "id": "d3887c51-83f9-44b1-987d-46fa41d943b0" } ] },
+      "cascadeSource": { "id": "%3C%3FHP", "type": "rich_text",
+        "rich_text": [] },
+      "Complexity": { "id": "ySOP", "number": 5, "type": "number" },
+      "Context Size": { "id": "DMV%40", "number": null, "type": "number" },
+      "Created": { "created_time": "2026-05-15T15:37:00.000Z",
+        "id": "W%7Cn%3C", "type": "created_time" },
+      "Duration": { "id": "BRDz", "number": 150, "type": "number" },
+      "EVENT": { "has_more": false, "id": "K%3EAT", "type": "relation",
+        "relation": [ { "id": "361cbb58-889e-81d7-b59c-f374cbbfa832" } ] },
+      "Filter": { "formula": { "boolean": true, "type": "boolean" },
+        "id": "Tb%5D_", "type": "formula" },
+      "fromStatus": { "id": "s~%5E%3C", "type": "status",
+        "status": { "color": "green", "id": "jvqx", "name": "Done" } },
+      "Model": { "id": "u%7B%3CR", "type": "select",
+        "select": { "color": "purple",
+          "id": "4d5462d6-c291-4075-9e43-1d246c02e03b", "name": "Opus 4.7" } },
+      "Objective": { "id": "jr~M", "type": "rich_text",
+        "rich_text": [ { "annotations": { "bold": false, "code": false,
+          "color": "default", "italic": false, "strikethrough": false,
+          "underline": false }, "href": null,
+          "plain_text": "Pre-marketplace cleanup: run a privacy audit.",
+          "text": { "content": "Pre-marketplace cleanup: run a privacy audit.",
+            "link": null }, "type": "text" } ] },
+      "Packet Name": { "id": "title", "type": "title",
+        "title": [ { "annotations": { "bold": false, "code": false,
+          "color": "default", "italic": false, "strikethrough": false,
+          "underline": false }, "href": null,
+          "plain_text": "Bridge v2.3 prep · 0.3 — Remediate test floor + PermissionView + privacy audit",
+          "text": { "content": "Bridge v2.3 prep · 0.3 — Remediate test floor + PermissionView + privacy audit",
+            "link": null }, "type": "text" } ] },
+      "Packet Output": { "id": "VyF%7C", "type": "rich_text", "rich_text": [] },
+      "PKT-ID": { "id": "FDqm", "type": "unique_id",
+        "unique_id": { "number": 798, "prefix": "PKT" } },
+      "PROJECT": { "has_more": false, "id": "NkiO", "type": "relation",
+        "relation": [ { "id": "268b2a2a-77cb-4a11-b902-2af150ea698b" } ] },
+      "SKILLS": { "has_more": false, "id": "%5C%5Coj", "type": "relation",
+        "relation": [ { "id": "318cbb58-889e-801a-90c7-d424baba3639" },
+          { "id": "b2eb533e-3be1-465b-86d4-1af6937db638" } ] },
+      "Sort": { "formula": { "string": null, "type": "string" },
+        "id": "fT~c", "type": "formula" },
+      "Status": { "id": "y%3Cxv", "type": "status",
+        "status": { "color": "green", "id": "_qF`", "name": "Done" } },
+      "Tokens": { "id": "K%3C%3BC", "number": null, "type": "number" },
+      "Trigger": { "id": "%5E%60aE", "type": "multi_select",
+        "multi_select": [ { "color": "purple", "id": "Fgf_", "name": "📦" } ] }
+    }
+    """#
+
+    await test("cu-sa (f): real live-Notion FOCUS row PKT-798 flattens to the modelled values") {
+        guard let data = realPKT798Properties.data(using: .utf8),
+              let realProps = try JSONSerialization.jsonObject(with: data)
+                as? [String: Any] else {
+            throw TestError.assertion("real fixture must parse as a JSON object")
+        }
+        let p = try propsMap(await build(props: realProps))
+
+        // Modelled scalar shapes resolve to the right human values.
+        try expect(p["Complexity"] == .int(5), "Complexity → 5; got \(String(describing: p["Complexity"]))")
+        try expect(p["Duration"] == .int(150), "Duration → 150; got \(String(describing: p["Duration"]))")
+        try expect(p["Model"] == .string("Opus 4.7"), "select → option name; got \(String(describing: p["Model"]))")
+        try expect(p["Status"] == .string("Done"), "status → name; got \(String(describing: p["Status"]))")
+        try expect(p["fromStatus"] == .string("Done"), "status → name; got \(String(describing: p["fromStatus"]))")
+        try expect(p["PKT-ID"] == .string("PKT-798"), "unique_id → prefix-number; got \(String(describing: p["PKT-ID"]))")
+        try expect(p["Trigger"] == .array([.string("\u{1F4E6}")]), "multi_select → [names]; got \(String(describing: p["Trigger"]))")
+        try expect(p["PROJECT"] == .array([.string("268b2a2a-77cb-4a11-b902-2af150ea698b")]),
+                   "relation → [ids]; got \(String(describing: p["PROJECT"]))")
+        try expect(p["SKILLS"] == .array([.string("318cbb58-889e-801a-90c7-d424baba3639"),
+                                          .string("b2eb533e-3be1-465b-86d4-1af6937db638")]),
+                   "relation → [ids] order-preserving; got \(String(describing: p["SKILLS"]))")
+        try expect(p["Blocked by"] == .array([]), "empty relation → []; got \(String(describing: p["Blocked by"]))")
+        try expect(p["cascadeSource"] == .string(""), "empty rich_text → \"\"; got \(String(describing: p["cascadeSource"]))")
+        try expect(p["Created"] == .string("2026-05-15T15:37:00.000Z"),
+                   "created_time → ISO string; got \(String(describing: p["Created"]))")
+        guard case .string(let pn)? = p["Packet Name"], pn.contains("Remediate test floor") else {
+            throw TestError.assertion("title → plain text; got \(String(describing: p["Packet Name"]))")
+        }
+
+        // Safe-skip contract holds on REAL data (NOT just synthetic):
+        // number:null and formula(inner string/boolean) are unmodelled
+        // and MUST be omitted entirely — never crash, never garbage,
+        // never a partial. This is the documented behavior surfaced for
+        // the operator in Decision row 26; this test pins it to reality.
+        for skipped in ["Context Size", "Tokens", "Filter", "Sort"] {
+            try expect(p[skipped] == nil,
+                       "real unmodelled shape `\(skipped)` must be skipped, not surfaced; got \(String(describing: p[skipped]))")
+        }
+
+        // The flatten injects NO key absent from the live input, and
+        // emits ONLY modelled Value kinds (string/int/double/bool/array
+        // /object) — no opaque/raw passthrough leaks from real noise.
+        let inputKeys = Set(realProps.keys)
+        for (k, v) in p {
+            try expect(inputKeys.contains(k), "flatten introduced a non-input key `\(k)`")
+            switch v {
+            case .string, .int, .double, .bool, .array, .object: break
+            default: throw TestError.assertion("real fixture produced a non-modelled Value for `\(k)`: \(v)")
+            }
+        }
+    }
 }

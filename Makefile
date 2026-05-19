@@ -72,10 +72,11 @@ test:
 # WS-C (PKT-798) → v3.0·0.5 → Dev-suite audit → PKT-800 S1 → S2 → S3 → S4
 # → cmd-w2 (Commands data layer) → cmd-w4 (fetch_skill /markdown switch)
 # → cu-sa (fetch_skill simplified `properties` map, 2026-05-18): runs the
-# suite + asserts the green floor (1074, integrated cu-sa +30 & cu-sb
-# net +15 over 1029; measured 3x deterministic on main; provenance in
-# scripts/test-floor-gate.sh) and zero failures. Used by CI so a shrunk/disabled
-# suite fails. Floor provenance lives in scripts/test-floor-gate.sh.
+# suite + asserts the green floor (1075 as of 2026-05-19 L5: +1 real
+# live-Notion FOCUS-row fixture test over the integrated 1074; measured
+# on main; provenance in scripts/test-floor-gate.sh) and zero failures.
+# Used by CI so a shrunk/disabled suite fails. Floor provenance lives in
+# scripts/test-floor-gate.sh.
 test-floor:
 	./scripts/test-floor-gate.sh
 

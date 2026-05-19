@@ -331,9 +331,21 @@
 # (humans) writes the page body to the clipboard only (no paste-back,
 # no new MCP tool, no kind flag). DS-binding / OAuth / multi-tenant
 # explicitly retired-deferred. Not pushed.
+#
+# 2026-05-19 close-the-loops (L5): +1 test() — FetchSkillPropertiesTests
+# section (f) drives the VERBATIM live-Notion FOCUS-DB-row `properties`
+# blob (PKT-798 / page 85d9aa02, captured via notion_page_read) through
+# the EXACT production flatten. This closes the cu-sa "modelled-not-
+# live-verified" residual recorded in v3-hub Decision Log row 26: the
+# per-type wire shapes above are now pinned against a real recorded
+# page, and the safe-skip of unmodelled real shapes (number:null,
+# formula inner string/boolean) is locked by assertion rather than
+# argued. True integrated green independently measured = 1075 (1074 +1).
+# FLOOR raised to the measured count per the order-inversion rule. Test/
+# floor change only; not pushed.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1074}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1075}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."
