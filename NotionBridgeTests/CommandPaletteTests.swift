@@ -217,21 +217,53 @@ func runCommandPaletteTests() async {
     // MARK: (D) CommandsPaletteGate — default-OFF / fail-closed
     // ============================================================
 
-    await test("Gate: unset environment is DISABLED (default-OFF)") {
-        try expect(!CommandsPaletteGate(environment: [:]).isEnabled,
-                   "an unset BRIDGE_ENABLE_COMMANDS must keep the palette OFF")
+    // cmd-ux: the palette is now ON BY DEFAULT, governed by a persisted
+    // master toggle. The env var only FORCE-overrides ("1" on / "0" off);
+    // anything else defers to the persisted pref, which DEFAULTS TO TRUE
+    // when the key has never been written. The pref reader is injected so
+    // these stay PURE (no UserDefaults.standard coupling).
+
+    await test("Gate: unset env + unwritten pref is ENABLED (default-ON)") {
+        let g = CommandsPaletteGate(environment: [:], persistedPreference: { nil })
+        try expect(g.isEnabled,
+                   "an unset env + never-written pref must default the palette ON")
     }
 
-    await test("Gate: exactly \"1\" enables the palette") {
-        try expect(CommandsPaletteGate(environment: ["BRIDGE_ENABLE_COMMANDS": "1"]).isEnabled,
-                   "literal \"1\" must enable the palette")
+    await test("Gate: env \"1\" force-enables regardless of the pref") {
+        try expect(CommandsPaletteGate(environment: ["BRIDGE_ENABLE_COMMANDS": "1"],
+                                       persistedPreference: { false }).isEnabled,
+                   "env \"1\" must force ON even when the pref is false")
     }
 
-    await test("Gate: any non-\"1\" value stays DISABLED (fail-closed)") {
-        for v in ["0", "true", "TRUE", "yes", "on", " 1", "1 ", "", "enable"] {
-            try expect(!CommandsPaletteGate(environment: ["BRIDGE_ENABLE_COMMANDS": v]).isEnabled,
-                       "value \"\(v)\" must NOT enable the palette (fail-closed)")
+    await test("Gate: env \"0\" force-DISABLES regardless of the pref (kill-switch)") {
+        try expect(!CommandsPaletteGate(environment: ["BRIDGE_ENABLE_COMMANDS": "0"],
+                                        persistedPreference: { true }).isEnabled,
+                   "env \"0\" must force OFF even when the pref is true")
+    }
+
+    await test("Gate: non-decisive env value defers to the persisted pref") {
+        for v in ["true", "TRUE", "yes", "on", " 1", "1 ", "", "enable"] {
+            try expect(CommandsPaletteGate(environment: ["BRIDGE_ENABLE_COMMANDS": v],
+                                           persistedPreference: { true }).isEnabled,
+                       "value \"\(v)\" is not a force-override → pref(true) ⇒ ON")
+            try expect(!CommandsPaletteGate(environment: ["BRIDGE_ENABLE_COMMANDS": v],
+                                            persistedPreference: { false }).isEnabled,
+                       "value \"\(v)\" is not a force-override → pref(false) ⇒ OFF")
         }
+    }
+
+    await test("Gate: persisted pref decides when no env override") {
+        try expect(CommandsPaletteGate(environment: [:], persistedPreference: { true }).isEnabled,
+                   "pref true (no env) ⇒ ON")
+        try expect(!CommandsPaletteGate(environment: [:], persistedPreference: { false }).isEnabled,
+                   "pref false (no env) ⇒ OFF")
+    }
+
+    await test("Gate: defaultEnabled is true (palette ships ON)") {
+        try expect(CommandsPaletteGate.defaultEnabled,
+                   "the shipping default must be ON")
+        try expect(BridgeDefaults.commandsPaletteEnabled == "com.notionbridge.commandsPaletteEnabled",
+                   "persisted master-toggle key identity guard")
     }
 
     await test("Gate: env key is the BRIDGE_ENABLE_* family name") {
@@ -240,10 +272,11 @@ func runCommandPaletteTests() async {
     }
 
     await test("Gate is Equatable / value-typed (deterministic under test)") {
-        try expect(CommandsPaletteGate(environment: [:]) == CommandsPaletteGate(environment: ["X": "y"]),
+        try expect(CommandsPaletteGate(environment: [:], persistedPreference: { false })
+                       == CommandsPaletteGate(environment: ["X": "y"], persistedPreference: { false }),
                    "two disabled gates compare equal")
-        try expect(CommandsPaletteGate(environment: ["BRIDGE_ENABLE_COMMANDS": "1"])
-                       != CommandsPaletteGate(environment: [:]),
+        try expect(CommandsPaletteGate(environment: ["BRIDGE_ENABLE_COMMANDS": "1"], persistedPreference: { false })
+                       != CommandsPaletteGate(environment: [:], persistedPreference: { false }),
                    "enabled vs disabled must differ")
     }
 
@@ -253,20 +286,29 @@ func runCommandPaletteTests() async {
     //   a PURE static decision, both arms, with NO GUI side effects.
     // ============================================================
 
-    await test("AppDelegate.shouldStartCommandsPalette: OFF when env unset") {
-        try expect(!AppDelegate.shouldStartCommandsPalette(environment: [:]),
-                   "default (unset) env must NOT start the palette — app byte-for-byte unchanged")
+    // cmd-ux: default-ON. The test process never writes
+    // `commandsPaletteEnabled`, so the unwritten pref ⇒ defaultEnabled
+    // (true). The env force-overrides are deterministic regardless.
+
+    await test("AppDelegate.shouldStartCommandsPalette: ON when env unset (default-ON)") {
+        // No env override + the test process never wrote the pref key ⇒
+        // the gate's defaultEnabled (true) decides.
+        UserDefaults.standard.removeObject(forKey: BridgeDefaults.commandsPaletteEnabled)
+        try expect(AppDelegate.shouldStartCommandsPalette(environment: [:]),
+                   "the palette now ships ON — an unset env + unwritten pref must start it")
     }
 
-    await test("AppDelegate.shouldStartCommandsPalette: ON only with =1") {
+    await test("AppDelegate.shouldStartCommandsPalette: env \"0\" force-OFF, \"1\" force-ON") {
         try expect(AppDelegate.shouldStartCommandsPalette(environment: ["BRIDGE_ENABLE_COMMANDS": "1"]),
-                   "BRIDGE_ENABLE_COMMANDS=1 must start the palette")
-        try expect(!AppDelegate.shouldStartCommandsPalette(environment: ["BRIDGE_ENABLE_COMMANDS": "true"]),
-                   "\"true\" must NOT start the palette (fail-closed, mirrors HTTP gate)")
+                   "BRIDGE_ENABLE_COMMANDS=1 must force the palette on")
+        try expect(!AppDelegate.shouldStartCommandsPalette(environment: ["BRIDGE_ENABLE_COMMANDS": "0"]),
+                   "BRIDGE_ENABLE_COMMANDS=0 must force the palette off (kill-switch)")
     }
 
     await test("AppDelegate gating decision matches CommandsPaletteGate exactly") {
-        for env in [[:], ["BRIDGE_ENABLE_COMMANDS": "1"], ["BRIDGE_ENABLE_COMMANDS": "0"]] {
+        // The env force-override arms are pref-independent, so the
+        // AppDelegate static must equal the gate for the same env.
+        for env in [["BRIDGE_ENABLE_COMMANDS": "1"], ["BRIDGE_ENABLE_COMMANDS": "0"]] {
             try expect(AppDelegate.shouldStartCommandsPalette(environment: env)
                            == CommandsPaletteGate(environment: env).isEnabled,
                        "the AppDelegate decision must delegate to the single-source gate for \(env)")
@@ -692,5 +734,203 @@ func runCommandPaletteTests() async {
                    "the end-to-end path must land the W2-resolved body on the clipboard, got \(cb.readString() ?? "nil")")
         try expect(fetched.replacingOccurrences(of: "-", with: "") == pidSig,
                    "must fetch the matched registry entry's page id, got \(fetched)")
+    }
+
+    // ============================================================
+    // MARK: (I) P2 — pure ↑/↓ selection state machine
+    //   The results-list selection logic, extracted out of the AppKit
+    //   panel. Exhaustively asserted: empty list, top-row preselect,
+    //   clamp at both ends (no wrap), and re-clamp when results shrink.
+    // ============================================================
+
+    await test("Selection: empty list ⇒ nil (nothing selected)") {
+        var s = CommandPaletteSelection(count: 0)
+        try expect(s.selectedIndex == nil, "empty results must select nothing")
+        s.move(.down); s.move(.up)
+        try expect(s.selectedIndex == nil, "arrows on an empty list are a no-op")
+    }
+
+    await test("Selection: non-empty list preselects the top row (index 0)") {
+        let s = CommandPaletteSelection(count: 5)
+        try expect(s.selectedIndex == 0, "top row must be preselected, got \(String(describing: s.selectedIndex))")
+    }
+
+    await test("Selection: ↓ advances and CLAMPS at the bottom (no wrap)") {
+        var s = CommandPaletteSelection(count: 3)
+        s.move(.down); try expect(s.selectedIndex == 1)
+        s.move(.down); try expect(s.selectedIndex == 2)
+        s.move(.down); try expect(s.selectedIndex == 2, "↓ at the last row must clamp, not wrap")
+    }
+
+    await test("Selection: ↑ retreats and CLAMPS at the top (no wrap)") {
+        var s = CommandPaletteSelection(count: 3)
+        s.move(.down); s.move(.down)        // → index 2
+        s.move(.up);  try expect(s.selectedIndex == 1)
+        s.move(.up);  try expect(s.selectedIndex == 0)
+        s.move(.up);  try expect(s.selectedIndex == 0, "↑ at the first row must clamp, not wrap")
+    }
+
+    await test("Selection: shrinking results re-clamps a stale index into range") {
+        var s = CommandPaletteSelection(count: 5)
+        s.move(.down); s.move(.down); s.move(.down)   // index 3
+        s.updateResultCount(2)                        // list shrank to 2
+        try expect(s.selectedIndex == 1,
+                   "a stale index past the end must clamp to the new last row, got \(String(describing: s.selectedIndex))")
+        s.updateResultCount(0)
+        try expect(s.selectedIndex == nil, "results emptying must clear the selection")
+        s.updateResultCount(4)
+        try expect(s.selectedIndex == 0, "results re-appearing must preselect the top row")
+    }
+
+    await test("Selection: updateResultCount preserves an in-range index") {
+        var s = CommandPaletteSelection(count: 5)
+        s.move(.down); s.move(.down)                  // index 2
+        s.updateResultCount(5)                        // same count
+        try expect(s.selectedIndex == 2, "an in-range selection must survive a same-size refresh")
+        s.updateResultCount(4)
+        try expect(s.selectedIndex == 2, "still in range after a small shrink ⇒ unchanged")
+    }
+
+    await test("Selection: negative counts are treated as empty (defensive)") {
+        var s = CommandPaletteSelection(count: -3)
+        try expect(s.selectedIndex == nil, "a negative count must behave as empty")
+        s.updateResultCount(-1)
+        try expect(s.selectedIndex == nil && s.count == 0, "negative refresh clamps to empty")
+    }
+
+    // ============================================================
+    // MARK: (J) P2 — pure commit → UI presentation mapping
+    //   Each CommandPaletteCommitResult → the EXACT inline message +
+    //   whether the panel stays open + whether it's an auto-dismiss
+    //   confirmation. The AppKit label/timer is the operator-smoke
+    //   ceiling; THIS decision is asserted exhaustively.
+    // ============================================================
+
+    await test("Presenter: .paste ⇒ \"Copied ‹name›\", panel DISMISSES (confirmation)") {
+        let p = CommandPalettePresenter.present(.paste("body"), name: "Email Signature")
+        try expect(p.message == "Copied Email Signature", "got '\(p.message)'")
+        try expect(p.staysOpen == false, "a successful copy must dismiss the panel")
+        try expect(p.isConfirmation, "a copy is a flash-then-dismiss confirmation")
+    }
+
+    await test("Presenter: .notFound ⇒ \"No match for ‹query›\", panel STAYS, no copy") {
+        let p = CommandPalettePresenter.present(.notFound(query: "zzz"), name: "ignored")
+        try expect(p.message == "No match for zzz", "got '\(p.message)'")
+        try expect(p.staysOpen, "no-match must keep the panel open for a retry")
+        try expect(!p.isConfirmation, "no-match is not a copy confirmation")
+    }
+
+    await test("Presenter: .unavailable ⇒ \"‹name› unavailable — offline?\", panel STAYS") {
+        let p = CommandPalettePresenter.present(
+            .unavailable(name: "Mailing Address", reason: "boom"), name: "ignored")
+        try expect(p.message == "Mailing Address unavailable — offline?", "got '\(p.message)'")
+        try expect(p.staysOpen, "unavailable must keep the panel open")
+        try expect(!p.isConfirmation)
+    }
+
+    await test("Presenter: empty-query no-op ⇒ blank message, panel STAYS, no copy") {
+        let p = CommandPalettePresenter.emptyQueryNoOp
+        try expect(p.message.isEmpty, "an empty-query Enter shows nothing")
+        try expect(p.staysOpen && !p.isConfirmation, "it is a pure no-op")
+    }
+
+    await test("Presenter: empty-registry message + dismiss delay constants") {
+        try expect(CommandPalettePresenter.emptyRegistryMessage
+                       == "No commands yet — add skills in Settings → Commands",
+                   "got '\(CommandPalettePresenter.emptyRegistryMessage)'")
+        try expect(CommandPalettePresenter.confirmationDismissMillis == 900,
+                   "the confirmation auto-dismiss is ~900ms, got \(CommandPalettePresenter.confirmationDismissMillis)")
+    }
+
+    await test("CommandPalettePresentation / arrow / selection are Equatable value types") {
+        try expect(CommandPaletteArrow.up != CommandPaletteArrow.down)
+        try expect(CommandPaletteSelection(count: 3) == CommandPaletteSelection(count: 3))
+        try expect(CommandPalettePresenter.present(.paste("a"), name: "n")
+                       == CommandPalettePresenter.present(.paste("b"), name: "n"),
+                   "presentation depends on name+case, not the body bytes")
+    }
+
+    // ============================================================
+    // MARK: (K) P2 — pure Settings status row + multi-monitor math
+    // ============================================================
+
+    await test("CommandsSettingsStatus: enabled + registered ⇒ \"Active — ⌃B\"") {
+        let st = CommandsSettingsStatus(enabled: true, isRegistered: true, hotkey: "⌃B")
+        try expect(st == .active(hotkey: "⌃B"))
+        try expect(st.message == "Active — ⌃B", "got '\(st.message)'")
+        try expect(!st.isWarning, "the active state is not a warning")
+    }
+
+    await test("CommandsSettingsStatus: enabled + NOT registered ⇒ red shortcut-unavailable") {
+        let st = CommandsSettingsStatus(enabled: true, isRegistered: false, hotkey: "⌃B")
+        try expect(st == .shortcutUnavailable)
+        try expect(st.message == "⚠ Shortcut unavailable (in use by another app)",
+                   "got '\(st.message)'")
+        try expect(st.isWarning, "an unavailable shortcut must render as a warning")
+    }
+
+    await test("CommandsSettingsStatus: disabled ⇒ \"Disabled\", no warning (regardless of registration)") {
+        for reg in [true, false] {
+            let st = CommandsSettingsStatus(enabled: false, isRegistered: reg, hotkey: "⌃B")
+            try expect(st == .disabled, "off ⇒ .disabled even if isRegistered=\(reg)")
+            try expect(st.message == "Disabled" && !st.isWarning)
+        }
+    }
+
+    await test("placementOrigin centres horizontally + ~28% up the visible frame") {
+        let frame = CGRect(x: 100, y: 200, width: 1000, height: 800)
+        let size = CGSize(width: 560, height: 320)
+        let o = CommandBoxController.placementOrigin(screenVisibleFrame: frame, panelSize: size)
+        try expect(o.x == frame.midX - 280, "x must centre the panel, got \(o.x)")
+        try expect(o.y == frame.minY + 800 * 0.28, "y must sit ~28% up, got \(o.y)")
+    }
+
+    await test("pickScreenFrame: prefers the screen containing the key window") {
+        let s0 = CGRect(x: 0, y: 0, width: 1000, height: 800)        // main
+        let s1 = CGRect(x: 1000, y: 0, width: 1000, height: 800)     // second
+        let keyOnS1 = CGRect(x: 1400, y: 300, width: 200, height: 200)
+        let hit = CommandBoxController.pickScreenFrame(
+            screens: [s0, s1], keyWindowFrame: keyOnS1,
+            mouseLocation: CGPoint(x: 10, y: 10), mainScreenFrame: s0)
+        try expect(hit == s1, "the panel must open on the key window's screen, got \(String(describing: hit))")
+    }
+
+    await test("pickScreenFrame: falls back to the mouse's screen, then main") {
+        let s0 = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let s1 = CGRect(x: 1000, y: 0, width: 1000, height: 800)
+        let mouseHit = CommandBoxController.pickScreenFrame(
+            screens: [s0, s1], keyWindowFrame: nil,
+            mouseLocation: CGPoint(x: 1500, y: 400), mainScreenFrame: s0)
+        try expect(mouseHit == s1, "no key window ⇒ use the mouse's screen, got \(String(describing: mouseHit))")
+        let mainHit = CommandBoxController.pickScreenFrame(
+            screens: [s0, s1], keyWindowFrame: nil,
+            mouseLocation: CGPoint(x: -50, y: -50), mainScreenFrame: s0)
+        try expect(mainHit == s0, "off-screen mouse + no key window ⇒ main, got \(String(describing: mainHit))")
+    }
+
+    await test("AppDelegate.setCommandsPaletteEnabled persists the master toggle live") {
+        // The live Settings entrypoint must write the persisted pref the
+        // gate consults (no relaunch). We assert the PERSISTED side-effect
+        // headlessly (the hot-key register/unregister itself is the
+        // operator-smoke ceiling — a Carbon registration needs a live
+        // WindowServer). Snapshot+restore the global key so this can
+        // neither contaminate nor be contaminated by a sibling test.
+        let key = BridgeDefaults.commandsPaletteEnabled
+        let saved = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let saved { UserDefaults.standard.set(saved, forKey: key) }
+            else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        let delegate = await AppDelegate()
+        await delegate.setCommandsPaletteEnabled(false)
+        try expect(UserDefaults.standard.bool(forKey: key) == false,
+                   "disabling via Settings must persist false")
+        try expect(!CommandsPaletteGate(environment: [:]).isEnabled,
+                   "the gate must observe the persisted-off pref (no env override)")
+        await delegate.setCommandsPaletteEnabled(true)
+        try expect(UserDefaults.standard.bool(forKey: key) == true,
+                   "re-enabling via Settings must persist true")
+        try expect(CommandsPaletteGate(environment: [:]).isEnabled,
+                   "the gate must observe the persisted-on pref")
     }
 }

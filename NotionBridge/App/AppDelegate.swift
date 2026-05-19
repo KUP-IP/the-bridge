@@ -454,9 +454,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// unit-testable headlessly (no NSApp, no hot-key, no panel) — the
     /// same shape as the streamableHTTP connector-gating decision test.
     /// Returns `true` iff the palette should be constructed for this
-    /// environment. ONLY a literal "1" enables it; unset / "0" / "true"
-    /// keep it OFF (fail-closed), so the default app is byte-for-byte
-    /// unchanged.
+    /// environment + persisted preference. The palette is now ON BY
+    /// DEFAULT: the env var only force-overrides ("1" on / "0" off);
+    /// otherwise the persisted master toggle (default true) decides.
     public nonisolated static func shouldStartCommandsPalette(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> Bool {
@@ -471,16 +471,57 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// resolved page body is written to the system clipboard.
     private func maybeStartCommandsPalette() {
         guard Self.shouldStartCommandsPalette() else {
-            print("[Notion Bridge] Commands palette disabled (set \(CommandsPaletteGate.enableEnvKey)=1 to enable)")
+            print("[Notion Bridge] Commands palette disabled (master toggle off; set \(CommandsPaletteGate.enableEnvKey)=1 to force on)")
             return
         }
+        startCommandsPalette()
+    }
+
+    /// Idempotently build the palette + register the hot-key. Safe to
+    /// call repeatedly: if `commandBox` already exists this is a no-op
+    /// (the hot-key stays registered). Used by both startup and the
+    /// live Settings toggle.
+    private func startCommandsPalette() {
+        guard commandBox == nil else { return }
         let provider = RegistrySkillsCommandProvider()
         let manager = CommandsManager()
         let coordinator = CommandPaletteCoordinator(provider: provider, manager: manager)
         let box = CommandBoxController(coordinator: coordinator)
         let registered = box.registerHotkey()
         self.commandBox = box
-        print("[Notion Bridge] Commands palette enabled — registry-backed, clipboard-only — hot-key \(registered ? "registered" : "registration FAILED") (\(HotkeyConfig.spikeDefault.displayString))")
+        print("[Notion Bridge] Commands palette enabled — registry-backed, clipboard-only — hot-key \(registered ? "registered" : "registration FAILED") (\(HotkeyConfig.productionDefault.displayString))")
+    }
+
+    /// Whether the Commands-palette global hot-key is currently
+    /// registered. Drives the Settings status row (Active vs the red
+    /// "⚠ Shortcut unavailable"). False when the palette is off or the
+    /// Carbon registration failed (the combo is owned by another app).
+    public var isCommandsPaletteHotkeyRegistered: Bool {
+        commandBox?.isRegistered ?? false
+    }
+
+    /// Live enable/disable entrypoint for the Settings master toggle.
+    /// Persists the preference, then registers/unregisters the global
+    /// hot-key WITHOUT a relaunch. Idempotent and safe when `commandBox`
+    /// is nil (disable becomes a clean no-op). An explicit
+    /// `BRIDGE_ENABLE_COMMANDS` env override still wins on next launch;
+    /// this only writes the persisted pref the gate consults when no
+    /// env override is present.
+    public func setCommandsPaletteEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: BridgeDefaults.commandsPaletteEnabled)
+        if enabled {
+            // Honor a kill-switch env override even on a live toggle:
+            // if the env explicitly forces OFF, don't construct.
+            guard Self.shouldStartCommandsPalette() else {
+                print("[Notion Bridge] Commands palette toggle ON ignored — \(CommandsPaletteGate.enableEnvKey)=0 forces it OFF")
+                return
+            }
+            startCommandsPalette()
+        } else {
+            commandBox?.unregisterHotkey()
+            commandBox = nil
+            print("[Notion Bridge] Commands palette disabled via Settings — hot-key unregistered")
+        }
     }
 
     // MARK: - Notion Token Validation

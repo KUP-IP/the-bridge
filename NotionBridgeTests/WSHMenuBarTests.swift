@@ -27,7 +27,12 @@ func runWSHMenuBarTests() async {
         for s in SettingsSection.allCases {
             try expect(s.id == s.rawValue, "id != rawValue for \(s)")
         }
-        try expect(SettingsSection.allCases.count == 7, "expected 7 sections, got \(SettingsSection.allCases.count)")
+        // cmd-ux: + the new "Commands" section (8 total).
+        try expect(SettingsSection.allCases.count == 8, "expected 8 sections, got \(SettingsSection.allCases.count)")
+        try expect(SettingsSection.commands.icon == "command",
+                   "commands icon: \(SettingsSection.commands.icon)")
+        try expect(SettingsSection.commands.id == SettingsSection.commands.rawValue,
+                   "commands id must equal rawValue")
     }
 
     await test("SettingsNavigation defaults to Connections (Settings home)") {

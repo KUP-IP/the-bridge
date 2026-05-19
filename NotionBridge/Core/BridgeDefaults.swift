@@ -24,6 +24,15 @@ public enum BridgeDefaults {
     /// Written by SkillsManager and SkillsModule, read at startup.
     public static let skills = "com.notionbridge.skills"
 
+    // MARK: - Commands Palette (cmd-ux)
+
+    /// Master on/off for the Commands palette (global-hotkey command box).
+    /// Bool. Written by Settings → Commands, read by `CommandsPaletteGate`.
+    /// ABSENT ⇒ ON (default-enabled): the gate treats a missing key as
+    /// `true` so a fresh install gets the palette without any opt-in. An
+    /// explicit `BRIDGE_ENABLE_COMMANDS` env var still overrides this pref.
+    public static let commandsPaletteEnabled = "com.notionbridge.commandsPaletteEnabled"
+
     // MARK: - Onboarding & Legal
 
     /// Whether the user has completed the onboarding wizard. Bool.

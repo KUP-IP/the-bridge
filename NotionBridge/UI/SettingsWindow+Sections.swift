@@ -232,6 +232,64 @@ extension SettingsView {
     }
 
 
+    // MARK: - Commands (cmd-ux)
+
+    /// Settings → Commands. (a) a persisted master Toggle that live-
+    /// registers / unregisters the global hot-key via the AppDelegate
+    /// (no relaunch); (b) a status row driven by
+    /// `CommandsSettingsStatus` (Active — ⌃B / red shortcut-unavailable
+    /// / Disabled); (c) the commands list = the existing `SkillsView`
+    /// (Commands ARE the enabled Skills). The toggle/status string
+    /// mapping is the pure `CommandsSettingsStatus` (unit-tested); only
+    /// the SwiftUI rendering here is the operator-smoke ceiling.
+    var commandsSection: some View {
+        let disabledTools = Set(UserDefaults.standard.stringArray(forKey: BridgeDefaults.disabledTools) ?? [])
+        let status = CommandsSettingsStatus(
+            enabled: commandsPaletteEnabled,
+            isRegistered: commandsPaletteRegistered,
+            hotkey: HotkeyConfig.productionDefault.displayString
+        )
+        return Form {
+            Section("Commands Palette") {
+                Toggle("Enable Commands palette", isOn: Binding(
+                    get: { commandsPaletteEnabled },
+                    set: { newValue in
+                        commandsPaletteEnabled = newValue
+                        (NSApp.delegate as? AppDelegate)?.setCommandsPaletteEnabled(newValue)
+                    }
+                ))
+                .help("Global hot-key command box. Type a command, press \u{23CE} to copy its body to the clipboard.")
+
+                HStack(spacing: BridgeSpacing.xs) {
+                    Image(systemName: status.isWarning
+                          ? "exclamationmark.triangle.fill"
+                          : (commandsPaletteEnabled ? "checkmark.circle.fill" : "minus.circle"))
+                        .foregroundStyle(status.isWarning
+                                         ? Color.red
+                                         : (commandsPaletteEnabled ? Color.green : Color.secondary))
+                    Text(status.message)
+                        .font(.callout)
+                        .foregroundStyle(status.isWarning ? Color.red : Color.primary)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Commands palette status: \(status.message)")
+            }
+
+            Section {
+                SkillsView(
+                    skillsManager: skillsManager,
+                    fetchSkillDisabled: disabledTools.contains("fetch_skill")
+                )
+            } header: {
+                Text("Commands are your enabled Skills. Manage them here or via the manage_skill tool.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .textCase(nil)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
     // MARK: - Credentials (PKT-372)
 
     var credentialsSection: some View {

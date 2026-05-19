@@ -26,8 +26,21 @@
 //
 //   2. GUI GLUE (structurally sound; needs manual smoke — NOT headless-faked):
 //      - CommandBoxPanel         — NSPanel(.nonactivatingPanel)
-//      - CommandBoxController     — Carbon hotkey + panel + fuzzy search +
+//      - CommandBoxController     — Carbon hotkey + panel + results table +
+//                                   ↑/↓ selection + inline state messages +
 //                                   the single clipboard write
+//
+// HONEST P2 GUI CEILING (NOT papered over): the global hot-key firing,
+// the non-activating NSPanel receiving keystrokes, the NSTableView
+// rendering the live results, the ↑/↓ key events reaching the panel, the
+// confirmation-then-dismiss timer, and multi-monitor placement on a real
+// WindowServer ALL require a live login session and are an explicit
+// operator manual-smoke. The DECISION logic underneath each of those —
+// the ranked results (`CommandPaletteCoordinator.search`), the ↑/↓
+// selection state machine (`CommandPaletteSelection`), the commit→message
+// mapping (`CommandPalettePresenter`), the active/unavailable status
+// (`CommandsSettingsStatus`), and the screen-pick math
+// (`CommandBoxController.placementOrigin`) — is PURE and 100%-green-tested.
 //
 // PERMISSION MODEL (why this is the low-risk design):
 //   - Carbon `RegisterEventHotKey` is a HOT-KEY REGISTRATION, not an
@@ -61,12 +74,23 @@ public struct HotkeyConfig: Equatable, Sendable, Codable {
         self.carbonModifiers = carbonModifiers
     }
 
-    /// The fixed default: ⌥⌘Space (Option+Command+Space). Chosen to avoid
-    /// Spotlight (⌘Space) and the macOS dictation / emoji defaults. A
-    /// real feature would make this user-configurable and conflict-checked.
+    /// The original spike default: ⌥⌘Space (Option+Command+Space).
+    /// RETAINED only so historical references / Codable fixtures stay
+    /// valid — the SHIPPING default is `productionDefault` (⌃B). Chosen
+    /// originally to avoid Spotlight (⌘Space) and macOS dictation.
     public static let spikeDefault = HotkeyConfig(
         keyCode: UInt32(kVK_Space),
         carbonModifiers: UInt32(cmdKey | optionKey)
+    )
+
+    /// The SHIPPING production default: ⌃B (Control+B). Carbon
+    /// `kVK_ANSI_B` (11) + `controlKey`. `hasModifier` is true (control
+    /// counts) so the controller will register it. This is the approved
+    /// default for the enterprise Commands-palette UX; a future increment
+    /// can make it user-configurable + conflict-checked.
+    public static let productionDefault = HotkeyConfig(
+        keyCode: UInt32(kVK_ANSI_B),
+        carbonModifiers: UInt32(controlKey)
     )
 
     /// Whether at least one modifier is set. A modifier-less global
@@ -82,15 +106,56 @@ public struct HotkeyConfig: Equatable, Sendable, Codable {
         return bytes.reduce(OSType(0)) { ($0 << 8) | OSType($1) }
     }()
 
-    /// Human-readable combo, for logging / smoke output.
+    /// Human-readable combo, for logging / smoke output / the Settings
+    /// status row. Modifiers render in the canonical Apple order
+    /// (⌃⌥⇧⌘), then the key glyph. ANSI letter / digit keys render as
+    /// their uppercase character; Space stays "Space"; anything else
+    /// degrades to `key#N`.
     public var displayString: String {
         var s = ""
         if carbonModifiers & UInt32(controlKey) != 0 { s += "⌃" }
         if carbonModifiers & UInt32(optionKey)  != 0 { s += "⌥" }
         if carbonModifiers & UInt32(shiftKey)   != 0 { s += "⇧" }
         if carbonModifiers & UInt32(cmdKey)     != 0 { s += "⌘" }
-        if keyCode == UInt32(kVK_Space) { s += "Space" } else { s += "key#\(keyCode)" }
+        s += Self.keyGlyph(for: keyCode)
         return s
+    }
+
+    /// Map a Carbon virtual key code to its display glyph. Pure +
+    /// exhaustively unit-testable (no GUI). Covers Space and the ANSI
+    /// letter row used by the shipping default (⌃B → "B"); unknown codes
+    /// fall back to `key#N` so the string is never empty.
+    public static func keyGlyph(for keyCode: UInt32) -> String {
+        switch Int(keyCode) {
+        case kVK_Space:   return "Space"
+        case kVK_ANSI_A:  return "A"
+        case kVK_ANSI_B:  return "B"
+        case kVK_ANSI_C:  return "C"
+        case kVK_ANSI_D:  return "D"
+        case kVK_ANSI_E:  return "E"
+        case kVK_ANSI_F:  return "F"
+        case kVK_ANSI_G:  return "G"
+        case kVK_ANSI_H:  return "H"
+        case kVK_ANSI_I:  return "I"
+        case kVK_ANSI_J:  return "J"
+        case kVK_ANSI_K:  return "K"
+        case kVK_ANSI_L:  return "L"
+        case kVK_ANSI_M:  return "M"
+        case kVK_ANSI_N:  return "N"
+        case kVK_ANSI_O:  return "O"
+        case kVK_ANSI_P:  return "P"
+        case kVK_ANSI_Q:  return "Q"
+        case kVK_ANSI_R:  return "R"
+        case kVK_ANSI_S:  return "S"
+        case kVK_ANSI_T:  return "T"
+        case kVK_ANSI_U:  return "U"
+        case kVK_ANSI_V:  return "V"
+        case kVK_ANSI_W:  return "W"
+        case kVK_ANSI_X:  return "X"
+        case kVK_ANSI_Y:  return "Y"
+        case kVK_ANSI_Z:  return "Z"
+        default:          return "key#\(keyCode)"
+        }
     }
 }
 
@@ -209,7 +274,7 @@ public final class CommandBoxPanel: NSPanel {
 /// owns the AppKit glue (panel, text field, hot-key) — the parts that
 /// genuinely require a WindowServer and are operator manual-smoke.
 @MainActor
-public final class CommandBoxController {
+public final class CommandBoxController: NSObject {
     private let hotkey: HotkeyConfig
     private let clipboard: ClipboardWriting
     /// The GUI-free search + W2-body-fetch core. Required — the palette
@@ -222,16 +287,69 @@ public final class CommandBoxController {
     private var eventHandler: EventHandlerRef?
     private var panel: CommandBoxPanel?
     private var textField: NSTextField?
+    private var resultsTable: NSTableView?
+    private var statusLabel: NSTextField?
+
+    /// The current ranked rows backing the results table.
+    private var results: [ScoredCommand] = []
+    /// The PURE ↑/↓ selection state machine. The table only renders the
+    /// index this yields — it owns no selection logic of its own.
+    private var selection = CommandPaletteSelection()
+    /// Generation token so a slow `coordinator.search` for stale text
+    /// can't overwrite a newer query's results (last-typed wins).
+    private var searchGeneration = 0
+    /// Pending auto-dismiss work for a "Copied ‹name›" confirmation.
+    private var dismissWorkItem: DispatchWorkItem?
 
     public private(set) var isRegistered = false
     public private(set) var isVisible = false
 
-    public init(hotkey: HotkeyConfig = .spikeDefault,
+    // MARK: Pure placement (multi-monitor) — unit-tested headlessly
+
+    /// The panel origin for a given target screen frame + panel size.
+    /// PURE so the multi-monitor math is asserted without a WindowServer.
+    /// Centred horizontally, ~28% up from the bottom of the visible frame
+    /// (the Spotlight placement) — but on the screen the caller passes
+    /// (active/key window's or the mouse's), NOT always `NSScreen.main`.
+    public nonisolated static func placementOrigin(
+        screenVisibleFrame f: CGRect,
+        panelSize size: CGSize
+    ) -> CGPoint {
+        CGPoint(
+            x: f.midX - size.width / 2,
+            y: f.minY + f.height * 0.28
+        )
+    }
+
+    /// Pick the screen the panel should open on: the one containing the
+    /// key window, else the one under the mouse, else `NSScreen.main`,
+    /// else the first screen. PURE given the inputs so the selection
+    /// policy is unit-tested without a live display arrangement.
+    public nonisolated static func pickScreenFrame(
+        screens: [CGRect],
+        keyWindowFrame: CGRect?,
+        mouseLocation: CGPoint,
+        mainScreenFrame: CGRect?
+    ) -> CGRect? {
+        func contains(_ frame: CGRect, _ point: CGPoint) -> Bool {
+            frame.contains(point)
+        }
+        if let kw = keyWindowFrame {
+            let center = CGPoint(x: kw.midX, y: kw.midY)
+            if let hit = screens.first(where: { contains($0, center) }) { return hit }
+        }
+        if let hit = screens.first(where: { contains($0, mouseLocation) }) { return hit }
+        if let main = mainScreenFrame { return main }
+        return screens.first
+    }
+
+    public init(hotkey: HotkeyConfig = .productionDefault,
                 clipboard: ClipboardWriting = SystemClipboard(),
                 coordinator: CommandPaletteCoordinator) {
         self.hotkey = hotkey
         self.clipboard = clipboard
         self.coordinator = coordinator
+        super.init()
     }
 
     // MARK: Hot-key registration (Carbon — no Input Monitoring)
@@ -308,16 +426,27 @@ public final class CommandBoxController {
         let panel = self.panel ?? makePanel()
         self.panel = panel
 
-        // Center-bottom of the main screen (Spotlight-ish placement).
-        if let screen = NSScreen.main {
-            let f = screen.visibleFrame
-            let size = panel.frame.size
-            let origin = NSPoint(
-                x: f.midX - size.width / 2,
-                y: f.minY + f.height * 0.28
+        // Multi-monitor (P2.8): open on the screen containing the key
+        // window, else the mouse, else main — NOT always NSScreen.main.
+        // The screen-pick + origin math is the PURE, unit-tested
+        // `pickScreenFrame` / `placementOrigin`; this is only the glue.
+        let screenFrames = NSScreen.screens.map { $0.visibleFrame }
+        if let target = Self.pickScreenFrame(
+            screens: screenFrames,
+            keyWindowFrame: NSApp.keyWindow?.frame,
+            mouseLocation: NSEvent.mouseLocation,
+            mainScreenFrame: NSScreen.main?.visibleFrame
+        ) {
+            panel.setFrameOrigin(
+                Self.placementOrigin(screenVisibleFrame: target,
+                                     panelSize: panel.frame.size)
             )
-            panel.setFrameOrigin(origin)
         }
+
+        // Reset transient state for a fresh invocation.
+        textField?.stringValue = ""
+        clearStatus()
+        refreshResults(for: "")
 
         // orderFrontRegardless does NOT activate this app — the panel
         // appears over the (still-active) prior app.
@@ -327,37 +456,184 @@ public final class CommandBoxController {
     }
 
     private func makePanel() -> CommandBoxPanel {
+        // Taller panel: query field on top, a results list below it, and
+        // a thin status line at the bottom.
+        let width: CGFloat = 560
         let panel = CommandBoxPanel()
-        let field = NSTextField(frame: NSRect(x: 12, y: 6, width: 536, height: 32))
-        field.placeholderString = "Type a command, press ⏎ to copy"
+        panel.setContentSize(NSSize(width: width, height: 320))
+
+        let field = QueryTextField(frame: NSRect(x: 12, y: 278, width: width - 24, height: 32))
+        field.placeholderString = "Type a command, press \u{23CE} to copy"
         field.font = .systemFont(ofSize: 18)
         field.bezelStyle = .roundedBezel
         field.focusRingType = .none
         field.target = self
         field.action = #selector(commitFromField(_:))
+        field.delegate = self
+        field.onArrow = { [weak self] arrow in self?.handleArrow(arrow) }
+
+        // Results table inside a scroll view.
+        let scroll = NSScrollView(frame: NSRect(x: 12, y: 32, width: width - 24, height: 238))
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        let table = NSTableView()
+        table.headerView = nil
+        table.rowHeight = 30
+        table.backgroundColor = .clear
+        table.selectionHighlightStyle = .regular
+        table.allowsEmptySelection = true
+        let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("cmd"))
+        col.width = width - 40
+        table.addTableColumn(col)
+        table.dataSource = self
+        table.delegate = self
+        table.target = self
+        table.doubleAction = #selector(commitFromTable(_:))
+        scroll.documentView = table
+
+        let status = NSTextField(labelWithString: "")
+        status.frame = NSRect(x: 14, y: 7, width: width - 28, height: 18)
+        status.font = .systemFont(ofSize: 12)
+        status.textColor = .secondaryLabelColor
+        status.isHidden = true
+
         let container = NSView(frame: panel.frame)
         container.wantsLayer = true
         container.layer?.cornerRadius = 12
         container.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         container.addSubview(field)
+        container.addSubview(scroll)
+        container.addSubview(status)
         panel.contentView = container
+
         self.textField = field
+        self.resultsTable = table
+        self.statusLabel = status
         return panel
     }
 
-    @objc private func commitFromField(_ sender: NSTextField) {
-        let query = sender.stringValue
-        sender.stringValue = ""
+    // MARK: Live results (driven by the GUI-free coordinator)
 
-        // The typed text is a fuzzy QUERY. Hide the panel, resolve the
-        // body via the W2 CommandsManager, and write it to the clipboard.
-        // `.notFound` writes NOTHING (never copy a guessed command).
-        panel?.orderOut(nil)
-        isVisible = false
+    /// Re-rank the results for `query` via the coordinator, re-seat the
+    /// PURE selection model (top row preselected, stale index clamped),
+    /// and reload the table. Generation-guarded so a slow stale search
+    /// can't clobber a newer one.
+    private func refreshResults(for query: String) {
+        searchGeneration &+= 1
+        let gen = searchGeneration
         Task { @MainActor in
-            let result = await self.coordinator.commit(query: query)
-            self.applyCommit(result)
+            let ranked = await self.coordinator.search(query)
+            guard gen == self.searchGeneration else { return }
+            self.results = ranked
+            self.selection.updateResultCount(ranked.count)
+            self.resultsTable?.reloadData()
+            self.syncTableSelection()
+            if ranked.isEmpty {
+                self.showStatus(CommandPalettePresenter.emptyRegistryMessage,
+                                warning: false)
+            } else {
+                self.clearStatus()
+            }
         }
+    }
+
+    /// Push the pure selection index onto the AppKit table.
+    private func syncTableSelection() {
+        guard let table = resultsTable else { return }
+        if let i = selection.selectedIndex, i < results.count {
+            table.selectRowIndexes(IndexSet(integer: i), byExtendingSelection: false)
+            table.scrollRowToVisible(i)
+        } else {
+            table.deselectAll(nil)
+        }
+    }
+
+    /// ↑/↓ from the text field: advance the PURE selection model and
+    /// mirror it onto the table. No wrap (clamped) — matches Spotlight.
+    private func handleArrow(_ arrow: CommandPaletteArrow) {
+        selection.move(arrow)
+        syncTableSelection()
+    }
+
+    private func showStatus(_ message: String, warning: Bool) {
+        guard let label = statusLabel else { return }
+        label.stringValue = message
+        label.textColor = warning ? .systemRed : .secondaryLabelColor
+        label.isHidden = message.isEmpty
+    }
+
+    private func clearStatus() {
+        statusLabel?.stringValue = ""
+        statusLabel?.isHidden = true
+    }
+
+    @objc private func commitFromTable(_ sender: Any?) {
+        commitCurrent()
+    }
+
+    @objc private func commitFromField(_ sender: NSTextField) {
+        commitCurrent()
+    }
+
+    /// The unified Enter path. ⏎ commits the SELECTED descriptor; if
+    /// nothing is explicitly selected it falls back to the best-match of
+    /// the raw query (the original behaviour). Empty query ⇒ pure no-op.
+    /// The commit→message + stays-open decision is the PURE
+    /// `CommandPalettePresenter` (unit-tested); this only renders it.
+    private func commitCurrent() {
+        let query = textField?.stringValue ?? ""
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Empty query ⏎ → no-op (panel stays, clipboard untouched).
+        if trimmed.isEmpty {
+            return
+        }
+
+        let selected: CommandDescriptor? = {
+            if let i = selection.selectedIndex, i < results.count {
+                return results[i].descriptor
+            }
+            return nil
+        }()
+        let confirmName = selected?.name ?? trimmed
+
+        Task { @MainActor in
+            let result: CommandPaletteCommitResult
+            if let descriptor = selected {
+                result = await self.coordinator.commit(descriptor)
+            } else {
+                result = await self.coordinator.commit(query: query)
+            }
+            // Clipboard write (or deliberate no-op) — UNCHANGED public API.
+            self.applyCommit(result)
+
+            // Pure presentation: exact message + stays-open + whether to
+            // flash a confirmation then auto-dismiss.
+            let p = CommandPalettePresenter.present(result, name: confirmName)
+            if p.isConfirmation {
+                self.showStatus(p.message, warning: false)
+                self.scheduleConfirmationDismiss()
+            } else if !p.message.isEmpty {
+                // .notFound / .unavailable → panel stays open (p.staysOpen
+                // is true for both) so the user can correct the query.
+                self.showStatus(p.message, warning: true)
+            }
+        }
+    }
+
+    /// Flash the "Copied ‹name›" confirmation, then auto-dismiss after
+    /// the pure-defined delay. Any earlier pending dismiss is cancelled.
+    private func scheduleConfirmationDismiss() {
+        dismissWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.hide()
+        }
+        dismissWorkItem = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + .milliseconds(CommandPalettePresenter.confirmationDismissMillis),
+            execute: work
+        )
     }
 
     /// Clipboard-only commit: on `.paste(body)` write the resolved body
@@ -380,9 +656,101 @@ public final class CommandBoxController {
     }
 
     private func hide() {
+        dismissWorkItem?.cancel()
+        dismissWorkItem = nil
         panel?.orderOut(nil)
         isVisible = false
     }
+
+    /// Esc from the panel — dismiss without any clipboard write.
+    fileprivate func dismissOnEscape() {
+        hide()
+    }
+
+    /// Live search as the user types. Driven by the text field's
+    /// `controlTextDidChange`.
+    fileprivate func queryDidChange(_ query: String) {
+        clearStatus()
+        refreshResults(for: query)
+    }
+}
+
+// MARK: - Text-field key handling (↑/↓/Esc + live search)
+
+extension CommandBoxController: NSTextFieldDelegate {
+    public func controlTextDidChange(_ obj: Notification) {
+        guard let field = obj.object as? NSTextField else { return }
+        queryDidChange(field.stringValue)
+    }
+
+    /// Intercept ↑/↓ (move selection) and Esc (dismiss) so they drive
+    /// the PURE selection model rather than editing the text field.
+    public func control(_ control: NSControl,
+                        textView: NSTextView,
+                        doCommandBy commandSelector: Selector) -> Bool {
+        switch commandSelector {
+        case #selector(NSResponder.moveUp(_:)):
+            handleArrow(.up)
+            return true
+        case #selector(NSResponder.moveDown(_:)):
+            handleArrow(.down)
+            return true
+        case #selector(NSResponder.cancelOperation(_:)):
+            dismissOnEscape()
+            return true
+        default:
+            return false
+        }
+    }
+}
+
+// MARK: - Results table data source / delegate
+
+extension CommandBoxController: NSTableViewDataSource, NSTableViewDelegate {
+    public func numberOfRows(in tableView: NSTableView) -> Int {
+        results.count
+    }
+
+    public func tableView(_ tableView: NSTableView,
+                           viewFor tableColumn: NSTableColumn?,
+                           row: Int) -> NSView? {
+        guard row < results.count else { return nil }
+        let d = results[row].descriptor
+        let id = NSUserInterfaceItemIdentifier("CmdCell")
+        let cell = (tableView.makeView(withIdentifier: id, owner: self) as? NSTextField)
+            ?? {
+                let tf = NSTextField(labelWithString: "")
+                tf.identifier = id
+                tf.font = .systemFont(ofSize: 15)
+                tf.lineBreakMode = .byTruncatingTail
+                return tf
+            }()
+        cell.stringValue = d.name
+        return cell
+    }
+
+    /// A mouse click in the table is a user selection — mirror it back
+    /// into the PURE model so a subsequent ⏎ commits the clicked row.
+    public func tableViewSelectionDidChange(_ notification: Notification) {
+        guard let table = notification.object as? NSTableView else { return }
+        let row = table.selectedRow
+        guard row >= 0, row < results.count else { return }
+        selection.updateResultCount(results.count)
+        // Re-seat the pure model's index to the clicked row by stepping
+        // it (keeps CommandPaletteSelection the single source of truth).
+        var s = CommandPaletteSelection(count: results.count)
+        for _ in 0..<row { s.move(.down) }
+        selection = s
+    }
+}
+
+/// An `NSTextField` that surfaces ↑/↓ to the controller even though the
+/// field editor would otherwise consume them. The Esc/arrow routing is
+/// handled via the delegate's `doCommandBy:`; this hook is a structural
+/// belt-and-suspenders kept minimal (the DECISION — what an arrow does —
+/// is the pure `CommandPaletteSelection`, unit-tested).
+final class QueryTextField: NSTextField {
+    var onArrow: ((CommandPaletteArrow) -> Void)?
 }
 
 #endif

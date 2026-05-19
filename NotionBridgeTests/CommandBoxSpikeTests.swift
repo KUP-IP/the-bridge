@@ -65,6 +65,46 @@ func runCommandBoxSpikeTests() async {
         try expect(back == h, "Codable round-trip changed the config")
     }
 
+    // ---- cmd-ux: the SHIPPING default is ⌃B (Control+B) --------------
+
+    await test("HotkeyConfig.productionDefault is ⌃B (kVK_ANSI_B + controlKey)") {
+        let h = HotkeyConfig.productionDefault
+        try expect(h.keyCode == UInt32(kVK_ANSI_B),
+                   "keyCode must be B (\(kVK_ANSI_B)), got \(h.keyCode)")
+        try expect(h.keyCode == 11, "kVK_ANSI_B is virtual key 11, got \(h.keyCode)")
+        try expect(h.carbonModifiers == UInt32(controlKey),
+                   "modifier must be controlKey only, got \(h.carbonModifiers)")
+    }
+
+    await test("HotkeyConfig.productionDefault.hasModifier is true (control counts)") {
+        try expect(HotkeyConfig.productionDefault.hasModifier,
+                   "⌃B must report hasModifier=true so the controller registers it")
+    }
+
+    await test("HotkeyConfig.productionDefault.displayString renders \"⌃B\"") {
+        try expect(HotkeyConfig.productionDefault.displayString == "⌃B",
+                   "got '\(HotkeyConfig.productionDefault.displayString)'")
+    }
+
+    await test("HotkeyConfig.keyGlyph maps Space, ANSI letters, and unknowns") {
+        try expect(HotkeyConfig.keyGlyph(for: UInt32(kVK_Space)) == "Space")
+        try expect(HotkeyConfig.keyGlyph(for: UInt32(kVK_ANSI_B)) == "B")
+        try expect(HotkeyConfig.keyGlyph(for: UInt32(kVK_ANSI_A)) == "A")
+        try expect(HotkeyConfig.keyGlyph(for: UInt32(kVK_ANSI_Z)) == "Z")
+        try expect(HotkeyConfig.keyGlyph(for: 9999) == "key#9999",
+                   "an unmapped code must degrade to key#N, never empty")
+    }
+
+    await test("HotkeyConfig.spikeDefault is RETAINED verbatim (⌥⌘Space) — not the shipping default") {
+        // The shipping default moved to productionDefault (⌃B); spikeDefault
+        // stays unchanged so historical Codable fixtures remain valid.
+        let s = HotkeyConfig.spikeDefault
+        try expect(s.keyCode == UInt32(kVK_Space) && s.carbonModifiers == UInt32(cmdKey | optionKey),
+                   "spikeDefault must remain ⌥⌘Space")
+        try expect(s != HotkeyConfig.productionDefault,
+                   "the two defaults must be distinct configs")
+    }
+
     // ---- (b) ClipboardWriting seam (NEW — supersedes save/restore) --
     //
     //   Corrected invariant vs the deleted ClipboardStasher: there is NO
