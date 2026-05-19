@@ -248,9 +248,17 @@ extension SettingsView {
     var commandsSection: some View {
         let disabledTools = Set(UserDefaults.standard.stringArray(forKey: BridgeDefaults.disabledTools) ?? [])
         let current = commandsHotkeyConfig
+        // cmd-ux W2: drive the status off the OBSERVED structured
+        // register outcome so a TRUE ⌃⌥⌘C collision shows a specific,
+        // actionable message ("⚠ ⌃⌥⌘C is in use by another app — record a
+        // different shortcut") DISTINCT from a plumbing failure — fixing
+        // the Bug-2 residual where any non-registered state read the
+        // same generic, accusatory copy. The pure
+        // `CommandsSettingsStatus` mapping stays the single source of the
+        // strings; this only feeds it the live observed status.
         let status = CommandsSettingsStatus(
             enabled: commandsPaletteEnabled,
-            isRegistered: commandsPaletteRegistered,
+            lastRegisterStatus: commandsLastRegisterStatus,
             hotkey: current.displayString
         )
         return Form {
@@ -884,19 +892,32 @@ extension SettingsView {
     }
 }
 
-// MARK: - Hotkey Recorder Field (Change B)
+// MARK: - Hotkey Recorder Field (Change B + cmd-ux W2 click-to-focus)
 
-/// A focusable field that, while `isRecording`, captures the next
-/// physical key-down (with held modifiers) and hands `(keyCode, Cocoa
-/// ModifierFlags)` to `onCapture`. The PURE part — translating that pair
-/// into a validated `HotkeyConfig` and persisting/re-registering it — is
-/// `HotkeyConfig.from` + `AppDelegate.setCommandsHotkey`, both unit-
-/// tested headlessly. ONLY the raw `NSEvent` capture gesture here is the
-/// documented operator-smoke ceiling.
+/// A focusable field that captures the next physical key-down (with held
+/// modifiers) and hands `(keyCode, Cocoa ModifierFlags)` to `onCapture`.
+///
+/// cmd-ux W2 — Bug-1 STRUCTURAL FIX: the field itself is now the click
+/// target. `mouseDown` enters recording AND synchronously takes first
+/// responder (`window?.makeFirstResponder(self)`) — so capture works
+/// STANDALONE with a single click, with NO dependence on a separate
+/// SwiftUI Button and NO reliance on the fragile best-effort async
+/// `makeFirstResponder` that was the *only* prior focus path (the root
+/// cause of "the recorder cannot capture"). `acceptsFirstResponder` is
+/// true whenever the focus model says recording (click-initiated OR the
+/// secondary button). The async `updateNSView` focus grab is KEPT only
+/// as a redundant belt for the button path; the click path no longer
+/// needs it. Escape cancels.
+///
+/// PURE / HEADLESS: the focus/recording transitions are the unit-tested
+/// `RecorderFocusModel` (in CommandsController.swift); the chord→config
+/// mapping is `HotkeyConfig.from` + `CommandsController.setHotkey`. ONLY
+/// the raw `NSEvent`/`mouseDown` gesture reaching this NSView on a live
+/// WindowServer is the documented operator-smoke ceiling.
 ///
 /// `onCapture` returns whether the chord was accepted (a valid
 /// modifier+key); a rejected chord (modifier-less / pure-modifier) keeps
-/// the field in capture mode so the user can try again. Escape cancels.
+/// the field in capture mode so the user can immediately try again.
 struct HotkeyRecorderField: NSViewRepresentable {
     let currentDisplay: String
     @Binding var isRecording: Bool
@@ -911,16 +932,22 @@ struct HotkeyRecorderField: NSViewRepresentable {
             return accepted
         }
         v.onCancel = { isRecording = false }
+        // The standalone click path: the NSView tells SwiftUI it entered
+        // recording so the @Binding (and the secondary button label)
+        // stay in sync — focus is already taken synchronously in
+        // mouseDown, so this binding write is cosmetic, not load-bearing.
+        v.onBeginRecording = { isRecording = true }
         return v
     }
 
     func updateNSView(_ nsView: RecorderNSView, context: Context) {
-        nsView.display = isRecording ? "Press shortcut\u{2026}" : currentDisplay
-        nsView.isRecording = isRecording
+        nsView.applyRecording(isRecording, currentDisplay: currentDisplay)
         if isRecording {
-            // Grab focus only if we don't already hold it — avoids a
-            // redundant makeFirstResponder on every SwiftUI re-render
-            // while capture mode stays on.
+            // Redundant BELT for the secondary "Record shortcut" button
+            // path (which flips the binding without a click on the
+            // field). Grab focus only if we don't already hold it. The
+            // click path does NOT depend on this — mouseDown already
+            // made the field first responder synchronously.
             DispatchQueue.main.async {
                 guard let window = nsView.window,
                       window.firstResponder !== nsView else { return }
@@ -930,42 +957,115 @@ struct HotkeyRecorderField: NSViewRepresentable {
         nsView.needsDisplay = true
     }
 
-    /// The AppKit capture surface. First-responder while recording;
-    /// `keyDown` forwards the raw `(keyCode, modifierFlags)` to the pure
-    /// mapping. Holds NO mapping/validation logic itself.
+    /// The AppKit capture surface. Owns the `RecorderFocusModel` (pure,
+    /// unit-tested) for its recording/first-responder state; `mouseDown`
+    /// is the standalone entry; `keyDown` forwards the raw
+    /// `(keyCode, modifierFlags)` to the pure chord mapping. Holds NO
+    /// mapping/validation logic itself.
     final class RecorderNSView: NSView {
-        var display: String = ""
-        var isRecording = false
+        private var focus = RecorderFocusModel()
+        private var display: String = ""
         /// Returns whether the chord was accepted.
         var onCapture: ((UInt32, NSEvent.ModifierFlags) -> Bool)?
         var onCancel: (() -> Void)?
+        /// Fired when a click enters recording so SwiftUI's @Binding
+        /// (and the secondary button label) follow the standalone path.
+        var onBeginRecording: (() -> Void)?
 
-        override var acceptsFirstResponder: Bool { isRecording }
+        /// True ⟺ the pure focus model says recording — so a click that
+        /// enters recording ALSO makes the field eligible for first
+        /// responder in the same run-loop turn (Bug-1 fix).
+        override var acceptsFirstResponder: Bool { focus.acceptsFirstResponder }
 
         /// AppKit virtual keycode for Escape (kVK_Escape) — named here so
         /// this SwiftUI file needn't import Carbon for a single constant.
         private static let escapeKeyCode: UInt16 = 53
 
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            // VoiceOver: present as a button-like control with a clear
+            // label/role so assistive tech is not a regression (the old
+            // bare NSView exposed nothing actionable).
+            setAccessibilityElement(true)
+            setAccessibilityRole(.button)
+            refreshAccessibility()
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError("init(coder:) unused") }
+
+        /// Reconcile with SwiftUI's binding (the secondary button path
+        /// flips `isRecording` without a click). Idempotent.
+        func applyRecording(_ recording: Bool, currentDisplay: String) {
+            focus.setRecording(recording)
+            display = recording ? "Press shortcut\u{2026}" : currentDisplay
+            refreshAccessibility()
+        }
+
+        // MARK: Standalone click-to-record (Bug-1 structural fix)
+
+        override func mouseDown(with event: NSEvent) {
+            // Enter recording AND take first responder synchronously —
+            // no async hop, no separate Button required. This is the
+            // single, reliable focus path the old code lacked.
+            focus.clickToRecord()
+            display = "Press shortcut\u{2026}"
+            window?.makeFirstResponder(self)
+            onBeginRecording?()
+            refreshAccessibility()
+            needsDisplay = true
+        }
+
         override func keyDown(with event: NSEvent) {
-            guard isRecording else { super.keyDown(with: event); return }
+            guard focus.isRecording else { super.keyDown(with: event); return }
             // Escape cancels capture without changing the binding.
             if event.keyCode == Self.escapeKeyCode {
+                focus.escape()
                 onCancel?()
+                refreshAccessibility()
+                needsDisplay = true
                 return
             }
-            _ = onCapture?(UInt32(event.keyCode), event.modifierFlags)
+            let accepted = onCapture?(UInt32(event.keyCode),
+                                      event.modifierFlags) ?? false
+            focus.captured(accepted: accepted)
+            refreshAccessibility()
+            needsDisplay = true
+        }
+
+        // MARK: VoiceOver
+
+        private func refreshAccessibility() {
+            if focus.isRecording {
+                setAccessibilityLabel("Recording shortcut. Press the new key combination, or press Escape to cancel.")
+            } else {
+                setAccessibilityLabel("Keyboard shortcut: \(display.isEmpty ? "none" : display). Click to record a new shortcut.")
+            }
+            setAccessibilityValue(display)
         }
 
         override func draw(_ dirtyRect: NSRect) {
-            let bg = isRecording
-                ? NSColor.controlAccentColor.withAlphaComponent(0.15)
+            // Clear, visible recording state: accent treatment + an
+            // accent border while capturing; a resting fill otherwise.
+            let recording = focus.isRecording
+            let bg = recording
+                ? NSColor.controlAccentColor.withAlphaComponent(0.18)
                 : NSColor.unemphasizedSelectedContentBackgroundColor
             bg.setFill()
-            let path = NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6)
+            let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
+                                    xRadius: 6, yRadius: 6)
             path.fill()
+            if recording {
+                NSColor.controlAccentColor.setStroke()
+                path.lineWidth = 1.5
+                path.stroke()
+            }
             let attrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 13),
-                .foregroundColor: NSColor.labelColor
+                .font: NSFont.systemFont(ofSize: 13,
+                                         weight: recording ? .semibold : .regular),
+                .foregroundColor: recording
+                    ? NSColor.controlAccentColor
+                    : NSColor.labelColor
             ]
             let str = NSAttributedString(string: display, attributes: attrs)
             let size = str.size()

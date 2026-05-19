@@ -350,4 +350,41 @@ func runCommandsControllerTests() async {
         try expect(m.acceptsFirstResponder == true,
                    "the button path must also be focusable (belt + click both work)")
     }
+
+    // ── W2: CommandBoxController.lastRegisterStatus — the HEADLESS slice
+    //
+    //   The modifier-less refusal path returns BEFORE any Carbon call
+    //   (no WindowServer needed) — so the controller's structured-status
+    //   classification of THAT path is genuinely unit-testable. It MUST
+    //   be a plumbing failure, NOT a collision: a user who somehow has a
+    //   modifier-less combo must never be told another app owns it.
+    //   (The Carbon RegisterEventHotKey firing for a VALID combo remains
+    //   the documented operator-smoke ceiling — see CommandBox.swift.)
+    await test("W2 CommandBoxController: a modifier-less combo ⇒ .plumbingFailure (never .collision)") {
+        let r = await MainActor.run { () -> HotkeyRegisterStatus in
+            // keyCode with ZERO modifiers → hasModifier == false →
+            // registerHotkey() refuses before touching Carbon.
+            let bad = HotkeyConfig(keyCode: UInt32(kVK_ANSI_C), carbonModifiers: 0)
+            let coord = CommandPaletteCoordinator(
+                provider: StaticCommandDescriptorProvider([]),
+                manager: CommandsManager(fetcher: { _ in "" })) // never invoked here
+            let box = CommandBoxController(hotkey: bad,
+                                          clipboard: InMemoryClipboard(),
+                                          coordinator: coord)
+            _ = box.registerHotkey()
+            return box.lastRegisterStatus
+        }
+        switch r {
+        case .plumbingFailure:
+            break // correct — refused input, not another app's fault
+        default:
+            throw TestError.assertion(
+                "modifier-less refusal must be .plumbingFailure, got \(r)")
+        }
+        // And it must map to the honest message, not a false collision.
+        let s = CommandsSettingsStatus(enabled: true, lastRegisterStatus: r,
+                                       hotkey: "C")
+        try expect(!s.message.contains("in use by another app"),
+                   "a refused modifier-less combo must NOT blame another app, got: \(s.message)")
+    }
 }
