@@ -411,6 +411,15 @@ public final class CommandBoxController: NSObject {
     public private(set) var isRegistered = false
     public private(set) var isVisible = false
 
+    /// cmd-ux W2: the structured outcome of the most recent
+    /// `registerHotkey()` attempt. Lets the Settings layer distinguish a
+    /// TRUE combo collision (Carbon `eventHotKeyExistsErr` / non-noErr
+    /// `RegisterEventHotKey`) from a plumbing failure (the
+    /// `InstallEventHandler` step, or a refused modifier-less combo) — so
+    /// a genuine ⌃⌥⌘C conflict legitimately shows ⚠ while a false one
+    /// does not. Defaults to `.unattempted` until the first attempt.
+    public private(set) var lastRegisterStatus: HotkeyRegisterStatus = .unattempted
+
     /// The combo this controller currently registers (or last tried to).
     /// Read by the Settings status row + the live-rebind path so the
     /// displayed glyph always tracks the controller's real config.
@@ -472,9 +481,17 @@ public final class CommandBoxController: NSObject {
     public func registerHotkey() -> Bool {
         guard hotkey.hasModifier else {
             print("[CommandBox] refusing modifier-less hot-key")
+            // A modifier-less combo is a refused-input plumbing failure,
+            // NOT a combo collision (nothing was even attempted with the
+            // WindowServer). Surface it as such so the status row never
+            // mislabels it as "in use by another app".
+            lastRegisterStatus = .plumbingFailure(osStatus: Int32(paramErr))
             return false
         }
-        guard !isRegistered else { return true }
+        guard !isRegistered else {
+            lastRegisterStatus = .registered
+            return true
+        }
 
         // Install the application-level Carbon event handler for
         // kEventHotKeyPressed. The callback trampolines back to `self`.
@@ -503,6 +520,12 @@ public final class CommandBoxController: NSObject {
         )
         guard installStatus == noErr else {
             print("[CommandBox] InstallEventHandler failed: \(installStatus)")
+            // The Carbon event-handler install failed — this is a
+            // plumbing failure, NOT a combo collision. Distinguishing
+            // these is the whole point of the structured status: a user
+            // whose ⌃⌥⌘C "doesn't register" because the handler couldn't
+            // install should NOT be told the combo is taken.
+            lastRegisterStatus = .plumbingFailure(osStatus: Int32(installStatus))
             return false
         }
 
@@ -513,10 +536,24 @@ public final class CommandBoxController: NSObject {
         )
         guard regStatus == noErr else {
             print("[CommandBox] RegisterEventHotKey failed: \(regStatus) (combo likely taken)")
+            // The InstallEventHandler step SUCCEEDED but
+            // RegisterEventHotKey returned non-noErr. Carbon's
+            // `eventHotKeyExistsErr` is the canonical "this exact combo
+            // is already owned by another registrant" code — surface it
+            // as a TRUE collision so the status row correctly tells the
+            // user to record a different shortcut. Any other non-noErr
+            // here is still a registration-level failure but not a
+            // plumbing one, so it is also a collision-class outcome
+            // (the combo could not be claimed).
+            //
+            // Clean up the handler we installed so a retry re-installs.
+            if let h = eventHandler { RemoveEventHandler(h); eventHandler = nil }
+            lastRegisterStatus = .collision(osStatus: Int32(regStatus))
             return false
         }
 
         isRegistered = true
+        lastRegisterStatus = .registered
         print("[CommandBox] registered global hot-key \(hotkey.displayString) (Carbon — no Input Monitoring)")
         return true
     }
@@ -525,6 +562,10 @@ public final class CommandBoxController: NSObject {
         if let ref = hotKeyRef { UnregisterEventHotKey(ref); hotKeyRef = nil }
         if let h = eventHandler { RemoveEventHandler(h); eventHandler = nil }
         isRegistered = false
+        // A deliberate unregister is not a failure — reset to
+        // "nothing attempted" so the status row reads cleanly when the
+        // palette is toggled back on later.
+        lastRegisterStatus = .unattempted
     }
 
     /// Live-rebind to a new combo WITHOUT a relaunch (Change B). Uses the
@@ -543,10 +584,19 @@ public final class CommandBoxController: NSObject {
         if registerHotkey() {
             return true
         }
-        // New combo failed — fall back to the prior working combo so the
-        // palette keeps responding to the old shortcut (best-effort).
+        // New combo failed — capture WHY (collision vs plumbing) before
+        // the fallback re-register overwrites lastRegisterStatus with the
+        // prior combo's `.registered`. The Settings layer must still see
+        // the real reason the NEW combo was rejected (so a true ⌃⌥⌘C
+        // collision shows ⚠ and a different message than a plumbing
+        // failure) even though the palette stays alive on the old combo.
+        let failureOfNewCombo = lastRegisterStatus
         hotkey = previous
         _ = registerHotkey()
+        // Restore the new-combo failure as the surfaced reason; the
+        // palette is functionally on the OLD combo (best-effort), but
+        // the user's intent (and the diagnostic) is about the new one.
+        lastRegisterStatus = failureOfNewCombo
         return false
     }
 
@@ -664,10 +714,14 @@ public final class CommandBoxController: NSObject {
             self.selection.updateResultCount(ranked.count)
             self.resultsTable?.reloadData()
             self.syncTableSelection()
-            if ranked.isEmpty {
-                self.showStatus(CommandPalettePresenter.emptyRegistryMessage,
-                                warning: false)
-            } else {
+            // cmd-ux W3 (Q1=b): the empty-vs-hint DECISION is the pure,
+            // unit-tested `CommandPaletteEmptyState` — this only renders
+            // what it decides (an inline guidance line instead of a
+            // blank list when zero command-type descriptors exist).
+            switch CommandPaletteEmptyState.decide(commandCount: ranked.count) {
+            case .hint(let message):
+                self.showStatus(message, warning: false)
+            case .hasCommands:
                 self.clearStatus()
             }
         }

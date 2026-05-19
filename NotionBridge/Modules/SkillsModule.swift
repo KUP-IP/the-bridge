@@ -337,7 +337,7 @@ public enum SkillsModule {
                     ]),
                     "visibility": .object([
                         "type": .string("string"),
-                        "description": .string("SkillVisibility for add/set_visibility: routing | standard (legacy adminOnly accepted as standard)")
+                        "description": .string("SkillVisibility for add/set_visibility: routing | standard | command (command = appears in the global Commands palette; still fetchable by name. legacy adminOnly accepted as standard)")
                     ]),
                     "summary": .object([
                         "type": .string("string"),
@@ -541,7 +541,7 @@ public enum SkillsModule {
                     guard let vis = parseVisibilityArg(args) else {
                         throw ToolRouterError.invalidArguments(
                             toolName: "manage_skill",
-                            reason: "'set_visibility' requires valid visibility: routing or standard"
+                            reason: "'set_visibility' requires valid visibility: routing, standard, or command"
                         )
                     }
                     let success = writeSetVisibility(named: name, visibility: vis)
@@ -847,6 +847,7 @@ public enum SkillsModule {
         switch t {
         case "routing": return .routing
         case "standard": return .standard
+        case "command": return .command   // cmd-ux W3: palette visibility
         case "adminOnly": return .standard
         default: return nil
         }

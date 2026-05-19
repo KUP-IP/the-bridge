@@ -138,9 +138,13 @@ struct SkillsView: View {
                     .background(Color.secondary.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
+                // cmd-ux W3: iterate SkillVisibility.allCases — single
+                // source of truth (no hardcoded tag list); a future case
+                // appears automatically with its pickerLabel.
                 Picker("Visibility", selection: $newSkillVisibility) {
-                    Text("Standard (fetch only)").tag(SkillVisibility.standard)
-                    Text("Routing (discovery list)").tag(SkillVisibility.routing)
+                    ForEach(SkillVisibility.allCases, id: \.self) { v in
+                        Text(v.pickerLabel).tag(v)
+                    }
                 }
 
                 if let error = addError {
@@ -163,9 +167,10 @@ struct SkillsView: View {
                         .fontWeight(.semibold)
                     Text("Standard — Skill text is fetched with fetch_skill when the skill is enabled. It does not appear in the lightweight discovery list (list_routing_skills).")
                     Text("Routing — The skill is listed by list_routing_skills so agents can discover it by name without downloading the full page first.")
+                    Text("Command — The skill appears in the global Commands palette (the hot-key command box copies its page body to your clipboard). It is still fetchable by name via fetch_skill, but is NOT in the routing discovery list.")
                     Divider()
                         .padding(.vertical, 4)
-                    Text("Skills are documents loaded at runtime via the fetch_skill MCP tool. Add the URL above to auto-detect the platform, or enter a UUID manually. Routing vs standard only affects how MCP clients discover the skill.")
+                    Text("Skills are documents loaded at runtime via the fetch_skill MCP tool. Add the URL above to auto-detect the platform, or enter a UUID manually. Visibility only affects discovery surfaces (routing list / Commands palette); fetch_skill is name-based and works for any enabled skill regardless of visibility.")
                         .foregroundStyle(.secondary)
                 }
                 .font(.caption2)
@@ -291,16 +296,20 @@ struct SkillsView: View {
             .background(Color.secondary.opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: 4))
 
+            // cmd-ux W3: per-row picker also iterates allCases — same
+            // single source. The set: closure write-back persists via
+            // SkillsManager.setVisibility (covered by a W3 unit test).
             Picker("", selection: Binding(
                 get: { skill.visibility },
                 set: { skillsManager.setVisibility(named: skill.name, to: $0) }
             )) {
-                Text("standard").tag(SkillVisibility.standard)
-                Text("routing").tag(SkillVisibility.routing)
+                ForEach(SkillVisibility.allCases, id: \.self) { v in
+                    Text(v.pickerLabel).tag(v)
+                }
             }
             .labelsHidden()
-            .frame(minWidth: 100)
-            .help("MCP visibility: routing appears in list_routing_skills")
+            .frame(minWidth: 160)
+            .help("Routing = list_routing_skills · Standard = fetch_skill only · Command = global Commands palette (still fetchable by name)")
 
             Spacer()
 

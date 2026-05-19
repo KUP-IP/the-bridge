@@ -50,9 +50,14 @@ public struct RegistrySkillsCommandProvider: CommandDescriptorProviding {
         let name: String
         let notionPageId: String
         let enabled: Bool
+        /// cmd-ux W3: the visibility axis. Decoded tolerantly via
+        /// `SkillVisibility`'s own Codable (missing ⇒ `.standard`;
+        /// legacy `adminOnly` ⇒ `.standard`; unknown ⇒ `.standard`;
+        /// `command` round-trips). The palette filters to `.command`.
+        let visibility: SkillVisibility
 
         enum CodingKeys: String, CodingKey {
-            case name, notionPageId, enabled
+            case name, notionPageId, enabled, visibility
         }
 
         init(from decoder: Decoder) throws {
@@ -62,6 +67,11 @@ public struct RegistrySkillsCommandProvider: CommandDescriptorProviding {
             // Legacy rows may omit `enabled`; SkillsManager treats a
             // missing flag as enabled — mirror that exactly.
             enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+            // Missing/legacy/unknown visibility ⇒ `.standard` (the
+            // conservative default — a row is never silently promoted
+            // into the palette). `SkillVisibility`'s custom decoder
+            // already maps adminOnly→standard and unknown→standard.
+            visibility = try c.decodeIfPresent(SkillVisibility.self, forKey: .visibility) ?? .standard
         }
     }
 
@@ -116,7 +126,13 @@ public struct RegistrySkillsCommandProvider: CommandDescriptorProviding {
             return []
         }
         return entries.compactMap { entry in
-            guard entry.enabled else { return nil }
+            // cmd-ux W3: the palette now shows ONLY skills explicitly
+            // marked `.command` (and enabled). Routing/standard skills
+            // are no longer palette rows — visibility is the selector.
+            // `fetch_skill` is unaffected (name-based, visibility-
+            // agnostic): a `.command` skill is still fetchable by name,
+            // and a routing/standard skill is still NOT in the palette.
+            guard entry.enabled, entry.visibility == .command else { return nil }
             let pageId = entry.notionPageId.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !pageId.isEmpty else { return nil }
             let name = entry.name

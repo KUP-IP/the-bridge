@@ -472,10 +472,13 @@ public enum CommandPalettePresenter {
     /// The auto-dismiss delay (ms) for the "Copied ‹name›" confirmation.
     public static let confirmationDismissMillis = 900
 
-    /// Empty-registry guidance shown when the palette opens with zero
-    /// commands available.
+    /// cmd-ux W3 (Q1=b): empty-state guidance shown when the palette has
+    /// ZERO command-type descriptors. The palette now filters to skills
+    /// explicitly marked `.command`, so the actionable guidance is to
+    /// mark one — not merely "add a skill" (a user may have skills that
+    /// just aren't `.command`). Single source of the string.
     public static let emptyRegistryMessage =
-        "No commands yet — add skills in Settings → Commands"
+        "No commands yet — mark a skill as Command in Settings → Commands"
 
     /// Map a commit result to its presentation. `name` is the label to
     /// echo in the success confirmation (the selected/best descriptor's
@@ -531,6 +534,17 @@ public enum CommandsSettingsStatus: Sendable, Equatable {
     /// Toggle on, but the global hot-key could NOT be registered
     /// (another app already owns the combo). Shown as a red warning.
     case shortcutUnavailable
+    /// cmd-ux W2: toggle on, a TRUE Carbon collision — this exact combo
+    /// is owned by another app. Distinct from a plumbing failure so the
+    /// user is told the actionable thing (record a different shortcut),
+    /// naming the conflicting combo. Carries the glyph.
+    case comboInUse(hotkey: String)
+    /// cmd-ux W2: toggle on, registration failed for a NON-collision
+    /// reason (the Carbon event-handler install failed, or a
+    /// modifier-less combo was refused). The palette is not working but
+    /// it is NOT another app's fault — a different, honest message so a
+    /// false collision is never shown.
+    case registrationFailed(hotkey: String)
     /// Toggle off — the palette is disabled by the user.
     case disabled
 
@@ -549,18 +563,95 @@ public enum CommandsSettingsStatus: Sendable, Equatable {
         }
     }
 
+    /// cmd-ux W2: the diagnostic-aware mapping. Drives off the structured
+    /// `HotkeyRegisterStatus` so a TRUE combo collision shows a specific,
+    /// actionable message (naming the combo, telling the user to record a
+    /// different one) that is DISTINCT from a plumbing failure — fixing
+    /// the Bug-2 residual where any non-registered state read the same
+    /// generic "in use by another app". Pure + exhaustively unit-tested.
+    ///
+    /// - Parameters:
+    ///   - enabled: the persisted master-toggle value (off ⇒ `.disabled`,
+    ///     regardless of the last register attempt).
+    ///   - lastRegisterStatus: the structured outcome of the most recent
+    ///     `RegisterEventHotKey` attempt (`.registered` / `.collision` /
+    ///     `.plumbingFailure` / `.unattempted`).
+    ///   - hotkey: the combo glyph to show.
+    public init(
+        enabled: Bool,
+        lastRegisterStatus: HotkeyRegisterStatus,
+        hotkey: String
+    ) {
+        guard enabled else { self = .disabled; return }
+        switch lastRegisterStatus {
+        case .registered:
+            self = .active(hotkey: hotkey)
+        case .collision:
+            self = .comboInUse(hotkey: hotkey)
+        case .plumbingFailure:
+            self = .registrationFailed(hotkey: hotkey)
+        case .unattempted:
+            // Enabled but no successful registration and no recorded
+            // reason — a generic unavailable. NOT a false collision.
+            self = .shortcutUnavailable
+        }
+    }
+
     /// The exact row text.
     public var message: String {
         switch self {
         case .active(let hotkey): return "Active — \(hotkey)"
-        case .shortcutUnavailable: return "⚠ Shortcut unavailable (in use by another app)"
+        case .shortcutUnavailable: return "⚠ Shortcut not active — record a shortcut or toggle Commands off/on"
+        case .comboInUse(let hotkey):
+            return "⚠ \(hotkey) is in use by another app — record a different shortcut"
+        case .registrationFailed(let hotkey):
+            return "⚠ \(hotkey) could not register (not another app — try toggling Commands off/on)"
         case .disabled: return "Disabled"
         }
     }
 
     /// True ⇒ render the row in the warning (red) treatment.
     public var isWarning: Bool {
-        if case .shortcutUnavailable = self { return true }
-        return false
+        switch self {
+        case .shortcutUnavailable, .comboInUse, .registrationFailed:
+            return true
+        case .active, .disabled:
+            return false
+        }
+    }
+}
+
+// ============================================================
+// MARK: - 8. CommandPaletteEmptyState (pure empty-state decision, W3)
+//
+//   Q1=b: when the palette has ZERO command-type descriptors the panel
+//   shows an inline HINT line instead of a blank list. The DECISION
+//   (show a list vs show the hint, and the exact hint text) is this
+//   pure type — unit-tested headlessly; only the NSView rendering of it
+//   is the operator-smoke ceiling.
+// ============================================================
+
+/// Pure decision for what the palette body should present given how many
+/// command descriptors are available. Total + deterministic so the
+/// "blank vs hint" rule and the exact copy are unit-asserted without a
+/// WindowServer.
+public enum CommandPaletteEmptyState: Sendable, Equatable {
+    /// There is at least one command — render the results list normally.
+    case hasCommands
+    /// Zero command-type descriptors — show the inline guidance hint
+    /// (NOT a blank list) so the user knows the actionable next step.
+    case hint(message: String)
+
+    /// Decide from the available command count. Pure: `count → state`.
+    public static func decide(commandCount: Int) -> CommandPaletteEmptyState {
+        commandCount > 0
+            ? .hasCommands
+            : .hint(message: CommandPalettePresenter.emptyRegistryMessage)
+    }
+
+    /// The inline hint text to show, or `nil` when a list should render.
+    public var hintMessage: String? {
+        if case .hint(let m) = self { return m }
+        return nil
     }
 }
