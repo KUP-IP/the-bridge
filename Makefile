@@ -70,10 +70,11 @@ test:
 	@echo "✅ Tests complete"
 
 # WS-C (PKT-798) → v3.0·0.5 → Dev-suite audit → PKT-800 S1 → S2 → S3 → S4
-# → cmd-w2 (Commands data layer) → cmd-w4 (fetch_skill /markdown switch,
-# 2026-05-18): runs the suite + asserts the green floor (1029, integrated:
-# cmd-w2+w4b+w4+w3, measured) and zero
-# failures. Used by CI so a shrunk/disabled
+# → cmd-w2 (Commands data layer) → cmd-w4 (fetch_skill /markdown switch)
+# → cu-sa (fetch_skill simplified `properties` map, 2026-05-18): runs the
+# suite + asserts the green floor (1059, = integrated 1029 + cu-sa's 30
+# additive FetchSkillPropertiesTests blocks, measured on cu-sa-skillprops
+# base 08c8718) and zero failures. Used by CI so a shrunk/disabled
 # suite fails. Floor provenance lives in scripts/test-floor-gate.sh.
 test-floor:
 	./scripts/test-floor-gate.sh

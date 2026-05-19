@@ -214,8 +214,12 @@ public enum SkillsModule {
 
                     let url = pageJSON["url"] as? String ?? ""
                     var title = "Untitled"
-                    if let properties = pageJSON["properties"] as? [String: Any] {
-                        title = NotionJSON.extractTitle(from: properties)
+                    // cu-sa: capture the SAME already-fetched properties
+                    // blob used for the title so the new `properties`
+                    // envelope key surfaces it (no extra network call).
+                    let pageProperties = pageJSON["properties"] as? [String: Any] ?? [:]
+                    if !pageProperties.isEmpty {
+                        title = NotionJSON.extractTitle(from: pageProperties)
                     }
 
                     // cmd-w4: body via the server /markdown render (one call;
@@ -233,7 +237,8 @@ public enum SkillsModule {
                         title: title,
                         url: url,
                         markdownJSONOrText: rawMarkdown,
-                        titleLookup: Self.makeSkillMentionTitleLookup()
+                        titleLookup: Self.makeSkillMentionTitleLookup(),
+                        pageProperties: pageProperties
                     )
                     await cache.set(cacheKey, content: result)
                     return result
@@ -1084,6 +1089,181 @@ public enum SkillsModule {
         ]
     }
 
+    // MARK: - cu-sa: simplified `properties` map
+
+    /// Flatten a Notion page `properties` JSON object (the verbatim
+    /// `pageJSON["properties"]` from `getPage`) into a small,
+    /// deterministic `{ propertyName: human-readable scalar/array }`
+    /// map for the `fetch_skill` envelope.
+    ///
+    /// This is the *only* new surface added by cu-sa — it is additive:
+    /// every pre-existing envelope key and its value type is unchanged;
+    /// the result of this function is injected under a single new
+    /// `"properties"` key. The page `properties` blob is ALREADY fetched
+    /// by `getPage` (it is parsed today purely to extract the title and
+    /// then discarded) — this surfaces what is already in hand, it does
+    /// NOT add a network call.
+    ///
+    /// Mapping (Notion property `type` → flattened `Value`):
+    ///  - `title` / `rich_text`        → plain text `String`
+    ///  - `select` / `status`          → option `name` `String`
+    ///  - `multi_select`               → `[String]` of option names
+    ///  - `number`                     → `Int` if integral else `Double`
+    ///  - `checkbox`                   → `Bool`
+    ///  - `date`                       → `start` `String` (range end dropped)
+    ///  - `url` / `email` / `phone_number` → `String`
+    ///  - `people`                     → `[String]` of person name (else id)
+    ///  - `relation`                   → `[String]` of related page ids
+    ///  - `files`                      → `[String]` of file names/urls
+    ///  - `created_time` / `last_edited_time` → `String`
+    ///  - `created_by` / `last_edited_by`     → name `String` (else id)
+    ///  - `unique_id`                  → `"prefix-123"` / `"123"` `String`
+    ///  - `formula`                    → its resolved inner value (recursed)
+    ///  - `rollup`                     → its resolved value (array/number/
+    ///                                   date/recursed single)
+    ///  - any other / malformed type   → SKIPPED (never throws, never a
+    ///                                   partial/garbage value)
+    ///
+    /// Pure + network-free + deterministic. A page that is not a database
+    /// row (no `properties`, or an empty object) flattens to an empty
+    /// map — callers see `"properties": {}` , never an error.
+    static func flattenProperties(_ properties: [String: Any]) -> [String: Value] {
+        var out: [String: Value] = [:]
+        for (key, raw) in properties {
+            guard let prop = raw as? [String: Any],
+                  let type = prop["type"] as? String else {
+                continue
+            }
+            if let v = flattenProperty(type: type, prop: prop) {
+                out[key] = v
+            }
+        }
+        return out
+    }
+
+    /// Flatten one Notion property value to a `Value`, or `nil` to skip
+    /// (unknown / unmodelled / structurally-absent). Never throws.
+    private static func flattenProperty(type: String, prop: [String: Any]) -> Value? {
+        switch type {
+        case "title", "rich_text":
+            guard let arr = prop[type] as? [[String: Any]] else { return nil }
+            return .string(NotionJSON.extractPlainText(from: arr))
+
+        case "select", "status":
+            guard let opt = prop[type] as? [String: Any] else { return nil }
+            guard let name = opt["name"] as? String else { return nil }
+            return .string(name)
+
+        case "multi_select":
+            guard let arr = prop["multi_select"] as? [[String: Any]] else { return nil }
+            return .array(arr.compactMap { ($0["name"] as? String).map(Value.string) })
+
+        case "number":
+            return flattenNumber(prop["number"])
+
+        case "checkbox":
+            guard let b = prop["checkbox"] as? Bool else { return nil }
+            return .bool(b)
+
+        case "date":
+            guard let d = prop["date"] as? [String: Any],
+                  let start = d["start"] as? String else { return nil }
+            return .string(start)
+
+        case "url", "email", "phone_number":
+            guard let s = prop[type] as? String else { return nil }
+            return .string(s)
+
+        case "created_time", "last_edited_time":
+            guard let s = prop[type] as? String else { return nil }
+            return .string(s)
+
+        case "created_by", "last_edited_by":
+            guard let person = prop[type] as? [String: Any] else { return nil }
+            return .string(personLabel(person))
+
+        case "people":
+            guard let arr = prop["people"] as? [[String: Any]] else { return nil }
+            return .array(arr.map { .string(personLabel($0)) })
+
+        case "relation":
+            guard let arr = prop["relation"] as? [[String: Any]] else { return nil }
+            return .array(arr.compactMap { ($0["id"] as? String).map(Value.string) })
+
+        case "files":
+            guard let arr = prop["files"] as? [[String: Any]] else { return nil }
+            return .array(arr.compactMap { f -> Value? in
+                if let n = f["name"] as? String, !n.isEmpty { return .string(n) }
+                if let ext = f["external"] as? [String: Any],
+                   let u = ext["url"] as? String { return .string(u) }
+                if let file = f["file"] as? [String: Any],
+                   let u = file["url"] as? String { return .string(u) }
+                return nil
+            })
+
+        case "unique_id":
+            guard let uid = prop["unique_id"] as? [String: Any] else { return nil }
+            guard let num = uid["number"] else { return nil }
+            let numStr: String
+            if let i = num as? Int { numStr = String(i) }
+            else if let d = num as? Double { numStr = String(d) }
+            else if let n = num as? NSNumber { numStr = n.stringValue }
+            else { return nil }
+            if let prefix = uid["prefix"] as? String, !prefix.isEmpty {
+                return .string("\(prefix)-\(numStr)")
+            }
+            return .string(numStr)
+
+        case "formula":
+            guard let f = prop["formula"] as? [String: Any],
+                  let inner = f["type"] as? String else { return nil }
+            return flattenProperty(type: inner, prop: f)
+
+        case "rollup":
+            guard let r = prop["rollup"] as? [String: Any],
+                  let inner = r["type"] as? String else { return nil }
+            if inner == "array", let elems = r["array"] as? [[String: Any]] {
+                return .array(elems.compactMap { e -> Value? in
+                    guard let et = e["type"] as? String else { return nil }
+                    return flattenProperty(type: et, prop: e)
+                })
+            }
+            return flattenProperty(type: inner, prop: r)
+
+        default:
+            return nil
+        }
+    }
+
+    /// Normalise a Notion JSON number to `.int` when integral else
+    /// `.double`; `nil` (no value) is skipped.
+    private static func flattenNumber(_ raw: Any?) -> Value? {
+        switch raw {
+        case let i as Int:
+            return .int(i)
+        case let d as Double:
+            return d.rounded() == d && abs(d) < 9.007199254740992e15
+                ? .int(Int(d)) : .double(d)
+        case let n as NSNumber:
+            let d = n.doubleValue
+            return d.rounded() == d && abs(d) < 9.007199254740992e15
+                ? .int(Int(d)) : .double(d)
+        default:
+            return nil
+        }
+    }
+
+    /// Best human label for a Notion person/user object: `name`, else a
+    /// person email, else the opaque `id`, else empty string (never nil
+    /// so a people/by array stays positional).
+    private static func personLabel(_ person: [String: Any]) -> String {
+        if let name = person["name"] as? String, !name.isEmpty { return name }
+        if let p = person["person"] as? [String: Any],
+           let email = p["email"] as? String, !email.isEmpty { return email }
+        if let id = person["id"] as? String { return id }
+        return ""
+    }
+
     // MARK: - cmd-w4: /markdown body retrieval + mention resolution
 
     /// Decode the `markdown` string from a `GET /v1/pages/{id}/markdown`
@@ -1131,12 +1311,18 @@ public enum SkillsModule {
     ///     envelope or already-extracted markdown; decoded defensively.
     ///   - titleLookup: injected `<mention-page>` title resolver
     ///     (unresolved → `[link](url)`; never throws, never drops).
+    ///   - pageProperties: the verbatim `getPage` `properties` blob
+    ///     (already fetched for the title) — flattened into the new,
+    ///     additive `properties` envelope key. Empty / non-DB page → an
+    ///     empty map (`"properties": {}`), never an error. ALL other
+    ///     envelope keys + value types are byte-for-byte unchanged.
     private static func buildSkillResult(
         skill: SkillConfig,
         title: String,
         url: String,
         markdownJSONOrText: String,
-        titleLookup: MentionResolver.TitleLookup
+        titleLookup: MentionResolver.TitleLookup,
+        pageProperties: [String: Any] = [:]
     ) async -> Value {
         let markdown = looksLikeMarkdownJSON(markdownJSONOrText)
             ? skillMarkdownString(fromMarkdownJSON: markdownJSONOrText)
@@ -1166,6 +1352,10 @@ public enum SkillsModule {
             "content": .string(contentValue)
         ]
         resultObj.merge(mcpMetadataObject(skill)) { _, new in new }
+        // cu-sa: additive — a single NEW `properties` key carrying the
+        // simplified flatten of the already-fetched getPage properties.
+        // Empty / non-DB page → `{}`. No pre-existing key is touched.
+        resultObj["properties"] = .object(flattenProperties(pageProperties))
         return .object(resultObj)
     }
 
@@ -1175,6 +1365,12 @@ public enum SkillsModule {
     /// production envelope path: decode → MentionResolver → envelope.
     /// `summary` / `triggerPhrases` / `antiTriggerPhrases` reproduce the
     /// merged skill-metadata block of the live result.
+    ///
+    /// cu-sa: `pageProperties` drives the new `properties` envelope key
+    /// through the EXACT production builder with zero network — pass the
+    /// verbatim shape `getPage` returns under `pageJSON["properties"]`.
+    /// Default `[:]` keeps every pre-cu-sa test calling this wrapper
+    /// byte-for-byte unchanged except for the additive `"properties": {}`.
     public static func buildSkillResultForTesting(
         name: String,
         title: String,
@@ -1183,6 +1379,7 @@ public enum SkillsModule {
         summary: String = "",
         triggerPhrases: [String] = [],
         antiTriggerPhrases: [String] = [],
+        pageProperties: [String: Any] = [:],
         titleLookup: @escaping MentionResolver.TitleLookup
     ) async -> Value {
         let cfg = SkillConfig(
@@ -1199,7 +1396,8 @@ public enum SkillsModule {
             title: title,
             url: url,
             markdownJSONOrText: markdownJSONOrText,
-            titleLookup: titleLookup
+            titleLookup: titleLookup,
+            pageProperties: pageProperties
         )
     }
 

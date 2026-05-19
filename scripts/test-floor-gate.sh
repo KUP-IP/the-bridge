@@ -281,9 +281,44 @@
 # merged. Commands palette GUI behaviour is operator-manual-smoke (cannot
 # be headlessly verified); the real Commands Notion data source is a
 # deferred operator dependency.
+# cu-sa (fetch_skill simplified `properties` map, 2026-05-18): ADDITIVE
+# only — the `fetch_skill` return envelope now carries one NEW key,
+# `properties`: a small, deterministic, pure flatten of the page
+# `properties` JSON that `getPage` ALREADY returns (it was parsed solely
+# for the title and then discarded; this surfaces what is already in
+# hand — NO new network call). Flatten rules: title/rich_text→plain
+# text; select/status→option name; multi_select→[names]; number→int-if-
+# integral-else-double; checkbox→bool; date→start string; url/email/
+# phone→string; created/last_edited time→string; created_by/
+# last_edited_by/people→name|email|id label(s); relation→[ids];
+# files→[name|url]; unique_id→"PREFIX-123"|"123"; formula→resolved
+# inner; rollup→resolved (array/number/single); any unknown / malformed
+# / structurally-absent type → SKIPPED (never throws, never a partial).
+# A non-DB / empty-properties page → `"properties": {}` (never an
+# error). The key is additive on EVERY path (the default no-arg
+# builder path emits `{}`), and EVERY pre-cu-sa envelope key + its
+# value type is byte-for-byte unchanged — proven by the (d)
+# envelope-stability tests (legacy 9-key set byte-identical
+# empty↔populated; only `properties` extends the set). New
+# FetchSkillPropertiesTests.swift contributes exactly 30 harness
+# `test()` blocks (per-type flatten matrix incl. unknown/absent skip +
+# formula/rollup recursion; multi-prop page; empty/non-DB/all-unknown →
+# {}; envelope stability ×2; content/blockCount properties-independent)
+# — all synthetic Notion `properties` fixtures, ZERO network. 1029 + 30
+# = 1059. The literal harness summary was
+# `Results: 1059 passed, 0 failed, 1059 total` (verified on this
+# branch, cu-sa-skillprops, base 08c8718). No other suite changed; the
+# prior 1029 ran byte-for-byte unchanged (additive isolation). FLOOR
+# raised to this branch's honestly-measured green per the
+# order-inversion rule; the orchestrator reconciles the true integrated
+# floor at merge. Modelled-not-live-verified: the per-type Notion wire
+# shapes (date range, files external/file, unique_id prefix null,
+# formula/rollup envelopes) are built from the Notion API spec, not a
+# recorded live page — the flatten routes every unknown/odd shape
+# through the same safe skip so it is correct regardless.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1029}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1059}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."

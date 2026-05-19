@@ -466,6 +466,7 @@ await runWSHMenuBarTests()        // PKT-804 (v2.3): menu-bar quick-page
 await runSnippetsModuleTests()    // PKT-2135a9e9 (v2.3 · WS-D): snippets module
 await runCommandsDataTests()      // cmd-w2: Commands data layer (CommandsManager + MentionResolver + cache)
 await runFetchSkillMarkdownTests() // cmd-w4: fetch_skill /markdown + shared MentionResolver
+await runFetchSkillPropertiesTests() // cu-sa: fetch_skill simplified `properties` map (additive)
 await runCommandBoxSpikeTests()   // cmd-w1 spike (imported): GUI-free command-box units
 await runCommandPaletteTests()    // cmd-w3: palette search + gate + AppDelegate gating + coordinator
 await runToolAnnotationAuditTests() // PKT-803 (v2.3 · WS-B): annotation coverage audit
