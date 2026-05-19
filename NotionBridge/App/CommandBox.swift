@@ -1,39 +1,45 @@
-// CommandBox.swift — Feasibility spike (cmd-w1-spike)
+// CommandBox.swift — cmd-sb (Commands palette: clipboard-only)
 // NotionBridge · App
 //
-// SPIKE GOAL: prove a global-hotkey → non-activating floating "command box"
-// → paste-back-into-prior-app architecture (the Alfred/Raycast pattern),
-// replacing the explicitly-rejected CGEventTap keylogger design.
+// The Commands palette is a global-hotkey → non-activating floating
+// "command box" (the Alfred/Raycast pattern). On Enter it resolves the
+// selected registry skill's page body and writes that Markdown to the
+// system clipboard — and STOPS there. The user explicitly wants the body
+// ON THE CLIPBOARD; they paste it themselves, wherever they want.
 //
-// This file is intentionally split into:
+// The cmd-w1-spike paste-back subsystem (prior-app capture, reactivate,
+// synthetic Cmd-V, clipboard save/restore round-trip, focus-restore +
+// its timing policy) has been DELETED in full — the palette no longer
+// touches another app, never synthesises keystrokes, and never
+// save/restores the pasteboard. The single remaining pasteboard
+// interaction is one `clearContents()+setString(.string)` write of the
+// resolved body, behind the `ClipboardWriting` seam so it is headlessly
+// asserted (write → read back) in the test harness.
+//
+// This file now owns only:
 //
 //   1. PURE, INJECTABLE LOGIC (unit-tested in the custom harness):
 //      - HotkeyConfig            — Carbon RegisterEventHotKey config model
-//      - PasteboardStashing      — protocol seam over NSPasteboard
-//      - InMemoryPasteboard      — test double
-//      - ClipboardStasher        — save → set(plain text) → restore round-trip
-//      - FrontmostAppProviding   — protocol seam over NSWorkspace
-//      - PriorAppCapture         — capture-on-show / reactivate-on-commit model
-//      - CommandBoxParameters    — paste-format + restore-timing policy
+//      - ClipboardWriting        — protocol seam over NSPasteboard (write-only)
+//      - InMemoryClipboard       — test double (write + read-back)
+//      - SystemClipboard         — NSPasteboard.general adapter (replace contents)
 //
 //   2. GUI GLUE (structurally sound; needs manual smoke — NOT headless-faked):
-//      - CommandBoxController    — NSPanel(.nonactivatingPanel) + Carbon hotkey
+//      - CommandBoxPanel         — NSPanel(.nonactivatingPanel)
+//      - CommandBoxController     — Carbon hotkey + panel + fuzzy search +
+//                                   the single clipboard write
 //
 // PERMISSION MODEL (why this is the low-risk design):
-//   - Carbon `RegisterEventHotKey` is a HOT-KEY REGISTRATION, not an event
-//     tap. It requires NO Input Monitoring and NO Accessibility TCC grant —
-//     the WindowServer delivers a Carbon event only when the exact combo is
-//     pressed. This is fundamentally different from CGEventTap (the rejected
-//     keylogger), which sees every keystroke and needs Input Monitoring.
-//   - The paste-back Cmd-V synthesis reuses the SAME CGEvent primitive
-//     already shipping in SyntheticInputModule (Accessibility-gated). That
-//     gate is pre-existing and unchanged by this spike.
-//   - NSPasteboard read/write needs NO TCC grant (already proven by
-//     PasteboardHistoryStore).
+//   - Carbon `RegisterEventHotKey` is a HOT-KEY REGISTRATION, not an
+//     event tap. It requires NO Input Monitoring and NO Accessibility
+//     TCC grant — the WindowServer delivers a Carbon event only when the
+//     exact combo is pressed.
+//   - NSPasteboard write needs NO TCC grant (already proven by
+//     PasteboardHistoryStore). With paste-back deleted there is no
+//     CGEvent synthesis and therefore no Accessibility surface at all.
 
 import Foundation
 import AppKit
-import CoreGraphics
 import Carbon.HIToolbox
 
 // ============================================================
@@ -55,10 +61,9 @@ public struct HotkeyConfig: Equatable, Sendable, Codable {
         self.carbonModifiers = carbonModifiers
     }
 
-    /// The spike's fixed default: ⌥⌘Space (Option+Command+Space).
-    /// Chosen to avoid Spotlight (⌘Space) and the macOS dictation /
-    /// emoji defaults. A real feature would make this user-configurable
-    /// and conflict-checked; out of scope for the spike.
+    /// The fixed default: ⌥⌘Space (Option+Command+Space). Chosen to avoid
+    /// Spotlight (⌘Space) and the macOS dictation / emoji defaults. A
+    /// real feature would make this user-configurable and conflict-checked.
     public static let spikeDefault = HotkeyConfig(
         keyCode: UInt32(kVK_Space),
         carbonModifiers: UInt32(cmdKey | optionKey)
@@ -77,7 +82,7 @@ public struct HotkeyConfig: Equatable, Sendable, Codable {
         return bytes.reduce(OSType(0)) { ($0 << 8) | OSType($1) }
     }()
 
-    /// Human-readable combo, for the spike's logging/smoke output.
+    /// Human-readable combo, for logging / smoke output.
     public var displayString: String {
         var s = ""
         if carbonModifiers & UInt32(controlKey) != 0 { s += "⌃" }
@@ -90,282 +95,76 @@ public struct HotkeyConfig: Equatable, Sendable, Codable {
 }
 
 // ============================================================
-// MARK: - 1b. Pasteboard stashing (pure + seam)
+// MARK: - 1b. Clipboard write seam (pure + seam)
+//
+//   This REPLACES the deleted `PasteboardStashing` /
+//   `ClipboardStasher` / save-restore round-trip. There is NO snapshot
+//   and NO restore: the user WANTS the resolved body left on the
+//   clipboard. The only operation is "replace the clipboard's plain-text
+//   contents with this string", and the test double can read it back so
+//   the on-Enter write is headlessly verifiable.
 // ============================================================
 
-/// Minimal seam over the parts of `NSPasteboard` the stash logic touches.
-/// Lets the round-trip be unit-tested with an in-memory double — no GUI,
-/// no real system pasteboard mutation in tests.
-public protocol PasteboardStashing: AnyObject {
-    var changeCount: Int { get }
-    /// Snapshot the current plain-text payload (nil if non-text/empty).
+/// Minimal write-only seam over `NSPasteboard`. The palette's sole
+/// pasteboard interaction. `readString()` exists ONLY so the harness can
+/// assert what was written (and so the controller can no-op an
+/// empty-body write) — it is never used to snapshot/restore.
+public protocol ClipboardWriting: AnyObject, Sendable {
+    /// Replace the clipboard's contents with a single plain-text payload.
+    func writeString(_ s: String)
+    /// Current plain-text payload (test read-back / empty-body guard).
     func readString() -> String?
-    /// Clear + write a single plain-text payload. Returns the new changeCount.
-    @discardableResult func writeString(_ s: String) -> Int
-    /// Restore a previously snapshotted plain-text payload (or clear if nil).
-    func restore(_ s: String?)
 }
 
-/// In-memory test double for `PasteboardStashing`.
-public final class InMemoryPasteboard: PasteboardStashing, @unchecked Sendable {
+/// In-memory test double for `ClipboardWriting`. Write fully replaces
+/// the stored value (models `clearContents()` + `setString`).
+public final class InMemoryClipboard: ClipboardWriting, @unchecked Sendable {
     private let lock = NSLock()
     private var _value: String?
-    private var _change = 0
+    /// Number of writes performed (lets a test prove "wrote exactly once"
+    /// / "never wrote" without a save/restore changeCount dance).
+    public private(set) var writeCount = 0
 
     public init(initial: String? = nil) { _value = initial }
 
-    public var changeCount: Int { lock.lock(); defer { lock.unlock() }; return _change }
-
-    public func readString() -> String? { lock.lock(); defer { lock.unlock() }; return _value }
-
-    @discardableResult
-    public func writeString(_ s: String) -> Int {
+    public func writeString(_ s: String) {
         lock.lock(); defer { lock.unlock() }
         _value = s
-        _change += 1
-        return _change
+        writeCount += 1
     }
 
-    public func restore(_ s: String?) {
+    public func readString() -> String? {
         lock.lock(); defer { lock.unlock() }
-        _value = s
-        _change += 1
+        return _value
     }
 }
 
-/// Live adapter backed by `NSPasteboard.general`. PLAIN TEXT ONLY by
-/// design: we only ever snapshot/restore `.string`. Rich content (RTF,
-/// files, images) is intentionally NOT preserved — restoring arbitrary
-/// declared types is a known footgun (promised/lazy data, file
-/// promises) and out of scope for the spike. Documented as a surviving
-/// risk in the spike report.
-public final class SystemPasteboard: PasteboardStashing, @unchecked Sendable {
+/// Live adapter backed by `NSPasteboard.general`. PLAIN TEXT ONLY:
+/// `clearContents()` then `setString(_, .string)` — the clipboard now
+/// holds exactly the resolved command body. Nothing is snapshotted and
+/// nothing is restored (by design — the user wants it on the clipboard).
+public final class SystemClipboard: ClipboardWriting, @unchecked Sendable {
     private let pb: NSPasteboard
     public init(_ pb: NSPasteboard = .general) { self.pb = pb }
 
-    public var changeCount: Int { pb.changeCount }
-
-    public func readString() -> String? { pb.string(forType: .string) }
-
-    @discardableResult
-    public func writeString(_ s: String) -> Int {
+    public func writeString(_ s: String) {
         pb.clearContents()
         pb.setString(s, forType: .string)
-        return pb.changeCount
     }
 
-    public func restore(_ s: String?) {
-        pb.clearContents()
-        if let s { pb.setString(s, forType: .string) }
-    }
-}
-
-/// Encapsulates the save → set → (paste happens) → restore round-trip.
-/// Pure and synchronous; the GUI layer drives the actual Cmd-V + the
-/// post-paste delay. `commit` returns a `RestoreToken` the caller invokes
-/// after the paste has been delivered.
-public struct ClipboardStasher {
-    private let pb: PasteboardStashing
-
-    public init(_ pb: PasteboardStashing) { self.pb = pb }
-
-    /// Opaque restore handle — carries the snapshot so the caller can
-    /// restore exactly what was there, after the paste lands.
-    public struct RestoreToken {
-        fileprivate let saved: String?
-        fileprivate let pb: PasteboardStashing
-        /// changeCount immediately AFTER we wrote our command text.
-        public let postWriteChangeCount: Int
-
-        /// Restore the user's original clipboard. Guarded: if something
-        /// else wrote to the pasteboard between our set and now (count
-        /// advanced past what we wrote), we DON'T clobber it — the user
-        /// or another app intentionally changed it.
-        public func restore() {
-            if pb.changeCount == postWriteChangeCount {
-                pb.restore(saved)
-            }
-            // else: stale — a newer write wins, do nothing.
-        }
-
-        /// Unconditional restore (used by the simplest timing policy /
-        /// when the guard is not desired). Exposed for the spike tests.
-        public func restoreUnconditionally() { pb.restore(saved) }
-    }
-
-    /// Snapshot the current plain-text clipboard, then overwrite it with
-    /// `text` (plain text). Returns the token used to restore later.
-    public func stash(_ text: String) -> RestoreToken {
-        let saved = pb.readString()
-        let newCount = pb.writeString(text)
-        return RestoreToken(saved: saved, pb: pb, postWriteChangeCount: newCount)
-    }
+    public func readString() -> String? { pb.string(forType: .string) }
 }
 
 // ============================================================
-// MARK: - 1c. Prior-app capture (pure + seam)
-// ============================================================
-
-/// Identifies the app to return focus to. Kept minimal/value-typed so the
-/// capture/return decision is testable without a real `NSRunningApplication`.
-public struct PriorApp: Equatable, Sendable {
-    public let bundleIdentifier: String?
-    public let processIdentifier: pid_t
-    public init(bundleIdentifier: String?, processIdentifier: pid_t) {
-        self.bundleIdentifier = bundleIdentifier
-        self.processIdentifier = processIdentifier
-    }
-}
-
-/// Seam over `NSWorkspace.shared.frontmostApplication` + activation.
-public protocol FrontmostAppProviding: AnyObject {
-    func currentFrontmost() -> PriorApp?
-    /// Reactivate the captured app. Returns false if it can't (gone).
-    func activate(_ app: PriorApp) -> Bool
-}
-
-/// The capture/return model. `capture()` is called just BEFORE the panel
-/// is shown (records who was frontmost — which is still us-or-them since
-/// a non-activating panel doesn't steal activation, but recording it is
-/// the robust contract). `returnFocus()` is called on commit/cancel.
-public final class PriorAppCapture {
-    private let provider: FrontmostAppProviding
-    private var captured: PriorApp?
-    /// Bundle id of THIS app — never "return focus" to ourselves.
-    private let selfBundleID: String?
-
-    public init(provider: FrontmostAppProviding, selfBundleID: String?) {
-        self.provider = provider
-        self.selfBundleID = selfBundleID
-    }
-
-    public var capturedApp: PriorApp? { captured }
-
-    /// Record the frontmost app, ignoring ourselves. Returns what was
-    /// captured (nil if frontmost was us or nothing).
-    @discardableResult
-    public func capture() -> PriorApp? {
-        guard let front = provider.currentFrontmost() else { captured = nil; return nil }
-        if let sb = selfBundleID, front.bundleIdentifier == sb {
-            // Frontmost is us (e.g. Settings window open) — nothing to
-            // return to. A non-activating panel is the common case where
-            // this DOESN'T happen, but guard anyway.
-            captured = nil
-            return nil
-        }
-        captured = front
-        return front
-    }
-
-    /// Reactivate the captured app. No-op (returns false) if nothing was
-    /// captured or the app vanished.
-    @discardableResult
-    public func returnFocus() -> Bool {
-        guard let app = captured else { return false }
-        return provider.activate(app)
-    }
-
-    public func reset() { captured = nil }
-}
-
-// ============================================================
-// MARK: - 1d. Command-box parameters (pure policy)
-// ============================================================
-
-/// Tunable, testable policy for the paste-back sequence. The exact
-/// numbers are spike defaults grounded in the Alfred/Raycast pattern;
-/// a real feature would empirically tune them.
-public struct CommandBoxParameters: Equatable, Sendable {
-    /// Delay AFTER reactivating the prior app, BEFORE synthesizing Cmd-V.
-    /// The reactivated app needs a beat to become key and route the
-    /// keystroke to its focused field.
-    public let reactivateToPasteDelayMs: Int
-    /// Delay AFTER Cmd-V, BEFORE restoring the user's original clipboard.
-    /// Must outlast the target app's async paste read. Too short = the
-    /// app pastes the RESTORED (old) content; this is the single most
-    /// fragile timing in the design (flagged as a surviving risk).
-    public let pasteToRestoreDelayMs: Int
-    /// Always plain text. Encodes deliverable #3's explicit "PLAIN TEXT
-    /// (.string)" requirement as a checked invariant, not a comment.
-    public let pasteFormatIsPlainTextOnly: Bool
-
-    public init(reactivateToPasteDelayMs: Int = 60,
-                pasteToRestoreDelayMs: Int = 250,
-                pasteFormatIsPlainTextOnly: Bool = true) {
-        self.reactivateToPasteDelayMs = reactivateToPasteDelayMs
-        self.pasteToRestoreDelayMs = pasteToRestoreDelayMs
-        self.pasteFormatIsPlainTextOnly = pasteFormatIsPlainTextOnly
-    }
-
-    public static let spikeDefault = CommandBoxParameters()
-
-    /// Validate the policy is self-consistent for the paste-back pattern.
-    public var isValid: Bool {
-        reactivateToPasteDelayMs >= 0
-            && pasteToRestoreDelayMs > reactivateToPasteDelayMs
-            && pasteFormatIsPlainTextOnly
-    }
-}
-
-// ============================================================
-// MARK: - 1e. Cmd-V synthesis (pure construction, no posting in tests)
-// ============================================================
-
-/// Builds the Cmd-V key-down/key-up CGEvent pair. Construction is pure
-/// and testable (we assert the events carry the right keyCode + the
-/// .maskCommand flag); ACTUAL posting to `.cghidEventTap` is a GUI-time
-/// side effect, kept out of the unit path.
-public enum PasteKeystroke {
-    /// vk for 'V'.
-    public static let vKeyCode = CGKeyCode(kVK_ANSI_V)
-
-    /// Returns (keyDown, keyUp) Cmd-V events, or nil if the event source
-    /// can't be created (sandbox / no WindowServer in CI).
-    public static func makeCommandVEvents() -> (down: CGEvent, up: CGEvent)? {
-        guard let src = CGEventSource(stateID: .hidSystemState) else { return nil }
-        guard let down = CGEvent(keyboardEventSource: src, virtualKey: vKeyCode, keyDown: true),
-              let up   = CGEvent(keyboardEventSource: src, virtualKey: vKeyCode, keyDown: false)
-        else { return nil }
-        down.flags = .maskCommand
-        up.flags = .maskCommand
-        return (down, up)
-    }
-
-    /// Post a constructed pair to the HID tap. Side-effecting; GUI-only.
-    public static func post(_ pair: (down: CGEvent, up: CGEvent)) {
-        pair.down.post(tap: .cghidEventTap)
-        pair.up.post(tap: .cghidEventTap)
-    }
-}
-
-// ============================================================
-// MARK: - 2. GUI GLUE — CommandBoxController
+// MARK: - 2. GUI GLUE — CommandBoxPanel + CommandBoxController
 //   Structurally sound. NOT unit-tested headlessly (honest): a global
 //   Carbon hot-key firing + a non-activating NSPanel receiving key
-//   events both require a live WindowServer/loginwindow session and a
-//   real frontmost app. The pure pieces above ARE tested; this shell
-//   wires them and is exercised by manual smoke.
+//   events both require a live WindowServer/loginwindow session. The
+//   pure pieces above (and the clipboard write via the seam) ARE tested;
+//   this shell wires them and is exercised by manual smoke.
 // ============================================================
 
 #if canImport(AppKit)
-
-/// Live `FrontmostAppProviding` over `NSWorkspace`.
-public final class WorkspaceFrontmostProvider: FrontmostAppProviding {
-    public init() {}
-
-    public func currentFrontmost() -> PriorApp? {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
-        return PriorApp(bundleIdentifier: app.bundleIdentifier,
-                        processIdentifier: app.processIdentifier)
-    }
-
-    public func activate(_ app: PriorApp) -> Bool {
-        let running = NSRunningApplication(processIdentifier: app.processIdentifier)
-        guard let running else { return false }
-        // .activate on macOS 14+ — no deprecated options needed.
-        return running.activate()
-    }
-}
 
 /// A borderless, non-activating floating panel that does not steal key
 /// focus from the frontmost app when shown. `canBecomeKey` is true so
@@ -397,28 +196,27 @@ public final class CommandBoxPanel: NSPanel {
     public override var canBecomeMain: Bool { false }
 }
 
-/// W3 controller: registers the Carbon hot-key, shows/hides the panel,
-/// runs a live fuzzy search over the cached command list as the user
-/// types, and on Enter fetches the selected command's resolved body via
-/// the W2 `CommandsManager` (CONSUMED, not duplicated) then runs the
-/// spike's capture → reactivate → stash → Cmd-V → restore paste-back
-/// using the PURE units above.
+/// Controller: registers the Carbon hot-key, shows/hides the panel, runs
+/// a live fuzzy search over the registry-backed command list as the user
+/// types (delegated to the GUI-free `CommandPaletteCoordinator`), and on
+/// Enter fetches the selected command's resolved body via the W2
+/// `CommandsManager` (CONSUMED, not duplicated) then WRITES that body to
+/// the clipboard. No prior-app capture, no reactivate, no Cmd-V, no
+/// save/restore — the body is simply left on the clipboard for the user.
 ///
-/// The fuzzy-search + body-fetch decision is delegated to the GUI-FREE
+/// The fuzzy-search + body-fetch decision is the GUI-FREE
 /// `CommandPaletteCoordinator` (unit-tested headlessly). This shell only
 /// owns the AppKit glue (panel, text field, hot-key) — the parts that
 /// genuinely require a WindowServer and are operator manual-smoke.
 @MainActor
 public final class CommandBoxController {
     private let hotkey: HotkeyConfig
-    private let params: CommandBoxParameters
-    private let capture: PriorAppCapture
-    private let stasher: ClipboardStasher
-    /// W3: the GUI-free search + W2-body-fetch core. `nil` ⇒ the spike's
-    /// original "paste exactly what was typed" behaviour (preserved so the
-    /// imported spike contract is unbroken); non-nil ⇒ typed text is a
-    /// fuzzy QUERY resolved to a command body before paste.
-    private let coordinator: CommandPaletteCoordinator?
+    private let clipboard: ClipboardWriting
+    /// The GUI-free search + W2-body-fetch core. Required — the palette
+    /// always resolves the typed text as a fuzzy QUERY against the
+    /// registry, fetches the matched skill's body, and writes it to the
+    /// clipboard. A non-matching query writes NOTHING (never a guess).
+    private let coordinator: CommandPaletteCoordinator
 
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandler: EventHandlerRef?
@@ -429,17 +227,10 @@ public final class CommandBoxController {
     public private(set) var isVisible = false
 
     public init(hotkey: HotkeyConfig = .spikeDefault,
-                params: CommandBoxParameters = .spikeDefault,
-                frontmost: FrontmostAppProviding = WorkspaceFrontmostProvider(),
-                pasteboard: PasteboardStashing = SystemPasteboard(),
-                coordinator: CommandPaletteCoordinator? = nil) {
+                clipboard: ClipboardWriting = SystemClipboard(),
+                coordinator: CommandPaletteCoordinator) {
         self.hotkey = hotkey
-        self.params = params
-        self.capture = PriorAppCapture(
-            provider: frontmost,
-            selfBundleID: Bundle.main.bundleIdentifier
-        )
-        self.stasher = ClipboardStasher(pasteboard)
+        self.clipboard = clipboard
         self.coordinator = coordinator
     }
 
@@ -509,14 +300,11 @@ public final class CommandBoxController {
     // MARK: Show / commit
 
     private func handleHotkey() {
-        if isVisible { hide(commit: false); return }
+        if isVisible { hide(); return }
         show()
     }
 
     private func show() {
-        // 1. Record who was frontmost BEFORE we show anything.
-        capture.capture()
-
         let panel = self.panel ?? makePanel()
         self.panel = panel
 
@@ -541,7 +329,7 @@ public final class CommandBoxController {
     private func makePanel() -> CommandBoxPanel {
         let panel = CommandBoxPanel()
         let field = NSTextField(frame: NSRect(x: 12, y: 6, width: 536, height: 32))
-        field.placeholderString = "Type a command, press ⏎"
+        field.placeholderString = "Type a command, press ⏎ to copy"
         field.font = .systemFont(ofSize: 18)
         field.bezelStyle = .roundedBezel
         field.focusRingType = .none
@@ -561,94 +349,39 @@ public final class CommandBoxController {
         let query = sender.stringValue
         sender.stringValue = ""
 
-        guard let coordinator else {
-            // No W3 coordinator wired → spike behaviour: paste the typed
-            // text verbatim (imported-contract preservation).
-            hide(commit: true, text: query)
-            return
-        }
-
-        // W3: the typed text is a fuzzy QUERY. Hide the panel immediately
-        // (so it doesn't steal the paste target's focus during the async
-        // fetch), reactivate the prior app, then resolve the body via the
-        // W2 CommandsManager and paste it. `.notFound` does NOT paste.
+        // The typed text is a fuzzy QUERY. Hide the panel, resolve the
+        // body via the W2 CommandsManager, and write it to the clipboard.
+        // `.notFound` writes NOTHING (never copy a guessed command).
         panel?.orderOut(nil)
         isVisible = false
         Task { @MainActor in
-            let result = await coordinator.commit(query: query)
-            switch result {
-            case .paste(let body):
-                self.pasteResolvedBody(body)
-            case .notFound:
-                // No command matched — do NOT paste a guess. Drop the
-                // captured prior app; the user can re-invoke and retype.
-                self.capture.reset()
-            case .unavailable(_, let reason):
-                print("[CommandBox] command body unavailable: \(reason)")
-                self.capture.reset()
-            }
+            let result = await self.coordinator.commit(query: query)
+            self.applyCommit(result)
         }
     }
 
-    /// W3 paste-back of an already-resolved command body. Reuses the
-    /// spike's tested capture → reactivate → stash → Cmd-V → restore
-    /// units verbatim — only the source of `text` differs (a fetched
-    /// command body instead of the literally-typed string).
-    private func pasteResolvedBody(_ body: String) {
-        guard !body.isEmpty else { capture.reset(); return }
-
-        let reactivated = capture.returnFocus()
-        guard reactivated else {
-            print("[CommandBox] prior app gone — not pasting")
-            capture.reset()
-            return
-        }
-
-        let token = stasher.stash(body)
-        let reMs = params.reactivateToPasteDelayMs
-        let restoreMs = params.pasteToRestoreDelayMs
-        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(reMs)) {
-            if let pair = PasteKeystroke.makeCommandVEvents() {
-                PasteKeystroke.post(pair)
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(restoreMs)) {
-                token.restore()
-                self.capture.reset()
-            }
+    /// Clipboard-only commit: on `.paste(body)` write the resolved body
+    /// to the clipboard (replace contents — no save/restore). On
+    /// `.notFound` / `.unavailable` write nothing (no guess, no
+    /// destructive clobber). Public so the harness can drive this pure
+    /// decision against an `InMemoryClipboard` with NO GUI (no panel, no
+    /// hot-key) — the headlessly-verifiable core of the on-Enter behaviour.
+    public func applyCommit(_ result: CommandPaletteCommitResult) {
+        switch result {
+        case .paste(let body):
+            guard !body.isEmpty else { return }
+            clipboard.writeString(body)
+        case .notFound:
+            // No command matched — do NOT copy a guess.
+            break
+        case .unavailable(_, let reason):
+            print("[CommandBox] command body unavailable: \(reason)")
         }
     }
 
-    /// The paste-back sequence (deliverable #3). Ordering and the two
-    /// delays come straight from `CommandBoxParameters` (tested policy).
-    private func hide(commit: Bool, text: String = "") {
+    private func hide() {
         panel?.orderOut(nil)
         isVisible = false
-
-        guard commit, !text.isEmpty else { capture.reset(); return }
-
-        // Reactivate the previously-frontmost app.
-        let reactivated = capture.returnFocus()
-        guard reactivated else {
-            print("[CommandBox] prior app gone — not pasting")
-            capture.reset()
-            return
-        }
-
-        // Stash user's clipboard + write our command text (PLAIN TEXT).
-        let token = stasher.stash(text)
-
-        // After the app becomes key, synthesize Cmd-V, then restore.
-        let reMs = params.reactivateToPasteDelayMs
-        let restoreMs = params.pasteToRestoreDelayMs
-        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(reMs)) {
-            if let pair = PasteKeystroke.makeCommandVEvents() {
-                PasteKeystroke.post(pair)
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(restoreMs)) {
-                token.restore()        // guarded: won't clobber a newer write
-                self.capture.reset()
-            }
-        }
     }
 }
 
