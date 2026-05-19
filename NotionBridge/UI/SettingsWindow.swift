@@ -47,10 +47,22 @@ public final class SettingsWindowController {
             return
         }
 
+        // cmd-ux W1: inject the AppDelegate's single observable
+        // `CommandsController` into the SwiftUI environment ON THE ROOT
+        // VIEW. SettingsView is hosted via NSHostingController in a plain
+        // NSWindow (NOT a SwiftUI WindowGroup), so there is no scene to
+        // inherit an `.environment` from — it MUST be applied here, to
+        // the exact view passed into NSHostingController(rootView:).
+        // SettingsView reads it via `@Environment`; this is what makes
+        // the Commands status row reactive (Bug 2 structural fix).
+        let commandsController = (NSApp.delegate as? AppDelegate)?.commandsController
+            ?? CommandsController()
+
         let settingsView = SettingsView(
             statusBar: statusBar,
             permissionManager: permissionManager
         )
+        .environment(commandsController)
 
         let hostingController = NSHostingController(rootView: settingsView)
 
@@ -123,6 +135,15 @@ public struct SettingsView: View {
 
     @ObservedObject var nav: SettingsNavigation
 
+    /// cmd-ux W1: the single observable Commands source of truth,
+    /// injected by `SettingsWindowController` onto the root view. Read
+    /// here so the Commands status row + recorder glyph re-render the
+    /// instant registration / hotkey / enabled state changes. Optional
+    /// because the type is environment-injected (and SwiftUI previews /
+    /// any non-injected host would otherwise crash) — a nil controller
+    /// falls back to the persisted snapshot, exactly the old behaviour.
+    @Environment(CommandsController.self) private var commandsController: CommandsController?
+
     // Token editing state (PKT-350 F1)
     @State var isEditingToken = false
     @State var newTokenValue = ""
@@ -192,20 +213,35 @@ public struct SettingsView: View {
     /// default-enabled contract when the key has never been written.
     @AppStorage(BridgeDefaults.commandsPaletteEnabled) var commandsPaletteEnabled: Bool = true
 
-    /// cmd-ux: whether the global hot-key is currently registered (drives
-    /// the Active vs "⚠ Shortcut unavailable" status row). Read live from
-    /// the AppDelegate's `CommandBoxController`; `false` when the palette
-    /// is off or registration failed (combo owned by another app).
+    /// cmd-ux W1: whether the global hot-key is currently registered
+    /// (drives Active vs "⚠ Shortcut unavailable"). Now read from the
+    /// OBSERVED `CommandsController` — accessing its `@Observable`
+    /// property inside the view body registers a dependency, so the
+    /// status row re-renders the instant registration state changes.
+    /// This is the structural fix for Bug 2: the old plain-computed
+    /// `NSApp.delegate` snapshot was evaluated once and never re-read,
+    /// so a working hot-key could still show "⚠ unavailable". A nil
+    /// controller (non-injected host) falls back to the prior snapshot.
     var commandsPaletteRegistered: Bool {
-        (NSApp.delegate as? AppDelegate)?.isCommandsPaletteHotkeyRegistered ?? false
+        if let c = commandsController { return c.isRegistered }
+        return (NSApp.delegate as? AppDelegate)?.isCommandsPaletteHotkeyRegistered ?? false
     }
 
-    /// Change B: the combo the recorder should DISPLAY — the live
-    /// controller's config when running, else the persisted value
-    /// (falls back to `productionDefault`). Re-read on each render so a
-    /// just-recorded combo shows immediately.
+    /// cmd-ux W1: the combo the recorder should DISPLAY — read from the
+    /// OBSERVED controller so a just-recorded combo (or a rebind that
+    /// fell back to the prior working combo) shows immediately and
+    /// truthfully. Nil controller falls back to the persisted value.
     var commandsHotkeyConfig: HotkeyConfig {
-        (NSApp.delegate as? AppDelegate)?.commandsHotkeyConfig ?? HotkeyConfig.loadPersisted()
+        if let c = commandsController { return c.hotkeyConfig }
+        return (NSApp.delegate as? AppDelegate)?.commandsHotkeyConfig ?? HotkeyConfig.loadPersisted()
+    }
+
+    /// cmd-ux W1/W2: the structured outcome of the last registration
+    /// attempt, observed live. Drives the precise status message (a true
+    /// combo collision vs a plumbing failure vs disabled). Nil controller
+    /// degrades to `.unattempted` (generic mapping, prior behaviour).
+    var commandsLastRegisterStatus: HotkeyRegisterStatus {
+        commandsController?.lastRegisterStatus ?? .unattempted
     }
 
     /// Change B: when true the recorder control is in capture mode —

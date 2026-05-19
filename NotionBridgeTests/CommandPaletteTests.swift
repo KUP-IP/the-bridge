@@ -889,8 +889,15 @@ func runCommandPaletteTests() async {
     await test("CommandsSettingsStatus: enabled + NOT registered ⇒ red shortcut-unavailable") {
         let st = CommandsSettingsStatus(enabled: true, isRegistered: false, hotkey: "⌃⌥⌘C")
         try expect(st == .shortcutUnavailable)
-        try expect(st.message == "⚠ Shortcut unavailable (in use by another app)",
+        // cmd-ux W2: the legacy (reason-unknown) message must NOT blame
+        // another app — that false "in use by another app" claim WAS the
+        // Bug-2 residual. The diagnostic-aware init (collision vs
+        // plumbing) carries the specific copy; this generic state stays
+        // honest and actionable without accusing another app.
+        try expect(st.message == "⚠ Shortcut not active — record a shortcut or toggle Commands off/on",
                    "got '\(st.message)'")
+        try expect(!st.message.contains("in use by another app"),
+                   "the generic state must not falsely claim a collision")
         try expect(st.isWarning, "an unavailable shortcut must render as a warning")
     }
 
