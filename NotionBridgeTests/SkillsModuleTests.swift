@@ -23,9 +23,9 @@ func runSkillsModuleTests() async {
     // MARK: - Tool Registration (fetch_skill, list_routing_skills, manage_skill)
     // ============================================================
 
-    await test("SkillsModule registers 3 tools") {
+    await test("SkillsModule registers 4 tools (Sprint A · #14: +skills_routing_list)") {
         let tools = await router.registrations(forModule: "skills")
-        try expect(tools.count == 3, "Expected 3 skills tools, got \(tools.count)")
+        try expect(tools.count == 4, "Expected 4 skills tools, got \(tools.count)")
     }
 
     await test("Tool fetch_skill is registered") {
@@ -34,10 +34,18 @@ func runSkillsModuleTests() async {
         try expect(names.contains("fetch_skill"), "Missing fetch_skill")
     }
 
-    await test("Tool list_routing_skills is registered") {
+    await test("Tool list_routing_skills is registered (Sprint A · #14 alias)") {
         let tools = await router.registrations(forModule: "skills")
         let names = Set(tools.map(\.name))
-        try expect(names.contains("list_routing_skills"), "Missing list_routing_skills")
+        try expect(names.contains("list_routing_skills"),
+                   "Missing list_routing_skills — one-cycle deprecation alias should stay live")
+    }
+
+    await test("Tool skills_routing_list is registered (Sprint A · #14 primary)") {
+        let tools = await router.registrations(forModule: "skills")
+        let names = Set(tools.map(\.name))
+        try expect(names.contains("skills_routing_list"),
+                   "Missing skills_routing_list — the renamed primary")
     }
 
     await test("list_routing_skills has open tier") {
@@ -45,6 +53,24 @@ func runSkillsModuleTests() async {
         let tool = tools.first(where: { $0.name == "list_routing_skills" })
         try expect(tool != nil, "list_routing_skills not found")
         try expect(tool!.tier == .open, "list_routing_skills should be .open")
+    }
+
+    await test("skills_routing_list has open tier") {
+        let tools = await router.registrations(forModule: "skills")
+        let tool = tools.first(where: { $0.name == "skills_routing_list" })
+        try expect(tool != nil, "skills_routing_list not found")
+        try expect(tool!.tier == .open, "skills_routing_list should be .open")
+    }
+
+    await test("list_routing_skills description prefixed DEPRECATED → skills_routing_list") {
+        let tools = await router.registrations(forModule: "skills")
+        guard let tool = tools.first(where: { $0.name == "list_routing_skills" }) else {
+            throw TestError.assertion("list_routing_skills not found")
+        }
+        try expect(tool.description.hasPrefix("DEPRECATED"),
+                   "Expected DEPRECATED prefix, got: \(tool.description.prefix(60))")
+        try expect(tool.description.contains("skills_routing_list"),
+                   "Expected pointer at skills_routing_list, got: \(tool.description.prefix(120))")
     }
 
     // ============================================================

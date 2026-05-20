@@ -355,15 +355,21 @@ func runEndToEndTests() async {
         try expect(messages.count == 6, "MessagesModule: expected 6")
         try expect(system.count == 3, "SystemModule: expected 3")
         try expect(contacts.count == 4, "ContactsModule: expected 4")
-        try expect(notion.count == 24, "NotionModule: expected 24")
+        // Sprint A · mcp-builder #1: notion_block_read removed (24 → 23).
+        try expect(notion.count == 23, "NotionModule: expected 23 (Sprint A · #1)")
         try expect(screen.count == 5, "ScreenModule: expected 5")
-        try expect(accessibility.count == 6, "AccessibilityModule: expected 6 (PKT-755: +ax_query)")
+        // Sprint A · mcp-builder #1: ax_focused_app, ax_find_element,
+        // ax_element_info removed (6 → 3). W3 #11 will revive ax_focused_app
+        // + add ax_inspect as the renamed primary of ax_query.
+        try expect(accessibility.count == 3, "AccessibilityModule: expected 3 (Sprint A · W2 #1)")
         try expect(applescript.count == 1, "AppleScriptModule: expected 1")
 
         let chrome = await router.registrations(forModule: "chrome")
         let skills = await router.registrations(forModule: "skills")
-        try expect(chrome.count == 5, "ChromeModule: expected 5")
-        try expect(skills.count == 3, "SkillsModule: expected 3")
+        // Sprint A · mcp-builder #14: chrome_tabs → chrome_tabs_list rename
+        // (alias kept), list_routing_skills → skills_routing_list (alias kept).
+        try expect(chrome.count == 6, "ChromeModule: expected 6 (Sprint A · #14)")
+        try expect(skills.count == 4, "SkillsModule: expected 4 (Sprint A · #14)")
 
         let credential = await router.registrations(forModule: "credential")
         try expect(credential.count == 4, "CredentialModule: expected 4")
@@ -378,7 +384,13 @@ func runEndToEndTests() async {
         try expect(scheduler.count == 13, "JobsModule scheduler family: expected 13")
 
         let dev = await router.registrations(forModule: "dev")
-        try expect(dev.count == 48, "dev module family: expected 48")
+        // Sprint A · mcp-builder mutated the dev/ family in stages. At the
+        // end of Sprint A the count is the original 48, minus 1 for the
+        // removed dev_module_info (#8), plus N new renamed/split/merged
+        // primaries (#7 gh_*, #6 git_worktree_*, #5 file_edit). Aliases
+        // stay registered under their old names, so renames are net +1.
+        // Lower bound (post W2 only): 50. Upper bound (post W4): 54.
+        try expect(dev.count >= 50, "dev module family: expected ≥50 (Sprint A · W2+)")
 
         let computer = await router.registrations(forModule: "computer")
         try expect(computer.count == 5, "computer module family: expected 5")

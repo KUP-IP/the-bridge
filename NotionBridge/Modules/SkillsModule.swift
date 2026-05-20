@@ -293,11 +293,13 @@ public enum SkillsModule {
         await registerManageSkill(on: router, skillCache: cache)
     }
 
-    // MARK: - list_routing_skills
+    // MARK: - skills_routing_list (Sprint A · mcp-builder #14 rename)
 
     private static func registerListRoutingSkills(on router: ToolRouter) async {
-        await router.register(ToolRegistration(
-            name: "list_routing_skills",
+        // Sprint A · mcp-builder #14: list_routing_skills → skills_routing_list
+        // (mcp-builder prefix-consistency: skills_* family).
+        let skillsRoutingList = ToolRegistration(
+            name: "skills_routing_list",
             module: moduleName,
             tier: .open,
             description: "Refresh the skill routing index (summaries + trigger phrases). Initial index is provided in server instructions at connection time — only call after a skill change.",
@@ -319,6 +321,13 @@ public enum SkillsModule {
                     "count": .int(items.count)
                 ])
             }
+        )
+        await router.register(skillsRoutingList)
+        // One-cycle deprecation alias under the old name.
+        await router.register(ToolDeprecationAlias.renameAlias(
+            oldName: "list_routing_skills",
+            newName: "skills_routing_list",
+            from: skillsRoutingList
         ))
     }
 

@@ -18,33 +18,20 @@ public enum DevModule {
 
     // MARK: - Registration
 
+    // Sprint A · mcp-builder #8: dev_module_info removed. It was a
+    // self-described scaffold placeholder ("Real dev tooling lands in
+    // follow-up packets"); the dev/ module is now populated with real
+    // primitives (code_search, file_str_replace/apply_patch, lsp_*,
+    // playwright_run, vitest_run, lighthouse_run) so the discovery
+    // placeholder serves no purpose. Audit §3 marked this for silent
+    // removal — no deprecation alias needed.
     public static func register(on router: ToolRouter) async {
-        await router.register(makeDevModuleInfo())
-    }
-
-    // MARK: - Tool factories
-
-    /// Placeholder scaffold tool — confirms the dev/ module is wired and discoverable.
-    /// Replaced/extended by real dev primitives in v2.2 follow-up packets.
-    private static func makeDevModuleInfo() -> ToolRegistration {
-        ToolRegistration(
-            name: "dev_module_info",
-            module: moduleName,
-            tier: .open,
-            description: "Return metadata about the dev/ module scaffold (PKT-738, v2.2). Placeholder — real dev primitives land in v2.2 follow-up packets.",
-            inputSchema: .object([
-                "type": .string("object"),
-                "properties": .object([:])
-            ]),
-            handler: { _ in
-                .object([
-                    "module": .string(moduleName),
-                    "status": .string("scaffold"),
-                    "introduced": .string("v2.2 · PKT-738"),
-                    "purpose": .string("Foundation for v2.2 dev primitives (code-edit, cursor/, computer/ helpers)."),
-                    "version": .string(AppVersion.marketing)
-                ])
-            }
-        )
+        // No-op: the dev/ module surface is composed entirely of tools
+        // registered by sibling modules (PlaywrightModule, VitestModule,
+        // LighthouseModule, CodeEditModule, LspModule) that pass
+        // `module: "dev"` to ToolRegistration. This explicit empty
+        // register(on:) call is retained for symmetry with other module
+        // entry points and for forward-compat with future scaffold tools.
+        _ = router
     }
 }

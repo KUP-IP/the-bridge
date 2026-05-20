@@ -28,9 +28,9 @@ public enum ChromeModule {
     /// Register all ChromeModule tools on the given router.
     public static func register(on router: ToolRouter) async {
 
-        // MARK: chrome_tabs – open
-        await router.register(ToolRegistration(
-            name: "chrome_tabs",
+        // MARK: chrome_tabs_list – open  (Sprint A · mcp-builder #14 rename)
+        let chromeTabsList = ToolRegistration(
+            name: "chrome_tabs_list",
             module: moduleName,
             tier: .open,
             description: "List all open Chrome tabs across windows. Returns windowId + tabIndex for other chrome_* tools. Resilient to per-window/tab Apple Event failures; returns partialResults/errors when possible.",
@@ -114,6 +114,11 @@ public enum ChromeModule {
                     "errors": .array(errors)
                 ])
             }
+        )
+        await router.register(chromeTabsList)
+        // Sprint A · mcp-builder #14: one-cycle deprecation alias.
+        await router.register(ToolDeprecationAlias.renameAlias(
+            oldName: "chrome_tabs", newName: "chrome_tabs_list", from: chromeTabsList
         ))
 
         // MARK: chrome_navigate – notify

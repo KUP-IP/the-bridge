@@ -27,13 +27,35 @@ public enum GhModule {
         runtime: GhRuntime = GhRuntime.shared,
         bgRuntime: BgProcessRuntime = BgProcessRuntime.shared
     ) async {
-        await router.register(makePrOpen(runtime: runtime, bgRuntime: bgRuntime))
+        // Sprint A · mcp-builder #7: rename gh_pr_open → gh_pr_create,
+        // gh_issue_open → gh_issue_create, gh_actions_runs →
+        // gh_actions_runs_list. "open" is the gh-CLI verb, "create" /
+        // "list" are the mcp-builder canonical action verbs.
+        // Old names stay as ONE-cycle deprecation aliases.
+        let prCreate = makePrCreate(runtime: runtime, bgRuntime: bgRuntime)
+        await router.register(prCreate)
+        await router.register(ToolDeprecationAlias.renameAlias(
+            oldName: "gh_pr_open", newName: "gh_pr_create", from: prCreate
+        ))
+
         await router.register(makePrStatus(runtime: runtime))
         await router.register(makePrComment(runtime: runtime))
         await router.register(makePrMerge(runtime: runtime, bgRuntime: bgRuntime))
-        await router.register(makeActionsRuns(runtime: runtime))
+
+        let actionsRunsList = makeActionsRunsList(runtime: runtime)
+        await router.register(actionsRunsList)
+        await router.register(ToolDeprecationAlias.renameAlias(
+            oldName: "gh_actions_runs", newName: "gh_actions_runs_list", from: actionsRunsList
+        ))
+
         await router.register(makeCheckStatus(runtime: runtime))
-        await router.register(makeIssueOpen(runtime: runtime))
+
+        let issueCreate = makeIssueCreate(runtime: runtime)
+        await router.register(issueCreate)
+        await router.register(ToolDeprecationAlias.renameAlias(
+            oldName: "gh_issue_open", newName: "gh_issue_create", from: issueCreate
+        ))
+
         await router.register(makeIssueComment(runtime: runtime))
         await router.register(makeIssueClose(runtime: runtime))
     }
@@ -42,12 +64,12 @@ public enum GhModule {
     // MARK: - Tool factories
     // ===========================================================
 
-    static func makePrOpen(runtime: GhRuntime, bgRuntime: BgProcessRuntime) -> ToolRegistration {
+    static func makePrCreate(runtime: GhRuntime, bgRuntime: BgProcessRuntime) -> ToolRegistration {
         ToolRegistration(
-            name: "gh_pr_open",
+            name: "gh_pr_create",
             module: moduleName,
             tier: .request,
-            description: "Open a GitHub pull request via `gh pr create`. Requires title (or fill: true). Returns the new PR URL on success. Long runs (e.g., `--fill` against many commits) can be sent to bg_process by passing background: true — the tool returns a bg_process job id immediately.",
+            description: "Create a GitHub pull request via `gh pr create`. Requires title (or fill: true). Returns the new PR URL on success. Long runs (e.g., `--fill` against many commits) can be sent to bg_process by passing background: true — the tool returns a bg_process job id immediately.",
             inputSchema: schemaObj([
                 "title":     strProp("PR title (required unless fill: true)."),
                 "body":      strProp("PR body (markdown)."),
@@ -63,9 +85,9 @@ public enum GhModule {
             ], required: []),
             handler: { arguments in
                 guard case .object(let obj) = arguments else {
-                    return invalidArgsValue("gh_pr_open", "expected object arguments")
+                    return invalidArgsValue("gh_pr_create", "expected object arguments")
                 }
-                if let cap = await ensureCapability("gh_pr_open", runtime: runtime) { return cap }
+                if let cap = await ensureCapability("gh_pr_create", runtime: runtime) { return cap }
 
                 var args: [String] = ["pr", "create"]
                 appendStr(&args, obj, "title", "--title")
@@ -80,14 +102,14 @@ public enum GhModule {
                 appendArr(&args, obj, "reviewers", "--reviewer")
 
                 if !args.contains("--fill") && !args.contains("--title") {
-                    return invalidArgsValue("gh_pr_open", "title is required (or pass fill: true)")
+                    return invalidArgsValue("gh_pr_create", "title is required (or pass fill: true)")
                 }
 
                 if case .bool(true) = obj["background"] {
-                    return await runInBackground("gh_pr_open", ghArgs: args,
-                        runtime: runtime, bgRuntime: bgRuntime, label: "gh_pr_open")
+                    return await runInBackground("gh_pr_create", ghArgs: args,
+                        runtime: runtime, bgRuntime: bgRuntime, label: "gh_pr_create")
                 }
-                return await runSync("gh_pr_open", ghArgs: args, runtime: runtime,
+                return await runSync("gh_pr_create", ghArgs: args, runtime: runtime,
                                      parseURL: true, parseJSON: false)
             }
         )
@@ -193,9 +215,9 @@ public enum GhModule {
         )
     }
 
-    static func makeActionsRuns(runtime: GhRuntime) -> ToolRegistration {
+    static func makeActionsRunsList(runtime: GhRuntime) -> ToolRegistration {
         ToolRegistration(
-            name: "gh_actions_runs",
+            name: "gh_actions_runs_list",
             module: moduleName,
             tier: .request,
             description: "List recent GitHub Actions runs via `gh run list --json ...`. Filter by branch, status ('queued'|'in_progress'|'completed'|'success'|'failure'|...), workflow (name or filename). Default limit 20.",
@@ -208,9 +230,9 @@ public enum GhModule {
                 "event":    strProp("Filter by event (push, pull_request, workflow_dispatch, ...).")
             ], required: []),
             handler: { arguments in
-                if let cap = await ensureCapability("gh_actions_runs", runtime: runtime) { return cap }
+                if let cap = await ensureCapability("gh_actions_runs_list", runtime: runtime) { return cap }
                 guard case .object(let obj) = arguments else {
-                    return invalidArgsValue("gh_actions_runs", "expected object arguments")
+                    return invalidArgsValue("gh_actions_runs_list", "expected object arguments")
                 }
                 let fields = "databaseId,name,displayTitle,status,conclusion,workflowName,headBranch,event,createdAt,updatedAt,url,headSha,number"
                 var args: [String] = ["run", "list"]
@@ -224,7 +246,7 @@ public enum GhModule {
                     return 20
                 }()
                 args.append(contentsOf: ["--limit", String(limit), "--json", fields])
-                let result = await runSync("gh_actions_runs", ghArgs: args, runtime: runtime,
+                let result = await runSync("gh_actions_runs_list", ghArgs: args, runtime: runtime,
                                            parseURL: false, parseJSON: true)
                 // Wrap parsed array with `count` for caller convenience.
                 if case .object(var dict) = result, case .array(let arr) = dict["json"] {
@@ -299,12 +321,12 @@ public enum GhModule {
         )
     }
 
-    static func makeIssueOpen(runtime: GhRuntime) -> ToolRegistration {
+    static func makeIssueCreate(runtime: GhRuntime) -> ToolRegistration {
         ToolRegistration(
-            name: "gh_issue_open",
+            name: "gh_issue_create",
             module: moduleName,
             tier: .request,
-            description: "Open a new GitHub issue via `gh issue create`. Returns the issue URL.",
+            description: "Create a new GitHub issue via `gh issue create`. Returns the issue URL.",
             inputSchema: schemaObj([
                 "title":     strProp("Issue title (required)."),
                 "body":      strProp("Issue body markdown."),
@@ -314,10 +336,10 @@ public enum GhModule {
                 "milestone": strProp("Optional milestone name.")
             ], required: ["title"]),
             handler: { arguments in
-                if let cap = await ensureCapability("gh_issue_open", runtime: runtime) { return cap }
+                if let cap = await ensureCapability("gh_issue_create", runtime: runtime) { return cap }
                 guard case .object(let obj) = arguments,
                       case .string(let title) = obj["title"], !title.isEmpty else {
-                    return invalidArgsValue("gh_issue_open", "required: title (non-empty string)")
+                    return invalidArgsValue("gh_issue_create", "required: title (non-empty string)")
                 }
                 var args: [String] = ["issue", "create", "--title", title]
                 appendStr(&args, obj, "body", "--body")
@@ -329,7 +351,7 @@ public enum GhModule {
                 if !args.contains("--body") {
                     args.append(contentsOf: ["--body", ""])
                 }
-                return await runSync("gh_issue_open", ghArgs: args, runtime: runtime,
+                return await runSync("gh_issue_create", ghArgs: args, runtime: runtime,
                                      parseURL: true, parseJSON: false)
             }
         )

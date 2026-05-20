@@ -22,9 +22,9 @@ func runNotionModuleTests() async {
     // MARK: - Tool Registration (23 tools)
     // ============================================================
 
-    await test("NotionModule registers 24 tools") {
+    await test("NotionModule registers 23 tools (Sprint A · #1: notion_block_read removed)") {
         let tools = await router.registrations(forModule: "notion")
-        try expect(tools.count == 24, "Expected 24 notion tools, got \(tools.count)")
+        try expect(tools.count == 23, "Expected 23 notion tools, got \(tools.count)")
     }
 
     let expectedTools: [String] = [
@@ -33,7 +33,7 @@ func runNotionModuleTests() async {
         "notion_block_delete", "notion_page_markdown_read", "notion_database_get", "notion_datasource_get",
         "notion_comments_list", "notion_comment_create", "notion_users_list",
         "notion_page_move", "notion_file_upload", "notion_token_introspect",
-        "notion_connections_list", "notion_block_read", "notion_block_update",
+        "notion_connections_list", "notion_block_update",
         "notion_datasource_update", "notion_datasource_create",
         "notion_discussion_create", "notion_code_block_append"
     ]
@@ -54,7 +54,7 @@ func runNotionModuleTests() async {
         "notion_search", "notion_page_read", "notion_query",
         "notion_page_markdown_read", "notion_comments_list",
         "notion_users_list", "notion_token_introspect", "notion_connections_list",
-        "notion_block_read", "notion_database_get", "notion_datasource_get"
+        "notion_database_get", "notion_datasource_get"
     ]
     for toolName in openTools {
         await test("\(toolName) tier is open") {
