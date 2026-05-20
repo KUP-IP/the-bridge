@@ -1,0 +1,17 @@
+{
+  "$comment_schema": "Schema reference: https://code.claude.com/docs/en/plugins-reference. Examples: https://github.com/anthropics/claude-plugins-official (plugins/* and external_plugins/*). Bridge MCP is a signed macOS .app — not an npm package — so the canonical 'command' field in .mcp.json points at the installed app's local MCP entry, not a fetched binary. See docs/operator/skills-attributions.md for the marketplace-submission gap notes.",
+  "name": "notion-bridge",
+  "version": "3.2.0",
+  "description": "Notion Bridge — a signed macOS .app that exposes 150+ MCP tools over stdio + streamable-HTTP. Workspace ops (Notion, Messages, Mail, Calendar), local-machine ops (files, shell, screen, browser, AX), 13 bundled SKILL.md defaults from anthropics/skills.",
+  "author": {
+    "name": "Isaiah Peters",
+    "email": "isaiah@kup.solutions"
+  },
+  "homepage": "https://github.com/kup-solutions/notion-bridge",
+  "license": "KUP Solutions Source-Available License v1.0",
+  "category": "productivity",
+  "notes": [
+    "Bridge MCP is NOT an npm package or fetched binary — it is a signed Mac .app installed at /Applications/Notion Bridge.app.",
+    "The .mcp.json registers the app's local stdio + HTTP endpoints. Marketplace submission must handle this 'local-app server' shape explicitly; see docs/operator/skills-attributions.md."
+  ]
+}

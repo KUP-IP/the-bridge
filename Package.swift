@@ -40,7 +40,14 @@ let package = Package(
                 .product(name: "JWTKit", package: "jwt-kit"),
             ],
             path: "NotionBridge",
-            exclude: ["App/NotionBridgeApp.swift", "App/Resources"]
+            exclude: ["App/NotionBridgeApp.swift", "App/Resources"],
+            // W3: bundled default SKILL.md files (Apache-2.0 skills from
+            // anthropics/skills + STUB.md stubs for source-available
+            // skills we cannot redistribute). `.copy` preserves directory
+            // layout verbatim so `Bundle.module` exposes
+            // `skills/<name>/SKILL.md` 1:1 — SPM does not try to
+            // "compile" the .md files.
+            resources: [.copy("Resources/skills")]
         ),
         .executableTarget(
             name: "NotionBridge",

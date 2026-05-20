@@ -472,6 +472,11 @@ await runCommandPaletteTests()    // cmd-w3: palette search + gate + AppDelegate
 await runSkillVsCommandSplitTests() // cmd-ux: LOCK the skill-vs-command body/properties split
 await runCommandsControllerTests()  // cmd-ux W1/W2: CommandsController observable state machine + status/focus model
 await runCommandVisibilityTests()   // cmd-ux W3: .command visibility axis — Codable, palette filter, picker write-back, empty-state
+await runFrontmatterParserTests()   // W2 D8: SKILL.md YAML frontmatter parser
+await runSkillSourceTests()         // W2 D2: SkillSource enum + legacy notionPageId backward-compat
+await runFilesystemSkillIndexTests() // W2 D3: SKILL.md filesystem index actor
+await runFetchSkillFileSourceTests() // W2 D5: file-source fetch_skill envelope shape
+await runListRoutingSkillsMergeTests() // W2 D6: merged routing-skills listing
 await runToolAnnotationAuditTests() // PKT-803 (v2.3 · WS-B): annotation coverage audit
 await runTransportRouterTests()     // PKT-803 (v2.3 · WS-B): transport router default/env
 await runRemoteOAuthHTTPTests()     // PKT-800 (S1): RFC 9728 PRM + transport gating + route
