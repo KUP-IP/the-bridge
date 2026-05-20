@@ -34,6 +34,13 @@ struct SkillsView: View {
     @State private var editingSkillName: String?
     @State private var editingURL: String = ""
 
+    // W2 D7: file-source skills surface as a separate read-only section
+    // populated from FilesystemSkillIndex.shared. Toggling them writes to
+    // BridgeDefaults.fileSkillEnabled (per-path) — the SKILL.md itself is
+    // the source of truth.
+    @State private var fileSourceSkills: [ParsedSkill] = []
+    @State private var fileSkillEnabledMap: [String: Bool] = [:]
+
     // BUG-2 fix: Inline skill name rename state
     @State private var renamingSkillName: String?
     @State private var renameText: String = ""
@@ -109,6 +116,33 @@ struct SkillsView: View {
                 }
             }
 
+            // W2 D7: file-source skills section (bundled + user dir).
+            // Read-only metadata (the .md file is the source of truth);
+            // operator can toggle enabled/disabled per path + reveal the
+            // SKILL.md in Finder.
+            if !fileSourceSkills.isEmpty {
+                Section {
+                    ForEach(fileSourceSkills, id: \.path) { fs in
+                        fileSkillRow(fs)
+                    }
+                } header: {
+                    HStack {
+                        Image(systemName: "doc.text")
+                            .font(.caption)
+                        Text("File-source skills")
+                            .font(.headline)
+                        Spacer()
+                        Text("\(fileSourceSkills.count) total")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } footer: {
+                    Text("SKILL.md files bundled with Notion Bridge or installed under ~/Library/Application Support/Notion Bridge/skills/. Toggling here does NOT modify the .md file — it stores a per-path enable flag.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             // Add Skill form
             Section {
                 TextField("Skill Name", text: $newSkillName)
@@ -181,9 +215,86 @@ struct SkillsView: View {
         .formStyle(.grouped)
         .onAppear {
             skillsManager.reloadFromUserDefaults()
+            loadFileSourceSkills()
         }
         .onReceive(NotificationCenter.default.publisher(for: .notionBridgeSkillsStorageDidChange)) { _ in
             skillsManager.reloadFromUserDefaults()
+        }
+    }
+
+    // MARK: - W2 D7: File-source skill row
+
+    @ViewBuilder
+    private func fileSkillRow(_ fs: ParsedSkill) -> some View {
+        HStack(spacing: 12) {
+            Toggle("", isOn: Binding(
+                get: { fileSkillEnabledMap[fs.path.path] ?? true },
+                set: { newValue in
+                    fileSkillEnabledMap[fs.path.path] = newValue
+                    SkillsModule.setFileSkillEnabled(path: fs.path, enabled: newValue)
+                }
+            ))
+            .toggleStyle(.switch)
+            .labelsHidden()
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(fs.name)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.primary)
+                let summary: String = {
+                    if case .string(let d) = fs.frontmatter["description"] { return d }
+                    return ""
+                }()
+                if !summary.isEmpty {
+                    Text(summary)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
+                }
+                Text(fs.displayPath)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+
+            HStack(spacing: 3) {
+                Image(systemName: "doc.text")
+                    .font(.caption2)
+                Text(fs.isUserSource ? "User" : "Bundled")
+                    .font(.caption2)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.secondary.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+
+            Spacer()
+
+            Button {
+                NSWorkspace.shared.activateFileViewerSelecting([fs.path])
+            } label: {
+                Image(systemName: "folder")
+                    .font(.caption)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Reveal SKILL.md in Finder")
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func loadFileSourceSkills() {
+        Task {
+            let skills = await FilesystemSkillIndex.shared.allSkills()
+            var enabledMap: [String: Bool] = [:]
+            for s in skills {
+                enabledMap[s.path.path] = SkillsModule.isFileSkillEnabled(path: s.path)
+            }
+            await MainActor.run {
+                self.fileSourceSkills = skills
+                self.fileSkillEnabledMap = enabledMap
+            }
         }
     }
 
@@ -288,6 +399,22 @@ struct SkillsView: View {
                 Image(systemName: skill.platform.systemImage)
                     .font(.caption2)
                 Text(skill.platform.displayName)
+                    .font(.caption2)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.secondary.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+
+            // W2 D7: source badge — distinguishes Notion-page-backed
+            // skills (this row) from file-source SKILL.md skills (their
+            // own section above). Notion-source rows are always "Notion"
+            // here because file-source skills don't live in this list.
+            HStack(spacing: 3) {
+                Image(systemName: "network")
+                    .font(.caption2)
+                Text("Notion")
                     .font(.caption2)
             }
             .foregroundStyle(.secondary)
