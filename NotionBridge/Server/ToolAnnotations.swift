@@ -92,10 +92,11 @@ public enum ToolAnnotationCatalog {
     public static let entries: [String: BridgeToolAnnotations] = [
         "applescript_exec": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: true, openWorld: true),
         // Sprint A · mcp-builder #1: ax_element_info / ax_find_element removed
-        // (PKT-755 v2.2 deprecation cycle complete; callers use ax_query modes).
-        // ax_focused_app is revived in W3 — see entry below in the "Sprint A
-        // additions" block, not here, so the audit-test catalog ⊆ live check
-        // stays well-defined during the W2→W3 transition.
+        // (PKT-755 v2.2 deprecation cycle complete; callers use ax_inspect modes).
+        // #11: ax_query → ax_inspect rename (alias kept). ax_focused_app
+        // revived as a NEW dedicated top-level tool (NOT a deprecation shim).
+        "ax_focused_app": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
+        "ax_inspect": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         "ax_perform_action": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "ax_query": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         "ax_tree": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
@@ -174,7 +175,11 @@ public enum ToolAnnotationCatalog {
         "git_merge": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: true, openWorld: true),
         "git_show": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: true, openWorld: true),
         "git_status": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: true),
+        // Sprint A · mcp-builder #6: git_worktree split into 3 primitives.
         "git_worktree": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: true),
+        "git_worktree_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: true),
+        "git_worktree_add": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: true, openWorld: true),
+        "git_worktree_remove": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: true, openWorld: true),
         "http_fetch": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: true),
         "job_create": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "job_delete": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: false, openWorld: false),
@@ -202,7 +207,14 @@ public enum ToolAnnotationCatalog {
         "lsp_references": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: true, openWorld: true),
         "lsp_rename": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: true),
         "lsp_session_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: true),
+        // Sprint A · mcp-builder #2: manage_skill split into 5 primitives.
+        // The 11-action polymorphism is preserved as a one-cycle alias.
         "manage_skill": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
+        "skill_create": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
+        "skill_delete": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: false, openWorld: false),
+        "skill_update": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
+        "skill_rename": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
+        "skill_sync_notion": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "messages_chat": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "messages_content": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         "messages_participants": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),

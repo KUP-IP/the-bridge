@@ -358,18 +358,22 @@ func runEndToEndTests() async {
         // Sprint A · mcp-builder #1: notion_block_read removed (24 → 23).
         try expect(notion.count == 23, "NotionModule: expected 23 (Sprint A · #1)")
         try expect(screen.count == 5, "ScreenModule: expected 5")
-        // Sprint A · mcp-builder #1: ax_focused_app, ax_find_element,
-        // ax_element_info removed (6 → 3). W3 #11 will revive ax_focused_app
-        // + add ax_inspect as the renamed primary of ax_query.
-        try expect(accessibility.count == 3, "AccessibilityModule: expected 3 (Sprint A · W2 #1)")
+        // Sprint A · mcp-builder #1 (W2): ax_find_element, ax_element_info
+        // removed. #11 (W3): ax_query → ax_inspect rename (alias kept), and
+        // ax_focused_app revived as a NEW dedicated tool. Final live set:
+        // ax_tree, ax_inspect, ax_query, ax_focused_app, ax_perform_action = 5.
+        try expect(accessibility.count == 5,
+                   "AccessibilityModule: expected 5 (Sprint A · #11 final)")
         try expect(applescript.count == 1, "AppleScriptModule: expected 1")
 
         let chrome = await router.registrations(forModule: "chrome")
         let skills = await router.registrations(forModule: "skills")
         // Sprint A · mcp-builder #14: chrome_tabs → chrome_tabs_list rename
         // (alias kept), list_routing_skills → skills_routing_list (alias kept).
+        // Sprint A · mcp-builder #2: manage_skill split into 5 primitives
+        //   (skill_create/delete/update/rename/sync_notion) + alias kept.
         try expect(chrome.count == 6, "ChromeModule: expected 6 (Sprint A · #14)")
-        try expect(skills.count == 4, "SkillsModule: expected 4 (Sprint A · #14)")
+        try expect(skills.count == 9, "SkillsModule: expected 9 (Sprint A · #2 + #14)")
 
         let credential = await router.registrations(forModule: "credential")
         try expect(credential.count == 4, "CredentialModule: expected 4")

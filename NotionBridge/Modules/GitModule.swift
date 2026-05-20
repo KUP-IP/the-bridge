@@ -666,9 +666,84 @@ extension GitModule {
         runtime: GitRuntime,
         bgRuntime: BgProcessRuntime = BgProcessRuntime.shared
     ) async {
-        await router.register(makeWorktree(runtime: runtime, bgRuntime: bgRuntime))
+        // Sprint A · mcp-builder #6: split git_worktree into 3 primitives
+        // (git_worktree_list / git_worktree_add / git_worktree_remove); the
+        // original stays as a 1-cycle deprecation alias.
+        let worktree = makeWorktree(runtime: runtime, bgRuntime: bgRuntime)
+        await router.register(worktree)
+        await registerWorktreeSplitPrimitives(on: router, primary: worktree)
+
         await router.register(makeCreateBranch(runtime: runtime))
         await router.register(makeMerge(runtime: runtime, bgRuntime: bgRuntime))
+    }
+
+    /// Sprint A · mcp-builder #6: register the 3 split primitives that
+    /// replace git_worktree's `action` enum. Each primitive forwards into
+    /// git_worktree's handler with `action` injected so the implementation
+    /// stays a single source of truth.
+    private static func registerWorktreeSplitPrimitives(
+        on router: ToolRouter,
+        primary: ToolRegistration
+    ) async {
+        let primaryHandler = primary.handler
+
+        // git_worktree_list — folds action='list'.
+        await router.register(ToolRegistration(
+            name: "git_worktree_list",
+            module: moduleName,
+            tier: .request,
+            description: "List git worktrees as structured entries (path, head, branch, bare/detached/locked/prunable flags). Splits out of git_worktree action='list' for clearer agent discovery.",
+            inputSchema: schemaObj([
+                "cwd": strProp("Optional working directory (defaults to Bridge process cwd).")
+            ], required: []),
+            handler: { args in
+                var merged: [String: Value]
+                if case .object(let d) = args { merged = d } else { merged = [:] }
+                merged["action"] = .string("list")
+                return try await primaryHandler(.object(merged))
+            }
+        ))
+
+        // git_worktree_add — folds action='add'.
+        await router.register(ToolRegistration(
+            name: "git_worktree_add",
+            module: moduleName,
+            tier: .request,
+            description: "Add a git worktree at `path` (optionally from `ref` and/or new branch `branch`). For clone-class additions, pass background:true to spawn via BgProcessRuntime and return a jobId immediately. Splits out of git_worktree action='add'.",
+            inputSchema: schemaObj([
+                "path":       strProp("Worktree path (required)."),
+                "ref":        strProp("Ref to check out (commit-ish)."),
+                "branch":     strProp("Create a new branch with this name (-b <name>)."),
+                "force":      boolProp("Pass -f."),
+                "cwd":        strProp("Optional working directory."),
+                "background": boolProp("Spawn via bg_process_start and return jobId immediately.")
+            ], required: ["path"]),
+            handler: { args in
+                var merged: [String: Value]
+                if case .object(let d) = args { merged = d } else { merged = [:] }
+                merged["action"] = .string("add")
+                return try await primaryHandler(.object(merged))
+            }
+        ))
+
+        // git_worktree_remove — folds action='remove'.
+        await router.register(ToolRegistration(
+            name: "git_worktree_remove",
+            module: moduleName,
+            tier: .request,
+            description: "Remove a git worktree at `path`. Pass force:true to drop modified/locked worktrees (--force). Splits out of git_worktree action='remove'.",
+            inputSchema: schemaObj([
+                "path":  strProp("Worktree path to remove (required)."),
+                "force": boolProp("Pass --force."),
+                "cwd":   strProp("Optional working directory.")
+            ], required: ["path"]),
+            handler: { args in
+                var merged: [String: Value]
+                if case .object(let d) = args { merged = d } else { merged = [:] }
+                merged["action"] = .string("remove")
+                return try await primaryHandler(.object(merged))
+            }
+        ))
     }
 
     static func makeWorktree(runtime: GitRuntime, bgRuntime: BgProcessRuntime) -> ToolRegistration {
@@ -676,7 +751,7 @@ extension GitModule {
             name: "git_worktree",
             module: moduleName,
             tier: .request,
-            description: "Manage git worktrees. action='list' parses `git worktree list --porcelain` into structured entries. action='add' creates a worktree at `path` (optionally from `ref` and/or new branch `branch`). action='remove' deletes the worktree at `path`. For `add` (clone-class), pass background:true to spawn via BgProcessRuntime and return jobId immediately.",
+            description: "DEPRECATED — split into git_worktree_list / git_worktree_add / git_worktree_remove in Sprint A · mcp-builder #6. Removed in 3.5.0. Manage git worktrees. action='list' parses `git worktree list --porcelain` into structured entries. action='add' creates a worktree at `path` (optionally from `ref` and/or new branch `branch`). action='remove' deletes the worktree at `path`. For `add` (clone-class), pass background:true to spawn via BgProcessRuntime and return jobId immediately.",
             inputSchema: schemaObj([
                 "action":     enumProp(["add", "list", "remove"], "Operation to perform (required)."),
                 "path":       strProp("Worktree path (required for add/remove)."),

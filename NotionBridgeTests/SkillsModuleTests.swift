@@ -23,9 +23,32 @@ func runSkillsModuleTests() async {
     // MARK: - Tool Registration (fetch_skill, list_routing_skills, manage_skill)
     // ============================================================
 
-    await test("SkillsModule registers 4 tools (Sprint A · #14: +skills_routing_list)") {
+    await test("SkillsModule registers 9 tools (Sprint A · #14 alias + #2 5-way split)") {
         let tools = await router.registrations(forModule: "skills")
-        try expect(tools.count == 4, "Expected 4 skills tools, got \(tools.count)")
+        // 4 pre-Sprint-A (fetch_skill, list_routing_skills, manage_skill,
+        //               skills_routing_list-new) + 5 split primitives.
+        try expect(tools.count == 9, "Expected 9 skills tools, got \(tools.count)")
+    }
+
+    await test("Sprint A · #2: 5 skill_* split primitives are registered") {
+        let tools = await router.registrations(forModule: "skills")
+        let names = Set(tools.map(\.name))
+        for primitive in ["skill_create", "skill_delete", "skill_update",
+                          "skill_rename", "skill_sync_notion"] {
+            try expect(names.contains(primitive),
+                       "Missing \(primitive) — Sprint A · mcp-builder #2 split")
+        }
+    }
+
+    await test("Sprint A · #2: manage_skill description carries DEPRECATED prefix") {
+        let tools = await router.registrations(forModule: "skills")
+        guard let tool = tools.first(where: { $0.name == "manage_skill" }) else {
+            throw TestError.assertion("manage_skill must stay live as a 1-cycle alias")
+        }
+        try expect(tool.description.contains("DEPRECATED"),
+                   "manage_skill description must mark deprecation, got: \(tool.description.prefix(80))")
+        try expect(tool.description.contains("skill_create"),
+                   "manage_skill description must point at the split primitives")
     }
 
     await test("Tool fetch_skill is registered") {

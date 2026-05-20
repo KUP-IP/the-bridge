@@ -382,12 +382,15 @@ public enum AccessibilityModule {
 
     public static func register(on router: ToolRouter) async {
 
-        // ── 1. ax_query (open) — PKT-755 unified replacement ──────────────
-        await router.register(ToolRegistration(
-            name: "ax_query",
+        // ── 1. ax_inspect (open) — Sprint A · #11 rename of ax_query ─────
+        // PKT-755 unified ax_focused_app + ax_find_element + ax_element_info
+        // into ax_query; Sprint A renames that umbrella to the action-verb
+        // canonical ax_inspect. ax_query stays as a one-cycle alias.
+        let axInspect = ToolRegistration(
+            name: "ax_inspect",
             module: moduleName,
             tier: .open,
-            description: "Unified AX query (PKT-755 — replaces ax_focused_app, ax_find_element, ax_element_info). mode='focused_app' returns the frontmost app + its focused element. mode='find_element' locates AX elements by role/title/label and returns matching paths. mode='element_info' inspects one element's full attributes, available actions, geometry, and state. Companion to ax_tree (full dump) and ax_perform_action (actuation).",
+            description: "Inspect macOS accessibility (AX) elements. mode='focused_app' returns the frontmost app + its focused element. mode='find_element' locates AX elements by role/title/label and returns matching paths. mode='element_info' inspects one element's full attributes, available actions, geometry, and state. Companion to ax_tree (full dump) and ax_perform_action (actuation).",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -417,13 +420,31 @@ public enum AccessibilityModule {
                     return AXModuleError.invalidInput("Unknown mode '\(mode)'. Expected: focused_app | find_element | element_info").toResponse()
                 }
             }
+        )
+        await router.register(axInspect)
+        // One-cycle deprecation alias under the old name.
+        await router.register(ToolDeprecationAlias.renameAlias(
+            oldName: "ax_query", newName: "ax_inspect", from: axInspect
         ))
 
-        // Sprint A · mcp-builder #1: ax_focused_app DEPRECATED shim removed
-        // (was registered as PKT-755 deprecation shim for v2.2 → v2.3 ramp;
-        // the cycle has elapsed, audit allows full removal). The name is
-        // revived in W3 as a NEW top-level tool (audit #11) that calls the
-        // same focusedAppPayload() helper directly — see below.
+        // ── 2. ax_focused_app (open) — Sprint A · #11 REVIVAL ─────────────
+        // Promoted from "mode='focused_app'" to its own top-level tool
+        // because frontmost-app introspection is hit often enough to deserve
+        // a dedicated, zero-arg call site (audit §3-question #2 acknowledged
+        // the optics of reviving a deprecated name — see report).
+        await router.register(ToolRegistration(
+            name: "ax_focused_app",
+            module: moduleName,
+            tier: .open,
+            description: "Return the frontmost macOS app's name, bundleId, and pid (+ its focused element when AX permission is granted). First step before any other ax_* call. Equivalent to `ax_inspect mode='focused_app'` but takes no arguments and is faster to discover.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([:])
+            ]),
+            handler: { _ in
+                focusedAppPayload()
+            }
+        ))
 
         // ── 3. ax_tree (open) ─────────────────────────────────────────────
         await router.register(ToolRegistration(

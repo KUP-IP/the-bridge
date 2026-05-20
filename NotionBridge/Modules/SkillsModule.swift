@@ -331,16 +331,35 @@ public enum SkillsModule {
         ))
     }
 
-    // MARK: - manage_skill Tool (PKT-477 Feature 3)
+    // MARK: - manage_skill Tool (PKT-477 Feature 3) + Sprint A · #2 split
+
+    /// Sprint A · mcp-builder #2: manage_skill's 11-action polymorphism is
+    /// the worst-case schema-clarity violation in the catalog. We split it
+    /// into 5 focused primitives (skill_create, skill_delete, skill_update,
+    /// skill_rename, skill_sync_notion) and keep manage_skill itself as a
+    /// one-cycle deprecation alias that dispatches on `action` to the same
+    /// handler. The primitives wrap the SAME handler — they just inject the
+    /// `action` arg server-side, so agents can pick the right primitive by
+    /// name without a polymorphic enum decision.
+    ///
+    /// Action → primitive map (the 11 actions collapse onto 5 verbs):
+    ///   skill_create        ← add, bulk_add
+    ///   skill_delete        ← delete
+    ///   skill_update        ← toggle, update_url, set_visibility, set_metadata
+    ///   skill_rename        ← rename
+    ///   skill_sync_notion   ← sync_metadata_to_notion, sync_metadata_from_notion
+    ///   (`list` stays on manage_skill — fetch_skill already covers per-skill
+    ///    reads, and skills_routing_list covers the routing-visible subset.)
 
     /// Register the `manage_skill` tool on the given router.
     private static func registerManageSkill(on router: ToolRouter, skillCache: SkillCache) async {
 
-        await router.register(ToolRegistration(
+        // Capture the handler closure for reuse by the 5 split primitives.
+        let manageSkill = ToolRegistration(
             name: "manage_skill",
             module: moduleName,
             tier: .notify, // was .orange — no such SecurityTier member
-            description: "Add, edit, delete, toggle, rename, or sync skills + their Notion metadata (trigger phrases, anti-trigger phrases, summary, visibility).",
+            description: "DEPRECATED — split into skill_create / skill_delete / skill_update / skill_rename / skill_sync_notion in Sprint A · mcp-builder #2. Removed in 3.5.0. Add, edit, delete, toggle, rename, or sync skills + their Notion metadata (trigger phrases, anti-trigger phrases, summary, visibility).",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -829,7 +848,183 @@ public enum SkillsModule {
                     ])
                 }
             }
+        )
+        await router.register(manageSkill)
+
+        // Sprint A · mcp-builder #2: register the 5 split primitives.
+        // Each primitive forwards into manage_skill's handler with `action`
+        // injected, so the implementation stays a single source of truth.
+        await Self.registerSkillSplitPrimitives(on: router, primaryHandler: manageSkill.handler)
+    }
+
+    // MARK: - Sprint A · #2 split primitives
+
+    /// Register the 5 mcp-builder primitives that replace manage_skill's
+    /// 11-action polymorphism. Each primitive's handler injects the
+    /// appropriate `action` (or `actions` map, for the multi-action
+    /// primitives like skill_update) into the input before forwarding.
+    private static func registerSkillSplitPrimitives(
+        on router: ToolRouter,
+        primaryHandler: @escaping @Sendable (Value) async throws -> Value
+    ) async {
+        // skill_create — folds manage_skill add + bulk_add.
+        await router.register(ToolRegistration(
+            name: "skill_create",
+            module: moduleName,
+            tier: .notify,
+            description: "Create one or more skills (Notion-source or file-source). For a single skill: name + url (+ optional visibility). For bulk: skills=[{name,url},...]. Replaces manage_skill action='add'/'bulk_add'.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "name": .object(["type": .string("string"), "description": .string("Skill name (single-skill mode).")]),
+                    "url": .object(["type": .string("string"), "description": .string("Notion page URL or hex page ID (single-skill mode).")]),
+                    "visibility": .object(["type": .string("string"), "description": .string("routing | standard | command")]),
+                    "skills": .object([
+                        "type": .string("array"),
+                        "description": .string("Array of {name, url} objects for bulk creation."),
+                        "items": .object(["type": .string("object")])
+                    ]),
+                    "bypassConfirmation": .object(["type": .string("boolean")])
+                ])
+            ]),
+            handler: { args in
+                // Bulk mode if `skills` is an array; else single-add.
+                var merged = Self.unpackArgsObject(args)
+                if case .array = merged["skills"] {
+                    merged["action"] = .string("bulk_add")
+                } else {
+                    merged["action"] = .string("add")
+                }
+                return try await primaryHandler(.object(merged))
+            }
         ))
+
+        // skill_delete — folds manage_skill delete.
+        await router.register(ToolRegistration(
+            name: "skill_delete",
+            module: moduleName,
+            tier: .notify,
+            description: "Delete one skill by name. Replaces manage_skill action='delete'.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "name": .object(["type": .string("string"), "description": .string("Skill name to delete.")]),
+                    "bypassConfirmation": .object(["type": .string("boolean")])
+                ]),
+                "required": .array([.string("name")])
+            ]),
+            handler: { args in
+                var merged = Self.unpackArgsObject(args)
+                merged["action"] = .string("delete")
+                return try await primaryHandler(.object(merged))
+            }
+        ))
+
+        // skill_update — folds manage_skill toggle, update_url, set_visibility, set_metadata.
+        await router.register(ToolRegistration(
+            name: "skill_update",
+            module: moduleName,
+            tier: .notify,
+            description: "Update one skill: toggle on/off, change its URL, set visibility, or replace MCP metadata (summary + trigger/anti-trigger phrases). Picks the right action automatically based on which fields are present. Replaces manage_skill toggle/update_url/set_visibility/set_metadata.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "name": .object(["type": .string("string"), "description": .string("Skill name (required).")]),
+                    "toggle": .object(["type": .string("boolean"), "description": .string("If true, toggle enabled/disabled.")]),
+                    "url": .object(["type": .string("string"), "description": .string("New URL — selects update_url path.")]),
+                    "visibility": .object(["type": .string("string"), "description": .string("routing | standard | command — selects set_visibility.")]),
+                    "summary": .object(["type": .string("string")]),
+                    "triggerPhrases": .object(["type": .string("array"), "items": .object(["type": .string("string")])]),
+                    "antiTriggerPhrases": .object(["type": .string("array"), "items": .object(["type": .string("string")])]),
+                    "bypassConfirmation": .object(["type": .string("boolean")])
+                ]),
+                "required": .array([.string("name")])
+            ]),
+            handler: { args in
+                var merged = Self.unpackArgsObject(args)
+                // Decide which underlying action to invoke based on which
+                // field is present. Order matches the original manage_skill
+                // explicit-action precedence.
+                if case .bool(true) = merged["toggle"] {
+                    merged["action"] = .string("toggle")
+                } else if merged["url"] != nil {
+                    merged["action"] = .string("update_url")
+                } else if merged["summary"] != nil
+                    || merged["triggerPhrases"] != nil
+                    || merged["antiTriggerPhrases"] != nil {
+                    merged["action"] = .string("set_metadata")
+                } else if merged["visibility"] != nil {
+                    merged["action"] = .string("set_visibility")
+                } else {
+                    return .object([
+                        "error": .string("skill_update requires at least one update field: toggle, url, visibility, summary, triggerPhrases, antiTriggerPhrases")
+                    ])
+                }
+                return try await primaryHandler(.object(merged))
+            }
+        ))
+
+        // skill_rename — folds manage_skill rename.
+        await router.register(ToolRegistration(
+            name: "skill_rename",
+            module: moduleName,
+            tier: .notify,
+            description: "Rename one skill (preserves UUID, enabled state, visibility, metadata). Replaces manage_skill action='rename'.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "name": .object(["type": .string("string"), "description": .string("Current skill name.")]),
+                    "newName": .object(["type": .string("string"), "description": .string("New skill name.")]),
+                    "bypassConfirmation": .object(["type": .string("boolean")])
+                ]),
+                "required": .array([.string("name"), .string("newName")])
+            ]),
+            handler: { args in
+                var merged = Self.unpackArgsObject(args)
+                merged["action"] = .string("rename")
+                return try await primaryHandler(.object(merged))
+            }
+        ))
+
+        // skill_sync_notion — folds manage_skill sync_metadata_to_notion / from_notion.
+        await router.register(ToolRegistration(
+            name: "skill_sync_notion",
+            module: moduleName,
+            tier: .notify,
+            description: "Sync one skill's MCP metadata (summary + trigger/anti-trigger phrases) between local store and Notion. direction='push' uploads local → Notion. direction='pull' downloads Notion → local. Replaces manage_skill sync_metadata_to_notion / sync_metadata_from_notion.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "name": .object(["type": .string("string"), "description": .string("Skill name (required).")]),
+                    "direction": .object([
+                        "type": .string("string"),
+                        "description": .string("'push' = local → Notion. 'pull' = Notion → local."),
+                        "enum": .array([.string("push"), .string("pull")])
+                    ]),
+                    "bypassConfirmation": .object(["type": .string("boolean")])
+                ]),
+                "required": .array([.string("name"), .string("direction")])
+            ]),
+            handler: { args in
+                var merged = Self.unpackArgsObject(args)
+                if case .string(let dir) = merged["direction"] {
+                    merged["action"] = .string(dir == "pull" ? "sync_metadata_from_notion" : "sync_metadata_to_notion")
+                } else {
+                    return .object([
+                        "error": .string("skill_sync_notion requires direction='push' or 'pull'")
+                    ])
+                }
+                return try await primaryHandler(.object(merged))
+            }
+        ))
+    }
+
+    /// Unpack a Value argument expected to be an object literal. Returns
+    /// empty dict on non-object input (the handler's own validation will
+    /// then surface a meaningful error).
+    fileprivate static func unpackArgsObject(_ v: Value) -> [String: Value] {
+        if case .object(let dict) = v { return dict }
+        return [:]
     }
 
     // MARK: - UserDefaults Write Helpers (non-MainActor safe)

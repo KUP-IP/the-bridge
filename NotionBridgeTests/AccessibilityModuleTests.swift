@@ -32,19 +32,97 @@ func runAccessibilityModuleTests() async {
 
     // --- Registration ---
 
-    await test("AccessibilityModule registers the live AX surface") {
+    await test("AccessibilityModule registers the post-Sprint-A AX surface") {
         let tools = await router.registrations(forModule: "accessibility")
         let names = Set(tools.map(\.name))
-        // Post W2: 3 live tools (ax_tree, ax_query, ax_perform_action).
-        // W3 will add ax_inspect + revived ax_focused_app + ax_query alias.
+        // Post Sprint A: 5 live tools — ax_tree, ax_inspect (renamed
+        // primary), ax_query (one-cycle alias of ax_inspect), revived
+        // ax_focused_app (NEW dedicated tool — audit #11), ax_perform_action.
         try expect(names.contains("ax_tree"), "Missing ax_tree")
-        try expect(names.contains("ax_query"), "Missing ax_query")
+        try expect(names.contains("ax_inspect"), "Missing ax_inspect (Sprint A · #11 primary)")
+        try expect(names.contains("ax_query"), "Missing ax_query (Sprint A · #11 alias)")
+        try expect(names.contains("ax_focused_app"),
+                   "Missing ax_focused_app (Sprint A · #11 revival)")
         try expect(names.contains("ax_perform_action"), "Missing ax_perform_action")
         // Removed in W2 (Sprint A · mcp-builder #1):
         try expect(!names.contains("ax_find_element"),
                    "ax_find_element should be removed (Sprint A · mcp-builder #1)")
         try expect(!names.contains("ax_element_info"),
                    "ax_element_info should be removed (Sprint A · mcp-builder #1)")
+    }
+
+    // Sprint A · mcp-builder #11 — ax_query → ax_inspect alias forwarding.
+
+    await test("ax_query is a DEPRECATED alias of ax_inspect") {
+        let tools = await router.registrations(forModule: "accessibility")
+        guard let tool = tools.first(where: { $0.name == "ax_query" }) else {
+            throw TestError.assertion("ax_query alias must be registered (1-cycle)")
+        }
+        try expect(tool.description.hasPrefix("DEPRECATED"),
+                   "ax_query must be marked DEPRECATED, got: \(tool.description.prefix(80))")
+        try expect(tool.description.contains("ax_inspect"),
+                   "ax_query description must point at ax_inspect")
+    }
+
+    await test("ax_inspect is open tier (Sprint A · #11 primary)") {
+        let tools = await router.registrations(forModule: "accessibility")
+        guard let tool = tools.first(where: { $0.name == "ax_inspect" }) else {
+            throw TestError.assertion("ax_inspect must be registered")
+        }
+        try expect(tool.tier == .open, "Expected open, got \(tool.tier.rawValue)")
+    }
+
+    await test("ax_focused_app is open tier (Sprint A · #11 revival, 0-arg)") {
+        let tools = await router.registrations(forModule: "accessibility")
+        guard let tool = tools.first(where: { $0.name == "ax_focused_app" }) else {
+            throw TestError.assertion("ax_focused_app must be registered (revived)")
+        }
+        try expect(tool.tier == .open, "Expected open, got \(tool.tier.rawValue)")
+    }
+
+    await test("ax_focused_app description does NOT mark DEPRECATED (revived)") {
+        let tools = await router.registrations(forModule: "accessibility")
+        guard let tool = tools.first(where: { $0.name == "ax_focused_app" }) else {
+            throw TestError.assertion("ax_focused_app must be registered (revived)")
+        }
+        try expect(!tool.description.contains("DEPRECATED"),
+                   "Revived ax_focused_app must NOT be marked deprecated")
+    }
+
+    await test("ax_query and ax_inspect have identical dispatch (alias forwarding)") {
+        let viaAlias = try await router.dispatch(toolName: "ax_query",
+                                                  arguments: .object(["mode": .string("focused_app")]))
+        let viaPrimary = try await router.dispatch(toolName: "ax_inspect",
+                                                    arguments: .object(["mode": .string("focused_app")]))
+        if case .object(let a) = viaAlias, case .object(let b) = viaPrimary {
+            // Both routes share the same handler; on the same call they
+            // must produce the same key-set (modulo timing-flake which is
+            // irrelevant — focusedAppPayload is deterministic per process).
+            if case .string(let ae) = a["error"], case .string(let be) = b["error"] {
+                try expect(ae == be, "alias error parity mismatch: \(ae) vs \(be)")
+            } else {
+                try expect(Set(a.keys) == Set(b.keys),
+                           "alias key-set parity mismatch: \(Set(a.keys)) vs \(Set(b.keys))")
+            }
+        } else {
+            throw TestError.assertion("Both routes must return object responses")
+        }
+    }
+
+    await test("ax_focused_app (revived) returns same shape as ax_inspect(focused_app)") {
+        let direct = try await router.dispatch(toolName: "ax_focused_app", arguments: .object([:]))
+        let viaInspect = try await router.dispatch(toolName: "ax_inspect",
+                                                    arguments: .object(["mode": .string("focused_app")]))
+        if case .object(let a) = direct, case .object(let b) = viaInspect {
+            if case .string(let ae) = a["error"], case .string(let be) = b["error"] {
+                try expect(ae == be, "focused_app helper error parity: \(ae) vs \(be)")
+            } else {
+                try expect(Set(a.keys) == Set(b.keys),
+                           "focused_app helper key-set parity: \(Set(a.keys)) vs \(Set(b.keys))")
+            }
+        } else {
+            throw TestError.assertion("Both routes must return object responses")
+        }
     }
 
     // --- Tier classification ---
