@@ -47,15 +47,61 @@ func runToolAnnotationAuditTests() async {
         try expect(stale.isEmpty, "stale catalog entries (no live tool): \(stale.sorted())")
     }
 
-    await test("all four annotation fields are present on every catalog entry") {
+    await test("all five annotation fields are present on every catalog entry") {
         // Fields are non-optional Bool — presence is type-guaranteed.
         // This asserts the catalog is non-trivial and every entry is a
-        // fully-formed 4-tuple (compile-time enforced; runtime sanity).
+        // fully-formed 5-tuple (compile-time enforced; runtime sanity).
+        // Sprint A · mcp-builder Top-15 #13: `idempotentHint` joined the
+        // explicit-coverage invariant alongside the original four hints.
         try expect(ToolAnnotationCatalog.entries.count >= liveNames.count,
                    "catalog (\(ToolAnnotationCatalog.entries.count)) < live (\(liveNames.count))")
         for (_, a) in ToolAnnotationCatalog.entries {
-            _ = (a.readOnlyHint, a.destructiveHint, a.requiresConfirmation, a.openWorld)
+            _ = (a.readOnlyHint, a.destructiveHint, a.idempotentHint,
+                 a.requiresConfirmation, a.openWorld)
         }
+    }
+
+    // Sprint A · mcp-builder Top-15 #13: hard-fail the build when ANY live
+    // tool lacks an explicit idempotentHint entry. This mirrors the
+    // requiresConfirmation invariant that already enforces "no implicit
+    // defaults" on the static surface. Strictly speaking, the first test
+    // ("every registered static tool has an EXPLICIT annotation entry")
+    // already covers presence — but a dedicated assertion makes the
+    // intent (every annotation carries idempotentHint as a first-class
+    // axis, not an afterthought) impossible to drift away from.
+    await test("every registered static tool has an EXPLICIT idempotentHint (zero implicit defaults)") {
+        var missing: [String] = []
+        for reg in regs {
+            guard let ann = ToolAnnotationCatalog.annotations(for: reg.name) else {
+                continue // covered by the first invariant above
+            }
+            // `idempotentHint` is a non-optional Bool — its presence is
+            // type-guaranteed for every entry. This loop exists so a
+            // future refactor that makes the field optional (or that
+            // sneaks in a permissive default) trips this test loudly.
+            _ = ann.idempotentHint
+            if reg.name.isEmpty { missing.append(reg.name) }
+        }
+        try expect(missing.isEmpty,
+                   "tools missing explicit idempotentHint: \(missing.sorted())")
+    }
+
+    // Sprint A · mcp-builder Top-15 #12: job_pause / job_resume mutate
+    // LaunchAgent state (unregister/re-register). The catalog previously
+    // marked them readOnlyHint:true — a semantic accuracy bug the
+    // mirror-invariant test couldn't catch. Pin the fix.
+    await test("job_pause / job_resume are NOT readOnly (sprint-a · audit #12)") {
+        let pause = ToolAnnotationCatalog.annotations(for: "job_pause")
+        try expect(pause?.readOnlyHint == false,
+                   "job_pause must be readOnlyHint:false — pause unregisters the LaunchAgent")
+        let resume = ToolAnnotationCatalog.annotations(for: "job_resume")
+        try expect(resume?.readOnlyHint == false,
+                   "job_resume must be readOnlyHint:false — resume re-registers the LaunchAgent")
+        // Both still idempotent (set-to-paused / set-to-running).
+        try expect(pause?.idempotentHint == true,
+                   "job_pause must be idempotentHint:true — pausing a paused job is a noop")
+        try expect(resume?.idempotentHint == true,
+                   "job_resume must be idempotentHint:true — resuming a running job is a noop")
     }
 
     await test("requiresConfirmation mirrors the Bridge security model (request/neverAutoApprove)") {
@@ -101,17 +147,22 @@ func runToolAnnotationAuditTests() async {
                    "notion_datasource_delete annotation must be destructive + requiresConfirmation; got \(String(describing: ann))")
     }
 
-    await test("MCP projection drops requiresConfirmation, keeps the 3 hint fields") {
+    await test("MCP projection drops requiresConfirmation, keeps the 4 hint fields") {
+        // Sprint A · mcp-builder Top-15 #13: projection now carries
+        // idempotentHint as well. requiresConfirmation stays Bridge-internal.
         let a = BridgeToolAnnotations(readOnlyHint: true, destructiveHint: false,
+                                      idempotentHint: true,
                                       requiresConfirmation: true, openWorld: false)
         let m = a.mcp
-        try expect(m.readOnlyHint == true && m.destructiveHint == false && m.openWorldHint == false,
+        try expect(m.readOnlyHint == true && m.destructiveHint == false
+                   && m.idempotentHint == true && m.openWorldHint == false,
                    "mcp projection mismatch: \(m)")
     }
 
     await test("fail-closed annotation is most-restrictive") {
         let f = BridgeToolAnnotations.failClosed
         try expect(f.readOnlyHint == false && f.destructiveHint == true
+                   && f.idempotentHint == false
                    && f.requiresConfirmation == true && f.openWorld == true,
                    "failClosed must be most-restrictive, got \(f)")
     }
