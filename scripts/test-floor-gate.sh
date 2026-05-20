@@ -410,9 +410,38 @@
 # fire only (operator smoke-checklist at docs/operator/). Integrated
 # green independently measured = 1162 (1132 +30). FLOOR raised per
 # order-inversion.
+#
+# 2026-05-19 Phase 1 — Bridge MCP parity-or-better program, W1+W2+W3:
+# +42 test() — UEP 3-wave sprint. (W1, read-only) mcp-builder audit of
+# all 152 tools → docs/operator/mcp-builder-audit-report.md; per-tool
+# keep/merge/split/rename/deprecate + proposed idempotentHint + 1-line
+# rationale; top-15 ranked Phase-2 backlog. No code change in W1.
+# (W2) SKILL.md filesystem-skill loader (9-decision architecture):
+# SkillSource discriminated enum (Codable + legacy notionPageId
+# backward-compat decode + synthesized-mirror encode → stable round-trip
+# fixed point); FilesystemSkillIndex actor (Bundle.module bundled scan
+# + ~/Library/Application Support/Notion Bridge/skills user dir +
+# DispatchSource FS watcher + 60s TTL); fetch_skill file-source path
+# (content = MentionResolver-rendered body, properties = YAML
+# frontmatter map; envelope-key parity); list_routing_skills merged
+# listing with Notion-wins + shadows:file:<path> annotation; SettingsView
+# Notion/File source badge + Reveal-in-Finder + per-path enable toggle
+# (BridgeDefaults.fileSkillEnabled); pure FrontmatterParser
+# (never-throws, defensive over BOM/malformed/unclosed-quote/embedded
+# ---). (W3) 13 Apache-2.0 skills bundled at NotionBridge/Resources/
+# skills/ via Package.swift .copy('Resources/skills') + LICENSE-APACHE-
+# 2.0.txt + NOTICE; 4 source-available stubs (docx/pdf/pptx/xlsx)
+# linked-not-redistributed; docs/operator/skills-attributions.md
+# matrix; plugin.json + .mcp.json at repo root citing the Claude Code
+# plugins-reference schema (signed-.app gap honestly noted in `notes`).
+# Worktree impl + independent reviewer GREENLIGHT-WITH-NITS + 2 nit
+# fixes (Apache-2.0 LICENSE/NOTICE distribution per §4 + encode-path
+# normalization comment) + orchestrator gate re-run. 4 LOCK tests green
+# unchanged in their assertions. Integrated green independently
+# measured = 1204 (1162 +42). FLOOR raised per order-inversion.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1162}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1204}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."

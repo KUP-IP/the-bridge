@@ -155,6 +155,10 @@ public enum SkillSource: Sendable, Equatable, Codable {
             try c.encode(pageId, forKey: .pageId)
         case .file(let path):
             try c.encode("file", forKey: .kind)
+            // Normalized encode: emits the full `file://...` URL. The decode
+            // path is forgiving (accepts both `file://...` and a bare absolute
+            // path); a bare-path input therefore decodes once and re-encodes
+            // with the `file://` prefix — semantically a quiet normalization.
             try c.encode(path.absoluteString, forKey: .path)
         }
     }

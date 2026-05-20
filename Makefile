@@ -72,11 +72,14 @@ test:
 # WS-C (PKT-798) → v3.0·0.5 → Dev-suite audit → PKT-800 S1 → S2 → S3 → S4
 # → cmd-w2 (Commands data layer) → cmd-w4 (fetch_skill /markdown switch)
 # → cu-sa (fetch_skill simplified `properties` map, 2026-05-18): runs the
-# suite + asserts the green floor (1162 as of 2026-05-19: prior 1132 +30
-# Commands remediation — @Observable CommandsController (reactive status),
-# mouseDown recorder, Carbon-OSStatus diagnostics, .command visibility +
-# palette filter; worktree impl + independent review + orchestrator gate;
-# measured on main; provenance in scripts/test-floor-gate.sh) and zero failures.
+# suite + asserts the green floor (1204 as of 2026-05-19: prior 1162 +42
+# Phase 1 of the parity-or-better program — mcp-builder audit (read-only)
+# + SKILL.md filesystem-skill loader (SkillSource enum, FilesystemSkillIndex
+# actor, fetch_skill file-source path, list_routing_skills merge, Settings
+# source badge) + 13 Apache-2.0 bundled skills + plugin.json/.mcp.json
+# manifests; worktree impl + independent review + 2 nit fixes + orchestrator
+# gate; measured on main; provenance in scripts/test-floor-gate.sh) and
+# zero failures.
 # Used by CI so a shrunk/disabled suite fails. Floor provenance lives in
 # scripts/test-floor-gate.sh.
 test-floor:

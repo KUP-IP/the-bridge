@@ -1,0 +1,38 @@
+Bridge MCP — bundled SKILL.md skills
+====================================
+
+This directory contains SKILL.md files redistributed from the upstream
+Anthropic skills library at:
+
+    https://github.com/anthropics/skills
+
+Each subdirectory is named after its upstream skill. The contents are
+licensed under the Apache License, Version 2.0 (see LICENSE-APACHE-2.0.txt
+in this directory).
+
+Bundled upstream skills (13, Apache-2.0):
+
+  - algorithmic-art        - claude-api            - frontend-design
+  - mcp-builder            - skill-creator         - slack-gif-creator
+  - theme-factory          - web-artifacts-builder - webapp-testing
+  - brand-guidelines       - canvas-design         - doc-coauthoring
+  - internal-comms
+
+Linked, NOT redistributed (source-available upstream license — see each
+STUB.md for the upstream link):
+
+  - docx                   - pdf
+  - pptx                   - xlsx
+
+Modifications: SKILL.md files are reproduced verbatim from upstream.
+Bundled `scripts/` directories (if present in any upstream skill) are
+intentionally NOT redistributed; Bridge MCP's `fetch_skill` tool returns
+only the SKILL.md text and never auto-executes bundled scripts.
+
+Original copyright and attribution notices from each upstream SKILL.md
+are preserved within those files. Bridge MCP claims no rights over the
+bundled skill content.
+
+For the full upstream provenance (URL + license per skill) see:
+
+    docs/operator/skills-attributions.md

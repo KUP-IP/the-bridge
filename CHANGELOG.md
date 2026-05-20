@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.3.0] — 2026-05-19 — SKILL.md adoption + bundled skills + plugin manifests
+
+Phase 1 of the parity-or-better program. Bridge MCP now reads Anthropic's open SKILL.md format alongside its existing Notion-page skills, ships 13 Apache-2.0 skills out of the box, and exposes Claude Code marketplace manifests for distribution.
+
+### Added
+- **SKILL.md filesystem skills.** `fetch_skill` and `list_routing_skills` now also read filesystem skills from `Bundle.module` (bundled defaults shipped with the app) and `~/Library/Application Support/Notion Bridge/skills/<name>/SKILL.md` (user-installable) — additive to today's Notion-page skills, no migration. File-source skills return `content` = the markdown body (via the shared `MentionResolver`) and `properties` = the flattened YAML frontmatter, keeping the `fetch_skill` envelope shape identical to the Notion path. Same-name collisions resolve **Notion-wins** with a visible `shadows: file:<path>` annotation in the routing list.
+- **13 bundled Apache-2.0 skills.** `algorithmic-art`, `brand-guidelines`, `canvas-design`, `claude-api`, `doc-coauthoring`, `frontend-design`, `internal-comms`, `mcp-builder`, `skill-creator`, `slack-gif-creator`, `theme-factory`, `web-artifacts-builder`, `webapp-testing` — verbatim SKILL.md only (no bundled scripts). 4 source-available skills (`docx`, `pdf`, `pptx`, `xlsx`) ship as stubs that link upstream rather than redistribute. Full attribution table at `docs/operator/skills-attributions.md`; Apache-2.0 LICENSE + NOTICE alongside the bundled skills per §4.
+- **Settings → Commands.** Per-row source badge (Notion vs File); file-source rows are read-only with "Reveal in Finder" and a per-path enable/disable toggle (the `.md` file is never shadow-edited).
+- **Claude Code plugin manifests.** `plugin.json` + `.mcp.json` at repo root describe Bridge MCP's tool surface in the Claude Code / Cowork plugin shape. The signed-`.app` vs npm-CLI shape mismatch is documented honestly rather than papered over; the marketplace submission spike captures the response.
+- **`mcp-builder` audit report.** `docs/operator/mcp-builder-audit-report.md` — every one of 162 tools classified `keep` / `merge` / `split` / `rename` / `deprecate` with proposed `idempotentHint` values and a top-15 ranked Phase-2 backlog. Read-only; no code change in this release.
+
+### Notes
+- The `SkillsManager.Skill` struct gained a discriminated `SkillSource` enum (`.notion(pageId:) | .file(path:)`). The legacy `notionPageId` field is union-decoded for backward-compatibility and mirrored on encode — existing UserDefaults blobs and test fixtures continue to work unchanged. The 4 `SkillVsCommandSplitTests` LOCK tests remain green with their original assertions.
+- `RegistrySkillsCommandProvider` (the global hot-key palette) requires `.notion` source AND `visibility == .command` — file-source skills are routing/standard surfaces only, never hot-key palette items. This preserves the Phase 3.2 split correctly under the new source axis.
+- File-source skills default to `routing` visibility unless their frontmatter declares `visibility: standard`. This is a decision-under-agency (matches the "curated bundled set = zero-config discovery" intent).
+- CI floor 1162 → 1204 (+42 tests covering parser, source, index, file-source envelope, merge precedence). Suite 100% green.
+
 ## [3.2.0] — 2026-05-19 — Commands: recorder/status fixed + Command visibility
 
 Fixes the two reported Commands defects and adds a Command skill type so the palette shows only commands.
