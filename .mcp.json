@@ -1,0 +1,11 @@
+{
+  "$comment_schema": "Schema reference: https://code.claude.com/docs/en/plugins-reference#mcp-json. Examples: https://github.com/anthropics/claude-plugins-official/blob/main/external_plugins/imessage/.mcp.json (stdio local-app) and https://github.com/anthropics/claude-plugins-official/blob/main/external_plugins/asana/.mcp.json (HTTP/SSE remote).",
+  "$comment_topology": "Bridge MCP runs as a local signed .app. The primary transport is streamable-HTTP on :9700 (configurable via config.json -> NOTION_BRIDGE_PORT env -> 9700 default). A stdio path is also available via the app's hidden launch flag, but the HTTP endpoint is the recommended client integration — it survives Claude Code restarts and supports multiple concurrent clients.",
+  "mcpServers": {
+    "notion-bridge": {
+      "type": "http",
+      "url": "http://127.0.0.1:9700/mcp",
+      "$comment_url": "If the user changed NOTION_BRIDGE_PORT or config.json's `port`, edit the URL accordingly. The default 9700 matches Version.swift's BridgeVersion.defaultSSEPort."
+    }
+  }
+}
