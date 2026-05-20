@@ -1,8 +1,12 @@
 // BuiltinModuleTests.swift – V1-TESTCOVERAGE
 // NotionBridge · Tests
 //
-// Tests for the builtin echo tool (registered inline in ServerManager,
-// module name "builtin"). Verifies registration, tier, and handler behavior.
+// Sprint A · mcp-builder #8 removed the production `echo` tool from
+// ServerManager (session_info covers connectivity health). These tests
+// register a LOCAL echo replica into a private router to exercise the
+// pure registration/dispatch plumbing of ToolRouter — the historical name
+// is retained for git history continuity but it no longer asserts
+// anything about the production tool surface.
 
 import Foundation
 import MCP

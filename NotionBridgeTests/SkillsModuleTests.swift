@@ -23,9 +23,32 @@ func runSkillsModuleTests() async {
     // MARK: - Tool Registration (fetch_skill, list_routing_skills, manage_skill)
     // ============================================================
 
-    await test("SkillsModule registers 3 tools") {
+    await test("SkillsModule registers 9 tools (Sprint A · #14 alias + #2 5-way split)") {
         let tools = await router.registrations(forModule: "skills")
-        try expect(tools.count == 3, "Expected 3 skills tools, got \(tools.count)")
+        // 4 pre-Sprint-A (fetch_skill, list_routing_skills, manage_skill,
+        //               skills_routing_list-new) + 5 split primitives.
+        try expect(tools.count == 9, "Expected 9 skills tools, got \(tools.count)")
+    }
+
+    await test("Sprint A · #2: 5 skill_* split primitives are registered") {
+        let tools = await router.registrations(forModule: "skills")
+        let names = Set(tools.map(\.name))
+        for primitive in ["skill_create", "skill_delete", "skill_update",
+                          "skill_rename", "skill_sync_notion"] {
+            try expect(names.contains(primitive),
+                       "Missing \(primitive) — Sprint A · mcp-builder #2 split")
+        }
+    }
+
+    await test("Sprint A · #2: manage_skill description carries DEPRECATED prefix") {
+        let tools = await router.registrations(forModule: "skills")
+        guard let tool = tools.first(where: { $0.name == "manage_skill" }) else {
+            throw TestError.assertion("manage_skill must stay live as a 1-cycle alias")
+        }
+        try expect(tool.description.contains("DEPRECATED"),
+                   "manage_skill description must mark deprecation, got: \(tool.description.prefix(80))")
+        try expect(tool.description.contains("skill_create"),
+                   "manage_skill description must point at the split primitives")
     }
 
     await test("Tool fetch_skill is registered") {
@@ -34,10 +57,18 @@ func runSkillsModuleTests() async {
         try expect(names.contains("fetch_skill"), "Missing fetch_skill")
     }
 
-    await test("Tool list_routing_skills is registered") {
+    await test("Tool list_routing_skills is registered (Sprint A · #14 alias)") {
         let tools = await router.registrations(forModule: "skills")
         let names = Set(tools.map(\.name))
-        try expect(names.contains("list_routing_skills"), "Missing list_routing_skills")
+        try expect(names.contains("list_routing_skills"),
+                   "Missing list_routing_skills — one-cycle deprecation alias should stay live")
+    }
+
+    await test("Tool skills_routing_list is registered (Sprint A · #14 primary)") {
+        let tools = await router.registrations(forModule: "skills")
+        let names = Set(tools.map(\.name))
+        try expect(names.contains("skills_routing_list"),
+                   "Missing skills_routing_list — the renamed primary")
     }
 
     await test("list_routing_skills has open tier") {
@@ -45,6 +76,24 @@ func runSkillsModuleTests() async {
         let tool = tools.first(where: { $0.name == "list_routing_skills" })
         try expect(tool != nil, "list_routing_skills not found")
         try expect(tool!.tier == .open, "list_routing_skills should be .open")
+    }
+
+    await test("skills_routing_list has open tier") {
+        let tools = await router.registrations(forModule: "skills")
+        let tool = tools.first(where: { $0.name == "skills_routing_list" })
+        try expect(tool != nil, "skills_routing_list not found")
+        try expect(tool!.tier == .open, "skills_routing_list should be .open")
+    }
+
+    await test("list_routing_skills description prefixed DEPRECATED → skills_routing_list") {
+        let tools = await router.registrations(forModule: "skills")
+        guard let tool = tools.first(where: { $0.name == "list_routing_skills" }) else {
+            throw TestError.assertion("list_routing_skills not found")
+        }
+        try expect(tool.description.hasPrefix("DEPRECATED"),
+                   "Expected DEPRECATED prefix, got: \(tool.description.prefix(60))")
+        try expect(tool.description.contains("skills_routing_list"),
+                   "Expected pointer at skills_routing_list, got: \(tool.description.prefix(120))")
     }
 
     // ============================================================

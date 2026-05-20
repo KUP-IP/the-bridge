@@ -23,13 +23,14 @@ func runChromeModuleTests() async {
     // MARK: - Tool Registration (5 tools)
     // ============================================================
 
-    await test("ChromeModule registers 5 tools") {
+    await test("ChromeModule registers 6 tools (Sprint A · #14: +chrome_tabs_list)") {
         let tools = await router.registrations(forModule: "chrome")
-        try expect(tools.count == 5, "Expected 5 chrome tools, got \(tools.count)")
+        try expect(tools.count == 6, "Expected 6 chrome tools, got \(tools.count)")
     }
 
     let expectedTools: [String] = [
-        "chrome_tabs",
+        "chrome_tabs",        // Sprint A · #14 alias (one-cycle deprecation)
+        "chrome_tabs_list",   // Sprint A · #14 new primary name
         "chrome_navigate",
         "chrome_read_page",
         "chrome_execute_js",
@@ -48,7 +49,7 @@ func runChromeModuleTests() async {
     // MARK: - Security Tiers
     // ============================================================
 
-    let openTools = ["chrome_tabs", "chrome_read_page", "chrome_screenshot_tab"]
+    let openTools = ["chrome_tabs", "chrome_tabs_list", "chrome_read_page", "chrome_screenshot_tab"]
     let notifyTools = ["chrome_navigate", "chrome_execute_js"]
 
     for toolName in openTools {

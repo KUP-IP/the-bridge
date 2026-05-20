@@ -154,30 +154,10 @@ public actor ServerManager {
         // and runs the 7-day cleanup pass for terminal jobs.
         _ = await BgProcessRuntime.shared.reconcileOrphans()
 
-        // 3. Register echo tool (backward compatibility from V1-01)
-        await router.register(ToolRegistration(
-            name: "echo",
-            module: "builtin",
-            tier: .open,
-            description: "Health-check tool — echoes the provided message back verbatim. Use to verify MCP connectivity.",
-            inputSchema: .object([
-                "type": .string("object"),
-                "properties": .object([
-                    "message": .object([
-                        "type": .string("string"),
-                        "description": .string("The message to echo back")
-                    ])
-                ]),
-                "required": .array([.string("message")])
-            ]),
-            handler: { arguments in
-                if case .object(let args) = arguments,
-                   case .string(let message) = args["message"] {
-                    return .object(["echo": .string(message)])
-                }
-                return .object(["error": .string("Missing 'message' parameter")])
-            }
-        ))
+        // Sprint A · mcp-builder #8: builtin `echo` tool removed.
+        // `session_info` covers connectivity-health checks; `echo` was a
+        // duplicate signal that added noise to the tool list. Audit §3
+        // marked this for silent removal — no deprecation alias needed.
 
         // 4. Build MCP Server — version from Bundle (single source of truth)
         let appVersion = AppVersion.resolved

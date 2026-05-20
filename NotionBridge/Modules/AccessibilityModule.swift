@@ -382,12 +382,15 @@ public enum AccessibilityModule {
 
     public static func register(on router: ToolRouter) async {
 
-        // ── 1. ax_query (open) — PKT-755 unified replacement ──────────────
-        await router.register(ToolRegistration(
-            name: "ax_query",
+        // ── 1. ax_inspect (open) — Sprint A · #11 rename of ax_query ─────
+        // PKT-755 unified ax_focused_app + ax_find_element + ax_element_info
+        // into ax_query; Sprint A renames that umbrella to the action-verb
+        // canonical ax_inspect. ax_query stays as a one-cycle alias.
+        let axInspect = ToolRegistration(
+            name: "ax_inspect",
             module: moduleName,
             tier: .open,
-            description: "Unified AX query (PKT-755 — replaces ax_focused_app, ax_find_element, ax_element_info). mode='focused_app' returns the frontmost app + its focused element. mode='find_element' locates AX elements by role/title/label and returns matching paths. mode='element_info' inspects one element's full attributes, available actions, geometry, and state. Companion to ax_tree (full dump) and ax_perform_action (actuation).",
+            description: "Inspect macOS accessibility (AX) elements. mode='focused_app' returns the frontmost app + its focused element. mode='find_element' locates AX elements by role/title/label and returns matching paths. mode='element_info' inspects one element's full attributes, available actions, geometry, and state. Companion to ax_tree (full dump) and ax_perform_action (actuation).",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -417,20 +420,29 @@ public enum AccessibilityModule {
                     return AXModuleError.invalidInput("Unknown mode '\(mode)'. Expected: focused_app | find_element | element_info").toResponse()
                 }
             }
+        )
+        await router.register(axInspect)
+        // One-cycle deprecation alias under the old name.
+        await router.register(ToolDeprecationAlias.renameAlias(
+            oldName: "ax_query", newName: "ax_inspect", from: axInspect
         ))
 
-        // ── 2. ax_focused_app (open) — DEPRECATED v2.2 (PKT-755) ──────────
+        // ── 2. ax_focused_app (open) — Sprint A · #11 REVIVAL ─────────────
+        // Promoted from "mode='focused_app'" to its own top-level tool
+        // because frontmost-app introspection is hit often enough to deserve
+        // a dedicated, zero-arg call site (audit §3-question #2 acknowledged
+        // the optics of reviving a deprecated name — see report).
         await router.register(ToolRegistration(
             name: "ax_focused_app",
             module: moduleName,
             tier: .open,
-            description: "[DEPRECATED v2.2 · PKT-755 — prefer ax_query with mode='focused_app'] Return the frontmost app's name, bundleId, and pid. First step before any other ax_* call.",
+            description: "Return the frontmost macOS app's name, bundleId, and pid (+ its focused element when AX permission is granted). First step before any other ax_* call. Equivalent to `ax_inspect mode='focused_app'` but takes no arguments and is faster to discover.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([:])
             ]),
             handler: { _ in
-                withDeprecationWarning(focusedAppPayload())
+                focusedAppPayload()
             }
         ))
 
@@ -475,46 +487,11 @@ public enum AccessibilityModule {
             }
         ))
 
-        // ── 4. ax_find_element (open) — DEPRECATED v2.2 (PKT-755) ─────────
-        await router.register(ToolRegistration(
-            name: "ax_find_element",
-            module: moduleName,
-            tier: .open,
-            description: "[DEPRECATED v2.2 · PKT-755 — prefer ax_query with mode='find_element'] Locate AX elements by role/title/label and return their paths. Cheaper than ax_tree; feeds ax_perform_action.",
-            inputSchema: .object([
-                "type": .string("object"),
-                "properties": .object([
-                    "pid":      .object(["type": .string("integer"), "description": .string("Process ID. Omit for frontmost app.")]),
-                    "role":     .object(["type": .string("string"),  "description": .string("AX role to match (e.g. AXButton, AXTextField)")]),
-                    "title":    .object(["type": .string("string"),  "description": .string("Title substring to match (case-insensitive)")]),
-                    "label":    .object(["type": .string("string"),  "description": .string("Label/description substring to match (case-insensitive)")]),
-                    "maxDepth": .object(["type": .string("integer"), "description": .string("Max search depth (default: 10)")])
-                ])
-            ]),
-            handler: { arguments in
-                withDeprecationWarning(findElementPayload(params: unwrap(arguments)))
-            }
-        ))
-
-        // ── 5. ax_element_info (open) — DEPRECATED v2.2 (PKT-755) ─────────
-        await router.register(ToolRegistration(
-            name: "ax_element_info",
-            module: moduleName,
-            tier: .open,
-            description: "[DEPRECATED v2.2 · PKT-755 — prefer ax_query with mode='element_info'] Inspect one AX element's full attributes, available actions, geometry, and state. Use after ax_query (find_element mode) to confirm before acting.",
-            inputSchema: .object([
-                "type": .string("object"),
-                "properties": .object([
-                    "pid":   .object(["type": .string("integer"), "description": .string("Process ID. Omit for frontmost app.")]),
-                    "path":  .object(["type": .string("string"),  "description": .string("Element path (e.g. /AXApplication:Finder/AXWindow:Downloads/AXButton:Close)")]),
-                    "role":  .object(["type": .string("string"),  "description": .string("Role to find (alternative to path)")]),
-                    "title": .object(["type": .string("string"),  "description": .string("Title to find (alternative to path)")])
-                ])
-            ]),
-            handler: { arguments in
-                withDeprecationWarning(elementInfoPayload(params: unwrap(arguments)))
-            }
-        ))
+        // Sprint A · mcp-builder #1: ax_find_element / ax_element_info
+        // DEPRECATED shims removed (PKT-755 v2.2 ramp complete; audit allows
+        // full removal). Callers must use ax_query with the appropriate
+        // mode= value; the payload helpers (findElementPayload /
+        // elementInfoPayload) are unchanged.
 
         // ── 6. ax_perform_action (notify) ─────────────────────────────────
         await router.register(ToolRegistration(

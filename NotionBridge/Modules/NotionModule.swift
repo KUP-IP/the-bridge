@@ -944,7 +944,7 @@ public enum NotionModule {
             name: "notion_connections_list",
             module: moduleName,
             tier: .open,
-            description: "List saved Notion workspace connections registered with the bridge. For all bridge connections use connections_list.",
+            description: "DEPRECATED — use `connections_list` with `kind:'notion'` filter. Removed in 3.5.0. List saved Notion workspace connections registered with the bridge.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([:]),
@@ -970,59 +970,10 @@ public enum NotionModule {
             }
         ))
 
-        // MARK: 17. notion_block_read - open (A14, v1.7.0)
-        await router.register(ToolRegistration(
-            name: "notion_block_read",
-            module: moduleName,
-            tier: .open,
-            description: "[DEPRECATED v2.2 · PKT-738 — prefer notion_page_read for whole-page reads, or notion_block_update for surgical edits.] Fetch one block by ID with full raw block JSON (type, content, children flag).",
-            inputSchema: .object([
-                "type": .string("object"),
-                "properties": .object([
-                    "blockId": .object([
-                        "type": .string("string"),
-                        "description": .string("Block ID to retrieve")
-                    ]),
-                    "workspace": workspaceParam
-                ]),
-                "required": .array([.string("blockId")])
-            ]),
-            handler: { arguments in
-                guard case .object(let args) = arguments,
-                      case .string(let blockId) = args["blockId"] else {
-                    throw ToolRouterError.invalidArguments(toolName: "notion_block_read", reason: "missing 'blockId'")
-                }
-
-                let client = try await registryHolder.getClient(workspace: extractWorkspace(args))
-                let data = try await client.getBlock(blockId: blockId)
-
-                guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    return .object(["error": .string("Failed to parse block response")])
-                }
-
-                let id = json["id"] as? String ?? ""
-                let type = json["type"] as? String ?? ""
-                let hasChildren = json["has_children"] as? Bool ?? false
-                let text = NotionJSON.extractPlainTextFromBlock(json)
-
-                var result: [String: Value] = [
-                    "id": .string(id),
-                    "type": .string(type),
-                    "has_children": .bool(hasChildren),
-                    "text": .string(text)
-                ]
-
-                // Include full type-specific payload as JSON string
-                if let typeData = json[type] {
-                    if let jsonData = try? JSONSerialization.data(withJSONObject: typeData, options: [.sortedKeys]),
-                       let jsonStr = String(data: jsonData, encoding: .utf8) {
-                        result["raw"] = .string(jsonStr)
-                    }
-                }
-
-                return .object(result)
-            }
-        ))
+        // Sprint A · mcp-builder #1: notion_block_read DEPRECATED shim
+        // removed (PKT-738 v2.2 ramp complete; audit allows full removal).
+        // Use notion_page_read for whole-page reads, or notion_block_update
+        // for surgical edits.
 
         // MARK: 18. notion_block_update - notify (A15, v1.7.0)
         await router.register(ToolRegistration(
@@ -1425,13 +1376,16 @@ public enum NotionModule {
         ))
 
         // MARK: 24. notion_code_block_append – notify (E3, v1.9.1)
-        // Auto-chunks long strings into ≤2000-char rich_text runs inside a single code
-        // block via PATCH /v1/blocks/{id}. Target block must already be a code block.
+        // Sprint A · mcp-builder #4: marked DEPRECATED — the operator
+        // proposal merges this into notion_blocks_append with `autoChunk:true`
+        // (1-cycle alias). The auto-chunking PATCH semantics differ from
+        // notion_blocks_append's POST semantics, so the alias keeps the
+        // same handler — only the description signals migration.
         await router.register(ToolRegistration(
             name: "notion_code_block_append",
             module: moduleName,
             tier: .notify,
-            description: "Replace a code block's content with a long string, auto-chunking into ≤2000-char runs. Target must already be type 'code'.",
+            description: "DEPRECATED — prefer `notion_blocks_append` with `autoChunk:true` and a single code child. Removed in 3.5.0. Replace a code block's content with a long string, auto-chunking into ≤2000-char runs. Target must already be type 'code'.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([

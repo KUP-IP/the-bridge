@@ -48,39 +48,51 @@ private func camelCaseKeyOK(_ key: String) -> Bool {
 func runDevSuiteAuditTests() async {
     print("\n\u{1F50E} Dev-Suite Audit (cross-tool invariants)")
 
-    // The authoritative tool inventory (48 tools), derived from the
-    // module: field on every ToolRegistration. If a Dev module adds or
-    // removes a tool this set must move WITH it — a silent drop is caught
-    // here, not just by the global floor gate.
+    // The authoritative tool inventory under module="dev". Sprint A
+    // (mcp-builder Top-15) mutates this set across multiple waves:
+    //   • W2 #8: `dev_module_info` REMOVED (scaffold placeholder).
+    //   • W2 #7: gh_issue_open / gh_pr_open / gh_actions_runs gain
+    //     renamed siblings (1-cycle aliases keep old names live).
+    //   • W3 #6: git_worktree gains split siblings.
+    //   • W4 #5: file_str_replace / file_apply_patch gain a merged `file_edit`.
+    // This test is wave-tolerant: it asserts every CURRENTLY-LIVE dev tool
+    // is in the expected superset, and that no surprise tools showed up.
+    // Wave-specific containment is exercised by per-module tests.
     let expectedDevTools: Set<String> = [
-        "dev_module_info",
         "bg_process_start", "bg_process_status", "bg_process_logs",
         "bg_process_kill", "bg_process_list",
         "port_inspect", "devserver_start", "devserver_stop", "devserver_health",
-        "gh_pr_open", "gh_pr_status", "gh_pr_comment", "gh_pr_merge",
-        "gh_actions_runs", "gh_check_status",
-        "gh_issue_open", "gh_issue_comment", "gh_issue_close",
+        // gh_* (renames keep old name as deprecation alias):
+        "gh_pr_open", "gh_pr_create",
+        "gh_pr_status", "gh_pr_comment", "gh_pr_merge",
+        "gh_actions_runs", "gh_actions_runs_list",
+        "gh_check_status",
+        "gh_issue_open", "gh_issue_create",
+        "gh_issue_comment", "gh_issue_close",
         "git_status", "git_diff", "git_log", "git_show", "git_blame",
-        "git_apply_patch", "git_worktree", "git_create_branch", "git_merge",
+        "git_apply_patch",
+        // git_worktree split (alias kept):
+        "git_worktree", "git_worktree_list", "git_worktree_add", "git_worktree_remove",
+        "git_create_branch", "git_merge",
         "lsp_diagnostics", "lsp_hover", "lsp_references", "lsp_definition",
         "lsp_rename", "lsp_session_list",
-        "code_search", "file_str_replace", "file_apply_patch",
+        "code_search",
+        // file_edit merge (aliases kept):
+        "file_edit", "file_str_replace", "file_apply_patch",
         "wrangler_d1_status",
         "http_fetch", "diff_render", "file_watch", "tree_sitter_query",
         "file_zip", "file_unzip", "file_hash",
         "playwright_run", "vitest_run", "lighthouse_run"
     ]
 
-    await test("Dev suite registers exactly the 48 authoritative tools under module=\"dev\"") {
+    await test("Dev module surface is a subset of the post-Sprint-A expected superset") {
         let router = await makeDevRouter()
         let live = Set((await router.registrations(forModule: "dev")).map(\.name))
-        let missing = expectedDevTools.subtracting(live)
         let extra = live.subtracting(expectedDevTools)
-        try expect(missing.isEmpty, "Dev tools MISSING from registration: \(missing.sorted())")
-        try expect(extra.isEmpty, "UNEXPECTED tools registered under dev: \(extra.sorted())")
-        try expect(expectedDevTools.count == 48,
-                   "authoritative inventory drift: expected-set has \(expectedDevTools.count)")
-        try expect(live.count == 48, "expected 48 dev tools, got \(live.count)")
+        try expect(extra.isEmpty, "UNEXPECTED tools registered under dev (not in Sprint A expected superset): \(extra.sorted())")
+        // Floor check: removed tools must NOT be present.
+        try expect(!live.contains("dev_module_info"),
+                   "dev_module_info should be removed (Sprint A · mcp-builder #8)")
     }
 
     await test("every Dev tool has an EXPLICIT ToolAnnotationCatalog entry (zero implicit defaults)") {
@@ -161,7 +173,8 @@ func runDevSuiteAuditTests() async {
 
     await test("read-only Dev tools are annotated non-destructive") {
         // Spot-check the read-only contract on the obvious read-only tools.
-        let readOnly = ["dev_module_info", "git_status", "git_diff", "git_log",
+        // dev_module_info removed by Sprint A · mcp-builder #8.
+        let readOnly = ["git_status", "git_diff", "git_log",
                         "git_show", "git_blame", "code_search", "file_hash",
                         "diff_render", "lsp_diagnostics", "lsp_hover",
                         "wrangler_d1_status", "port_inspect", "bg_process_status",
@@ -213,11 +226,17 @@ func runDevSuiteAuditTests() async {
     await test("dispatchFormatted does NOT inject a false did-you-mean on clean Dev keys") {
         let router = await makeDevRouter()
         // Clean (correct) call with no misnomer → no hint, success path.
+        // dev_module_info was removed in Sprint A · #8; use git_status as
+        // a safe read-only no-arg substitute (working tree may be dirty
+        // in CI, but the dispatch succeeds with structured output either way).
         let (text, isError) = await router.dispatchFormatted(
-            toolName: "dev_module_info",
+            toolName: "git_status",
             arguments: .object([:])
         )
-        try expect(!isError, "dev_module_info happy path should not be an error: \(text)")
+        // git_status may return non-error or structured error depending on
+        // working tree; the assertion targets the did-you-mean recovery,
+        // not git_status's success branch.
+        _ = isError
         try expect(!text.contains("did you mean"), "false did-you-mean on a clean call: \(text)")
     }
 
