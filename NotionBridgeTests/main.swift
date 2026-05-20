@@ -472,6 +472,8 @@ await runCommandPaletteTests()    // cmd-w3: palette search + gate + AppDelegate
 await runSkillVsCommandSplitTests() // cmd-ux: LOCK the skill-vs-command body/properties split
 await runCommandsControllerTests()  // cmd-ux W1/W2: CommandsController observable state machine + status/focus model
 await runCommandVisibilityTests()   // cmd-ux W3: .command visibility axis — Codable, palette filter, picker write-back, empty-state
+await runFlagVisibilityMigrationTests()  // cmd-ux W4 (3.4.1): flag-based visibility SSOT — enum↔flags, decode/encode migration, RegistrySkillsCommandProvider flag filter, mutator parity
+await runW4ComponentAndStorageTests()    // cmd-ux W4 (3.4.1): kbd-chip splitter + per-path file-source flag storage + effective routing/palette resolution
 await runFrontmatterParserTests()   // W2 D8: SKILL.md YAML frontmatter parser
 await runSkillSourceTests()         // W2 D2: SkillSource enum + legacy notionPageId backward-compat
 await runFilesystemSkillIndexTests() // W2 D3: SKILL.md filesystem index actor

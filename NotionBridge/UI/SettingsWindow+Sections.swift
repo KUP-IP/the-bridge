@@ -26,7 +26,7 @@ extension SettingsView {
 
     var permissionsSection: some View {
         Form {
-            Section("TCC Permissions") {
+            Section("System permissions") {
                 PermissionView(permissionManager: permissionManager)
             }
 
@@ -105,12 +105,12 @@ extension SettingsView {
             }
 
             // 2. Integrated Tools
-            Section("Integrated Tools") {
+            Section("Integrated tools") {
                 IntegratedToolsContent()
             }
 
             // 3. Connected Clients
-            Section("Connected Clients") {
+            Section("Connected clients") {
                 if statusBar.connectedClients.isEmpty {
                     Text("No clients connected")
                         .foregroundStyle(BridgeColors.secondary)
@@ -120,12 +120,12 @@ extension SettingsView {
             }
 
             // 4. Remote Access
-            Section("Remote Access") {
+            Section("Remote access") {
                 ConnectionSetupView()
             }
 
             // 5. App Control
-            Section("App Control") {
+            Section("App control") {
                 HStack {
                     Text("Launch at login")
                     Toggle("", isOn: $launchAtLogin)
@@ -262,7 +262,7 @@ extension SettingsView {
             hotkey: current.displayString
         )
         return Form {
-            Section("Commands Palette") {
+            Section("Commands palette") {
                 Toggle("Enable Commands palette", isOn: Binding(
                     get: { commandsPaletteEnabled },
                     set: { newValue in
@@ -287,21 +287,27 @@ extension SettingsView {
                 .accessibilityLabel("Commands palette status: \(status.message)")
 
                 // (c) Change B: in-Settings hot-key recorder.
+                // W4 (3.4.1): kbd-chip display when not recording; explicit
+                // Retry button instead of the "toggle off/on" workaround copy.
                 HStack(spacing: BridgeSpacing.sm) {
                     Text("Shortcut")
                     Spacer()
-                    HotkeyRecorderField(
-                        currentDisplay: current.displayString,
-                        isRecording: $isRecordingHotkey,
-                        onCapture: { keyCode, mods in
-                            guard let cfg = HotkeyConfig.from(
-                                keyCode: keyCode, cocoaModifiers: mods
-                            ) else { return false }
-                            _ = (NSApp.delegate as? AppDelegate)?.setCommandsHotkey(cfg)
-                            return true
-                        }
-                    )
-                    .frame(width: 150)
+                    if isRecordingHotkey {
+                        HotkeyRecorderField(
+                            currentDisplay: current.displayString,
+                            isRecording: $isRecordingHotkey,
+                            onCapture: { keyCode, mods in
+                                guard let cfg = HotkeyConfig.from(
+                                    keyCode: keyCode, cocoaModifiers: mods
+                                ) else { return false }
+                                _ = (NSApp.delegate as? AppDelegate)?.setCommandsHotkey(cfg)
+                                return true
+                            }
+                        )
+                        .frame(width: 150)
+                    } else {
+                        BridgeKbdChips(displayString: current.displayString)
+                    }
                     Button(isRecordingHotkey ? "Press shortcut\u{2026}" : "Record shortcut") {
                         isRecordingHotkey.toggle()
                     }
@@ -312,6 +318,16 @@ extension SettingsView {
                             .setCommandsHotkey(.productionDefault)
                     }
                     .disabled(!commandsPaletteEnabled)
+                    if status.isWarning {
+                        Button {
+                            (NSApp.delegate as? AppDelegate)?.retryHotkeyRegistration()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Retry registering this shortcut now.")
+                        .accessibilityLabel("Retry shortcut registration")
+                    }
                 }
                 .help("Click \u{201C}Record shortcut\u{201D}, then press the new combo. A modifier (\u{2318}/\u{2325}/\u{2303}/\u{21E7}) is required.")
             }
@@ -322,7 +338,7 @@ extension SettingsView {
                     fetchSkillDisabled: disabledTools.contains("fetch_skill")
                 )
             } header: {
-                Text("Commands are Notion-page skills; the palette hot-key copies the selected command\u{2019}s page body to your clipboard. Add, edit, or remove commands below (or via the manage_skill tool).")
+                Text("Skills here can be flipped into routing discovery, the Commands palette, or both. Routing surfaces a skill in the discovery list so agents can find it by name. Palette surfaces it under the global hot-key — pressing the shortcut and selecting a command copies that skill's page body to your clipboard.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .textCase(nil)
@@ -382,7 +398,7 @@ extension SettingsView {
             }
 
 
-            Section("Local Server") {
+            Section("Local server") {
                 LabeledContent("Streamable HTTP") {
                     Text(verbatim: "http://localhost:\(ssePort)/mcp")
                         .font(.system(.caption, design: .monospaced))

@@ -31,6 +31,23 @@ public enum BridgeDefaults {
     /// → enabled by default.
     public static let fileSkillEnabled = "com.notionbridge.fileSkillEnabled"
 
+    /// W4 (3.4.1): per-path flag-based visibility for file-source skills,
+    /// mirroring `routingDiscoverable` on the Skill struct. Dictionary
+    /// <String /* absolute file path */, Bool>. Missing entry: the
+    /// default is derived from the SKILL.md frontmatter (`visibility:
+    /// routing` → true, anything else → false); explicit toggles win.
+    public static let fileSkillRoutingDiscoverable = "com.notionbridge.fileSkillRoutingDiscoverable"
+
+    /// W4 (3.4.1): per-path flag-based palette membership for
+    /// file-source skills, mirroring `inCommandPalette` on the Skill
+    /// struct. Dictionary <String /* absolute file path */, Bool>.
+    /// Missing entry: false (no file-source skill auto-promotes into
+    /// the hot-key palette — it requires explicit operator opt-in
+    /// because palette commit requires a Notion page id to fetch the
+    /// body; file-source palette membership is currently advisory
+    /// until a file-source commit pipeline lands).
+    public static let fileSkillInCommandPalette = "com.notionbridge.fileSkillInCommandPalette"
+
     // MARK: - Commands Palette (cmd-ux)
 
     /// Master on/off for the Commands palette (global-hotkey command box).

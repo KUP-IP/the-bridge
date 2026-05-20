@@ -1,5 +1,40 @@
 # Changelog
 
+## [3.4.1] — 2026-05-20 — Commands tab UX/UI overhaul + flag-based visibility SSOT
+
+End-to-end remediation of the Settings → Commands tab in response to operator UX critique. Replaces the mutually-exclusive 3-state visibility picker with two independent flags, brings Notion-source and file-source skills to row-level parity, ships a small shared component library (badges, kbd chips, empty-state), and strips MCP tool names from user-facing copy across the settings surface.
+
+### Added
+- **`routingDiscoverable` + `inCommandPalette` flags** on `SkillsManager.Skill` and `SkillsModule.SkillConfig`. Independent boolean axes — a skill may now appear in both the routing discovery list and the global Commands palette simultaneously, a state the legacy 3-state `SkillVisibility` enum could not express. The enum is preserved as a synthesized derived view + back-compat encode mirror for one release.
+- **`SkillsManager.setRoutingDiscoverable(named:to:)` + `setInCommandPalette(named:to:)`** flag-direct mutators.
+- **Per-path file-source flag storage.** `SkillsModule.{set,isFileSkill}{RoutingDiscoverable,InCommandPalette}` plus `BridgeDefaults.{fileSkillRoutingDiscoverable,fileSkillInCommandPalette}` keys. Effective routing-discoverable: explicit toggle wins, frontmatter `visibility: routing` as fallback default. Effective palette-membership: explicit opt-in only (conservative — palette commit currently requires a Notion page id, so file-source palette membership is staged as advisory until a file-source commit pipeline lands).
+- **`AppDelegate.retryHotkeyRegistration()`** — explicit per-shortcut retry path; replaces the "toggle Commands off/on" workaround copy.
+- **`BridgeBadge`, `BridgeKbdChips`, `BridgeEmptyState`** in `BridgeTheme.swift` — small shared component library. `BridgeKbdChips.splitChips(displayString:)` is `nonisolated static` so the chip parsing is headlessly testable.
+- **Empty-state banner** above the Skills list when no enabled skill carries `inCommandPalette`. Surfaces the silent-fail condition that previously made the hot-key palette render empty without explanation.
+- **Delete confirmation alert.** Row trash button now opens a confirmation dialog instead of firing on click.
+
+### Changed
+- **Visibility picker → two independent toggles** in both per-row Skill rows AND the Add-skill form. The legacy "Routing / Standard / Command" 3-state picker is replaced; a new skill can be added directly into the combined state.
+- **File-source rows reach row-level parity with Notion-source rows.** Routing + Palette toggles added; description text uses `.secondary` contrast instead of `.tertiary`; folder-reveal button bumped from 16×14 to 24×20 with proper hit area + VoiceOver label.
+- **Notion-source rows pruned for professional finish.** The redundant inline "Notion" source badge is removed (the section header already conveys source). The full UUID subtitle is replaced with a compact `ID …<last6>` affordance for skills with an ID set, and a `Set URL` button for skills missing one — full edit still on click. Reorder chevrons bumped to 24×20 with VoiceOver labels.
+- **Commands palette section.** Hot-key display is now rendered as styled `kbd` chips (one per modifier + key) instead of a plain bordered text field; the recorder pop-in only appears during capture. Section title sentence-cased ("Commands palette" not "Commands Palette"). A `Retry` button surfaces in the `.warning` state alongside the existing checkmark/exclamation/minus state icons.
+- **Sentence-case across all Settings sections.** "TCC Permissions" → "System permissions", "Integrated Tools" → "Integrated tools", "Connected Clients" → "Connected clients", "Remote Access" → "Remote access", "App Control" → "App control", "Local Server" → "Local server". Single capitalization convention across the seven sidebar tabs.
+- **MCP tool names purged from user-facing copy** in the Skills + Commands surfaces. `fetch_skill` / `manage_skill` references replaced with action-language describing what the feature does, not what internal tool implements it.
+- **Inline `Add` form copy** rewritten — "Add a skill" / "Add skill" (sentence case); footer help text rewritten around the two-flag mental model with explicit "Routing and Palette are independent" framing.
+
+### Fixed
+- Truncated visibility dropdowns on the Settings → Commands rows (the `Picker` was constrained by HStack squeeze and rendered as `Standard (fetch…)` / `Routing (discove…)`). The new two-toggle layout has a stable 180pt minimum width and shows full labels.
+- Asymmetric file-source rows (no visibility control, no per-skill metadata) brought up to parity with Notion-source rows.
+- Trash button no longer fires on click — confirmation alert required.
+
+### Notes
+- **Storage migration is one-cycle back-compatible.** `Skill` and `SkillConfig` encode the new flag pair AND the derived legacy `visibility` enum value; decode prefers the flag pair, derives from the enum on pre-3.4.1 rows, defaults `.standard` (both false) on the bare-minimum case. The 4 `SkillVsCommandSplitTests` LOCK tests are preserved unchanged. `SkillVisibility.allCases.count == 3` invariant preserved.
+- **The MCP wire format is preserved.** `fetch_skill` / `manage_skill` / `skills_routing_list` continue to return the legacy `visibility` enum value alongside the new flag pair so external callers reading the enum field keep working until 3.5.x.
+- **Q7=a all-tabs parity** was partially landed: shared `BridgeBadge` / `BridgeKbdChips` / `BridgeEmptyState` components are in `BridgeTheme.swift` and applied to the Commands tab; the other six tabs receive the sentence-case + tool-name-purge + contrast bumps. Per-tab badge migration is incremental and deferred to a follow-up sprint (not blocking; Commands is the marquee surface).
+- **Drag-handle reorder + dedicated Add-skill sheet (Q3=a / Q4=a)** are deferred. The reorder arrow buttons are bumped to 24×20 with VoiceOver labels as an interim improvement; the inline Add form takes the new two-toggle UI verbatim. Sheet-based Add flow is scoped to the next Commands UX sprint.
+- **Static feature module tool count unchanged at 172.** No tool added or removed in this release.
+- **CI floor raised 1195 → 1217 (+22 tests).** 13 W1 flag-migration tests + 9 W4 component/storage tests, all green.
+
 ## [3.4.0] — 2026-05-19 — Sprint A: tool-surface consolidation + `idempotentHint`
 
 Phase 2 of the mcp-builder leverage program. Top-15 audit recommendations shipped (12 structural, 3 description-only markers honestly flagged). Net surface lift: 162 → 172 registered tools (alias-inflated; the action surface contracts dramatically — `manage_skill`'s 11-action polymorphism in particular collapses into 5 verb-primitives).

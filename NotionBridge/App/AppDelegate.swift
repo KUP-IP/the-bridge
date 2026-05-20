@@ -633,6 +633,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         return ok
     }
 
+    /// W4 (3.4.1): explicit retry path for the Settings "retry" button —
+    /// re-attempts the SAME currently-recorded combo. A transient Carbon
+    /// `RegisterEventHotKey` collision (e.g. another app momentarily
+    /// holding the same combo) can clear without the operator hunting
+    /// for the master toggle. No-op when the palette is disabled.
+    @discardableResult
+    public func retryHotkeyRegistration() -> Bool {
+        guard commandBox != nil else { return false }
+        return setCommandsHotkey(commandsController.hotkeyConfig)
+    }
+
     // MARK: - Notion Token Validation
 
     /// Validate Notion API token on startup. Updates StatusBarController with result.

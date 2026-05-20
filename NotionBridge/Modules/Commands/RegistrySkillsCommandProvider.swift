@@ -55,18 +55,20 @@ public struct RegistrySkillsCommandProvider: CommandDescriptorProviding {
         /// the new `source` field or the legacy `notionPageId` field.
         let source: SkillSource
         let enabled: Bool
-        /// cmd-ux W3: the visibility axis. Decoded tolerantly via
-        /// `SkillVisibility`'s own Codable (missing ⇒ `.standard`;
-        /// legacy `adminOnly` ⇒ `.standard`; unknown ⇒ `.standard`;
-        /// `command` round-trips). The palette filters to `.command`.
-        let visibility: SkillVisibility
+        /// cmd-ux W4 (3.4.1): primary palette membership flag. Decoded
+        /// directly when present; otherwise derived from the legacy
+        /// `visibility` enum (`.command` ⇒ true, else false). A row is
+        /// never silently promoted into the palette — the conservative
+        /// default for missing/malformed input is false.
+        let inCommandPalette: Bool
 
         /// Convenience: the Notion page id (empty for `.file` sources).
         /// Preserves the pre-W2 call-site shape inside `descriptors()`.
         var notionPageId: String { source.notionPageIdOrEmpty }
 
         enum CodingKeys: String, CodingKey {
-            case name, source, notionPageId, enabled, visibility
+            case name, source, notionPageId, enabled, visibility,
+                 routingDiscoverable, inCommandPalette
         }
 
         init(from decoder: Decoder) throws {
@@ -84,11 +86,14 @@ public struct RegistrySkillsCommandProvider: CommandDescriptorProviding {
             // Legacy rows may omit `enabled`; SkillsManager treats a
             // missing flag as enabled — mirror that exactly.
             enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
-            // Missing/legacy/unknown visibility ⇒ `.standard` (the
-            // conservative default — a row is never silently promoted
-            // into the palette). `SkillVisibility`'s custom decoder
-            // already maps adminOnly→standard and unknown→standard.
-            visibility = try c.decodeIfPresent(SkillVisibility.self, forKey: .visibility) ?? .standard
+            // W4: prefer the new flag; fall back to deriving from the
+            // legacy enum on pre-3.4.1 rows.
+            if let ip = try c.decodeIfPresent(Bool.self, forKey: .inCommandPalette) {
+                inCommandPalette = ip
+            } else {
+                let legacy = try c.decodeIfPresent(SkillVisibility.self, forKey: .visibility) ?? .standard
+                inCommandPalette = (legacy == .command)
+            }
         }
     }
 
@@ -143,13 +148,14 @@ public struct RegistrySkillsCommandProvider: CommandDescriptorProviding {
             return []
         }
         return entries.compactMap { entry in
-            // cmd-ux W3: the palette now shows ONLY skills explicitly
-            // marked `.command` (and enabled). Routing/standard skills
-            // are no longer palette rows — visibility is the selector.
-            // `fetch_skill` is unaffected (name-based, visibility-
-            // agnostic): a `.command` skill is still fetchable by name,
-            // and a routing/standard skill is still NOT in the palette.
-            guard entry.enabled, entry.visibility == .command else { return nil }
+            // cmd-ux W4 (3.4.1): the palette shows skills with the
+            // `inCommandPalette` flag set (and enabled). Routing-only
+            // skills no longer appear; a skill that is BOTH routing-
+            // discoverable AND palette-pinned now correctly appears in
+            // both surfaces (the new state the legacy 3-state enum
+            // could not express). `fetch_skill` is unaffected (name-
+            // based, flag-agnostic).
+            guard entry.enabled, entry.inCommandPalette else { return nil }
             // W2 D2: palette commit goes via Notion /markdown — only
             // `.notion(pageId:)` sources are selectable. File-source
             // skills surface in `list_routing_skills` / `fetch_skill`,

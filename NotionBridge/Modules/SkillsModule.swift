@@ -77,7 +77,7 @@ public enum SkillsModule {
 
     public static func buildRoutingInstructions() -> String {
         let skills = readAllSkills().filter { skill in
-            guard skill.enabled, skill.visibility == .routing else { return false }
+            guard skill.enabled, skill.routingDiscoverable else { return false }
             switch skill.source {
             case .notion(let pid):
                 return NotionPageRef.isValidStoredPageId(pid.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -1235,7 +1235,9 @@ public enum SkillsModule {
         let name: String
         let source: SkillSource
         let enabled: Bool
-        let visibility: SkillVisibility
+        /// W4 (3.4.1): primary flag-based visibility — mirrors `SkillsManager.Skill`.
+        let routingDiscoverable: Bool
+        let inCommandPalette: Bool
         let summary: String
         let triggerPhrases: [String]
         let antiTriggerPhrases: [String]
@@ -1247,8 +1249,15 @@ public enum SkillsModule {
         /// Notion page id for `.notion` sources, empty for `.file` sources.
         var notionPageId: String { source.notionPageIdOrEmpty }
 
+        /// Derived legacy view — every call site that branches on a
+        /// single enum value continues to work unchanged.
+        var visibility: SkillVisibility {
+            SkillVisibility.fromFlags(routingDiscoverable: routingDiscoverable, inCommandPalette: inCommandPalette)
+        }
+
         enum CodingKeys: String, CodingKey {
             case name, source, notionPageId, enabled, visibility,
+                 routingDiscoverable, inCommandPalette,
                  summary, triggerPhrases, antiTriggerPhrases, url, platform
         }
 
@@ -1277,7 +1286,7 @@ public enum SkillsModule {
             )
         }
 
-        /// W2 D2: source-aware ctor.
+        /// W2 D2: source-aware ctor (W4: maps enum → flag pair).
         init(
             name: String,
             source: SkillSource,
@@ -1289,10 +1298,39 @@ public enum SkillsModule {
             url: String? = nil,
             platform: SkillPlatform = .notion
         ) {
+            let pair = visibility.asFlags
+            self.init(
+                name: name,
+                source: source,
+                enabled: enabled,
+                routingDiscoverable: pair.routingDiscoverable,
+                inCommandPalette: pair.inCommandPalette,
+                summary: summary,
+                triggerPhrases: triggerPhrases,
+                antiTriggerPhrases: antiTriggerPhrases,
+                url: url,
+                platform: platform
+            )
+        }
+
+        /// W4: flag-direct ctor.
+        init(
+            name: String,
+            source: SkillSource,
+            enabled: Bool,
+            routingDiscoverable: Bool,
+            inCommandPalette: Bool,
+            summary: String = "",
+            triggerPhrases: [String] = [],
+            antiTriggerPhrases: [String] = [],
+            url: String? = nil,
+            platform: SkillPlatform = .notion
+        ) {
             self.name = name
             self.source = source
             self.enabled = enabled
-            self.visibility = visibility
+            self.routingDiscoverable = routingDiscoverable
+            self.inCommandPalette = inCommandPalette
             self.summary = SkillMetadataLimits.clampedSummary(summary)
             self.triggerPhrases = SkillMetadataLimits.clampedPhraseList(triggerPhrases)
             self.antiTriggerPhrases = SkillMetadataLimits.clampedPhraseList(antiTriggerPhrases)
@@ -1311,7 +1349,17 @@ public enum SkillsModule {
                 source = .notion(pageId: "")
             }
             enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
-            visibility = try c.decodeIfPresent(SkillVisibility.self, forKey: .visibility) ?? .standard
+            // W4 migration: prefer flag pair; fall back to legacy enum.
+            if let rd = try c.decodeIfPresent(Bool.self, forKey: .routingDiscoverable),
+               let ip = try c.decodeIfPresent(Bool.self, forKey: .inCommandPalette) {
+                routingDiscoverable = rd
+                inCommandPalette = ip
+            } else {
+                let legacy = try c.decodeIfPresent(SkillVisibility.self, forKey: .visibility) ?? .standard
+                let pair = legacy.asFlags
+                routingDiscoverable = pair.routingDiscoverable
+                inCommandPalette = pair.inCommandPalette
+            }
             let rawSummary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
             let rawTriggers = try c.decodeIfPresent([String].self, forKey: .triggerPhrases) ?? []
             let rawAnti = try c.decodeIfPresent([String].self, forKey: .antiTriggerPhrases) ?? []
@@ -1331,6 +1379,10 @@ public enum SkillsModule {
                 try c.encode(pid, forKey: .notionPageId)
             }
             try c.encode(enabled, forKey: .enabled)
+            // W4: write BOTH the flag pair (primary) AND the derived
+            // legacy enum value (one-cycle back-compat).
+            try c.encode(routingDiscoverable, forKey: .routingDiscoverable)
+            try c.encode(inCommandPalette, forKey: .inCommandPalette)
             try c.encode(visibility, forKey: .visibility)
             try c.encode(summary, forKey: .summary)
             try c.encode(triggerPhrases, forKey: .triggerPhrases)
@@ -1853,6 +1905,53 @@ public enum SkillsModule {
         UserDefaults.standard.set(dict, forKey: BridgeDefaults.fileSkillEnabled)
     }
 
+    /// W4 (3.4.1): per-path routing-discoverable flag for file-source
+    /// skills. Missing entry returns nil so callers can fall back to
+    /// the frontmatter-derived default.
+    public static func explicitFileSkillRoutingDiscoverable(path: URL) -> Bool? {
+        let dict = UserDefaults.standard.dictionary(forKey: BridgeDefaults.fileSkillRoutingDiscoverable) as? [String: Bool]
+        return dict?[path.path]
+    }
+
+    public static func setFileSkillRoutingDiscoverable(path: URL, value: Bool) {
+        var dict = (UserDefaults.standard.dictionary(forKey: BridgeDefaults.fileSkillRoutingDiscoverable) as? [String: Bool]) ?? [:]
+        dict[path.path] = value
+        UserDefaults.standard.set(dict, forKey: BridgeDefaults.fileSkillRoutingDiscoverable)
+    }
+
+    /// W4 (3.4.1): per-path palette-membership flag for file-source
+    /// skills. Missing entry returns nil → defaults to false (no
+    /// auto-promotion into the hot-key palette).
+    public static func explicitFileSkillInCommandPalette(path: URL) -> Bool? {
+        let dict = UserDefaults.standard.dictionary(forKey: BridgeDefaults.fileSkillInCommandPalette) as? [String: Bool]
+        return dict?[path.path]
+    }
+
+    public static func setFileSkillInCommandPalette(path: URL, value: Bool) {
+        var dict = (UserDefaults.standard.dictionary(forKey: BridgeDefaults.fileSkillInCommandPalette) as? [String: Bool]) ?? [:]
+        dict[path.path] = value
+        UserDefaults.standard.set(dict, forKey: BridgeDefaults.fileSkillInCommandPalette)
+    }
+
+    /// W4 (3.4.1): effective routing-discoverable for a file-source
+    /// skill — explicit toggle wins, else derives from frontmatter
+    /// (`visibility: routing` ⇒ true, anything else ⇒ false).
+    public static func isFileSkillRoutingDiscoverable(path: URL, frontmatter: [String: Any]) -> Bool {
+        if let explicit = explicitFileSkillRoutingDiscoverable(path: path) {
+            return explicit
+        }
+        if let v = frontmatter["visibility"] as? String, v == "routing" {
+            return true
+        }
+        return false
+    }
+
+    /// W4 (3.4.1): effective palette-membership for a file-source
+    /// skill — explicit toggle only (no frontmatter default).
+    public static func isFileSkillInCommandPalette(path: URL) -> Bool {
+        explicitFileSkillInCommandPalette(path: path) ?? false
+    }
+
     /// W2 D5: Build the `fetch_skill` envelope for a file-source skill.
     /// Shape mirrors `buildSkillResult` byte-for-byte (same envelope keys
     /// + value types) so the caller can not distinguish source by
@@ -1925,7 +2024,7 @@ public enum SkillsModule {
     /// opt out by setting `visibility: standard` in frontmatter.
     public static func mergedRoutingSkills() async -> [Value] {
         let notionSkills = readAllSkills().filter { s in
-            s.enabled && s.visibility == .routing
+            s.enabled && s.routingDiscoverable
                 && NotionPageRef.isValidStoredPageId(s.notionPageId.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         let fileSkills = await FilesystemSkillIndex.shared.allSkills().filter { fs in

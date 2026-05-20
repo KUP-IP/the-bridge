@@ -40,6 +40,18 @@ struct SkillsView: View {
     // the source of truth.
     @State private var fileSourceSkills: [ParsedSkill] = []
     @State private var fileSkillEnabledMap: [String: Bool] = [:]
+    /// W4 (3.4.1): per-path mirrors of the file-source flag toggles —
+    /// hydrate at load (explicit override → frontmatter default), persist
+    /// via SkillsModule.set… on each user toggle.
+    @State private var fileSkillRoutingMap: [String: Bool] = [:]
+    @State private var fileSkillPaletteMap: [String: Bool] = [:]
+    /// W4 (3.4.1): replace the legacy add-form picker with two
+    /// independent toggles so the new combined state (both true) can be
+    /// expressed at creation time.
+    @State private var newSkillRoutingDiscoverable: Bool = false
+    @State private var newSkillInCommandPalette: Bool = false
+    /// W4 (3.4.1): per-row delete confirmation.
+    @State private var skillPendingDeletion: String?
 
     // BUG-2 fix: Inline skill name rename state
     @State private var renamingSkillName: String?
@@ -52,7 +64,7 @@ struct SkillsView: View {
             if !invalidPageSkills.isEmpty {
                 Section {
                     Label(
-                        "Some skills have an invalid Notion page ID (not 32 hex digits). Fix the URL or ID in Settings — fetch_skill and sync will fail until corrected.",
+                        "Some skills have an invalid Notion page ID (not 32 hex digits). Fix the URL or ID below — these skills won't be retrievable by agents until corrected.",
                         systemImage: "exclamationmark.triangle.fill"
                     )
                     .font(.callout)
@@ -63,10 +75,26 @@ struct SkillsView: View {
             // F11: Cross-tab dependency guard
             if fetchSkillDisabled && !skillsManager.skills.isEmpty {
                 Section {
-                    Label("The fetch_skill tool is disabled in Tools. Skills won\u{2019}t be available to AI clients until it\u{2019}s re-enabled.",
+                    Label("Skill retrieval is disabled in Tools. Skills won\u{2019}t be available to AI clients until you re-enable it.",
                           systemImage: "exclamationmark.triangle.fill")
                         .font(.callout)
                         .foregroundStyle(.orange)
+                }
+            }
+
+            // W4 (3.4.1): empty-state banner — surface the silent-fail
+            // condition (palette would render empty even after the
+            // hot-key binds). Renders only when there are skills but 0
+            // are flagged for the palette.
+            let palettePopulation = skillsManager.skills.filter { $0.enabled && $0.inCommandPalette }.count
+                + fileSourceSkills.filter { (fileSkillEnabledMap[$0.path.path] ?? true) && (fileSkillPaletteMap[$0.path.path] ?? false) }.count
+            if !skillsManager.skills.isEmpty && palettePopulation == 0 {
+                Section {
+                    BridgeEmptyState(
+                        systemImage: "command",
+                        title: "No skills in the Commands palette yet",
+                        body: "Flip a skill's Palette toggle on the right to make it appear in the global hot-key popover. Routing is independent — a skill can be in both, either, or neither."
+                    )
                 }
             }
 
@@ -80,7 +108,7 @@ struct SkillsView: View {
                         Text("No skills configured")
                             .font(.callout)
                             .foregroundStyle(.secondary)
-                        Text("Skills are Notion pages that AI clients can fetch at runtime via the fetch_skill MCP tool.")
+                        Text("Skills are Notion pages and SKILL.md files that AI clients can request by name when they need them.")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                             .multilineTextAlignment(.center)
@@ -172,13 +200,15 @@ struct SkillsView: View {
                     .background(Color.secondary.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
-                // cmd-ux W3: iterate SkillVisibility.allCases — single
-                // source of truth (no hardcoded tag list); a future case
-                // appears automatically with its pickerLabel.
-                Picker("Visibility", selection: $newSkillVisibility) {
-                    ForEach(SkillVisibility.allCases, id: \.self) { v in
-                        Text(v.pickerLabel).tag(v)
-                    }
+                // W4 (3.4.1): two independent flag toggles replace the
+                // 3-state picker. A new skill can be added directly into
+                // the new combined state (both true) — impossible under
+                // the legacy single-enum model.
+                VStack(alignment: .leading, spacing: BridgeSpacing.xs) {
+                    Toggle("Show in routing discovery list", isOn: $newSkillRoutingDiscoverable)
+                        .toggleStyle(.switch)
+                    Toggle("Show in Commands palette", isOn: $newSkillInCommandPalette)
+                        .toggleStyle(.switch)
                 }
 
                 if let error = addError {
@@ -187,27 +217,27 @@ struct SkillsView: View {
                         .foregroundStyle(.red)
                 }
 
-                Button("Add Skill") {
+                Button("Add skill") {
                     addSkill()
                 }
                 .disabled(newSkillName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                           || newSkillPageId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             } header: {
-                Text("Add Skill")
+                Text("Add a skill")
             } footer: {
                 VStack(alignment: .leading, spacing: 10) {
                     Label("Visibility", systemImage: "eye")
                         .font(.caption)
                         .fontWeight(.semibold)
-                    Text("Standard — Skill text is fetched with fetch_skill when the skill is enabled. It does not appear in the lightweight discovery list (list_routing_skills).")
-                    Text("Routing — The skill is listed by list_routing_skills so agents can discover it by name without downloading the full page first.")
-                    Text("Command — The skill appears in the global Commands palette (the hot-key command box copies its page body to your clipboard). It is still fetchable by name via fetch_skill, but is NOT in the routing discovery list.")
+                    Text("Routing — the skill appears in the routing discovery list so agents can discover it by name without downloading the full page first.")
+                    Text("Palette — the skill appears in the global Commands palette (the hot-key popover copies its page body to your clipboard).")
+                    Text("Routing and Palette are independent. A skill may be in both, either, or neither. Skills not in either surface are still retrievable by name.")
                     Divider()
                         .padding(.vertical, 4)
-                    Text("Skills are documents loaded at runtime via the fetch_skill MCP tool. Add the URL above to auto-detect the platform, or enter a UUID manually. Visibility only affects discovery surfaces (routing list / Commands palette); fetch_skill is name-based and works for any enabled skill regardless of visibility.")
+                    Text("Skills are documents loaded at runtime when an agent requests them by name. Add the URL above to auto-detect the platform, or enter a UUID manually.")
                         .foregroundStyle(.secondary)
                 }
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -219,6 +249,24 @@ struct SkillsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .notionBridgeSkillsStorageDidChange)) { _ in
             skillsManager.reloadFromUserDefaults()
+        }
+        // W4 (3.4.1): destructive delete moves behind a confirmation
+        // alert so the trash button is no longer one-click fatal.
+        .alert("Delete this skill?",
+               isPresented: Binding(
+                get: { skillPendingDeletion != nil },
+                set: { if !$0 { skillPendingDeletion = nil } }
+               ),
+               presenting: skillPendingDeletion) { name in
+            Button("Delete \(name)", role: .destructive) {
+                skillsManager.removeSkill(named: name)
+                skillPendingDeletion = nil
+            }
+            Button("Cancel", role: .cancel) {
+                skillPendingDeletion = nil
+            }
+        } message: { name in
+            Text("\"\(name)\" will be removed from this Notion Bridge install. The underlying Notion page is not affected. This action cannot be undone from this dialog.")
         }
     }
 
@@ -236,6 +284,7 @@ struct SkillsView: View {
             ))
             .toggleStyle(.switch)
             .labelsHidden()
+            .accessibilityLabel("Enable \(fs.name)")
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(fs.name)
@@ -247,27 +296,55 @@ struct SkillsView: View {
                 }()
                 if !summary.isEmpty {
                     Text(summary)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
-                Text(fs.displayPath)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
             }
 
-            HStack(spacing: 3) {
-                Image(systemName: "doc.text")
-                    .font(.caption2)
-                Text(fs.isUserSource ? "User" : "Bundled")
-                    .font(.caption2)
+            // W4 (3.4.1): single source badge — distinguishes user from
+            // bundled (the section header already says "file-source").
+            BridgeBadge(fs.isUserSource ? "User" : "Bundled",
+                        systemImage: fs.isUserSource ? "person" : "shippingbox",
+                        tone: fs.isUserSource ? .info : .neutral)
+
+            // W4 (3.4.1): file-source rows now carry the same Routing +
+            // Palette toggles as Notion-source rows — design parity per
+            // operator Q3=a (unified row shape). Palette membership for
+            // file-source skills is currently advisory: the palette
+            // commit path requires a Notion page id (see
+            // RegistrySkillsCommandProvider), so a flagged file-skill
+            // will not yet appear in the hot-key popover — surfaced
+            // here so the operator can stage the choice; a follow-up
+            // sprint wires the file-source commit pipeline.
+            HStack(spacing: BridgeSpacing.xs) {
+                Toggle(isOn: Binding(
+                    get: { fileSkillRoutingMap[fs.path.path] ?? false },
+                    set: { newValue in
+                        fileSkillRoutingMap[fs.path.path] = newValue
+                        SkillsModule.setFileSkillRoutingDiscoverable(path: fs.path, value: newValue)
+                    }
+                )) {
+                    Text("Routing").font(.caption)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .help("Appear in the routing discovery list.")
+
+                Toggle(isOn: Binding(
+                    get: { fileSkillPaletteMap[fs.path.path] ?? false },
+                    set: { newValue in
+                        fileSkillPaletteMap[fs.path.path] = newValue
+                        SkillsModule.setFileSkillInCommandPalette(path: fs.path, value: newValue)
+                    }
+                )) {
+                    Text("Palette").font(.caption)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .help("Stage membership in the Commands palette (currently advisory for file-source skills until the commit pipeline lands).")
             }
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Color.secondary.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .frame(minWidth: 180, alignment: .leading)
 
             Spacer()
 
@@ -275,25 +352,41 @@ struct SkillsView: View {
                 NSWorkspace.shared.activateFileViewerSelecting([fs.path])
             } label: {
                 Image(systemName: "folder")
-                    .font(.caption)
+                    .font(.body)
+                    .frame(width: 24, height: 20)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .help("Reveal SKILL.md in Finder")
+            .help("Reveal the SKILL.md file in Finder")
+            .accessibilityLabel("Reveal \(fs.name) in Finder")
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
     }
 
     private func loadFileSourceSkills() {
         Task {
             let skills = await FilesystemSkillIndex.shared.allSkills()
             var enabledMap: [String: Bool] = [:]
+            var routingMap: [String: Bool] = [:]
+            var paletteMap: [String: Bool] = [:]
             for s in skills {
                 enabledMap[s.path.path] = SkillsModule.isFileSkillEnabled(path: s.path)
+                // W4 (3.4.1): hydrate the per-path flag mirrors. Explicit
+                // toggles win; absence falls back to the frontmatter-
+                // derived default for routing, false for palette.
+                let fm = s.frontmatter.compactMapValues { value -> Any? in
+                    if case .string(let v) = value { return v }
+                    return nil
+                }
+                routingMap[s.path.path] = SkillsModule.isFileSkillRoutingDiscoverable(path: s.path, frontmatter: fm)
+                paletteMap[s.path.path] = SkillsModule.isFileSkillInCommandPalette(path: s.path)
             }
             await MainActor.run {
                 self.fileSourceSkills = skills
                 self.fileSkillEnabledMap = enabledMap
+                self.fileSkillRoutingMap = routingMap
+                self.fileSkillPaletteMap = paletteMap
             }
         }
     }
@@ -375,108 +468,129 @@ struct SkillsView: View {
                         }
                     }
                 } else {
-                    Text(skill.notionPageId.isEmpty ? "No URL set" : skill.notionPageId)
-                        .font(.caption)
-                        .foregroundStyle(skill.notionPageId.isEmpty ? .tertiary : .secondary)
-                        .lineLimit(1)
-                        .onTapGesture {
-                            commitPendingEdit()
-                            urlValidationError = nil
-                            editingSkillName = skill.name
-                            editingURL = skill.notionPageId
+                    // W4 (3.4.1): drop the always-visible UUID — surface
+                    // a compact "Set URL" affordance when missing, or a
+                    // small monospace 6-char tail (last 6) when set.
+                    // Click still enters edit mode; the full ID lives in
+                    // the field once you start editing.
+                    Button {
+                        commitPendingEdit()
+                        urlValidationError = nil
+                        editingSkillName = skill.name
+                        editingURL = skill.notionPageId
+                    } label: {
+                        if skill.notionPageId.isEmpty {
+                            Label("Set URL", systemImage: "link.badge.plus")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        } else {
+                            let tail = String(skill.notionPageId.suffix(6))
+                            HStack(spacing: 4) {
+                                Image(systemName: "link")
+                                    .font(.caption2)
+                                Text("ID …\(tail)")
+                                    .font(.system(.caption, design: .monospaced))
+                            }
+                            .foregroundStyle(.secondary)
                         }
+                    }
+                    .buttonStyle(.plain)
+                    .help(skill.notionPageId.isEmpty
+                          ? "Add a Notion page URL or UUID for this skill"
+                          : "Click to edit the URL or UUID")
                 }
                 if !skill.summary.isEmpty {
                     Text(skill.summary)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
             }
 
-            // V2-SKILLS: Platform badge
-            HStack(spacing: 3) {
-                Image(systemName: skill.platform.systemImage)
-                    .font(.caption2)
-                Text(skill.platform.displayName)
-                    .font(.caption2)
-            }
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Color.secondary.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            // W4 (3.4.1): single platform badge — the redundant inline
+            // "Notion" source badge is gone (the row's column position +
+            // the section header already convey source). For platforms
+            // other than Notion (manual, future), the badge surfaces the
+            // platform clearly without doubling.
+            BridgeBadge(skill.platform.displayName, systemImage: skill.platform.systemImage)
 
-            // W2 D7: source badge — distinguishes Notion-page-backed
-            // skills (this row) from file-source SKILL.md skills (their
-            // own section above). Notion-source rows are always "Notion"
-            // here because file-source skills don't live in this list.
-            HStack(spacing: 3) {
-                Image(systemName: "network")
-                    .font(.caption2)
-                Text("Notion")
-                    .font(.caption2)
-            }
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Color.secondary.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-
-            // cmd-ux W3: per-row picker also iterates allCases — same
-            // single source. The set: closure write-back persists via
-            // SkillsManager.setVisibility (covered by a W3 unit test).
-            Picker("", selection: Binding(
-                get: { skill.visibility },
-                set: { skillsManager.setVisibility(named: skill.name, to: $0) }
-            )) {
-                ForEach(SkillVisibility.allCases, id: \.self) { v in
-                    Text(v.pickerLabel).tag(v)
+            // W4 (3.4.1): two independent flag toggles replace the
+            // 3-state visibility picker. Routing = appears in
+            // list_routing_skills. Palette = appears in the global
+            // Commands palette (⌃⌥⌘C). A skill may be both — the
+            // legacy enum could not express that combination.
+            HStack(spacing: BridgeSpacing.xs) {
+                Toggle(isOn: Binding(
+                    get: { skill.routingDiscoverable },
+                    set: { _ = skillsManager.setRoutingDiscoverable(named: skill.name, to: $0) }
+                )) {
+                    Text("Routing").font(.caption)
                 }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .help("Appear in the routing discovery list so agents can find this skill by name.")
+
+                Toggle(isOn: Binding(
+                    get: { skill.inCommandPalette },
+                    set: { _ = skillsManager.setInCommandPalette(named: skill.name, to: $0) }
+                )) {
+                    Text("Palette").font(.caption)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .help("Appear in the global Commands palette hot-key (copies the page body to your clipboard).")
             }
-            .labelsHidden()
-            .frame(minWidth: 160)
-            .help("Routing = list_routing_skills · Standard = fetch_skill only · Command = global Commands palette (still fetchable by name)")
+            .frame(minWidth: 180, alignment: .leading)
 
             Spacer()
 
-            // PKT-487 F3: Reorder buttons — up/down chevrons
-            VStack(spacing: 0) {
+            // W4 (3.4.1): reorder buttons bumped from 16×14 to 24×20 +
+            // wider hit area; still arrows for now (drag-handle deferred).
+            VStack(spacing: 2) {
                 Button {
                     commitPendingEdit()
                     skillsManager.moveSkill(from: index, to: index - 1)
                 } label: {
                     Image(systemName: "chevron.up")
-                        .font(.caption2)
-                        .frame(width: 16, height: 14)
+                        .font(.body)
+                        .frame(width: 24, height: 20)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
                 .disabled(index == 0)
+                .accessibilityLabel("Move skill up")
 
                 Button {
                     commitPendingEdit()
                     skillsManager.moveSkill(from: index, to: index + 1)
                 } label: {
                     Image(systemName: "chevron.down")
-                        .font(.caption2)
-                        .frame(width: 16, height: 14)
+                        .font(.body)
+                        .frame(width: 24, height: 20)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
                 .disabled(index == skillsManager.skills.count - 1)
+                .accessibilityLabel("Move skill down")
             }
 
+            // W4 (3.4.1): destructive trash now opens a confirmation
+            // alert instead of firing on click.
             Button(role: .destructive) {
-                skillsManager.removeSkill(named: skill.name)
+                skillPendingDeletion = skill.name
             } label: {
                 Image(systemName: "trash")
-                    .font(.caption)
+                    .font(.body)
+                    .frame(width: 24, height: 20)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.red.opacity(0.7))
+            .foregroundStyle(.red.opacity(0.8))
+            .accessibilityLabel("Delete skill \(skill.name)")
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
     }
 
     // MARK: - Actions (PKT-487)
@@ -576,7 +690,12 @@ struct SkillsView: View {
             case .success(let normalized):
                 let success = skillsManager.addSkill(name: name, notionPageId: normalized, visibility: newSkillVisibility)
                 if success {
-                    // Update url/platform on the just-added skill
+                    // W4 (3.4.1): apply the flag pair captured on the add
+                    // form. The legacy `visibility:` add path uses the
+                    // single-axis default; the two flag toggles now take
+                    // precedence on the freshly-added skill.
+                    _ = skillsManager.setRoutingDiscoverable(named: name, to: newSkillRoutingDiscoverable)
+                    _ = skillsManager.setInCommandPalette(named: name, to: newSkillInCommandPalette)
                     if storedURL != nil || platform != .notion {
                         skillsManager.updateSkillExtras(named: name, url: storedURL, platform: platform)
                     }
@@ -593,6 +712,8 @@ struct SkillsView: View {
             }
             let success = skillsManager.addSkill(name: name, notionPageId: pageId, visibility: newSkillVisibility)
             if success {
+                _ = skillsManager.setRoutingDiscoverable(named: name, to: newSkillRoutingDiscoverable)
+                _ = skillsManager.setInCommandPalette(named: name, to: newSkillInCommandPalette)
                 skillsManager.updateSkillExtras(named: name, url: storedURL, platform: platform)
                 resetAddForm()
             } else {
@@ -606,6 +727,8 @@ struct SkillsView: View {
         newSkillPageId = ""
         newSkillURL = ""
         newSkillVisibility = .standard
+        newSkillRoutingDiscoverable = false
+        newSkillInCommandPalette = false
         detectedPlatform = .manual
     }
 }

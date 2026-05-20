@@ -97,6 +97,27 @@ extension SkillVisibility {
         case .command:  return "Command (palette)"
         }
     }
+
+    /// cmd-ux W4 (3.4.1): legacy enum → flag-pair mapping. The flag model
+    /// is the new SSOT; this enum is preserved only as a synthesized read
+    /// view + back-compat write target for one release.
+    public var asFlags: (routingDiscoverable: Bool, inCommandPalette: Bool) {
+        switch self {
+        case .routing:  return (true,  false)
+        case .standard: return (false, false)
+        case .command:  return (false, true)
+        }
+    }
+
+    /// cmd-ux W4 (3.4.1): flag-pair → legacy enum. Both flags true (a NEW
+    /// combination the old enum cannot express) collapses to `.command` so
+    /// existing `visibility == .command` checks remain correct. New
+    /// callsites should read the flags directly via the Skill accessors.
+    public static func fromFlags(routingDiscoverable r: Bool, inCommandPalette c: Bool) -> SkillVisibility {
+        if c { return .command }
+        if r { return .routing }
+        return .standard
+    }
 }
 
 // MARK: - SkillSource (W2 D2)
@@ -203,7 +224,14 @@ public final class SkillsManager {
         public var name: String
         public var source: SkillSource
         public var enabled: Bool
-        public var visibility: SkillVisibility
+        /// cmd-ux W4 (3.4.1): primary stored visibility axis. SSOT for the
+        /// `list_routing_skills` discovery list (`routingDiscoverable`)
+        /// and the Commands palette membership (`inCommandPalette`). The
+        /// legacy `SkillVisibility` enum is preserved as a derived read +
+        /// back-compat encode mirror only — every call site that branches
+        /// on a single enum value now maps to one of these two flags.
+        public var routingDiscoverable: Bool
+        public var inCommandPalette: Bool
         /// MCP-facing summary (authoritative in UserDefaults; sync to Notion via `manage_skill`).
         public var summary: String
         public var triggerPhrases: [String]
@@ -219,17 +247,31 @@ public final class SkillsManager {
         /// validators, etc.) — those keep reading this field unchanged.
         public var notionPageId: String { source.notionPageIdOrEmpty }
 
+        /// Derived legacy view — call sites that branch on a single enum
+        /// value continue to work without source changes. Setting maps to
+        /// the underlying flags. New code should prefer the flag pair.
+        public var visibility: SkillVisibility {
+            get { SkillVisibility.fromFlags(routingDiscoverable: routingDiscoverable, inCommandPalette: inCommandPalette) }
+            set {
+                let pair = newValue.asFlags
+                self.routingDiscoverable = pair.routingDiscoverable
+                self.inCommandPalette = pair.inCommandPalette
+            }
+        }
+
         enum CodingKeys: String, CodingKey {
             case name, source, notionPageId, enabled, visibility,
+                 routingDiscoverable, inCommandPalette,
                  summary, triggerPhrases, antiTriggerPhrases, url, platform
         }
 
-        /// New-style initializer — pass a `SkillSource` directly.
+        /// Flag-based designated initializer — the new W4 SSOT shape.
         public init(
             name: String,
             source: SkillSource,
             enabled: Bool = true,
-            visibility: SkillVisibility = .standard,
+            routingDiscoverable: Bool = false,
+            inCommandPalette: Bool = false,
             summary: String = "",
             triggerPhrases: [String] = [],
             antiTriggerPhrases: [String] = [],
@@ -239,12 +281,42 @@ public final class SkillsManager {
             self.name = name
             self.source = source
             self.enabled = enabled
-            self.visibility = visibility
+            self.routingDiscoverable = routingDiscoverable
+            self.inCommandPalette = inCommandPalette
             self.summary = SkillMetadataLimits.clampedSummary(summary)
             self.triggerPhrases = SkillMetadataLimits.clampedPhraseList(triggerPhrases)
             self.antiTriggerPhrases = SkillMetadataLimits.clampedPhraseList(antiTriggerPhrases)
             self.url = url
             self.platform = platform
+        }
+
+        /// Back-compat convenience initializer — every pre-W4 caller that
+        /// passes `visibility:` keeps working; the enum is translated to
+        /// the flag pair at construction time.
+        public init(
+            name: String,
+            source: SkillSource,
+            enabled: Bool = true,
+            visibility: SkillVisibility,
+            summary: String = "",
+            triggerPhrases: [String] = [],
+            antiTriggerPhrases: [String] = [],
+            url: String? = nil,
+            platform: SkillPlatform = .notion
+        ) {
+            let pair = visibility.asFlags
+            self.init(
+                name: name,
+                source: source,
+                enabled: enabled,
+                routingDiscoverable: pair.routingDiscoverable,
+                inCommandPalette: pair.inCommandPalette,
+                summary: summary,
+                triggerPhrases: triggerPhrases,
+                antiTriggerPhrases: antiTriggerPhrases,
+                url: url,
+                platform: platform
+            )
         }
 
         /// Legacy convenience initializer accepting `notionPageId` directly
@@ -289,7 +361,22 @@ public final class SkillsManager {
                 source = .notion(pageId: "")
             }
             enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
-            visibility = try c.decodeIfPresent(SkillVisibility.self, forKey: .visibility) ?? .standard
+            // W4 visibility-flag migration. Prefer the new
+            // `routingDiscoverable` + `inCommandPalette` fields. If they
+            // are absent (every pre-3.4.1 persisted row), fall back to
+            // deriving the flag pair from the legacy `visibility` enum.
+            // If even the enum is missing/malformed, both flags default
+            // false (= `.standard`, the conservative posture).
+            if let rd = try c.decodeIfPresent(Bool.self, forKey: .routingDiscoverable),
+               let ip = try c.decodeIfPresent(Bool.self, forKey: .inCommandPalette) {
+                routingDiscoverable = rd
+                inCommandPalette = ip
+            } else {
+                let legacy = try c.decodeIfPresent(SkillVisibility.self, forKey: .visibility) ?? .standard
+                let pair = legacy.asFlags
+                routingDiscoverable = pair.routingDiscoverable
+                inCommandPalette = pair.inCommandPalette
+            }
             let rawSummary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
             let rawTriggers = try c.decodeIfPresent([String].self, forKey: .triggerPhrases) ?? []
             let rawAnti = try c.decodeIfPresent([String].self, forKey: .antiTriggerPhrases) ?? []
@@ -314,6 +401,13 @@ public final class SkillsManager {
                 try c.encode(pid, forKey: .notionPageId)
             }
             try c.encode(enabled, forKey: .enabled)
+            // W4: write BOTH the new flag pair (primary SSOT going
+            // forward) AND the derived legacy enum value (one-cycle
+            // back-compat so a hypothetical older build that still
+            // reads `visibility` keeps working). The flag pair is the
+            // source of truth on the next decode.
+            try c.encode(routingDiscoverable, forKey: .routingDiscoverable)
+            try c.encode(inCommandPalette, forKey: .inCommandPalette)
             try c.encode(visibility, forKey: .visibility)
             try c.encode(summary, forKey: .summary)
             try c.encode(triggerPhrases, forKey: .triggerPhrases)
@@ -413,10 +507,12 @@ public final class SkillsManager {
         skills.filter(\.enabled)
     }
 
-    /// Enabled skills marked `routing` with a valid Notion page id (for `list_routing_skills`).
+    /// Enabled skills with `routingDiscoverable` set (for `list_routing_skills`).
+    /// W4: reads the flag directly; the legacy `.routing` enum value
+    /// maps to `routingDiscoverable == true && inCommandPalette == false`.
     public var routingSkillsForDiscovery: [Skill] {
         skills.filter { skill in
-            guard skill.enabled, skill.visibility == .routing else { return false }
+            guard skill.enabled, skill.routingDiscoverable else { return false }
             switch skill.source {
             case .notion(let pid):
                 return NotionPageRef.isValidStoredPageId(pid.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -480,11 +576,41 @@ public final class SkillsManager {
         return false
     }
 
-    /// Set visibility tier. Returns false if not found.
+    /// Set visibility tier via the legacy enum. Maps to the flag pair
+    /// at the call site so existing call paths keep working unchanged.
+    /// Returns false if not found.
     @discardableResult
     public func setVisibility(named name: String, to visibility: SkillVisibility) -> Bool {
         if let idx = skills.firstIndex(where: { $0.name.lowercased() == name.lowercased() }) {
             skills[idx].visibility = visibility
+            save()
+            return true
+        }
+        return false
+    }
+
+    /// cmd-ux W4: flag-direct mutator — the new W4 UI writes these
+    /// independently rather than via the 3-state enum. Returns false if
+    /// not found. The two flags are independent: a skill may be both
+    /// routing-discoverable AND palette-pinned (the new state the old
+    /// enum could not express).
+    @discardableResult
+    public func setRoutingDiscoverable(named name: String, to value: Bool) -> Bool {
+        if let idx = skills.firstIndex(where: { $0.name.lowercased() == name.lowercased() }) {
+            skills[idx].routingDiscoverable = value
+            save()
+            return true
+        }
+        return false
+    }
+
+    /// cmd-ux W4: flag-direct mutator — the new W4 UI writes these
+    /// independently rather than via the 3-state enum. Returns false if
+    /// not found.
+    @discardableResult
+    public func setInCommandPalette(named name: String, to value: Bool) -> Bool {
+        if let idx = skills.firstIndex(where: { $0.name.lowercased() == name.lowercased() }) {
+            skills[idx].inCommandPalette = value
             save()
             return true
         }
