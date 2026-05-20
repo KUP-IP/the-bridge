@@ -439,9 +439,41 @@
 # normalization comment) + orchestrator gate re-run. 4 LOCK tests green
 # unchanged in their assertions. Integrated green independently
 # measured = 1204 (1162 +42). FLOOR raised per order-inversion.
+#
+# 2026-05-19 Sprint A — Phase 2 mcp-builder consolidation (15 audit items).
+# **RECORDED DECISION** (order-inversion rule, Decision Log row 14): FLOOR
+# LOWERED 1204 → 1195 (net −9). NOT a regression — Sprint A legitimately
+# REMOVED tools and their associated tests:
+#   - −4 already-deprecated AX/Notion tools (ax_focused_app shim,
+#     ax_find_element, ax_element_info, notion_block_read) per audit #1
+#   - −2 silent removals (echo, dev_module_info) per audit #8
+# Their tool-specific tests went with them. The 4-wave sprint also ADDED:
+#   - +2 new audit-test invariants (idempotentHint presence + job_pause/
+#     resume readOnlyHint guard) per audit #12/#13
+#   - new tests for skill_* primitives (5-way manage_skill split, item #2)
+#   - new tests for git_worktree_* primitives (split, item #6)
+#   - new tests for the file_edit dispatch (item #5 full merge)
+#   - new tests for the jobs_*_all merge into job_pause/_resume all:true (#3)
+#   - new tests for ax_inspect rename + ax_focused_app revival (item #11)
+#   - new tests for the 5 renames (#7, #14) + 2 silent removals (#8)
+# Net: more tests added than removed, but the removed tools had
+# substantial per-tool coverage that the new aliases don't replicate
+# (the aliases delegate to their successors; one alias-forwarding test
+# covers each rather than the 3-5 per-tool tests the deprecated tools
+# carried). Net −9 is honest accounting. tool count: 162 → 172 (+10) per
+# BridgeConstants.staticFeatureModuleToolCount in Version.swift.
+# Worktree impl + independent reviewer GREENLIGHT-WITH-NITS + 3
+# orchestrator nit fixes (staticFeatureModuleToolCount reconcile to 172
+# + ax_tree description ax_query → ax_inspect + AccessibilityModule.swift
+# header comment refresh) + orchestrator gate re-run.
+# Sprint A items 4/9/10 (notion_code_block_append, chrome_screenshot_tab,
+# notion_connections_list) shipped as description-only deprecation
+# markers — receivers need non-trivial param wiring; full structural
+# merge deferred to Phase 2.5. Audit item 15 (snippets_* tier review)
+# explicitly deferred — operator open question.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1204}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1195}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."

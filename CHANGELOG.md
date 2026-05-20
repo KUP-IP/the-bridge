@@ -1,5 +1,34 @@
 # Changelog
 
+## [3.4.0] — 2026-05-19 — Sprint A: tool-surface consolidation + `idempotentHint`
+
+Phase 2 of the mcp-builder leverage program. Top-15 audit recommendations shipped (12 structural, 3 description-only markers honestly flagged). Net surface lift: 162 → 172 registered tools (alias-inflated; the action surface contracts dramatically — `manage_skill`'s 11-action polymorphism in particular collapses into 5 verb-primitives).
+
+### Added
+- **`idempotentHint` annotation axis.** Fourth hint alongside `readOnlyHint`/`destructiveHint`/`requiresConfirmation`/`openWorld`. Non-optional `Bool` with no default; the existing zero-implicit-defaults invariant extended to require explicit per-tool classification. Audit-test fails the build on any unannotated tool.
+- **`skill_create` / `skill_delete` / `skill_update` / `skill_rename` / `skill_sync_notion`** — 5 verb-primitives replacing `manage_skill`'s 11-action polymorphism. The old `manage_skill` is retained as a one-cycle deprecation alias that dispatches by `action`.
+- **`git_worktree_list` / `git_worktree_add` / `git_worktree_remove`** — `git_worktree`'s 3-action polymorphism split into primitives.
+- **`ax_inspect`** — rename of `ax_query` to the action-verb canonical name.
+- **`ax_focused_app`** — REVIVED as a NEW dedicated zero-arg top-level tool (item 11). Distinct from the v2.2 deprecation shim of the same name that was removed in this release.
+- **`gh_issue_create` / `gh_pr_create` / `gh_actions_runs_list`** — renames for verb consistency.
+- **`chrome_tabs_list`** — rename of `chrome_tabs`.
+- **`skills_routing_list`** — rename of `list_routing_skills` (now follows the `skills_*` prefix established by the `manage_skill` split).
+- **`file_edit` with `mode: 'replace'|'patch'`** — full structural merge of `file_str_replace` + `file_apply_patch`. Both old tools kept as one-cycle aliases.
+- **`job_pause` / `job_resume` `all: true` parameter** — full structural merge of `jobs_pause_all` / `jobs_resume_all`. Both old tools kept as aliases.
+
+### Removed
+- The 4 already-deprecated tools (`ax_focused_app` shim, `ax_find_element`, `ax_element_info`, `notion_block_read`) — one cycle elapsed since v2.2 deprecation.
+- `echo` and `dev_module_info` — silent removal (audit item 8; `session_info` covers connectivity, `dev_module_info` was a self-described placeholder).
+
+### Fixed
+- `job_pause` / `job_resume` annotations corrected from `readOnlyHint:true` → `false`. They mutate LaunchAgent state (pause unregisters, resume re-registers); the annotation was a semantic bug the mirror-invariant test couldn't catch.
+
+### Notes
+- **All renamed/merged tools retain one-cycle deprecation aliases** (operator decision Q4=a). Old names continue to work; their descriptions carry a `DEPRECATED — use <new_name> instead. Removed in 3.5.0.` prefix. Audit recommended 2-cycle for `file_edit` and the `chrome_screenshot_tab` merge; operator override to 1-cycle flagged at the alias sites.
+- **3 audit items shipped as description-only markers** (`notion_code_block_append`, `chrome_screenshot_tab`, `notion_connections_list`). The receiver tools (`notion_blocks_append` `autoChunk:true`, `screen_capture` `target={kind:'chrome_tab'}`, `connections_list` `kind:'notion'`) have semantically distinct backends that need non-trivial parameter wiring — full structural merge deferred to Phase 2.5.
+- **Audit item 15** (snippets_* tier review) explicitly deferred — operator open question.
+- CI floor lowered 1204 → 1195 with recorded decision in `scripts/test-floor-gate.sh` (the removed deprecated tools legitimately lost their tests; the audit invariant + new alias tests partially compensated but didn't fully replace the per-tool coverage).
+
 ## [3.3.1] — 2026-05-19 — Ship the 3.3.0 bundled skills (Makefile fix)
 
 Hotfix. 3.3.0 (34) was released with the SKILL.md adoption code AND the 13 Apache-2.0 skills committed to the repo, but the `make install` packaging step copied only the executable target's SPM resource bundle into `.app/Contents/Resources/` and missed the `NotionBridgeLib` target's bundle — so the shipped binary had the loader code but no bundled skills to load. **No source changes; Makefile only.** Suite still 1204/0; same audit; same review.

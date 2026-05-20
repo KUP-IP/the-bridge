@@ -2,22 +2,29 @@
 // NotionBridge · Modules
 //
 // Native Mac UI steering via ApplicationServices framework.
-// Tools (post-PKT-755):
-//   - ax_focused_app   (open)   [DEPRECATED v2.2 · PKT-755 — prefer ax_query]
+// Tools (post-Sprint A · mcp-builder Phase 2):
+//   - ax_inspect       (open)   ← discriminated-union AX query (rename of ax_query)
+//   - ax_query         (open)   ← one-cycle deprecation alias for ax_inspect (removed in 3.5.0)
+//   - ax_focused_app   (open)   ← REVIVED as new dedicated zero-arg top-level tool (Sprint A · #11)
 //   - ax_tree          (open)
-//   - ax_find_element  (open)   [DEPRECATED v2.2 · PKT-755 — prefer ax_query]
-//   - ax_element_info  (open)   [DEPRECATED v2.2 · PKT-755 — prefer ax_query]
-//   - ax_query         (open)   ← unified replacement
 //   - ax_perform_action (notify)
 //
 // PKT-356: original Mac Steering Sprint scaffold.
 // PKT-755 (Bridge v2.2 · 0.1.2): consolidated three overlapping AX query
 //   tools (ax_focused_app + ax_find_element + ax_element_info) into a single
-//   ax_query with a discriminated-union schema. The originals are retained as
-//   deprecation shims for the v2.2 → v2.3 ramp; both the new tool and the
-//   shims dispatch through the same private *Payload(...) helpers so payload
-//   shape stays identical (modulo an injected `_deprecated` marker on the
-//   shims). ax_perform_action and ax_tree are out of scope.
+//   ax_query with a discriminated-union schema. The originals shipped as
+//   deprecation shims; both the new tool and the shims dispatched through
+//   the same private *Payload(...) helpers (with an injected `_deprecated`
+//   marker on the shims).
+// Sprint A (mcp-builder Phase 2):
+//   #1   removed the v2.2 deprecation shims (cycle complete).
+//   #11  renamed ax_query → ax_inspect (one-cycle alias on the old name)
+//        AND revived ax_focused_app as a NEW dedicated zero-arg top-level
+//        tool — NOT a deprecation shim. The revival has its own annotation
+//        entry and a test that pins the absence of any DEPRECATED prefix.
+// The legacy `deprecationWarning` constant + `_deprecated` marker code
+// path remain reachable from `ax_query` (the alias) and continue to inject
+// the prior marker shape into responses for one cycle. Dead-stripped in 3.5.0.
 
 import MCP
 import AppKit
@@ -451,7 +458,7 @@ public enum AccessibilityModule {
             name: "ax_tree",
             module: moduleName,
             tier: .open,
-            description: "Dump the full AX element tree for one app. Expensive — cap with maxDepth. Use ax_query (find_element mode) for targeted lookups.",
+            description: "Dump the full AX element tree for one app. Expensive — cap with maxDepth. Use ax_inspect (mode='find_element') for targeted lookups.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([

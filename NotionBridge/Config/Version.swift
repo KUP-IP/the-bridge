@@ -11,11 +11,11 @@ import Foundation
 public enum AppVersion {
     /// Marketing version (CFBundleShortVersionString equivalent).
     /// Format: MAJOR.MINOR.PATCH (Semantic Versioning).
-    public static let marketing = "3.3.1"
+    public static let marketing = "3.4.0"
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
-    public static let build = "35"
+    public static let build = "36"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }
@@ -53,7 +53,20 @@ public enum BridgeConstants {
     /// v2.3 · WS-D (PKT-2135a9e9): + snippets (9 snippets_* tools) = 158.
     /// Note: jobs_pause_all / jobs_resume_all dropped; current JobsModule contributes 13 job_* tools.
     /// run-app re-platform: + notion_datasource_delete (NotionModule 23→24) = 159.
-    public static let staticFeatureModuleToolCount = 159
+    /// Sprint A (mcp-builder Phase 2): 159 + 13 net = 172. Delta:
+    ///   − 4 deprecated removals (ax_focused_app deprecated-shim, ax_find_element, ax_element_info, notion_block_read)
+    ///   − 1 dev_module_info (silent removal; echo was builtin so excluded already)
+    ///   + 5 skill_* primitives from manage_skill 11-action split (manage_skill kept as 1-cycle alias)
+    ///   + 3 git_worktree_{list,add,remove} from git_worktree split (git_worktree kept as 1-cycle alias)
+    ///   + 1 ax_inspect (rename of ax_query; ax_query kept as 1-cycle alias)
+    ///   + 1 ax_focused_app REVIVED as new dedicated tool (item 11; not a deprecation shim)
+    ///   + 3 gh_*_create / gh_actions_runs_list renames (3 old names kept as aliases)
+    ///   + 1 chrome_tabs_list rename (chrome_tabs kept as alias)
+    ///   + 1 skills_routing_list rename (list_routing_skills kept as alias)
+    ///   + 1 file_edit new (file_str_replace + file_apply_patch kept as aliases)
+    ///   + 2 jobs_pause_all / jobs_resume_all reinstated as catalog-present aliases routing to job_pause/_resume all:true
+    /// Aliases all carry one-cycle deprecation prefix; full removal in 3.5.0 (Sprint B's release in the patch ladder).
+    public static let staticFeatureModuleToolCount = 172
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

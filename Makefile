@@ -72,12 +72,14 @@ test:
 # WS-C (PKT-798) → v3.0·0.5 → Dev-suite audit → PKT-800 S1 → S2 → S3 → S4
 # → cmd-w2 (Commands data layer) → cmd-w4 (fetch_skill /markdown switch)
 # → cu-sa (fetch_skill simplified `properties` map, 2026-05-18): runs the
-# suite + asserts the green floor (1204 as of 2026-05-19: prior 1162 +42
-# Phase 1 of the parity-or-better program — mcp-builder audit (read-only)
-# + SKILL.md filesystem-skill loader (SkillSource enum, FilesystemSkillIndex
-# actor, fetch_skill file-source path, list_routing_skills merge, Settings
-# source badge) + 13 Apache-2.0 bundled skills + plugin.json/.mcp.json
-# manifests; worktree impl + independent review + 2 nit fixes + orchestrator
+# suite + asserts the green floor (1195 as of 2026-05-19: prior 1204 net
+# −9 from Sprint A's deprecated-tool removals losing their tests; tool
+# count 162 → 172. Sprint A — Phase 2 mcp-builder consolidation: top-15
+# audit items shipped (12 structural, 3 description-only markers
+# flagged for Phase 2.5), idempotentHint annotation added as 4th axis
+# with new audit-invariant. Floor lowered per recorded decision in
+# scripts/test-floor-gate.sh per the order-inversion rule. Worktree
+# impl + independent review + 3 nit fixes + orchestrator
 # gate; measured on main; provenance in scripts/test-floor-gate.sh) and
 # zero failures.
 # Used by CI so a shrunk/disabled suite fails. Floor provenance lives in
