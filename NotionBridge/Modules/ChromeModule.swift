@@ -430,7 +430,7 @@ public enum ChromeModule {
             name: "chrome_screenshot_tab",
             module: moduleName,
             tier: .open,
-            description: "Screenshot a specific Chrome tab's rendered viewport as PNG. For non-Chrome windows use screen_capture.",
+            description: "DEPRECATED — use `screen_capture` with target={kind:'chrome_tab', windowId, tabIndex} (audit-recommended 2-cycle; operator Q4=a override to 1-cycle). Removed in 3.5.0. Screenshot a specific Chrome tab's rendered viewport as PNG.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([

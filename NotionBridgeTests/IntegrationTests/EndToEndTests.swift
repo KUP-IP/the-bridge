@@ -385,7 +385,10 @@ func runEndToEndTests() async {
         try expect(connections.count == 5, "ConnectionsModule: expected 5")
 
         let scheduler = await router.registrations(forModule: "scheduler")
-        try expect(scheduler.count == 13, "JobsModule scheduler family: expected 13")
+        // Sprint A · mcp-builder #3: jobs_pause_all / jobs_resume_all
+        // reinstated as 1-cycle aliases that forward to job_pause/job_resume
+        // with all:true. Net +2.
+        try expect(scheduler.count == 15, "JobsModule scheduler family: expected 15 (Sprint A · #3)")
 
         let dev = await router.registrations(forModule: "dev")
         // Sprint A · mcp-builder mutated the dev/ family in stages. At the

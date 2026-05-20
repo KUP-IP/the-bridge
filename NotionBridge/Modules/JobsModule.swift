@@ -26,8 +26,38 @@ public enum JobsModule {
         await router.register(makeJobGet())
         await router.register(makeJobList())
         await router.register(makeJobDelete())
-        await router.register(makeJobPause())
-        await router.register(makeJobResume())
+
+        // Sprint A · mcp-builder #3: merge jobs_pause_all / jobs_resume_all
+        // into job_pause / job_resume with `all: true`. The mass ops stay
+        // registered as 1-cycle deprecation aliases that inject all:true.
+        let jobPause = makeJobPause()
+        await router.register(jobPause)
+        await router.register(ToolDeprecationAlias.transformAlias(
+            oldName: "jobs_pause_all",
+            newName: "job_pause",
+            module: moduleName,
+            tier: .notify,
+            inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+            forwardingDescription: "Kill-switch: pause every active job in parallel. Pass `all: true` to job_pause for the same behavior.",
+            handler: { _ in
+                try await jobPause.handler(.object(["all": .bool(true)]))
+            }
+        ))
+
+        let jobResume = makeJobResume()
+        await router.register(jobResume)
+        await router.register(ToolDeprecationAlias.transformAlias(
+            oldName: "jobs_resume_all",
+            newName: "job_resume",
+            module: moduleName,
+            tier: .notify,
+            inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
+            forwardingDescription: "Resume every paused job in parallel. Pass `all: true` to job_resume for the same behavior.",
+            handler: { _ in
+                try await jobResume.handler(.object(["all": .bool(true)]))
+            }
+        ))
+
         await router.register(makeJobHistory())
         await router.register(makeJobTemplates())
         // v1.10.0 tools
@@ -36,9 +66,6 @@ public enum JobsModule {
         await router.register(makeJobDuplicate())
         await router.register(makeJobExport())
         await router.register(makeJobImport())
-        // DROPPED v2.2 · PKT-738: jobs_pause_all / jobs_resume_all kill-switches removed.
-        // Use per-job job_pause / job_resume, or iterate job_list. Factories retained
-        // (makeJobsPauseAll / makeJobsResumeAll) for potential reinstatement; not registered.
     }
 
     // MARK: - v1.9.0 tool factories
@@ -105,26 +132,40 @@ public enum JobsModule {
     private static func makeJobPause() -> ToolRegistration {
         ToolRegistration(
             name: "job_pause", module: moduleName, tier: .open,
-            description: "Pause one job: unregister its LaunchAgent but keep DB record + plist. Reversible via job_resume.",
+            description: "Pause one job: unregister its LaunchAgent but keep DB record + plist. Reversible via job_resume. Sprint A · mcp-builder #3: pass all:true to pause every active job in parallel (kill-switch — replaces deprecated jobs_pause_all). id and all:true are mutually exclusive.",
             inputSchema: .object([
                 "type": .string("object"),
-                "required": .array([.string("id")]),
-                "properties": .object(["id": .object(["type": .string("string")])])
+                "properties": .object([
+                    "id":  .object(["type": .string("string"),  "description": .string("Job id to pause (mutually exclusive with all:true).")]),
+                    "all": .object(["type": .string("boolean"), "description": .string("Pause every active job (kill-switch). Default false.")])
+                ])
             ]),
-            handler: { args in try await JobsManager.shared.pauseJob(args: args) }
+            handler: { args in
+                if case .object(let dict) = args, case .bool(true) = dict["all"] {
+                    return try await JobsManager.shared.pauseAllTool(args: args)
+                }
+                return try await JobsManager.shared.pauseJob(args: args)
+            }
         )
     }
 
     private static func makeJobResume() -> ToolRegistration {
         ToolRegistration(
             name: "job_resume", module: moduleName, tier: .open,
-            description: "Resume one paused job by re-registering its LaunchAgent.",
+            description: "Resume one paused job by re-registering its LaunchAgent. Sprint A · mcp-builder #3: pass all:true to resume every paused job (replaces deprecated jobs_resume_all). id and all:true are mutually exclusive.",
             inputSchema: .object([
                 "type": .string("object"),
-                "required": .array([.string("id")]),
-                "properties": .object(["id": .object(["type": .string("string")])])
+                "properties": .object([
+                    "id":  .object(["type": .string("string"),  "description": .string("Job id to resume (mutually exclusive with all:true).")]),
+                    "all": .object(["type": .string("boolean"), "description": .string("Resume every paused job. Default false.")])
+                ])
             ]),
-            handler: { args in try await JobsManager.shared.resumeJob(args: args) }
+            handler: { args in
+                if case .object(let dict) = args, case .bool(true) = dict["all"] {
+                    return try await JobsManager.shared.resumeAllTool(args: args)
+                }
+                return try await JobsManager.shared.resumeJob(args: args)
+            }
         )
     }
 

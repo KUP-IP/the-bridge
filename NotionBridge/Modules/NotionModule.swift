@@ -944,7 +944,7 @@ public enum NotionModule {
             name: "notion_connections_list",
             module: moduleName,
             tier: .open,
-            description: "List saved Notion workspace connections registered with the bridge. For all bridge connections use connections_list.",
+            description: "DEPRECATED — use `connections_list` with `kind:'notion'` filter. Removed in 3.5.0. List saved Notion workspace connections registered with the bridge.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([:]),
@@ -1376,13 +1376,16 @@ public enum NotionModule {
         ))
 
         // MARK: 24. notion_code_block_append – notify (E3, v1.9.1)
-        // Auto-chunks long strings into ≤2000-char rich_text runs inside a single code
-        // block via PATCH /v1/blocks/{id}. Target block must already be a code block.
+        // Sprint A · mcp-builder #4: marked DEPRECATED — the operator
+        // proposal merges this into notion_blocks_append with `autoChunk:true`
+        // (1-cycle alias). The auto-chunking PATCH semantics differ from
+        // notion_blocks_append's POST semantics, so the alias keeps the
+        // same handler — only the description signals migration.
         await router.register(ToolRegistration(
             name: "notion_code_block_append",
             module: moduleName,
             tier: .notify,
-            description: "Replace a code block's content with a long string, auto-chunking into ≤2000-char runs. Target must already be type 'code'.",
+            description: "DEPRECATED — prefer `notion_blocks_append` with `autoChunk:true` and a single code child. Removed in 3.5.0. Replace a code block's content with a long string, auto-chunking into ≤2000-char runs. Target must already be type 'code'.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([

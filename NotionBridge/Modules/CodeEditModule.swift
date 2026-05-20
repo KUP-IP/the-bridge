@@ -65,6 +65,59 @@ public enum CodeEditModule {
         await registerCodeSearch(on: router)
         await registerFileStrReplace(on: router)
         await registerFileApplyPatch(on: router)
+        // Sprint A · mcp-builder #5: merge file_str_replace + file_apply_patch
+        // into file_edit with mode='replace'|'patch'. Operator Q4=a override
+        // dropped the audit-recommended 2-cycle window to 1 cycle, so the
+        // old names stay registered (as 1-cycle aliases) alongside file_edit.
+        await registerFileEdit(on: router)
+    }
+
+    /// Sprint A · mcp-builder #5: file_edit primary that dispatches into
+    /// file_str_replace's or file_apply_patch's handler based on `mode`.
+    private static func registerFileEdit(on router: ToolRouter) async {
+        // audit-recommended 2-cycle; operator Q4=a override to 1-cycle
+        await router.register(ToolRegistration(
+            name: "file_edit",
+            module: moduleName,
+            tier: .notify,
+            description: "Edit a file with mode='replace' (literal search→replacement with optional preview, replaces file_str_replace) or mode='patch' (unified-diff application, replaces file_apply_patch). Single tool for code-edit ergonomics matching Claude Code's built-in edit verb.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "mode": .object([
+                        "type": .string("string"),
+                        "enum": .array([.string("replace"), .string("patch")]),
+                        "description": .string("'replace' (literal search→replacement) or 'patch' (unified diff apply).")
+                    ]),
+                    "path": .object(["type": .string("string"), "description": .string("Absolute file path (tilde-expanded). Required for mode='replace'.")]),
+                    "search": .object(["type": .string("string"), "description": .string("Literal search string (mode='replace').")]),
+                    "replacement": .object(["type": .string("string"), "description": .string("Replacement string (mode='replace').")]),
+                    "replaceAllMatches": .object(["type": .string("boolean")]),
+                    "preview": .object(["type": .string("boolean")]),
+                    "patch": .object(["type": .string("string"), "description": .string("Unified-diff text (mode='patch').")]),
+                    "stripLevel": .object(["type": .string("integer"), "description": .string("Strip count for patch paths (mode='patch', default 0).")])
+                ]),
+                "required": .array([.string("mode")])
+            ]),
+            handler: { args in
+                guard case .object(let dict) = args,
+                      case .string(let mode) = dict["mode"] else {
+                    return .object([
+                        "error": .string("file_edit requires mode='replace' or mode='patch'")
+                    ])
+                }
+                switch mode {
+                case "replace":
+                    return try await router.dispatch(toolName: "file_str_replace", arguments: args)
+                case "patch":
+                    return try await router.dispatch(toolName: "file_apply_patch", arguments: args)
+                default:
+                    return .object([
+                        "error": .string("file_edit: unknown mode '\(mode)' — expected 'replace' or 'patch'")
+                    ])
+                }
+            }
+        ))
     }
 
     // MARK: - rg discovery
@@ -304,7 +357,7 @@ public enum CodeEditModule {
             name: "file_str_replace",
             module: moduleName,
             tier: .notify,
-            description: "Replace one or more occurrences of a literal string in a file. By default rejects ambiguous matches (>1 occurrence) — pass replaceAllMatches:true to override. Pass preview:true to receive a unified diff without writing. Atomic via String.write(atomically:true). Preferred over `shell_exec sed` for code edits because it guarantees scope (no accidental multi-match) and previewable diffs.",
+            description: "DEPRECATED — use `file_edit` with mode='replace' instead. Removed in 3.5.0 (audit-recommended 2-cycle; operator Q4=a override to 1-cycle). Replace one or more occurrences of a literal string in a file. By default rejects ambiguous matches (>1 occurrence) — pass replaceAllMatches:true to override. Pass preview:true to receive a unified diff without writing. Atomic via String.write(atomically:true).",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -482,7 +535,7 @@ public enum CodeEditModule {
             name: "file_apply_patch",
             module: moduleName,
             tier: .notify,
-            description: "Apply a unified-diff patch to a single file. Validates each hunk's context against current file content (rejects on drift). Atomic via String.write(atomically:true). Multi-file diffs must be split per file by the caller. Pass preview:true to validate without writing.",
+            description: "DEPRECATED — use `file_edit` with mode='patch' instead. Removed in 3.5.0 (audit-recommended 2-cycle; operator Q4=a override to 1-cycle). Apply a unified-diff patch to a single file. Validates each hunk's context against current file content (rejects on drift). Atomic via String.write(atomically:true). Multi-file diffs must be split per file by the caller. Pass preview:true to validate without writing.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
