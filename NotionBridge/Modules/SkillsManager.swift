@@ -99,6 +99,83 @@ extension SkillVisibility {
     }
 }
 
+// MARK: - SkillSource (W2 D2)
+
+/// Discriminated origin for a skill. `cmd-w2` introduces SKILL.md
+/// filesystem-loaded skills alongside Notion-page skills.
+///
+/// Persisted wire format (in the same JSON-encoded array under
+/// `BridgeDefaults.skills`):
+///   `.notion(pageId)` → `{"source": {"kind": "notion", "pageId": "<32hex>"}}`
+///   `.file(path)`     → `{"source": {"kind": "file",   "path":   "<abs URL>"}}`
+///
+/// Backward-compat: a legacy row that carries the old top-level field
+/// `"notionPageId": "<32hex>"` (without a `source` discriminator) decodes
+/// as `.notion(pageId)`. Decoding is union-of-both; encoding always
+/// writes the new `source` shape. Re-decoding a re-encoded legacy blob
+/// is stable (a fixed point — see SkillSourceTests).
+public enum SkillSource: Sendable, Equatable, Codable {
+    case notion(pageId: String)
+    case file(path: URL)
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, pageId, path
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try c.decode(String.self, forKey: .kind)
+        switch kind {
+        case "notion":
+            let pid = try c.decode(String.self, forKey: .pageId)
+            self = .notion(pageId: pid)
+        case "file":
+            let raw = try c.decode(String.self, forKey: .path)
+            // Decode both file:// URL strings and bare absolute paths
+            // (defensive — a hand-edited preferences plist could carry
+            // either). `URL(fileURLWithPath:)` always succeeds.
+            if let url = URL(string: raw), url.isFileURL {
+                self = .file(path: url)
+            } else {
+                self = .file(path: URL(fileURLWithPath: raw))
+            }
+        default:
+            // Unknown discriminator: degrade safely to an empty-notion source
+            // (the conservative default — the row will fail validation and
+            // surface the corruption to the operator rather than crash).
+            self = .notion(pageId: "")
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .notion(let pageId):
+            try c.encode("notion", forKey: .kind)
+            try c.encode(pageId, forKey: .pageId)
+        case .file(let path):
+            try c.encode("file", forKey: .kind)
+            try c.encode(path.absoluteString, forKey: .path)
+        }
+    }
+
+    /// The Notion page id, if this is a `.notion` source. Empty string for
+    /// `.file` sources. Used by call sites that ONLY make sense for Notion
+    /// (e.g. `sync_metadata_to_notion`, the Notion-API fetch path).
+    public var notionPageIdOrEmpty: String {
+        switch self {
+        case .notion(let pid): return pid
+        case .file:            return ""
+        }
+    }
+
+    /// True for `.file` sources.
+    public var isFile: Bool {
+        if case .file = self { return true }
+        return false
+    }
+}
+
 /// Manages the Skills configuration — named Notion pages that can be
 /// fetched at runtime via the `fetch_skill` MCP tool.
 ///
@@ -108,11 +185,19 @@ extension SkillVisibility {
 @Observable
 public final class SkillsManager {
 
-    /// A single skill definition: name + Notion page ID + enabled + visibility.
+    /// A single skill definition: name + source (Notion page or file path)
+    /// + enabled + visibility.
+    ///
+    /// W2 D2: `source` replaces the prior `notionPageId: String` field. The
+    /// persistence layer reads BOTH the new `source` discriminator AND the
+    /// legacy top-level `notionPageId` — so an existing UserDefaults blob
+    /// from a prior release decodes as `.notion(pageId)` without
+    /// migration. Encoding always emits the new `source` shape; re-decode
+    /// is stable.
     public struct Skill: Codable, Identifiable, Sendable, Equatable {
         public var id: String { name }
         public var name: String
-        public var notionPageId: String
+        public var source: SkillSource
         public var enabled: Bool
         public var visibility: SkillVisibility
         /// MCP-facing summary (authoritative in UserDefaults; sync to Notion via `manage_skill`).
@@ -124,10 +209,43 @@ public final class SkillsManager {
         /// V2-SKILLS: Auto-detected platform from URL. Defaults to .notion for backward compat.
         public var platform: SkillPlatform
 
+        /// Convenience: the Notion page id for a `.notion` source, or
+        /// empty for `.file`. Many existing call sites only make sense for
+        /// Notion-source skills (the Notion API client, page-id
+        /// validators, etc.) — those keep reading this field unchanged.
+        public var notionPageId: String { source.notionPageIdOrEmpty }
+
         enum CodingKeys: String, CodingKey {
-            case name, notionPageId, enabled, visibility, summary, triggerPhrases, antiTriggerPhrases, url, platform
+            case name, source, notionPageId, enabled, visibility,
+                 summary, triggerPhrases, antiTriggerPhrases, url, platform
         }
 
+        /// New-style initializer — pass a `SkillSource` directly.
+        public init(
+            name: String,
+            source: SkillSource,
+            enabled: Bool = true,
+            visibility: SkillVisibility = .standard,
+            summary: String = "",
+            triggerPhrases: [String] = [],
+            antiTriggerPhrases: [String] = [],
+            url: String? = nil,
+            platform: SkillPlatform = .notion
+        ) {
+            self.name = name
+            self.source = source
+            self.enabled = enabled
+            self.visibility = visibility
+            self.summary = SkillMetadataLimits.clampedSummary(summary)
+            self.triggerPhrases = SkillMetadataLimits.clampedPhraseList(triggerPhrases)
+            self.antiTriggerPhrases = SkillMetadataLimits.clampedPhraseList(antiTriggerPhrases)
+            self.url = url
+            self.platform = platform
+        }
+
+        /// Legacy convenience initializer accepting `notionPageId` directly
+        /// — keeps every pre-W2 caller (and 30+ persisted-format test
+        /// fixtures) compiling unchanged. Constructs `.notion(pageId:)`.
         public init(
             name: String,
             notionPageId: String,
@@ -139,21 +257,33 @@ public final class SkillsManager {
             url: String? = nil,
             platform: SkillPlatform = .notion
         ) {
-            self.name = name
-            self.notionPageId = notionPageId
-            self.enabled = enabled
-            self.visibility = visibility
-            self.summary = SkillMetadataLimits.clampedSummary(summary)
-            self.triggerPhrases = SkillMetadataLimits.clampedPhraseList(triggerPhrases)
-            self.antiTriggerPhrases = SkillMetadataLimits.clampedPhraseList(antiTriggerPhrases)
-            self.url = url
-            self.platform = platform
+            self.init(
+                name: name,
+                source: .notion(pageId: notionPageId),
+                enabled: enabled,
+                visibility: visibility,
+                summary: summary,
+                triggerPhrases: triggerPhrases,
+                antiTriggerPhrases: antiTriggerPhrases,
+                url: url,
+                platform: platform
+            )
         }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             name = try c.decode(String.self, forKey: .name)
-            notionPageId = try c.decode(String.self, forKey: .notionPageId)
+            // W2 D2: union-of-both decode. Prefer the new `source`
+            // discriminator; fall back to the legacy top-level
+            // `notionPageId` field for backward compat with persisted
+            // blobs written by every prior release.
+            if let decoded = try c.decodeIfPresent(SkillSource.self, forKey: .source) {
+                source = decoded
+            } else if let legacy = try c.decodeIfPresent(String.self, forKey: .notionPageId) {
+                source = .notion(pageId: legacy)
+            } else {
+                source = .notion(pageId: "")
+            }
             enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
             visibility = try c.decodeIfPresent(SkillVisibility.self, forKey: .visibility) ?? .standard
             let rawSummary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
@@ -170,7 +300,15 @@ public final class SkillsManager {
         public func encode(to encoder: Encoder) throws {
             var c = encoder.container(keyedBy: CodingKeys.self)
             try c.encode(name, forKey: .name)
-            try c.encode(notionPageId, forKey: .notionPageId)
+            // W2 D2: encode the NEW `source` shape. Also mirror the
+            // notion page id into the legacy `notionPageId` field when
+            // it is a `.notion` source so a hypothetical older build
+            // that doesn't know about `source` still works (forward-
+            // compat with the prior wire format).
+            try c.encode(source, forKey: .source)
+            if case .notion(let pid) = source {
+                try c.encode(pid, forKey: .notionPageId)
+            }
             try c.encode(enabled, forKey: .enabled)
             try c.encode(visibility, forKey: .visibility)
             try c.encode(summary, forKey: .summary)
@@ -202,25 +340,24 @@ public final class SkillsManager {
     /// Add a new skill. Returns false if name is empty or not unique.
     @discardableResult
     public func addSkill(name: String, notionPageId: String) -> Bool {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
-        guard !skills.contains(where: { $0.name.lowercased() == trimmed.lowercased() }) else {
-            return false
-        }
-        skills.append(Skill(name: trimmed, notionPageId: notionPageId, visibility: .standard))
-        save()
-        return true
+        addSkill(name: name, source: .notion(pageId: notionPageId), visibility: .standard)
     }
 
     /// Add with explicit visibility (e.g. routing tier).
     @discardableResult
     public func addSkill(name: String, notionPageId: String, visibility: SkillVisibility) -> Bool {
+        addSkill(name: name, source: .notion(pageId: notionPageId), visibility: visibility)
+    }
+
+    /// W2 D2: full-fidelity add accepting any `SkillSource`.
+    @discardableResult
+    public func addSkill(name: String, source: SkillSource, visibility: SkillVisibility = .standard) -> Bool {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
         guard !skills.contains(where: { $0.name.lowercased() == trimmed.lowercased() }) else {
             return false
         }
-        skills.append(Skill(name: trimmed, notionPageId: notionPageId, visibility: visibility))
+        skills.append(Skill(name: trimmed, source: source, visibility: visibility))
         save()
         return true
     }
@@ -274,9 +411,20 @@ public final class SkillsManager {
 
     /// Enabled skills marked `routing` with a valid Notion page id (for `list_routing_skills`).
     public var routingSkillsForDiscovery: [Skill] {
-        skills.filter {
-            $0.enabled && $0.visibility == .routing
-                && NotionPageRef.isValidStoredPageId($0.notionPageId.trimmingCharacters(in: .whitespacesAndNewlines))
+        skills.filter { skill in
+            guard skill.enabled, skill.visibility == .routing else { return false }
+            switch skill.source {
+            case .notion(let pid):
+                return NotionPageRef.isValidStoredPageId(pid.trimmingCharacters(in: .whitespacesAndNewlines))
+            case .file:
+                // W2 D6: file-source skills don't surface through the Notion-
+                // page-id-bound routing list from SkillsManager. The merged
+                // listing comes from `SkillsModule.list_routing_skills`,
+                // which combines this Notion-source slice with file-source
+                // entries from `FilesystemSkillIndex`. Keep this property
+                // bound to Notion skills for backward-compat callers.
+                return false
+            }
         }
     }
 
@@ -309,12 +457,21 @@ public final class SkillsManager {
     }
 
         /// Update a skill's Notion page ID. Returns false if not found.
+    /// File-source skills are not updatable here (the SKILL.md path is the
+    /// source of truth — use the user dir to change it).
     @discardableResult
     public func updateSkillURL(named name: String, newPageId: String) -> Bool {
         if let idx = skills.firstIndex(where: { $0.name.lowercased() == name.lowercased() }) {
-            skills[idx].notionPageId = newPageId
-            save()
-            return true
+            switch skills[idx].source {
+            case .notion:
+                skills[idx].source = .notion(pageId: newPageId)
+                save()
+                return true
+            case .file:
+                // No-op for file-source skills (preserves contract that
+                // returning `false` means "no change applied").
+                return false
+            }
         }
         return false
     }

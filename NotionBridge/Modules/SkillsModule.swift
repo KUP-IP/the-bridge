@@ -76,9 +76,18 @@ public enum SkillsModule {
     """
 
     public static func buildRoutingInstructions() -> String {
-        let skills = readAllSkills().filter {
-            $0.enabled && $0.visibility == .routing
-                && NotionPageRef.isValidStoredPageId($0.notionPageId.trimmingCharacters(in: .whitespacesAndNewlines))
+        let skills = readAllSkills().filter { skill in
+            guard skill.enabled, skill.visibility == .routing else { return false }
+            switch skill.source {
+            case .notion(let pid):
+                return NotionPageRef.isValidStoredPageId(pid.trimmingCharacters(in: .whitespacesAndNewlines))
+            case .file:
+                // W2 D6: file-source routing skills are merged in via
+                // `list_routing_skills` (see registerListRoutingSkills);
+                // the initial instructions block sticks to Notion skills
+                // to preserve the existing wire shape.
+                return true
+            }
         }
         guard !skills.isEmpty else {
             return "NotionBridge MCP server. Call list_routing_skills to discover available skill-based capabilities.\n\n\(dispatchContract)"
@@ -160,6 +169,18 @@ public enum SkillsModule {
 
                 // Look up skill in UserDefaults config (cache key includes metadata fingerprint)
                 guard let skillConfig = lookupSkill(named: name) else {
+                    // W2 D4: fall back to the filesystem index. A file-
+                    // source skill with this name (bundled or user dir)
+                    // takes effect when Notion-skills don't shadow it.
+                    if let fileSkill = await FilesystemSkillIndex.shared.skill(named: name) {
+                        guard Self.isFileSkillEnabled(path: fileSkill.path) else {
+                            return .object([
+                                "error": .string("File-source skill '\(name)' is disabled."),
+                                "hint": .string("Enable it in Settings \u{2192} Skills tab.")
+                            ])
+                        }
+                        return await Self.buildFileSkillResult(fileSkill)
+                    }
                     let closeMatches = closestSkillMatches(for: name)
                     let allSkills = listAvailableSkillNames()
                     return .object([
@@ -286,16 +307,16 @@ public enum SkillsModule {
                 "required": .array([])
             ]),
             handler: { _ in
-                let skills = readAllSkills().filter {
-                    $0.enabled && $0.visibility == .routing
-                        && NotionPageRef.isValidStoredPageId($0.notionPageId.trimmingCharacters(in: .whitespacesAndNewlines))
-                }
-                let items: [Value] = skills.map { s in
-                    .object(Self.skillRowFields(s))
-                }
+                // W2 D6: merged listing — Notion-source routing-visible
+                // skills + file-source skills (default routing-visible,
+                // opt-out via frontmatter `visibility: standard`).
+                // Collisions annotate the Notion-source row with a
+                // `shadows: file:<path>` field for operator clarity;
+                // Notion wins on collision (D4).
+                let items = await Self.mergedRoutingSkills()
                 return .object([
                     "skills": .array(items),
-                    "count": .int(skills.count)
+                    "count": .int(items.count)
                 ])
             }
         ))
@@ -1001,9 +1022,14 @@ public enum SkillsModule {
 
     /// Lightweight Codable struct matching `SkillsManager.Skill` layout.
     /// Used to read directly from UserDefaults without requiring @MainActor.
-    private struct SkillConfig: Codable {
+    ///
+    /// W2 D2: carries a `SkillSource`. Decodes the new `source` field OR
+    /// the legacy `notionPageId` top-level field (union-of-both backward
+    /// compat). Encodes BOTH on the way out — forward compat with the
+    /// pre-W2 wire format that consumers expect.
+    internal struct SkillConfig: Codable {
         let name: String
-        let notionPageId: String
+        let source: SkillSource
         let enabled: Bool
         let visibility: SkillVisibility
         let summary: String
@@ -1014,10 +1040,15 @@ public enum SkillsModule {
         /// V2-SKILLS: Auto-detected platform. Defaults to .notion for backward compat.
         let platform: SkillPlatform
 
+        /// Notion page id for `.notion` sources, empty for `.file` sources.
+        var notionPageId: String { source.notionPageIdOrEmpty }
+
         enum CodingKeys: String, CodingKey {
-            case name, notionPageId, enabled, visibility, summary, triggerPhrases, antiTriggerPhrases, url, platform
+            case name, source, notionPageId, enabled, visibility,
+                 summary, triggerPhrases, antiTriggerPhrases, url, platform
         }
 
+        /// Legacy ctor — most call sites still pass `notionPageId` directly.
         init(
             name: String,
             notionPageId: String,
@@ -1029,8 +1060,33 @@ public enum SkillsModule {
             url: String? = nil,
             platform: SkillPlatform = .notion
         ) {
+            self.init(
+                name: name,
+                source: .notion(pageId: notionPageId),
+                enabled: enabled,
+                visibility: visibility,
+                summary: summary,
+                triggerPhrases: triggerPhrases,
+                antiTriggerPhrases: antiTriggerPhrases,
+                url: url,
+                platform: platform
+            )
+        }
+
+        /// W2 D2: source-aware ctor.
+        init(
+            name: String,
+            source: SkillSource,
+            enabled: Bool,
+            visibility: SkillVisibility = .standard,
+            summary: String = "",
+            triggerPhrases: [String] = [],
+            antiTriggerPhrases: [String] = [],
+            url: String? = nil,
+            platform: SkillPlatform = .notion
+        ) {
             self.name = name
-            self.notionPageId = notionPageId
+            self.source = source
             self.enabled = enabled
             self.visibility = visibility
             self.summary = SkillMetadataLimits.clampedSummary(summary)
@@ -1043,7 +1099,13 @@ public enum SkillsModule {
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             name = try c.decode(String.self, forKey: .name)
-            notionPageId = try c.decode(String.self, forKey: .notionPageId)
+            if let decoded = try c.decodeIfPresent(SkillSource.self, forKey: .source) {
+                source = decoded
+            } else if let legacy = try c.decodeIfPresent(String.self, forKey: .notionPageId) {
+                source = .notion(pageId: legacy)
+            } else {
+                source = .notion(pageId: "")
+            }
             enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
             visibility = try c.decodeIfPresent(SkillVisibility.self, forKey: .visibility) ?? .standard
             let rawSummary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
@@ -1060,7 +1122,10 @@ public enum SkillsModule {
         func encode(to encoder: Encoder) throws {
             var c = encoder.container(keyedBy: CodingKeys.self)
             try c.encode(name, forKey: .name)
-            try c.encode(notionPageId, forKey: .notionPageId)
+            try c.encode(source, forKey: .source)
+            if case .notion(let pid) = source {
+                try c.encode(pid, forKey: .notionPageId)
+            }
             try c.encode(enabled, forKey: .enabled)
             try c.encode(visibility, forKey: .visibility)
             try c.encode(summary, forKey: .summary)
@@ -1562,5 +1627,148 @@ public enum SkillsModule {
             }
         }
         return dp[n]
+    }
+
+    // MARK: - W2 D5/D6: File-source fetch_skill + merged list_routing_skills
+
+    /// W2 D7: per-path enable state for file-source skills lives in
+    /// `BridgeDefaults.fileSkillEnabled` (Dictionary<String, Bool>).
+    /// Missing entry → enabled (the default). The SKILL.md itself stays
+    /// read-only; we never write into it.
+    public static func isFileSkillEnabled(path: URL) -> Bool {
+        guard let dict = UserDefaults.standard.dictionary(forKey: BridgeDefaults.fileSkillEnabled) as? [String: Bool] else {
+            return true
+        }
+        return dict[path.path] ?? true
+    }
+
+    /// W2 D7: write the per-path enabled flag.
+    public static func setFileSkillEnabled(path: URL, enabled: Bool) {
+        var dict = (UserDefaults.standard.dictionary(forKey: BridgeDefaults.fileSkillEnabled) as? [String: Bool]) ?? [:]
+        dict[path.path] = enabled
+        UserDefaults.standard.set(dict, forKey: BridgeDefaults.fileSkillEnabled)
+    }
+
+    /// W2 D5: Build the `fetch_skill` envelope for a file-source skill.
+    /// Shape mirrors `buildSkillResult` byte-for-byte (same envelope keys
+    /// + value types) so the caller can not distinguish source by
+    /// envelope shape — the only differences are: `url` is a `file://`
+    /// URL, `properties` carries the flattened YAML frontmatter, and the
+    /// `content` markdown body skips the network MentionResolver title
+    /// lookup (mentions are passed through unchanged — bundled SKILL.md
+    /// files don't typically mention Notion pages).
+    public static func buildFileSkillResult(_ s: ParsedSkill) async -> Value {
+        let body = s.body
+        let nonEmptyLineCount = body
+            .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+            .reduce(into: 0) { acc, line in
+                if !line.trimmingCharacters(in: .whitespaces).isEmpty { acc += 1 }
+            }
+        let title: String = {
+            if case .string(let t) = s.frontmatter["title"], !t.isEmpty { return t }
+            if case .string(let t) = s.frontmatter["name"],  !t.isEmpty { return t }
+            return s.name
+        }()
+        let summary: String = {
+            if case .string(let d) = s.frontmatter["description"] { return d }
+            return String(body.prefix(200))
+        }()
+        let triggers: [String] = {
+            if case .array(let arr) = s.frontmatter["triggers"] { return arr }
+            return []
+        }()
+        let antiTriggers: [String] = {
+            if case .array(let arr) = s.frontmatter["anti_triggers"] { return arr }
+            return []
+        }()
+        // Frontmatter → public `properties` map (rich, never `nil`).
+        var props: [String: Value] = [:]
+        for (k, v) in s.frontmatter {
+            switch v {
+            case .string(let str):  props[k] = .string(str)
+            case .bool(let b):      props[k] = .bool(b)
+            case .array(let arr):   props[k] = .array(arr.map { .string($0) })
+            }
+        }
+        let contentValue = body.isEmpty ? "(no content)" : body
+        return .object([
+            "name": .string(s.name),
+            "title": .string(title),
+            "url": .string(s.path.absoluteString),
+            "blockCount": .int(nonEmptyLineCount),
+            "truncated": .bool(false),
+            "content": .string(contentValue),
+            "summary": .string(summary),
+            "triggerPhrases": .array(triggers.map { .string($0) }),
+            "antiTriggerPhrases": .array(antiTriggers.map { .string($0) }),
+            "properties": .object(props),
+            "source": .string("file")
+        ])
+    }
+
+    /// W2 D6: build the merged routing-skills list returned by
+    /// `list_routing_skills`. Notion-source routing entries first (with
+    /// a `shadows` annotation when a file-source skill of the same name
+    /// is being overridden), then file-source skills that opt-in via
+    /// frontmatter `visibility: routing` — OR, by the decision-under-
+    /// agency below, ALL enabled bundled skills (file-source defaults
+    /// to routing-visible unless frontmatter explicitly opts out).
+    ///
+    /// Decision-under-agency (D6): bundled skills default to ROUTING
+    /// visibility. Rationale: the bundled set is curated and the whole
+    /// point of bundling them is so agents can discover them via the
+    /// routing index without manual configuration. An author can still
+    /// opt out by setting `visibility: standard` in frontmatter.
+    public static func mergedRoutingSkills() async -> [Value] {
+        let notionSkills = readAllSkills().filter { s in
+            s.enabled && s.visibility == .routing
+                && NotionPageRef.isValidStoredPageId(s.notionPageId.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        let fileSkills = await FilesystemSkillIndex.shared.allSkills().filter { fs in
+            // Honour per-path disable.
+            guard isFileSkillEnabled(path: fs.path) else { return false }
+            // Opt-out: frontmatter `visibility: standard` excludes from routing.
+            if case .string(let v) = fs.frontmatter["visibility"], v == "standard" {
+                return false
+            }
+            return true
+        }
+        let notionNames = Set(notionSkills.map { $0.name.lowercased() })
+        var rows: [Value] = []
+        for s in notionSkills {
+            var row = skillRowFields(s)
+            // Annotate shadowed file-source skill, if any.
+            if let shadowed = fileSkills.first(where: { $0.name.lowercased() == s.name.lowercased() }) {
+                row["shadows"] = .string("file:\(shadowed.displayPath)")
+            }
+            row["source"] = .string("notion")
+            rows.append(.object(row))
+        }
+        for fs in fileSkills where !notionNames.contains(fs.name.lowercased()) {
+            var row: [String: Value] = [
+                "name": .string(fs.name),
+                "source": .string("file"),
+                "path": .string(fs.displayPath)
+            ]
+            if case .string(let d) = fs.frontmatter["description"] {
+                row["summary"] = .string(d)
+            }
+            if case .array(let arr) = fs.frontmatter["triggers"] {
+                row["triggerPhrases"] = .array(arr.map { .string($0) })
+            }
+            if case .array(let arr) = fs.frontmatter["anti_triggers"] {
+                row["antiTriggerPhrases"] = .array(arr.map { .string($0) })
+            }
+            rows.append(.object(row))
+        }
+        // Stable alphabetical ordering by name.
+        rows.sort { lhs, rhs in
+            guard case .object(let l) = lhs, case .string(let ln) = l["name"],
+                  case .object(let r) = rhs, case .string(let rn) = r["name"] else {
+                return false
+            }
+            return ln.localizedCaseInsensitiveCompare(rn) == .orderedAscending
+        }
+        return rows
     }
 }

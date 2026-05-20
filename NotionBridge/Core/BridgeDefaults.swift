@@ -24,6 +24,13 @@ public enum BridgeDefaults {
     /// Written by SkillsManager and SkillsModule, read at startup.
     public static let skills = "com.notionbridge.skills"
 
+    /// W2 D7: per-path enable state for file-source skills (SKILL.md
+    /// files in `Bundle.module/skills/` or the user dir). The .md file
+    /// itself is read-only here — toggling never mutates it. Value is a
+    /// Dictionary<String /* absolute file path */, Bool>. Missing entry
+    /// → enabled by default.
+    public static let fileSkillEnabled = "com.notionbridge.fileSkillEnabled"
+
     // MARK: - Commands Palette (cmd-ux)
 
     /// Master on/off for the Commands palette (global-hotkey command box).
