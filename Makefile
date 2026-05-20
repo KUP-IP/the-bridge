@@ -104,7 +104,15 @@ app: build extension jobrunner
 	@SPM_BUNDLE="$(RELEASE_DIR)/NotionBridge_NotionBridge.bundle"; \
 		if [ -d "$$SPM_BUNDLE" ]; then \
 			cp -R "$$SPM_BUNDLE" "$(APP_BUNDLE)/Contents/Resources/"; \
-			echo "  ↳ Copied SPM resource bundle to .app root"; \
+			echo "  ↳ Copied SPM resource bundle (NotionBridge) to .app root"; \
+		fi
+	@# ── Copy NotionBridgeLib resource bundle too (3.3.0 W3: bundled SKILL.md ──
+	@# ── skills declared in Package.swift on the NotionBridgeLib target — its  ──
+	@# ── Bundle.module lookup needs the sibling library-target bundle).        ──
+	@LIB_BUNDLE="$(RELEASE_DIR)/NotionBridge_NotionBridgeLib.bundle"; \
+		if [ -d "$$LIB_BUNDLE" ]; then \
+			cp -R "$$LIB_BUNDLE" "$(APP_BUNDLE)/Contents/Resources/"; \
+			echo "  ↳ Copied SPM resource bundle (NotionBridgeLib — bundled skills) to .app root"; \
 		fi
 	@# ── Add MenuBarIcon-named copies for image(forResource:) lookup ──
 	@if [ -f "$(APP_BUNDLE)/Contents/Resources/NotionBridge_NotionBridge.bundle/notionbridge-menubar.png" ]; then \

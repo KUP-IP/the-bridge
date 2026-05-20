@@ -1,5 +1,9 @@
 # Changelog
 
+## [3.3.1] — 2026-05-19 — Ship the 3.3.0 bundled skills (Makefile fix)
+
+Hotfix. 3.3.0 (34) was released with the SKILL.md adoption code AND the 13 Apache-2.0 skills committed to the repo, but the `make install` packaging step copied only the executable target's SPM resource bundle into `.app/Contents/Resources/` and missed the `NotionBridgeLib` target's bundle — so the shipped binary had the loader code but no bundled skills to load. **No source changes; Makefile only.** Suite still 1204/0; same audit; same review.
+
 ## [3.3.0] — 2026-05-19 — SKILL.md adoption + bundled skills + plugin manifests
 
 Phase 1 of the parity-or-better program. Bridge MCP now reads Anthropic's open SKILL.md format alongside its existing Notion-page skills, ships 13 Apache-2.0 skills out of the box, and exposes Claude Code marketplace manifests for distribution.
