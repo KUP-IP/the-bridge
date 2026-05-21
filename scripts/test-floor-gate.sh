@@ -473,7 +473,7 @@
 # explicitly deferred — operator open question.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1217}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1232}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."

@@ -474,6 +474,8 @@ await runCommandsControllerTests()  // cmd-ux W1/W2: CommandsController observab
 await runCommandVisibilityTests()   // cmd-ux W3: .command visibility axis — Codable, palette filter, picker write-back, empty-state
 await runFlagVisibilityMigrationTests()  // cmd-ux W4 (3.4.1): flag-based visibility SSOT — enum↔flags, decode/encode migration, RegistrySkillsCommandProvider flag filter, mutator parity
 await runW4ComponentAndStorageTests()    // cmd-ux W4 (3.4.1): kbd-chip splitter + per-path file-source flag storage + effective routing/palette resolution
+await runSkillsMCPFlagRoundTripTests()    // 3.4.2 W3 H1 fix: SkillConfig MCP reconstruction preserves combined-state flag pair
+await runHotkeyRecorderFocusTests()        // 3.4.2 W4 H5 fix: RecorderFocusModel contract locks the button-binding focus path
 await runFrontmatterParserTests()   // W2 D8: SKILL.md YAML frontmatter parser
 await runSkillSourceTests()         // W2 D2: SkillSource enum + legacy notionPageId backward-compat
 await runFilesystemSkillIndexTests() // W2 D3: SKILL.md filesystem index actor

@@ -442,11 +442,17 @@ public enum SkillsModule {
                 case "list":
                     let skills = readAllSkills()
                     let items: [Value] = skills.map { skill in
+                        // W4-3.4.2: envelope now exposes BOTH the legacy
+                        // `visibility` string (derived; one-cycle back-
+                        // compat) AND the new flag pair so MCP callers
+                        // can read the combined state losslessly.
                         var row: [String: Value] = [
                             "name": .string(skill.name),
                             "uuid": .string(skill.notionPageId),
                             "enabled": .bool(skill.enabled),
                             "visibility": .string(skill.visibility.rawValue),
+                            "routingDiscoverable": .bool(skill.routingDiscoverable),
+                            "inCommandPalette": .bool(skill.inCommandPalette),
                             "platform": .string(skill.platform.rawValue)
                         ]
                         if let skillUrl = skill.url {
@@ -676,11 +682,18 @@ public enum SkillsModule {
                         }
                         return cur.antiTriggerPhrases
                     }()
+                    // W4-3.4.2 H1 fix: preserve flag pair directly
+                    // instead of round-tripping through the legacy enum
+                    // (the back-compat enum→flag mapper would collapse
+                    // the combined state routingDiscoverable=true &&
+                    // inCommandPalette=true to .command, losing the
+                    // routing bit).
                     skills[idx] = SkillConfig(
                         name: cur.name,
-                        notionPageId: cur.notionPageId,
+                        source: cur.source,
                         enabled: cur.enabled,
-                        visibility: cur.visibility,
+                        routingDiscoverable: cur.routingDiscoverable,
+                        inCommandPalette: cur.inCommandPalette,
                         summary: newSummary,
                         triggerPhrases: newTrig,
                         antiTriggerPhrases: newAnti,
@@ -808,11 +821,13 @@ public enum SkillsModule {
                             ])
                         }
                         let cur = skills[idx]
+                        // W4-3.4.2 H1 fix: flag-direct reconstruction.
                         skills[idx] = SkillConfig(
                             name: cur.name,
-                            notionPageId: cur.notionPageId,
+                            source: cur.source,
                             enabled: cur.enabled,
-                            visibility: cur.visibility,
+                            routingDiscoverable: cur.routingDiscoverable,
+                            inCommandPalette: cur.inCommandPalette,
                             summary: newSummary,
                             triggerPhrases: trig,
                             antiTriggerPhrases: anti,
@@ -1078,15 +1093,36 @@ public enum SkillsModule {
         }
     }
 
+    /// W4-3.4.2: legacy enum-input setter, preserved as a back-compat
+    /// wrapper that delegates to the flag-direct path. The 3-state enum
+    /// maps to a flag pair via SkillVisibility.asFlags. A caller that
+    /// wants the combined state should use `writeSetFlags` instead.
     private static func writeSetVisibility(named name: String, visibility: SkillVisibility) -> Bool {
+        let pair = visibility.asFlags
+        return writeSetFlags(
+            named: name,
+            routingDiscoverable: pair.routingDiscoverable,
+            inCommandPalette: pair.inCommandPalette
+        )
+    }
+
+    /// W4-3.4.2 (H1 fix): flag-direct setter — the new SSOT write path
+    /// for the visibility axis. Preserves combined-state losslessly
+    /// (both flags can be set independently). Returns false if not found.
+    private static func writeSetFlags(
+        named name: String,
+        routingDiscoverable: Bool,
+        inCommandPalette: Bool
+    ) -> Bool {
         var skills = readAllSkills()
         if let idx = skills.firstIndex(where: { $0.name.lowercased() == name.lowercased() }) {
             let s = skills[idx]
             skills[idx] = SkillConfig(
                 name: s.name,
-                notionPageId: s.notionPageId,
+                source: s.source,
                 enabled: s.enabled,
-                visibility: visibility,
+                routingDiscoverable: routingDiscoverable,
+                inCommandPalette: inCommandPalette,
                 summary: s.summary,
                 triggerPhrases: s.triggerPhrases,
                 antiTriggerPhrases: s.antiTriggerPhrases,
@@ -1114,11 +1150,13 @@ public enum SkillsModule {
         var skills = readAllSkills()
         if let idx = skills.firstIndex(where: { $0.name.lowercased() == name.lowercased() }) {
             let s = skills[idx]
+            // W4-3.4.2 H1 fix: flag-direct reconstruction (toggle).
             skills[idx] = SkillConfig(
                 name: s.name,
-                notionPageId: s.notionPageId,
+                source: s.source,
                 enabled: !s.enabled,
-                visibility: s.visibility,
+                routingDiscoverable: s.routingDiscoverable,
+                inCommandPalette: s.inCommandPalette,
                 summary: s.summary,
                 triggerPhrases: s.triggerPhrases,
                 antiTriggerPhrases: s.antiTriggerPhrases,
@@ -1140,11 +1178,13 @@ public enum SkillsModule {
         guard !skills.contains(where: { $0.name.lowercased() == trimmed.lowercased() }) else { return false }
         if let idx = skills.firstIndex(where: { $0.name.lowercased() == oldName.lowercased() }) {
             let s = skills[idx]
+            // W4-3.4.2 H1 fix: flag-direct reconstruction (rename).
             skills[idx] = SkillConfig(
                 name: trimmed,
-                notionPageId: s.notionPageId,
+                source: s.source,
                 enabled: s.enabled,
-                visibility: s.visibility,
+                routingDiscoverable: s.routingDiscoverable,
+                inCommandPalette: s.inCommandPalette,
                 summary: s.summary,
                 triggerPhrases: s.triggerPhrases,
                 antiTriggerPhrases: s.antiTriggerPhrases,
@@ -1162,11 +1202,15 @@ public enum SkillsModule {
         var skills = readAllSkills()
         if let idx = skills.firstIndex(where: { $0.name.lowercased() == name.lowercased() }) {
             let s = skills[idx]
+            // W4-3.4.2 H1 fix: flag-direct reconstruction (update_url).
+            // The flag-direct ctor takes `source:` so wrap the new
+            // pageId in `.notion(pageId:)` to preserve the W2 D2 shape.
             skills[idx] = SkillConfig(
                 name: s.name,
-                notionPageId: newPageId,
+                source: .notion(pageId: newPageId),
                 enabled: s.enabled,
-                visibility: s.visibility,
+                routingDiscoverable: s.routingDiscoverable,
+                inCommandPalette: s.inCommandPalette,
                 summary: s.summary,
                 triggerPhrases: s.triggerPhrases,
                 antiTriggerPhrases: s.antiTriggerPhrases,

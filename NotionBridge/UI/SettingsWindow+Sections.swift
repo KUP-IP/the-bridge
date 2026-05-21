@@ -1012,10 +1012,36 @@ struct HotkeyRecorderField: NSViewRepresentable {
 
         /// Reconcile with SwiftUI's binding (the secondary button path
         /// flips `isRecording` without a click). Idempotent.
+        ///
+        /// W4-3.4.2 H5 fix: when the binding transitions FALSE→TRUE and
+        /// this view is already in a window hierarchy, grab first
+        /// responder SYNCHRONOUSLY in the same run-loop turn instead of
+        /// relying on the SwiftUI-side async retry that could fire
+        /// before the view lands in a window (silent no-op). For freshly
+        /// mounted views — when `window` is still nil — the
+        /// `didMoveToWindow` override below picks up the slack.
         func applyRecording(_ recording: Bool, currentDisplay: String) {
+            let wasRecording = focus.isRecording
             focus.setRecording(recording)
             display = recording ? "Press shortcut\u{2026}" : currentDisplay
+            if recording, !wasRecording, let window {
+                window.makeFirstResponder(self)
+            }
             refreshAccessibility()
+        }
+
+        /// W4-3.4.2 H5 fix: when the view is mounted into a window AND
+        /// the focus model already says recording (the W4 conditional-
+        /// render path mounts the view fresh on the operator's Record
+        /// button click — `applyRecording(true, …)` ran in the same
+        /// runloop turn as mount, but no `window` existed yet to grab
+        /// focus on), grab first responder here. This is the reliable
+        /// signal that the WindowServer is ready to route key events.
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if focus.isRecording, let window {
+                window.makeFirstResponder(self)
+            }
         }
 
         // MARK: Standalone click-to-record (Bug-1 structural fix)

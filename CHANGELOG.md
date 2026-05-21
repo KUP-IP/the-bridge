@@ -1,5 +1,26 @@
 # Changelog
 
+## [3.4.2] — 2026-05-21 — 3.4.1 regression fixes: hotkey recorder + Skills MCP combined-state
+
+Targeted regression patch. Two confirmed defects shipped in 3.4.1 are fixed; observability + new MCP set_flags action documented as honestly deferred to 3.4.3.
+
+### Fixed
+- **Hotkey recorder couldn't capture after "Record shortcut" click (H5).** The W4-3.4.1 conditional render — `if isRecordingHotkey { HotkeyRecorderField } else { BridgeKbdChips }` — meant the recorder NSView was freshly mounted at the moment the operator clicked Record, before any window existed to receive a `makeFirstResponder` call. The redundant `DispatchQueue.main.async` focus-grab in `updateNSView` fired before the view landed in a window hierarchy → `nsView.window` was nil → silent no-op, no retry. Two defenses added: (1) `viewDidMoveToWindow` override on `RecorderNSView` grabs first responder on the reliable AppKit signal that the WindowServer is ready to route key events; (2) `applyRecording(true, …)` now grabs first responder *synchronously* in the same runloop turn when the view is already windowed (covers the toggle-after-mount path).
+- **Skills MCP round-trip collapsed combined-state (H1).** Five `SkillConfig` reconstruction sites in [SkillsModule.swift](NotionBridge/Modules/SkillsModule.swift) (`set_metadata`, `sync_metadata_from_notion`, `toggle-enabled`, `rename`, `update_url`) re-built the row via `SkillConfig(..., visibility: cur.visibility, ...)` — the legacy enum ctor. The W4-3.4.1 back-compat enum→flag mapper would collapse the combined state (`routingDiscoverable=true && inCommandPalette=true`) down to `.command` (= `routingDiscoverable=false, inCommandPalette=true`), silently dropping the routing bit on every MCP write. Replaced all 5 reconstructions with the W4 flag-direct ctor that preserves the pair losslessly. Net effect: a skill flagged for both routing AND palette in the UI now survives any MCP-side mutation without drift.
+
+### Added
+- **MCP `list` envelope now exposes the flag pair.** Every `manage_skill action:"list"` result row carries `routingDiscoverable: Bool` + `inCommandPalette: Bool` *in addition to* the legacy `visibility: String` field. One-cycle back-compat preserved per the 3.5.0 deprecation plan; downstream callers can migrate to reading the flags directly while existing readers continue to work.
+- **`writeSetFlags(named:routingDiscoverable:inCommandPalette:)` internal write path** — flag-direct setter that's now the SSOT; `writeSetVisibility(named:visibility:)` is preserved as a back-compat wrapper delegating to it.
+- **`SkillsMCPFlagRoundTripTests.swift`** — 4 tests locking the H1 fix. Combined-state encode/decode round-trip · simulated MCP `set_metadata` full path round-trip · *negative test* documenting the pre-3.4.2 legacy-ctor regression boundary (so a future revert is loud) · envelope flag-pair shape lock.
+- **`HotkeyRecorderFocusTests.swift`** — 6 tests locking the `RecorderFocusModel` contract that the H5 fix relies on: the `setRecording(true)` button-binding path leaves the model `acceptsFirstResponder == true`; the standalone `clickToRecord` path (3.2.0 Bug-1 baseline) remains intact; escape cancels; accepted-vs-rejected chord transitions.
+
+### Notes
+- **W3 fix scope:** all 5 reconstruction sites use the flag-direct ctor that takes `source:`; the `update_url` path wraps the new pageId in `.notion(pageId: newPageId)` so the W2-D2 source-discriminated shape stays intact.
+- **W4 fix scope:** the `viewDidMoveToWindow` override + synchronous focus on transition are belt-and-suspenders. Either alone fixes the H5 regression; together they make the focus-grab fully race-proof against any future SwiftUI mount-timing change.
+- **Deferred to 3.4.3** *(honest scope discipline per Decision #5 "limit blast radius per release")*: Workstream A observability (MCPActivityLogger actor + Settings → Advanced → MCP Activity panel + Export debug bundle button); manage_skill `set_flags` MCP action (flag-direct input). Both confirmed-defect fixes don't require observability to land — H1 and H5 were reproducible from code reading.
+- **Carried forward**: Sparkle release-cut for v3.4.1 + v3.4.2 (operator-auth scope; gh release create + appcast.xml update). The installed build still won't Sparkle-self-update until appcast lands.
+- **CI floor raised 1217 → 1232 (+15 net tests).** All 1232 tests green.
+
 ## [3.4.1] — 2026-05-20 — Commands tab UX/UI overhaul + flag-based visibility SSOT
 
 End-to-end remediation of the Settings → Commands tab in response to operator UX critique. Replaces the mutually-exclusive 3-state visibility picker with two independent flags, brings Notion-source and file-source skills to row-level parity, ships a small shared component library (badges, kbd chips, empty-state), and strips MCP tool names from user-facing copy across the settings surface.
