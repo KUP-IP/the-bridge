@@ -288,4 +288,17 @@ public actor FilesystemSkillIndex {
             .appendingPathComponent(bundleId, isDirectory: true)
             .appendingPathComponent("skills", isDirectory: true)
     }
+
+    /// Seam for tests to override index contents directly in memory.
+    /// 3.4.2 W4 fix: was `#if DEBUG`-gated which broke `make build`'s
+    /// release-mode compile of NotionBridgeTests (5 sites in
+    /// CommandPaletteTests reference this method). Removing the guard
+    /// is harmless — the production code never calls this method, and
+    /// shipping a public test-seam in release adds zero runtime cost
+    /// (no allocation, no behavior change unless deliberately invoked).
+    public func testOverrideIndexed(_ override: [String: ParsedSkill]) {
+        self.indexed = override
+        self.didInitialScan = true
+        self.lastScan = Date()
+    }
 }
