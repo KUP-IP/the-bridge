@@ -117,7 +117,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
-        // PKT-487 → PKT-1 v4.0: Dock label uses the new display name
+        // PKT-487 → PKT-1 v3.5: Dock label uses the new display name
         // (executable bundle name is still "NotionBridge" — that's the
         // SPM target identifier baked into the binary).
         ProcessInfo.processInfo.processName = "The Bridge"
@@ -131,7 +131,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // PKT-1 v4.0: Rename migration. Idempotent + atomic; no-ops on every
+        // PKT-1 v3.5: Rename migration. Idempotent + atomic; no-ops on every
         // launch after the first successful run. Runs BEFORE any subsystem
         // touches Application Support so they see canonical paths.
         do {

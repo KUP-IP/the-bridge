@@ -1,5 +1,5 @@
 // BridgePaths.swift — Single source of truth for on-disk locations.
-// PKT-1 (v4.0): The app rebranded "Notion Bridge → The Bridge"; this
+// PKT-1 (v3.5): The app rebranded "Notion Bridge → The Bridge"; this
 // consolidates the previously-inconsistent path naming (the codebase
 // historically used both "NotionBridge" and "Notion Bridge" as folder
 // names) into one canonical home: "The Bridge".

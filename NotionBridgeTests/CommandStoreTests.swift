@@ -1,4 +1,4 @@
-// CommandStoreTests.swift — PKT-6 v4.0
+// CommandStoreTests.swift — PKT-6 v3.5
 // Covers: CRUD, slug exclusivity, key-slot eviction, recency sort,
 // substring search, first-run seeding, persistence round-trip.
 

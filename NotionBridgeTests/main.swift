@@ -503,13 +503,13 @@ await runStripeDeprecationShimTests()
 await runEndToEndTests()
 await runWranglerModuleTests() // PKT-757 (v2.2 · 0.2.2)
 
-// PKT-1 (v4.0): rename migration + canonical paths.
+// PKT-1 (v3.5): rename migration + canonical paths.
 await runPathMigrationTests()
 
-// PKT-9 (v4.0): Standing Orders + Routing Index.
+// PKT-9 (v3.5): Standing Orders + Routing Index.
 await runStandingOrdersTests()
 
-// PKT-6 (v4.0): CommandStore (markdown-per-command + index.json).
+// PKT-6 (v3.5): CommandStore (markdown-per-command + index.json).
 await runCommandStoreTests()
 
 // ============================================================

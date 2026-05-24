@@ -1,7 +1,7 @@
 // PathMigration.swift — One-time migration of legacy on-disk locations
 // to the new canonical "The Bridge" folders.
 //
-// PKT-1 (v4.0): Existing 3.x installs store data under one (or both!) of
+// PKT-1 (v3.5): Existing 3.x installs store data under one (or both!) of
 // these legacy locations:
 //   ~/Library/Application Support/Notion Bridge/   (display-name variant)
 //   ~/Library/Application Support/NotionBridge/    (executable-name variant)
@@ -50,7 +50,7 @@ public enum PathMigration {
 
     /// Sentinel filename inside the canonical Application Support dir that
     /// records a successful migration. Existence ⇒ skip migration.
-    public static let sentinelName = ".bridge-migration-v4.0-complete"
+    public static let sentinelName = ".bridge-migration-v3.5-complete"
 
     /// Run migration once. Safe to call on every launch — no-ops after the
     /// first successful run.

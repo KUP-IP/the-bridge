@@ -1,4 +1,4 @@
-// StandingOrdersTests.swift — PKT-9 v4.0
+// StandingOrdersTests.swift — PKT-9 v3.5
 // Covers: StandingOrdersStore CRUD + optimistic concurrency,
 // RoutingIndex rendering determinism, StandingOrdersComposer assembly
 // and per-client overlay matching.

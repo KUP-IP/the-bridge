@@ -1,4 +1,4 @@
-// StandingOrdersStore.swift — Single-document store for the v4.0
+// StandingOrdersStore.swift — Single-document store for the v3.5
 // "Standing Orders": the user-authored operating preamble that every
 // MCP client receives in the initialize handshake.
 //
@@ -178,7 +178,7 @@ public final class StandingOrdersStore: @unchecked Sendable {
     private func writeMetadata(updatedAt: Date, hash: String) throws {
         let iso = ISO8601DateFormatter().string(from: updatedAt)
         let payload = """
-        {"updatedAt":"\(iso)","hash":"\(hash)","version":"v4.0"}
+        {"updatedAt":"\(iso)","hash":"\(hash)","version":"v3.5"}
         """
         try payload.write(to: metaURL, atomically: true, encoding: .utf8)
     }

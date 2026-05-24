@@ -1,5 +1,5 @@
 // CommandStore.swift — Markdown-backed store for user-authored Commands.
-// PKT-6 (v4.0).
+// PKT-6 (v3.5).
 //
 // Layout:
 //   ~/Library/Application Support/The Bridge/commands/

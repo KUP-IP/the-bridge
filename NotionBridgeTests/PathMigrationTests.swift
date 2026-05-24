@@ -1,4 +1,4 @@
-// PathMigrationTests.swift — verifies the v4.0 rename migration
+// PathMigrationTests.swift — verifies the v3.5 rename migration
 // PKT-1: idempotency, atomicity, conflict handling, no-data-loss.
 
 import Foundation
