@@ -4,7 +4,7 @@
 // Discovers SKILL.md files in two roots:
 //   • Bundled defaults: Bundle.module, subdir `skills/<name>/SKILL.md`
 //     (or `STUB.md` for source-available linked-only skills).
-//   • User-installable: ~/Library/Application Support/Notion Bridge/skills/
+//   • User-installable: ~/Library/Application Support/The Bridge/skills/
 //     (or `kup.solutions.notion-bridge`'s appSupport dir derived from the
 //     main bundle id).
 //
@@ -270,23 +270,10 @@ public actor FilesystemSkillIndex {
     }
 
     private static func defaultUserDirectory() -> URL {
-        let fm = FileManager.default
-        let bundleId = Bundle.main.bundleIdentifier ?? defaultBundleId
-        let support: URL
-        if let url = try? fm.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        ) {
-            support = url
-        } else {
-            support = URL(fileURLWithPath: NSHomeDirectory())
-                .appendingPathComponent("Library/Application Support")
-        }
-        return support
-            .appendingPathComponent(bundleId, isDirectory: true)
-            .appendingPathComponent("skills", isDirectory: true)
+        // PKT-1 v3.5: ~/Library/Application Support/The Bridge/skills/
+        // (was previously bundle-id-scoped — now everything lives under
+        // the shared "The Bridge" home and BridgePaths owns the layout).
+        BridgePaths.applicationSupport(.skills)
     }
 
     /// Seam for tests to override index contents directly in memory.

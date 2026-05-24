@@ -588,7 +588,7 @@ public actor LspSession {
         let workspaceName = (workspaceRoot as NSString).lastPathComponent
         let params: [String: Any] = [
             "processId":        NSNumber(value: ProcessInfo.processInfo.processIdentifier),
-            "clientInfo":       ["name": "NotionBridge", "version": AppVersion.marketing],
+            "clientInfo":       ["name": "The Bridge", "version": AppVersion.marketing],  // PKT-1 v3.5: brand rename
             "locale":           "en",
             "rootUri":          workspaceURI,
             "rootPath":         workspaceRoot,

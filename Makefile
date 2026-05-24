@@ -6,8 +6,8 @@
 # Debug workflow:    make debug
 # Dev app bundle:    make app (unsigned, for local testing)
 
-APP_NAME        = Notion Bridge
-DMG_VOLUME_NAME = NotionBridge
+APP_NAME        = The Bridge
+DMG_VOLUME_NAME = The Bridge
 BUNDLE_ID       = kup.solutions.notion-bridge
 BINARY_NAME     = NotionBridge
 BUILD_DIR       = .build
@@ -203,27 +203,31 @@ check-stale-build:
 	fi
 
 # ── Install ────────────────────────────────────────────────────────────
+# PKT-1 v3.5: destination renamed to "/Applications/The Bridge.app".
+# Cleanup removes the new path AND both legacy variants ("Notion Bridge.app"
+# from 3.x display-name installs, "NotionBridge.app" from any executable-
+# name installs) so re-installs land cleanly regardless of prior state.
 install: check-stale-build notarize
 	@echo "📲 Installing notarized app to /Applications..."
-	@rm -rf "/Applications/Notion Bridge.app" "/Applications/NotionBridge.app"
-	@ditto "$(APP_BUNDLE)" "/Applications/Notion Bridge.app"
-	@spctl --assess --verbose "/Applications/Notion Bridge.app"
+	@rm -rf "/Applications/The Bridge.app" "/Applications/Notion Bridge.app" "/Applications/NotionBridge.app"
+	@ditto "$(APP_BUNDLE)" "/Applications/The Bridge.app"
+	@spctl --assess --verbose "/Applications/The Bridge.app"
 	@echo "🔄 Re-registering with Launch Services..."
-	@/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f "/Applications/Notion Bridge.app"
+	@/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f "/Applications/The Bridge.app"
 	@killall Dock 2>/dev/null || true
-	@echo "✅ Installed: /Applications/Notion Bridge.app"
+	@echo "✅ Installed: /Applications/The Bridge.app"
 
 # v1.7.0: Copy-only install (no notarize dep, no killall) (F3)
 install-copy: check-stale-build sign
 	@echo "Installing app to /Applications (copy-only)..."
-	@rm -rf "/Applications/Notion Bridge.app" "/Applications/NotionBridge.app"
-	@ditto "$(APP_BUNDLE)" "/Applications/Notion Bridge.app"
+	@rm -rf "/Applications/The Bridge.app" "/Applications/Notion Bridge.app" "/Applications/NotionBridge.app"
+	@ditto "$(APP_BUNDLE)" "/Applications/The Bridge.app"
 	@echo "🔄 Re-registering with Launch Services..."
-	@/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f "/Applications/Notion Bridge.app"
-	@echo "Installed: /Applications/Notion Bridge.app"
-	@echo "Restart NotionBridge manually to pick up changes."
+	@/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f "/Applications/The Bridge.app"
+	@echo "Installed: /Applications/The Bridge.app"
+	@echo "Restart The Bridge manually to pick up changes."
 
-# Alias for agents / remote MCP sessions: same as install-copy (no notarize; does not kill NotionBridge).
+# Alias for agents / remote MCP sessions: same as install-copy (no notarize; does not kill The Bridge).
 install-agent-safe: install-copy
 
 # ── Clean TCC ──────────────────────────────────────────────────────────

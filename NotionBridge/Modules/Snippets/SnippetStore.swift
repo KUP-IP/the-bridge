@@ -79,8 +79,10 @@ public actor SnippetStore {
     }
 
     public nonisolated static func defaultStoreURL() -> URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/NotionBridge/snippets/store.json", isDirectory: false)
+        // PKT-1 v3.5: route through BridgePaths so the rename migration is
+        // consistent and the store lands at ~/Library/Application Support/
+        // The Bridge/snippets/store.json.
+        BridgePaths.applicationSupport(.snippets).appendingPathComponent("store.json", isDirectory: false)
     }
 
     public nonisolated static func defaultEspansoURL() -> URL {

@@ -719,11 +719,24 @@ public actor SSEServer {
 
             let legacyVersion = AppVersion.resolved
             let routingInstructions = SkillsModule.buildRoutingInstructions()
+            // PKT-9 v3.5: prepend Standing Orders. Same best-effort posture
+            // as ServerManager — legacy initialize must succeed even when
+            // the on-disk store is missing or unreadable.
+            let composedInstructions: String = {
+                do {
+                    let snapshot = try StandingOrdersStore.shared.read()
+                    let orders = snapshot.markdown.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if orders.isEmpty { return routingInstructions }
+                    return orders + "\n\n---\n\n" + routingInstructions
+                } catch {
+                    return routingInstructions
+                }
+            }()
             return buildRPCResponse(id: requestId, result: [
                 "protocolVersion": BridgeConstants.mcpProtocolVersion,
                 "capabilities": ["tools": [:] as [String: Any]] as [String: Any],
-                "serverInfo": ["name": "NotionBridge", "version": legacyVersion] as [String: Any],
-                "instructions": routingInstructions
+                "serverInfo": ["name": "The Bridge", "version": legacyVersion] as [String: Any],  // PKT-1 v3.5: brand rename
+                "instructions": composedInstructions
             ] as [String: Any])
 
         case "notifications/initialized":

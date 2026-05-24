@@ -47,7 +47,8 @@ public enum BridgePaths {
     public enum SupportSubdir: String {
         case commands       = "commands"
         case snippets       = "snippets"
-        case skillsCache    = "skills-cache"
+        case skills         = "skills"          // user-installed SKILL.md files
+        case skillsCache    = "skills-cache"    // Notion-synced routing-skill cache
         case standingOrders = "standing-orders"
         case jobs           = "jobs"
         case bgProcess      = "bg-process"

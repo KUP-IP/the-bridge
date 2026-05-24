@@ -159,7 +159,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             options: [.idleSystemSleepDisabled, .suddenTerminationDisabled],
             reason: "MCP server must remain active for client connections"
         )
-        print("[Notion Bridge] App Nap prevention activity started")
+        print("[The Bridge] App Nap prevention activity started")
 
         // PKT-341: Bootstrap LogManager for crash-resilient disk logging
         Task {
@@ -237,7 +237,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
-        print("[Notion Bridge] Shutting down MCP server...")
+        print("[The Bridge] Shutting down MCP server...")
         serverTask?.cancel()
         serverTask = nil
         if let manager = serverManager {
@@ -262,7 +262,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         statusBar.markServerStopped()
-        print("[Notion Bridge] Server stopped.")
+        print("[The Bridge] Server stopped.")
     }
 
     /// PKT-369 W2: Dock icon click opens or brings Settings to front.
@@ -298,7 +298,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private func installSignalHandlers() {
         signal(SIGTERM, crashFlushHandler)
         signal(SIGABRT, crashFlushHandler)
-        print("[Notion Bridge] Signal handlers installed (SIGTERM, SIGABRT)")
+        print("[The Bridge] Signal handlers installed (SIGTERM, SIGABRT)")
     }
 
     // MARK: - Rapid Restart Detection (V1-PATCH-003)
@@ -319,25 +319,25 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let count = UserDefaults.standard.integer(forKey: Self.rapidLaunchCountKey)
 
         UserDefaults.standard.set(now, forKey: Self.rapidLaunchTimeKey)
-        print("[Notion Bridge] detectRapidRestart: set lastLaunchTime=\(now)")
+        print("[The Bridge] detectRapidRestart: set lastLaunchTime=\(now)")
 
         let elapsed = now - lastLaunch
         if elapsed < Self.rapidRestartWindow && lastLaunch > 0 {
             let newCount = count + 1
             UserDefaults.standard.set(newCount, forKey: Self.rapidLaunchCountKey)
             if newCount >= Self.rapidRestartThreshold {
-                print("[Notion Bridge] ⚠️ RAPID RESTART CYCLE: \(newCount) launches in \(Int(elapsed))s — deferring non-critical init by 5s")
+                print("[The Bridge] ⚠️ RAPID RESTART CYCLE: \(newCount) launches in \(Int(elapsed))s — deferring non-critical init by 5s")
                 UserDefaults.standard.synchronize()
                 return true
             }
-            print("[Notion Bridge] Launch \(newCount)/\(Self.rapidRestartThreshold) within restart window (\(Int(elapsed))s)")
+            print("[The Bridge] Launch \(newCount)/\(Self.rapidRestartThreshold) within restart window (\(Int(elapsed))s)")
             UserDefaults.standard.synchronize()
             return false
         } else {
             // Outside window — reset counter
             UserDefaults.standard.set(1, forKey: Self.rapidLaunchCountKey)
             UserDefaults.standard.synchronize()
-            print("[Notion Bridge] detectRapidRestart: outside window, reset count=1")
+            print("[The Bridge] detectRapidRestart: outside window, reset count=1")
             return false
         }
     }
@@ -354,11 +354,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let others = running.filter { $0.processIdentifier != myPID }
         if let existing = others.first {
-            print("[Notion Bridge] Duplicate instance detected — PID \(existing.processIdentifier) is already running (my PID: \(myPID))")
+            print("[The Bridge] Duplicate instance detected — PID \(existing.processIdentifier) is already running (my PID: \(myPID))")
             return false
         }
 
-        print("[Notion Bridge] Single-instance check passed (PID: \(myPID))")
+        print("[The Bridge] Single-instance check passed (PID: \(myPID))")
         return true
     }
 
@@ -393,9 +393,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             if let data = try? Data(contentsOf: url),
                let list = try? JSONDecoder().decode([String].self, from: data) {
                 toolAllowlist = Set(list)
-                print("[Notion Bridge] Loaded tool allowlist (\(toolAllowlist?.count ?? 0) tools) from \(path)")
+                print("[The Bridge] Loaded tool allowlist (\(toolAllowlist?.count ?? 0) tools) from \(path)")
             } else {
-                print("[Notion Bridge] ⚠️ Failed to load allowlist from \(path)")
+                print("[The Bridge] ⚠️ Failed to load allowlist from \(path)")
             }
         }
 
@@ -420,7 +420,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 statusBar.markServerStarted(toolCount: toolCount)
                 statusBar.toolInfoList = toolInfos
             }
-            print("[Notion Bridge] MCP server started with \(toolCount) tools (stdio + SSE :\(port))")
+            print("[The Bridge] MCP server started with \(toolCount) tools (stdio + SSE :\(port))")
 
             // Run both transports concurrently
             await withTaskGroup(of: Void.self) { group in
@@ -429,9 +429,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                     do {
                         try await manager.run()
                     } catch is CancellationError {
-                        print("[Notion Bridge] stdio transport cancelled")
+                        print("[The Bridge] stdio transport cancelled")
                     } catch {
-                        print("[Notion Bridge] stdio error: \(error.localizedDescription)")
+                        print("[The Bridge] stdio error: \(error.localizedDescription)")
                     }
                 }
 
@@ -496,7 +496,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// resolved page body is written to the system clipboard.
     private func maybeStartCommandsPalette() {
         guard Self.shouldStartCommandsPalette() else {
-            print("[Notion Bridge] Commands palette disabled (master toggle off; set \(CommandsPaletteGate.enableEnvKey)=1 to force on)")
+            print("[The Bridge] Commands palette disabled (master toggle off; set \(CommandsPaletteGate.enableEnvKey)=1 to force on)")
             return
         }
         startCommandsPalette()
@@ -528,7 +528,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             // full relaunch.
             if !existing.isRegistered {
                 let ok = existing.registerHotkey()
-                print("[Notion Bridge] Commands palette hot-key re-registration \(ok ? "succeeded" : "still FAILED") (\(existing.hotkeyConfig.displayString))")
+                print("[The Bridge] Commands palette hot-key re-registration \(ok ? "succeeded" : "still FAILED") (\(existing.hotkeyConfig.displayString))")
             }
             commandsController.publishRegistration(
                 isRegistered: existing.isRegistered,
@@ -555,7 +555,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             status: box.lastRegisterStatus,
             hotkey: box.hotkeyConfig
         )
-        print("[Notion Bridge] Commands palette enabled — registry-backed, clipboard-only — hot-key \(registered ? "registered" : "registration FAILED") (\(hotkey.displayString))")
+        print("[The Bridge] Commands palette enabled — registry-backed, clipboard-only — hot-key \(registered ? "registered" : "registration FAILED") (\(hotkey.displayString))")
     }
 
     /// Whether the Commands-palette global hot-key is currently
@@ -604,7 +604,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             // Honor a kill-switch env override even on a live toggle:
             // if the env explicitly forces OFF, don't construct.
             guard Self.shouldStartCommandsPalette() else {
-                print("[Notion Bridge] Commands palette toggle ON ignored — \(CommandsPaletteGate.enableEnvKey)=0 forces it OFF")
+                print("[The Bridge] Commands palette toggle ON ignored — \(CommandsPaletteGate.enableEnvKey)=0 forces it OFF")
                 return
             }
             startCommandsPalette() // builds box + publishes real registration
@@ -612,7 +612,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             commandBox?.unregisterHotkey()
             commandBox = nil
             commandsController.publishUnregistered()
-            print("[Notion Bridge] Commands palette disabled via Settings — hot-key unregistered")
+            print("[The Bridge] Commands palette disabled via Settings — hot-key unregistered")
         }
     }
 
@@ -642,9 +642,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // collision is distinguishable from a plumbing failure.
         let ok = commandsController.setHotkey(config, registrar: commandsRegistrar)
         if commandBox == nil {
-            print("[Notion Bridge] Commands hot-key recorded (\(config.displayString)) — palette is OFF; applies when re-enabled")
+            print("[The Bridge] Commands hot-key recorded (\(config.displayString)) — palette is OFF; applies when re-enabled")
         } else {
-            print("[Notion Bridge] Commands hot-key rebind \(ok ? "succeeded" : "FAILED (combo taken — kept prior)") (\(config.displayString))")
+            print("[The Bridge] Commands hot-key rebind \(ok ? "succeeded" : "FAILED (combo taken — kept prior)") (\(config.displayString))")
         }
         return ok
     }
@@ -675,14 +675,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 await MainActor.run {
                     statusBar.updateNotionTokenStatus("missing", detail: "Set NOTION_API_TOKEN or add to ~/.config/notion-bridge/config.json")
                 }
-                print("[Notion Bridge] Notion API token not found")
+                print("[The Bridge] Notion API token not found")
 
             case .available(let source):
                 // Token found — validate with a test API call
                 await MainActor.run {
                     statusBar.updateNotionTokenStatus("disconnected", detail: "Validating...")
                 }
-                print("[Notion Bridge] Notion API token found (source: \(source)), validating...")
+                print("[The Bridge] Notion API token found (source: \(source)), validating...")
 
                 do {
                     let client = try NotionClient()
@@ -691,17 +691,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                     await MainActor.run {
                         if result.success {
                             statusBar.updateNotionTokenStatus("connected", detail: result.message)
-                            print("[Notion Bridge] Notion API token validated ✅ (\(result.message))")
+                            print("[The Bridge] Notion API token validated ✅ (\(result.message))")
                         } else {
                             statusBar.updateNotionTokenStatus("disconnected", detail: result.message)
-                            print("[Notion Bridge] Notion API token validation failed: \(result.message)")
+                            print("[The Bridge] Notion API token validation failed: \(result.message)")
                         }
                     }
                 } catch {
                     await MainActor.run {
                         statusBar.updateNotionTokenStatus("disconnected", detail: error.localizedDescription)
                     }
-                    print("[Notion Bridge] Notion client init failed: \(error.localizedDescription)")
+                    print("[The Bridge] Notion client init failed: \(error.localizedDescription)")
                 }
             }
         }
@@ -724,17 +724,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             try? service.unregister()
             do {
                 try service.register()
-                print("[Notion Bridge] Auto-launch registered via SMAppService (\(service.status.rawValue))")
+                print("[The Bridge] Auto-launch registered via SMAppService (\(service.status.rawValue))")
             } catch {
-                print("[Notion Bridge] SMAppService registration failed: \(error.localizedDescription)")
+                print("[The Bridge] SMAppService registration failed: \(error.localizedDescription)")
             }
         } else {
             // User preference is off — ensure no login item exists
             if service.status != .notRegistered {
                 try? service.unregister()
-                print("[Notion Bridge] Auto-launch unregistered (launchAtLogin = false)")
+                print("[The Bridge] Auto-launch unregistered (launchAtLogin = false)")
             } else {
-                print("[Notion Bridge] Auto-launch not active (launchAtLogin = false)")
+                print("[The Bridge] Auto-launch not active (launchAtLogin = false)")
             }
         }
     }

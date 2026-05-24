@@ -165,7 +165,7 @@ struct SkillsView: View {
                             .foregroundStyle(.secondary)
                     }
                 } footer: {
-                    Text("SKILL.md files bundled with Notion Bridge or installed under ~/Library/Application Support/Notion Bridge/skills/. Toggling here does NOT modify the .md file — it stores a per-path enable flag.")
+                    Text("SKILL.md files bundled with The Bridge or installed under ~/Library/Application Support/The Bridge/skills/. Toggling here does NOT modify the .md file — it stores a per-path enable flag.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

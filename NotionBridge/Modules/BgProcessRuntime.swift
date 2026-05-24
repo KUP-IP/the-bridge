@@ -2,7 +2,7 @@
 // NotionBridge · Modules · dev/
 //
 // Single source of truth for async process lifecycle. Owns:
-//   - per-job dir at ~/Library/Application Support/NotionBridge/jobs/<id>/{stdout,stderr,meta.json}
+//   - per-job dir at ~/Library/Application Support/The Bridge/jobs/<id>/{stdout,stderr,meta.json}
 //   - posix_spawn child in its own process group (POSIX_SPAWN_SETPGROUP, pgrp=0 ⇒ pgid==pid)
 //   - atomic status writer (meta.json via .tmp + rename)
 //   - per-job stdout/stderr files redirected via posix_spawn_file_actions_addopen
@@ -113,12 +113,9 @@ public actor BgProcessRuntime {
         if let baseDir {
             self.baseDir = baseDir
         } else {
-            let support = FileManager.default.urls(
-                for: .applicationSupportDirectory, in: .userDomainMask
-            ).first ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support")
-            self.baseDir = support
-                .appendingPathComponent("NotionBridge", isDirectory: true)
-                .appendingPathComponent("jobs", isDirectory: true)
+            // PKT-1 v3.5: align with BridgePaths so per-job dirs land at
+            // ~/Library/Application Support/The Bridge/jobs/<id>/...
+            self.baseDir = BridgePaths.applicationSupport(.jobs)
         }
         self.cleanupTTL = cleanupTTL
         self.killGracePeriodSec = killGracePeriodSec

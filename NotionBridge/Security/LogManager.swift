@@ -1,6 +1,6 @@
 // LogManager.swift — Structured JSON Log Writer with Rotation
 // NotionBridge · Security
-// PKT-341: Crash resilience — persistent log to ~/Library/Logs/NotionBridge/
+// PKT-341: Crash resilience — persistent log to ~/Library/Logs/The Bridge/
 
 import Foundation
 
@@ -21,9 +21,10 @@ public actor LogManager {
     private var fileHandle: FileHandle?
 
     private init() {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        self.logDirectory = home.appendingPathComponent("Library/Logs/NotionBridge")
-        self.logFileURL = logDirectory.appendingPathComponent("notion-bridge.log")
+        // PKT-1 v3.5: route through BridgePaths so this lands at
+        // ~/Library/Logs/The Bridge/the-bridge.log alongside everything else.
+        self.logDirectory = BridgePaths.logs
+        self.logFileURL = logDirectory.appendingPathComponent("the-bridge.log")
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
         enc.outputFormatting = [.sortedKeys]
@@ -100,7 +101,7 @@ public actor LogManager {
         fileHandle?.closeFile()
 
         // Rotate: current → .1 (replace if exists)
-        let rotatedURL = logDirectory.appendingPathComponent("notion-bridge.log.1")
+        let rotatedURL = logDirectory.appendingPathComponent("the-bridge.log.1")
         try? FileManager.default.removeItem(at: rotatedURL)
         try? FileManager.default.moveItem(at: logFileURL, to: rotatedURL)
 
