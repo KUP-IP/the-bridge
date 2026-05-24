@@ -71,16 +71,17 @@ func runRemoteOAuthHardeningTests() async {
 
     let keys = await HardeningKeys.make()
 
-    func validator() -> ConnectorBearerValidator {
+    // Same Swift 6.2.1 -O -strict-concurrency crash workaround as
+    // RemoteOAuthHardeningS4Tests.swift — nested `func authCtx(...)` with
+    // default arguments inside an async body crashes the type-checker.
+    // Closures route through a different isolation-analysis path.
+    let validator: @Sendable () -> ConnectorBearerValidator = {
         ConnectorBearerValidator(
             keys: keys.verify, hasKeys: true,
             expectedIssuer: hIssuer, expectedAudience: hResource
         )
     }
-    func authCtx(
-        diagnostics: ConnectorAuthDiagnostics = ConnectorAuthDiagnostics(),
-        binding: ConnectorSessionBinding = ConnectorSessionBinding()
-    ) -> ConnectorAuthContext {
+    let authCtx: @Sendable (ConnectorAuthDiagnostics, ConnectorSessionBinding) -> ConnectorAuthContext = { diagnostics, binding in
         ConnectorAuthContext(
             validator: validator(),
             sessionBinding: binding,
@@ -211,7 +212,7 @@ func runRemoteOAuthHardeningTests() async {
     await test("StepUp E2E: destructive tools/call without step-up → 403 step_up_required, NO dispatch") {
         let server = SSEServer(
             router: ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog()),
-            onToolCall: {}, connectorAuth: authCtx()
+            onToolCall: {}, connectorAuth: authCtx(ConnectorAuthDiagnostics(), ConnectorSessionBinding())
         )
         let tok = try await keys.sign(iss: hIssuer, aud: hResource, scope: "snippets.write")
         let body = Data(#"{"method":"tools/call","params":{"name":"snippets_delete","arguments":{"id":"s1"}}}"#.utf8)
@@ -232,7 +233,7 @@ func runRemoteOAuthHardeningTests() async {
     await test("StepUp E2E: destructive tools/call WITH step-up scope reaches session machinery") {
         let server = SSEServer(
             router: ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog()),
-            onToolCall: {}, connectorAuth: authCtx()
+            onToolCall: {}, connectorAuth: authCtx(ConnectorAuthDiagnostics(), ConnectorSessionBinding())
         )
         let tok = try await keys.sign(
             iss: hIssuer, aud: hResource,
@@ -255,7 +256,7 @@ func runRemoteOAuthHardeningTests() async {
     await test("StepUp E2E: non-destructive tools/call needs no step-up (reaches session path)") {
         let server = SSEServer(
             router: ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog()),
-            onToolCall: {}, connectorAuth: authCtx()
+            onToolCall: {}, connectorAuth: authCtx(ConnectorAuthDiagnostics(), ConnectorSessionBinding())
         )
         let tok = try await keys.sign(iss: hIssuer, aud: hResource, scope: "snippets.read")
         let body = Data(#"{"method":"tools/call","params":{"name":"snippets_list","arguments":{}}}"#.utf8)
@@ -322,7 +323,7 @@ func runRemoteOAuthHardeningTests() async {
         let binding = ConnectorSessionBinding()
         let server = SSEServer(
             router: ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog()),
-            onToolCall: {}, connectorAuth: authCtx(binding: binding)
+            onToolCall: {}, connectorAuth: authCtx(ConnectorAuthDiagnostics(), binding)
         )
         // Client A binds session "shared" with a non-tools/call request.
         let tokA = try await keys.sign(iss: hIssuer, aud: hResource, sub: "client-A", scope: "snippets.read")
@@ -367,7 +368,7 @@ func runRemoteOAuthHardeningTests() async {
         let diag = ConnectorAuthDiagnostics()
         let server = SSEServer(
             router: ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog()),
-            onToolCall: {}, connectorAuth: authCtx(diagnostics: diag)
+            onToolCall: {}, connectorAuth: authCtx(diag, ConnectorSessionBinding())
         )
         // The actual secret material we will look for in the transcript.
         let validTok = try await keys.sign(iss: hIssuer, aud: hResource, scope: "snippets.read")
