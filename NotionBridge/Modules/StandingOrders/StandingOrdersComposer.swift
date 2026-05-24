@@ -28,6 +28,18 @@ public enum StandingOrdersComposer {
     /// Per-client overlay. Bridge supports tailoring a short addendum
     /// based on the connecting client's name. Pass nil for the global
     /// default.
+    ///
+    /// PKT v3.6·8 design decision: the on-disk `orders.md` is authored
+    /// as a **universal chief-of-staff preamble** that serves every
+    /// MCP client equally well via the principle-first / Notion-impl-
+    /// footnote dual-register pattern. Overlays are intentionally empty
+    /// by default — the unified-preamble thesis is that one center
+    /// across every system compounds operator alignment more than
+    /// per-client tailoring would. This mechanism remains available
+    /// as a future lever if any single client proves problematic
+    /// (e.g. a host whose own system prompt collides hard with the
+    /// universal preamble), but reaching for it should require a
+    /// fresh design decision, not a default.
     public struct ClientOverlay: Equatable, Sendable {
         public let clientName: String   // e.g. "claude-code", "cursor", "chatgpt-dev-mode"
         public let addendum: String
