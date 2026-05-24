@@ -117,16 +117,32 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
-        // PKT-487: Override process name for dock label (executable is "NotionBridge" but display should be "Notion Bridge")
-        ProcessInfo.processInfo.processName = "Notion Bridge"
+        // PKT-487 → PKT-1 v4.0: Dock label uses the new display name
+        // (executable bundle name is still "NotionBridge" — that's the
+        // SPM target identifier baked into the binary).
+        ProcessInfo.processInfo.processName = "The Bridge"
 
         // PKT-332: Single-instance guard — prevent duplicate processes from
         // SMAppService login item + Terminal session restore + manual launch
         let allowMulti = CommandLine.arguments.contains("--multi-instance")
         guard allowMulti || ensureSingleInstance() else {
-            print("[Notion Bridge] Another instance is already running — exiting")
+            print("[The Bridge] Another instance is already running — exiting")
             NSApplication.shared.terminate(nil)
             return
+        }
+
+        // PKT-1 v4.0: Rename migration. Idempotent + atomic; no-ops on every
+        // launch after the first successful run. Runs BEFORE any subsystem
+        // touches Application Support so they see canonical paths.
+        do {
+            let report = try PathMigration.runOnce(log: { print("[PathMigration] \($0)") })
+            if !report.alreadyComplete {
+                print("[PathMigration] migrated support:\(report.supportItemsMoved) logs:\(report.logsItemsMoved) collisions:\(report.collisionsRenamed)")
+            }
+        } catch {
+            // Non-fatal: subsystems will still create the canonical dir on first
+            // write. We surface the error so it shows up in launch logs.
+            print("[PathMigration] WARNING: migration failed: \(error)")
         }
 
         CredentialsFeature.migrateIfNeeded()
