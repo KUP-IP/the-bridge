@@ -56,7 +56,13 @@ public enum StandingOrdersComposer {
             parts.append("---\n\n## Client-specific notes (\(client))\n\n\(overlay.addendum.trimmingCharacters(in: .whitespacesAndNewlines))")
         }
 
-        parts.append("---\n\n\(RoutingIndex.render(skills))")
+        // PKT v3.6·8: suppress auto-trailer when the standing-orders body
+        // already carries a curated "Routing skills" section inline.
+        // Prevents the double-render observed at handshake when on-disk
+        // orders.md contains the section header itself.
+        if !trimmed.contains("## Routing skills") {
+            parts.append("---\n\n\(RoutingIndex.render(skills))")
+        }
 
         let text = parts.joined(separator: "\n\n")
         return ComposedInstructions(

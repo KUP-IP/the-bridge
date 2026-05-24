@@ -185,6 +185,78 @@ func runStandingOrdersTests() async {
         try expect(composed.estimatedTokens > 0)
     }
 
+    // MARK: - PKT v3.6·8 — Universal Standing Orders amendment
+
+    await test("Composer: trailer is suppressed when standing-orders already has ## Routing skills") {
+        let body = """
+        # orders
+
+        body content
+
+        ## Routing skills
+
+        - **inline-keepr** — already curated inline
+        """
+        let composed = StandingOrdersComposer.compose(
+            standingOrders: body,
+            skills: [sampleSkill("foo", name: "Foo")]
+        )
+        // Trailer auto-render is suppressed; only the inline curated section remains.
+        let matches = composed.text.components(separatedBy: "## Routing skills").count - 1
+        try expect(matches == 1, "expected exactly one '## Routing skills' header, got \(matches)")
+        // The skill from the array is NOT auto-rendered when inline section is present.
+        try expect(!composed.text.contains("(`foo`"),
+                   "auto-trailer should be suppressed when inline routing section present")
+    }
+
+    await test("Composer: trailer still appended when standing-orders has no inline routing section") {
+        // Regression guard for the prior contract — empty/no-routing input still gets the trailer.
+        let composed = StandingOrdersComposer.compose(
+            standingOrders: "# orders\n\nno routing section here",
+            skills: [sampleSkill("foo", name: "Foo")]
+        )
+        try expect(composed.text.contains("## Routing skills available"))
+        try expect(composed.text.contains("(`foo`"))
+    }
+
+    await test("Composer: v6.5.0 principle anchors survive composition") {
+        let body = """
+        # Standing Orders
+
+        ## 1. Role overlay — Keepr
+
+        Adopt the **Keepr** role.
+
+        ## 2. Capabilities & delegation
+
+        When work exceeds your scope, **write a packet**.
+
+        ## 5. Context priority & the Pillars
+
+        **PLEASE — the receive side (generate, restore, fuel):**
+
+        ## 7. The Bridge — operational context
+
+        **Sensitive paths.** The Bridge enforces a Sensitive Paths list.
+
+        **Notion implementation:** PACKETS DS row.
+
+        SSOT: https://www.notion.so/28acbb58889e80d5b111ed23b996c304
+        """
+        let composed = StandingOrdersComposer.compose(
+            standingOrders: body,
+            skills: []
+        )
+        // These anchors must survive composition unchanged so any MCP client
+        // receives the universal chief-of-staff frame at handshake.
+        try expect(composed.text.contains("Role overlay — Keepr"))
+        try expect(composed.text.contains("write a packet"))
+        try expect(composed.text.contains("PLEASE — the receive side"))
+        try expect(composed.text.contains("Notion implementation:"))
+        try expect(composed.text.contains("Sensitive paths."))
+        try expect(composed.text.contains("https://www.notion.so/28acbb58889e80d5b111ed23b996c304"))
+    }
+
     // MARK: - Hash determinism
 
     await test("Hash: same input yields same hash; tiny diff changes it") {
