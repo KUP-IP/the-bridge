@@ -663,7 +663,7 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
     public func sendFireAndForget(context: ExecutionNotificationContext) async {
         guard !isTestProcess, let center else { return }
         let content = UNMutableNotificationContent()
-        content.title = "Notion Bridge"
+        content.title = "The Bridge"
         content.body = "\"\(context.toolName)\" was called"
         content.sound = .default
         content.categoryIdentifier = context.notionPageURL != nil

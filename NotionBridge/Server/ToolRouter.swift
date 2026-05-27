@@ -171,7 +171,7 @@ public actor ToolRouter {
         if tool.module == CredentialModule.moduleName && !CredentialsFeature.isEnabled {
             throw ToolRouterError.invalidArguments(
                 toolName: toolName,
-                reason: "Credentials are disabled. Turn on “Keychain credentials” in Notion Bridge Settings → Credentials."
+                reason: "Credentials are disabled. Turn on “Keychain credentials” in The Bridge Settings → Credentials."
             )
         }
 

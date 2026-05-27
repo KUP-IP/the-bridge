@@ -77,7 +77,7 @@ public enum PaymentModule {
                 guard CredentialsFeature.isEnabled else {
                     throw ToolRouterError.invalidArguments(
                         toolName: "payment_execute",
-                        reason: "Credentials are disabled. Enable Keychain credentials in Notion Bridge Settings → Credentials to charge stored payment methods."
+                        reason: "Credentials are disabled. Enable Keychain credentials in The Bridge Settings → Credentials to charge stored payment methods."
                     )
                 }
 

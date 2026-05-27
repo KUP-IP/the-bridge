@@ -67,7 +67,7 @@ public final class SettingsWindowController {
         let hostingController = NSHostingController(rootView: settingsView)
 
         let window = NSWindow(contentViewController: hostingController)
-        window.title = "Notion Bridge Settings"
+        window.title = "The Bridge Settings"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.setContentSize(NSSize(width: 720, height: 900))
         window.minSize = NSSize(width: 640, height: 720)
@@ -201,6 +201,7 @@ public struct SettingsView: View {
                 Label(section.rawValue, systemImage: section.icon)
                     .tag(section)
             }
+            .tint(NotionPalette.blue)
             .navigationSplitViewColumnWidth(min: 140, ideal: 160, max: 200)
         } detail: {
             detailContent

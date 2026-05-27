@@ -88,11 +88,12 @@ public final class WindowTracker {
     }
 
     /// Determines if a window is a Settings-class window.
-    /// Matches SettingsWindowController ("Notion Bridge Settings") and
+    /// Matches SettingsWindowController ("The Bridge Settings") and
     /// SwiftUI Settings scene windows. Excludes popover, onboarding, etc.
     private func isSettingsWindow(_ window: NSWindow) -> Bool {
         let title = window.title
-        return title == "Notion Bridge Settings"
+        return title == "The Bridge Settings"
+            || title == "Notion Bridge Settings"
             || title == "Settings"
             || title == "Preferences"
             || title.hasSuffix(" Settings")
