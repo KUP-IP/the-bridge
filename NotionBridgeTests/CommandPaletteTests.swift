@@ -663,7 +663,7 @@ func runCommandPaletteTests() async {
     }
 
     // ============================================================
-    // MARK: (H) Clipboard-only commit — CommandBoxController.applyCommit
+    // MARK: (H) Clipboard-only commit — CommandBridgeController.applyCommit
     //   The on-Enter behaviour: .paste → WRITE the body to the clipboard
     //   (replace contents, NO save/restore); .notFound / .unavailable →
     //   write NOTHING. Driven through an InMemoryClipboard so the write
@@ -674,7 +674,7 @@ func runCommandPaletteTests() async {
     await test("applyCommit(.paste) WRITES the resolved body to the clipboard") {
         let cb = InMemoryClipboard(initial: "user-prior-clip")
         let mgr = CommandsManager(fetcher: { _ in mdJSON("x") })
-        let ctrl = await CommandBoxController(
+        let ctrl = await CommandBridgeController(
             clipboard: cb,
             coordinator: CommandPaletteCoordinator(
                 provider: StaticCommandDescriptorProvider(), manager: mgr))
@@ -689,7 +689,7 @@ func runCommandPaletteTests() async {
         // the user WANTS the body on the clipboard; the original is gone.
         let cb = InMemoryClipboard(initial: "user-prior-clip")
         let mgr = CommandsManager(fetcher: { _ in mdJSON("x") })
-        let ctrl = await CommandBoxController(
+        let ctrl = await CommandBridgeController(
             clipboard: cb,
             coordinator: CommandPaletteCoordinator(
                 provider: StaticCommandDescriptorProvider(), manager: mgr))
@@ -701,7 +701,7 @@ func runCommandPaletteTests() async {
     await test("applyCommit(.notFound) writes NOTHING (no guessed command on the clipboard)") {
         let cb = InMemoryClipboard(initial: "user-prior-clip")
         let mgr = CommandsManager(fetcher: { _ in mdJSON("x") })
-        let ctrl = await CommandBoxController(
+        let ctrl = await CommandBridgeController(
             clipboard: cb,
             coordinator: CommandPaletteCoordinator(
                 provider: StaticCommandDescriptorProvider(), manager: mgr))
@@ -714,7 +714,7 @@ func runCommandPaletteTests() async {
     await test("applyCommit(.unavailable) writes NOTHING (no destructive clobber)") {
         let cb = InMemoryClipboard(initial: "user-prior-clip")
         let mgr = CommandsManager(fetcher: { _ in mdJSON("x") })
-        let ctrl = await CommandBoxController(
+        let ctrl = await CommandBridgeController(
             clipboard: cb,
             coordinator: CommandPaletteCoordinator(
                 provider: StaticCommandDescriptorProvider(), manager: mgr))
@@ -726,7 +726,7 @@ func runCommandPaletteTests() async {
     await test("applyCommit(.paste) with an EMPTY body writes nothing (no blank clobber)") {
         let cb = InMemoryClipboard(initial: "user-prior-clip")
         let mgr = CommandsManager(fetcher: { _ in mdJSON("x") })
-        let ctrl = await CommandBoxController(
+        let ctrl = await CommandBridgeController(
             clipboard: cb,
             coordinator: CommandPaletteCoordinator(
                 provider: StaticCommandDescriptorProvider(), manager: mgr))
@@ -739,7 +739,7 @@ func runCommandPaletteTests() async {
     await test("applyCommit(.paste) preserves exact markdown bytes onto the clipboard") {
         let cb = InMemoryClipboard()
         let mgr = CommandsManager(fetcher: { _ in mdJSON("x") })
-        let ctrl = await CommandBoxController(
+        let ctrl = await CommandBridgeController(
             clipboard: cb,
             coordinator: CommandPaletteCoordinator(
                 provider: StaticCommandDescriptorProvider(), manager: mgr))
@@ -765,7 +765,7 @@ func runCommandPaletteTests() async {
             provider: RegistrySkillsCommandProvider(suiteName: suite, storageKey: BridgeDefaults.skills),
             manager: mgr)
         let cb = InMemoryClipboard()
-        let ctrl = await CommandBoxController(clipboard: cb, coordinator: coord)
+        let ctrl = await CommandBridgeController(clipboard: cb, coordinator: coord)
         let result = await coord.commit(query: "Email Signature")
         await ctrl.applyCommit(result)
         try expect(cb.readString() == "RESOLVED SIGNATURE BODY",
@@ -951,19 +951,25 @@ func runCommandPaletteTests() async {
         }
     }
 
-    await test("placementOrigin centres horizontally + ~28% up the visible frame") {
+    await test("placementOrigin centres horizontally + sits at bottom-center-25% (PKT-878 Q2)") {
+        // PKT-878 v3.6.3: the panel CENTRE sits 25% up from the bottom
+        // of the visible frame (was 28%-up-from-bottom origin for the
+        // legacy NSTableView controller). x still centres the panel; y
+        // is now `minY + height*0.25 - panel.height/2`.
         let frame = CGRect(x: 100, y: 200, width: 1000, height: 800)
         let size = CGSize(width: 560, height: 320)
-        let o = CommandBoxController.placementOrigin(screenVisibleFrame: frame, panelSize: size)
-        try expect(o.x == frame.midX - 280, "x must centre the panel, got \(o.x)")
-        try expect(o.y == frame.minY + 800 * 0.28, "y must sit ~28% up, got \(o.y)")
+        let o = CommandBridgeController.placementOrigin(screenVisibleFrame: frame, panelSize: size)
+        try expect(o.x == frame.midX - size.width / 2, "x must centre the panel, got \(o.x)")
+        let expectedY = frame.minY + 800 * 0.25 - size.height / 2
+        try expect(o.y == expectedY,
+                   "y must anchor the panel CENTRE at 25% up from the bottom (\(expectedY)), got \(o.y)")
     }
 
     await test("pickScreenFrame: prefers the screen containing the key window") {
         let s0 = CGRect(x: 0, y: 0, width: 1000, height: 800)        // main
         let s1 = CGRect(x: 1000, y: 0, width: 1000, height: 800)     // second
         let keyOnS1 = CGRect(x: 1400, y: 300, width: 200, height: 200)
-        let hit = CommandBoxController.pickScreenFrame(
+        let hit = CommandBridgeController.pickScreenFrame(
             screens: [s0, s1], keyWindowFrame: keyOnS1,
             mouseLocation: CGPoint(x: 10, y: 10), mainScreenFrame: s0)
         try expect(hit == s1, "the panel must open on the key window's screen, got \(String(describing: hit))")
@@ -972,11 +978,11 @@ func runCommandPaletteTests() async {
     await test("pickScreenFrame: falls back to the mouse's screen, then main") {
         let s0 = CGRect(x: 0, y: 0, width: 1000, height: 800)
         let s1 = CGRect(x: 1000, y: 0, width: 1000, height: 800)
-        let mouseHit = CommandBoxController.pickScreenFrame(
+        let mouseHit = CommandBridgeController.pickScreenFrame(
             screens: [s0, s1], keyWindowFrame: nil,
             mouseLocation: CGPoint(x: 1500, y: 400), mainScreenFrame: s0)
         try expect(mouseHit == s1, "no key window ⇒ use the mouse's screen, got \(String(describing: mouseHit))")
-        let mainHit = CommandBoxController.pickScreenFrame(
+        let mainHit = CommandBridgeController.pickScreenFrame(
             screens: [s0, s1], keyWindowFrame: nil,
             mouseLocation: CGPoint(x: -50, y: -50), mainScreenFrame: s0)
         try expect(mainHit == s0, "off-screen mouse + no key window ⇒ main, got \(String(describing: mainHit))")

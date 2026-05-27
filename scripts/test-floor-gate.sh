@@ -471,9 +471,23 @@
 # markers — receivers need non-trivial param wiring; full structural
 # merge deferred to Phase 2.5. Audit item 15 (snippets_* tier review)
 # explicitly deferred — operator open question.
+# 2026-05-27 PKT-878 (v3.6.3) — Command Bridge popup rebuild.
+# Replaced legacy CommandBoxController (NSTableView) with SwiftUI Liquid
+# Glass CommandBridgeController (borderless NSPanel at bottom-center-25%,
+# 10-slot BridgeGlassBubble tray, in-memory recents, 180ms ease-out open
+# + 10ms bubble cascade + reduce-motion path). Renamed all test references
+# (CommandBoxController → CommandBridgeController). Added 19 new headless
+# tests in CommandBridgeControllerTests.swift covering placement math
+# (Q2 25%-up-from-bottom), CommandBridgeRecents MRU + cap (Q1 in-memory),
+# CommandBridgeAnimation locked/reduce-motion values, viewModel pure
+# builders (slotRows × 10 / recentRows MRU), applyCommit clipboard
+# contract, controller lifecycle, and hot-key plumbing-failure shape.
+# Integrated green measured = 1294 (1232 +62: foundation merge contributed
+# the bulk; PKT-878 added the 19 headless assertions above). FLOOR raised
+# per order-inversion.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1232}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1294}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."

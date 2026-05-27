@@ -114,10 +114,10 @@ public struct RecorderFocusModel: Sendable, Equatable {
 // ============================================================
 
 /// The behaviour `CommandsController` needs from the live
-/// `CommandBoxController` (Carbon hot-key), abstracted so the controller
+/// `CommandBridgeController` (Carbon hot-key), abstracted so the controller
 /// state machine is unit-testable with an in-memory fake (no Carbon, no
 /// WindowServer). The production conformance is a thin adapter the
-/// AppDelegate builds around its `CommandBoxController`.
+/// AppDelegate builds around its `CommandBridgeController`.
 @MainActor
 public protocol CommandsRegistrar: AnyObject {
     /// Whether the global hot-key is currently registered.

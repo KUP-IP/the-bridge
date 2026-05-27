@@ -26,7 +26,7 @@ import NotionBridgeLib
 
 // ── In-memory CommandsRegistrar fake (no Carbon) ───────────────────────
 //
-// Models the CommandBoxController contract the controller drives: a
+// Models the CommandBridgeController contract the controller drives: a
 // register/rebind returns a scripted HotkeyRegisterStatus and the fake
 // updates isRegistered + currentHotkey exactly like the real adapter
 // would, so the controller's reaction is asserted with zero WindowServer.
@@ -351,7 +351,7 @@ func runCommandsControllerTests() async {
                    "the button path must also be focusable (belt + click both work)")
     }
 
-    // ── W2: CommandBoxController.lastRegisterStatus — the HEADLESS slice
+    // ── W2: CommandBridgeController.lastRegisterStatus — the HEADLESS slice
     //
     //   The modifier-less refusal path returns BEFORE any Carbon call
     //   (no WindowServer needed) — so the controller's structured-status
@@ -360,7 +360,7 @@ func runCommandsControllerTests() async {
     //   modifier-less combo must never be told another app owns it.
     //   (The Carbon RegisterEventHotKey firing for a VALID combo remains
     //   the documented operator-smoke ceiling — see CommandBox.swift.)
-    await test("W2 CommandBoxController: a modifier-less combo ⇒ .plumbingFailure (never .collision)") {
+    await test("W2 CommandBridgeController: a modifier-less combo ⇒ .plumbingFailure (never .collision)") {
         let r = await MainActor.run { () -> HotkeyRegisterStatus in
             // keyCode with ZERO modifiers → hasModifier == false →
             // registerHotkey() refuses before touching Carbon.
@@ -368,7 +368,7 @@ func runCommandsControllerTests() async {
             let coord = CommandPaletteCoordinator(
                 provider: StaticCommandDescriptorProvider([]),
                 manager: CommandsManager(fetcher: { _ in "" })) // never invoked here
-            let box = CommandBoxController(hotkey: bad,
+            let box = CommandBridgeController(hotkey: bad,
                                           clipboard: InMemoryClipboard(),
                                           coordinator: coord)
             _ = box.registerHotkey()

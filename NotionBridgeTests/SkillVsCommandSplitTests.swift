@@ -13,7 +13,7 @@
 //     fetches, one payload. The agent gets the whole page.
 //
 //   • Hot-key command (CommandsManager.body → CommandPaletteCoordinator
-//     .commit → CommandBoxController clipboard): BODY-ONLY markdown via
+//     .commit → CommandBridgeController clipboard): BODY-ONLY markdown via
 //     /markdown. It must NEVER fetch or leak page `properties` — the
 //     user pastes a clean body, not a metadata dump.
 //
@@ -72,7 +72,7 @@ func runSkillVsCommandSplitTests() async {
                                   abbreviation: "sig")
             ]),
             manager: mgr)
-        let ctrl = await CommandBoxController(
+        let ctrl = await CommandBridgeController(
             clipboard: cb, coordinator: coord)
 
         let result = await coord.commit(
