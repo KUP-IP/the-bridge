@@ -5,12 +5,12 @@
         <item>
             <title>1.9.5</title>
             <pubDate>Mon, 04 May 2026 13:44:59 -0500</pubDate>
-            <link>https://github.com/KUP-IP/Notion-bridge/releases</link>
+            <link>https://github.com/KUP-IP/the-bridge/releases</link>
             <sparkle:version>26</sparkle:version>
             <sparkle:shortVersionString>1.9.5</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/KUP-IP/Notion-bridge/releases/download/v1.9.5/notion-bridge-v1.9.5.dmg" length="13191749" type="application/octet-stream" sparkle:edSignature="J324CQC3LTf6jve8L8ZsDmXObASrkkk3VxMwDFYPMd/I+5yKKU/Zs1qd72SuaF6SiiSbn7S/zZrc/L/HiuvRCw=="/>
+            <enclosure url="https://github.com/KUP-IP/the-bridge/releases/download/v1.9.5/notion-bridge-v1.9.5.dmg" length="13191749" type="application/octet-stream" sparkle:edSignature="J324CQC3LTf6jve8L8ZsDmXObASrkkk3VxMwDFYPMd/I+5yKKU/Zs1qd72SuaF6SiiSbn7S/zZrc/L/HiuvRCw=="/>
         </item>
     </channel>
 </rss>

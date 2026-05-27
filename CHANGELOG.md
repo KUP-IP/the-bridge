@@ -1,5 +1,64 @@
 # Changelog
 
+## [3.6.0] — 2026-05-27 — Liquid Glass complete: rename, BridgePaths, Standing Orders, Command Bridge, ModuleGroup, Dashboard
+
+Project rename "NotionBridge → The Bridge" complete in user-visible surfaces. Bundle identifier (`kup.solutions.notion-bridge`), Keychain service name (`com.notionbridge`), and SPM binary/target names intentionally preserved to protect user data continuity. GitHub repository renamed `KUP-IP/Notion-bridge` → `KUP-IP/the-bridge`; Sparkle SUFeedURL and appcast download URLs updated in lockstep — existing v3.4.x installs will pick up this release via GitHub's automatic redirect from the old URL.
+
+### Added — Foundation (v4.0 wave)
+
+- **`BridgePaths`** at `NotionBridge/Core/BridgePaths.swift` — single source of truth for all on-disk paths. `BridgePaths.applicationSupport(.commands)`, `.skills`, `.standingOrders`, `.jobs`, etc.; `BridgePaths.logs(.jobs)`, `.audit`, `.server`. All previously-hardcoded `~/Library/Application Support/NotionBridge/...` paths now route through here. Test hook `BridgePaths.overrideHomeForTesting(_:)` makes the entire FS layer redirectable to a temp dir.
+- **`PathMigration.runOnce()`** at `NotionBridge/Core/PathMigration.swift` — idempotent one-shot migration from `~/Library/Application Support/{Notion Bridge,NotionBridge}/` and `~/Library/Logs/{Notion Bridge,NotionBridge}/` to the canonical `~/Library/Application Support/The Bridge/` + `~/Library/Logs/The Bridge/`. Collisions get a `.pre-migrate-<timestamp>` sibling; the legacy dir gets renamed to `.legacy-<timestamp>` (not deleted, one release cycle of recovery). Sentinel `.bridge-migration-v3.5-complete` short-circuits subsequent runs.
+- **`CommandStore`** at `NotionBridge/Modules/Commands/CommandStore.swift` — 10-slot favorites with markdown-per-command + `index.json`. CRUD with duplicate-slug rejection; `setKeySlot(slug:slot:)` enforces 0–9 range with eviction; `recordUse` MRU + `search(query:)` for the Command Bridge popup; `Icon` enum (emoji / SF Symbol + NotionColor); `seedIfEmpty` ships 5 starter commands keyed to slots 1–5 on fresh install.
+- **`StandingOrdersStore` + `StandingOrdersComposer` + `RoutingIndex`** at `NotionBridge/Modules/StandingOrders/`. Store: `orders.md` + sibling `metadata.json` with per-client overlays. Composer: client-prefix overlay matching, trailer-suppression guard for inline `## Routing skills` sections, universal v6.5.0 principle preservation. RoutingIndex: renders the routing-skill table for the trailer.
+- **`BridgeThemeV2`** at `NotionBridge/UI/BridgeThemeV2.swift` — Liquid Glass primitive library: `BridgeGlassCard`, `BridgeGlassBubble`, `BridgeDepLink`, `PartialToggle` (TripleState off/partial/on), `BridgeCardLabel`, `NotionPalette` (semantic color tokens shared across the new UI).
+
+### Added — UI surface (v3.6 wave)
+
+- **PKT-876 — Settings sections Liquid Glass (5 sections).** Connections, Credentials, Permissions, Jobs, Advanced reskinned per locked `design/*.html` mocks. Shared `BridgeSettingsSectionHeader` consumed by every section (single component, 5 callers). Dep-link chips: Credentials → "Used by" → Tools modules; Permissions → "Required by" → Tools modules. Derived live from tool annotations.
+- **PKT-877 — Tools page rebuild + dispatch fail-closed.** `ModuleGroup` abstraction derives 25 groups covering 173 tools (0 orphans) from tool-name prefix + explicit-override. `ModuleGroupCard` collapsible group cards with master `PartialToggle`, dep-hint chips, partial-state count badge. **SAFETY CONTRACT:** `ToolRouter.dispatchFormatted` returns `BridgeToolError.moduleGroupDisabled` (typed error, not stringly) on any disabled-group dispatch — no silent failure.
+- **PKT-878 — Command Bridge popup rebuild.** 943-line legacy `CommandBoxController` (NSPanel + NSTableView + Carbon hot-key) replaced with `CommandBridgeController` (SwiftUI Liquid Glass). Borderless NSPanel at bottom-center-25%, `BridgeGlassBubble` 10-slot tray, 1–0 fires assigned favorite + clipboard-write + close, ↓ opens recents (in-memory session-only), typing fires substring search ranked by recency, 180ms ease-out open with 10ms-per-bubble cascade, full reduce-motion path. Menu-bar bridge-icon pill deep-links to Commands Settings. Operator smoke checklist at `docs/operator/command-bridge-smoke-checklist.md`. Carbon hot-key infrastructure preserved verbatim.
+- **PKT-879 — Dashboard popover + Onboarding wizard + Commands icon picker.** Dashboard reskinned per `design/dashboard.html`: 300pt popover, every row jump-links via `SettingsNavigation`, status pulse glow respecting reduce-motion, two-col permission grid. Onboarding 7-step wizard refresh per `design/onboarding.html`: Liquid Glass cards, progress bar, transport-pick step with "Recommended" badge on stdio, final step lands user in Dashboard. Commands editor icon picker dialog: emoji tab (~40 curated) + SF Symbol tab (~200 curated via `NSImage(systemSymbolName:)`, no new SPM dependency) + Notion color swatch row. Selection persists immediately to `CommandStore.Icon`.
+
+### Audit-driven polish (W1–W3 + v3.6·6)
+
+- **Credentials list scoping (D1).** `CredentialManager.isKeychainItemManagedByThisApp` previously returned `true` when the keychain item had no `kSecAttrAccessGroup` attribute, surfacing every system Keychain item (`Com.Apple.Scopedbookmarksagent.Xpc`, `Chrome Safe Storage`, `Spark`, etc.) under "Stored credentials". Flipped to `false`; Bridge-saved items still surface via the metadata-flag and `com.notionbridge` infrastructure-service fallbacks. Extracted `matchesAccessGroup(item:expected:)` as a pure helper for testability.
+- **Settings window title.** "Notion Bridge Settings" → "The Bridge Settings". `WindowTracker` matches both old and new for back-compat. Sweep also caught 4 other user-visible "Notion Bridge" strings (ToolRouter error, SecurityGate notification, PaymentModule error, About card).
+- **Sidebar tint.** Settings sidebar List adopts `NotionPalette.blue` so selection state matches dep-link chips.
+- **Jobs stats card.** Hardcoded "Failed: 0" cell removed (failure-tracking infra not wired — a hardcoded zero was worse than no metric). `Total` cell color switched from `Color.white.opacity(0.9)` to `Color.primary` for dark-mode readability.
+- **Skills row visual hierarchy (D5).** Platform "Notion" badge and Routing/Palette toggles share a row but represent different action classes (informational vs. state). Added a vertical `Divider` between them. Skill name gains a small `arrow.up.right.square` glyph next to it to surface the click-to-open-in-browser affordance without requiring hover discovery.
+- **Tools per-group expand-state persistence (D6).** Previously every group expanded on view load if any tool in the group was on, producing a wall-of-toggles. New cold-launch default: every group collapsed. User expand/collapse persists in `BridgeDefaults.moduleGroupExpanded`. Off groups still auto-collapse regardless of saved value (PKT-877 DoD invariant preserved).
+- **Dead-code prune.** 230 lines of legacy `legacyAdvancedFormBody` removed from `SettingsWindow+Sections.swift`.
+- **Security hardening.** `CommandStore.slugify` previously accepted Unicode `Ll` (lowercase letters), permitting homoglyph collisions (Cyrillic `а` U+0430 vs ASCII `a`). Locked to ASCII `[a-z0-9_-]`. Two visually-identical command names can no longer produce different slugs.
+- **Accessibility.** `BridgeSettingsSectionHeader` gains combined a11y (`.accessibilityElement(.contain)` + `.isHeader` trait + decorative icon hidden). `AdvancedSection` copy / reveal-in-Finder icon buttons labeled. `IconPickerSheet` color swatches expose `"<color> color"` labels with `.isSelected` trait; search field labeled per active tab; magnifying-glass icon hidden.
+
+### Fixed
+
+- **`v3.6·8` Standing Orders Composer trailer suppression** (cherry-picked from `21a6447`). When `orders.md` contains a curated inline `## Routing skills` section, the auto-rendered routing-index trailer is suppressed — fixes the confirmed double-render at MCP handshake.
+
+### Tests
+
+- **Floor raised 1232 → 1376** (+144 cumulative).
+- New suites: `PathMigrationTests` (11), `StandingOrdersTests` (20 + 3 from v3.6·8), `CommandStoreTests` (15), PKT-876 `SettingsSectionsLGTests` (14), PKT-877 `ModuleGroupTests` (19) + `ToolRouterFailClosedTests` (6 SAFETY CONTRACT), PKT-878 `CommandBridgeControllerTests` (19), PKT-879 `PKT879DashboardTests` (10) + `PKT879OnboardingTests` (5) + `PKT879IconPickerTests` (12), v3.6.0 polish `CredentialsScopeFilterTests` (5), `ModuleGroupExpandPersistenceTests` (5), v3.6·6 `CommandStoreSecurityTests` (6).
+
+### Branch hygiene + repo state
+
+- 21 stale branches retired (15 in initial cleanup + v3.6/v4.0/pkt-778 closed post-merge + `_safety_branch` after polish). 13 zombie worktrees pruned from the old `notion-bridge` project location.
+- `~/Developer/notion-bridge` → `~/Developer/the-bridge` directory rename complete; SPM `.build/.source_path` and `workspace-state.json` realigned; module cache cleared.
+
+### Carve-outs (deferred to v3.7)
+
+- **v3.7·A — SkillsCacheReader/Writer pipeline.** `StandingOrdersSection.cachedRoutingSkills()` currently returns `[]` (TODO marker); the composer + UI render correctly without it via the "None registered yet" path.
+- **v3.7·B — `standing_orders_*` MCP tool surface.** Referenced in source comments; not registered with ToolRouter. In-Settings UI editor covers the read/write path for the human surface.
+- **v3.7·C — Dashboard popover + Onboarding wizard manual visual verification.** Headless tests pass; pixel verification by an operator with reduce-motion enabled is the right exit gate.
+- **v3.7·D — OnboardingWindow deep a11y pass.** Text-labeled buttons cover primary actions; deeper sweep belongs in a dedicated packet if VoiceOver users surface concrete gaps.
+- **v3.7·E — Dark-mode regression sweep.** Glass material bleed-through can produce illegible foregrounds on dark wallpapers. Single token fix landed in v3.6.0 (Jobs Total); fuller audit deferred.
+
+### Closeout docs
+
+- `docs/operator/command-bridge-smoke-checklist.md` — PKT-878 smoke checklist
+- `docs/operator/v3.6.5-closeout.md` — Standing Orders completeness Done-with-carve-outs
+- `docs/operator/v3.6.6-closeout.md` — Code hardening (a11y, security, Sparkle pre-flight)
+
 ## [3.4.2] — 2026-05-21 — 3.4.1 regression fixes: hotkey recorder + Skills MCP combined-state
 
 Targeted regression patch. Two confirmed defects shipped in 3.4.1 are fixed; observability + new MCP set_flags action documented as honestly deferred to 3.4.3.

@@ -17,9 +17,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>3.5.0</string>
+	<string>3.6.0</string>
 	<key>CFBundleVersion</key>
-	<string>41</string>
+	<string>42</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<key>LSUIElement</key>
@@ -33,7 +33,7 @@
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 KUP Solutions LLC. All rights reserved.</string>
 	<key>SUFeedURL</key>
-	<string>https://raw.githubusercontent.com/KUP-IP/Notion-bridge/main/appcast.xml</string>
+	<string>https://raw.githubusercontent.com/KUP-IP/the-bridge/main/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>AYjKcJUCz34FoCoeCEc17j7pd3enjqd2ttzDEV6F6fg=</string>
 	<key>SUScheduledCheckInterval</key>
