@@ -9,6 +9,8 @@ public struct CommandsEditorView: View {
     @State private var loadError: String? = nil
     @State private var saveMessage: String? = nil
     @State private var isCreatingNew: Bool = false
+    // PKT-879: icon picker sheet state
+    @State private var iconPickerPresented: Bool = false
 
     public init() {}
 
@@ -78,6 +80,19 @@ public struct CommandsEditorView: View {
         .onChange(of: commands) { _, _ in
             if selectedSlug == nil { selectedSlug = commands.first?.slug }
         }
+        // PKT-879: icon picker sheet
+        .sheet(isPresented: $iconPickerPresented) {
+            if let cmd = currentCommand {
+                IconPickerSheet(
+                    isPresented: $iconPickerPresented,
+                    currentIcon: cmd.icon,
+                    currentColor: cmd.color,
+                    onPick: { newIcon, newColor in
+                        applyIconAndColor(slug: cmd.slug, icon: newIcon, color: newColor)
+                    }
+                )
+            }
+        }
     }
 
     // MARK: - Sidebar row
@@ -122,12 +137,21 @@ public struct CommandsEditorView: View {
 
     private func editorHeader(_ c: CommandStore.Command) -> some View {
         HStack(spacing: 14) {
-            iconView(c.icon, color: c.color)
-                .frame(width: 44, height: 44)
-                .background(
-                    Circle().fill(Color.white.opacity(0.06))
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
-                )
+            // PKT-879: editor header icon is now the picker entry point.
+            Button {
+                iconPickerPresented = true
+            } label: {
+                iconView(c.icon, color: c.color)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        Circle().fill(Color.white.opacity(0.06))
+                            .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
+                    )
+            }
+            .buttonStyle(.plain)
+            .help("Change icon")
+            .accessibilityLabel("Change icon")
+
             Text(c.name)
                 .font(.system(size: 22, weight: .semibold))
             Spacer()
@@ -148,7 +172,22 @@ public struct CommandsEditorView: View {
     private func appearanceCard(_ c: CommandStore.Command) -> some View {
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 10) {
-                BridgeCardLabel("Appearance")
+                HStack {
+                    BridgeCardLabel("Appearance")
+                    Spacer()
+                    // PKT-879: open the new icon picker sheet.
+                    Button {
+                        iconPickerPresented = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "square.grid.2x2")
+                            Text("Change icon")
+                        }
+                        .font(.system(size: 11.5, weight: .medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
                 HStack(spacing: 6) {
                     ForEach(CommandStore.NotionColor.allCases, id: \.self) { col in
                         Button {
@@ -164,15 +203,16 @@ public struct CommandsEditorView: View {
                                 )
                         }
                         .buttonStyle(.plain)
+                        .help("Set color: \(col.rawValue)")
                     }
                     Spacer()
                     Text("Color applies to symbols, not emoji")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                Text("Icon picker: replace from the menu bar above (current: \(c.icon.displayHint)). Full emoji + SF Symbol picker is the next iteration.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text("Current: \(c.icon.displayHint). Tap the icon (or Change icon) to pick a new emoji or SF Symbol.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
         }
     }
@@ -368,6 +408,20 @@ public struct CommandsEditorView: View {
 
     private func updateColor(slug: String, color: CommandStore.NotionColor) {
         guard var c = commands.first(where: { $0.slug == slug }) else { return }
+        c.color = color
+        applyUpdate(c)
+    }
+
+    /// PKT-879: atomic icon + color update from the icon picker sheet.
+    /// Color is only relevant for symbol icons; the picker passes `nil`
+    /// for emoji selections.
+    private func applyIconAndColor(
+        slug: String,
+        icon: CommandStore.Icon,
+        color: CommandStore.NotionColor?
+    ) {
+        guard var c = commands.first(where: { $0.slug == slug }) else { return }
+        c.icon = icon
         c.color = color
         applyUpdate(c)
     }

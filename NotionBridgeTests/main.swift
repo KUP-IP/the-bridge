@@ -520,6 +520,11 @@ await runSettingsSectionsLGTests()
 await runModuleGroupTests()
 await runToolRouterFailClosedTests()
 
+// PKT-879 (v3.6.4): Dashboard / Onboarding / icon picker reskin.
+await runPKT879DashboardTests()
+await runPKT879OnboardingTests()
+await runPKT879IconPickerTests()
+
 // ============================================================
 // MARK: - Summary
 // ============================================================

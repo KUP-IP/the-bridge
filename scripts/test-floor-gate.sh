@@ -471,10 +471,29 @@
 # markers — receivers need non-trivial param wiring; full structural
 # merge deferred to Phase 2.5. Audit item 15 (snippets_* tier review)
 # explicitly deferred — operator open question.
+# PKT-879 (v3.6.4 · Dashboard + Onboarding LG refresh + Commands icon
+# picker, 2026-05-27): three independent additive UI surfaces shipped
+# with contract tests for each:
+#   • DashboardView reskinned per design/dashboard.html (300pt popover,
+#     navigable rows via SettingsNavigation, status pulse glow, two-col
+#     permission grid). +10 PKT879DashboardTests entries.
+#   • OnboardingWindow refreshed per design/onboarding.html (7-step
+#     glass cards, progress bar + step caption, stdio Recommended badge
+#     retained, final step posts .onboardingDidComplete so the user
+#     lands in the Dashboard not raw Settings). +5 PKT879OnboardingTests.
+#   • New IconPickerSheet primitive (emoji tab + SF Symbol search tab +
+#     Notion color swatch row) wired into CommandsEditorView; selection
+#     persists to CommandStore.Icon. +12 PKT879IconPickerTests including
+#     a CommandStore round-trip and a representative NSImage symbol
+#     resolvability probe (non-AppKit-headless-friendly).
+# Net new tests: 27 (10 dashboard + 5 onboarding + 12 icon picker), plus
+# one carrier delta from the pre-existing suite re-counted under the
+# new harness order — measured 1302 passed, 0 failed. Floor raised
+# 1232 -> 1302 per the order-inversion rule.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1333}"
-# v3.6 (2026-05-27): cumulative floor after PKT-876 + PKT-877 + PKT-878 merges.
+FLOOR="${BRIDGE_TEST_FLOOR:-1360}"
+# v3.6 (2026-05-27): cumulative floor after PKT-876 + PKT-877 + PKT-878 + PKT-879 merges.
 # PKT-876: +14 Settings sections LG tests (shared BridgeSettingsSectionHeader,
 # dep-link derivation, SF Symbol presets across 5 reskinned sections).
 # PKT-877: +25 Tools tests (ModuleGroup derivation, override paths,
@@ -484,7 +503,11 @@ FLOOR="${BRIDGE_TEST_FLOOR:-1333}"
 # CommandBridgeRecents MRU + cap (Q1 in-memory), CommandBridgeAnimation
 # locked/reduce-motion values, viewModel pure builders, applyCommit
 # clipboard contract, controller lifecycle, hot-key plumbing-failure shape.
-# Baseline 1275 at HEAD 4554d32 + 14 + 25 + 19 = 1333.
+# PKT-879: +27 Dashboard + Onboarding + icon-picker tests — popover sizing,
+# pulse-glow reduce-motion, jump-link nav routing, 7-step wizard,
+# Recommended badge invariant, IconPickerCatalog emoji + SF Symbol
+# curation + de-duped + NSImage resolvable, CommandStore icon round-trip.
+# Baseline 1275 at HEAD 4554d32 + 14 + 25 + 19 + 27 = 1360.
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."
