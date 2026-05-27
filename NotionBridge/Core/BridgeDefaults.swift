@@ -18,6 +18,13 @@ public enum BridgeDefaults {
     /// Written by ToolRegistryView, read by CredentialsFeature and ListTools handlers.
     public static let disabledTools = "com.notionbridge.disabledTools"
 
+    /// v3.6.0 D6: per-ModuleGroup expand/collapse state on the Tools page.
+    /// Dictionary<String /* group raw id */, Bool>. Missing entry: collapsed
+    /// (the v3.6.0 default — was "expanded if any tool in the group is on",
+    /// which became a wall-of-toggles for users with most groups enabled).
+    /// Written by ModuleGroupCard on user toggle; read at view construction.
+    public static let moduleGroupExpanded = "com.notionbridge.moduleGroupExpanded"
+
     // MARK: - Skills
 
     /// Encoded skills list. Data (JSON-encoded [Skill]).

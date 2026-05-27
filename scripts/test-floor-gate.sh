@@ -492,10 +492,14 @@
 # 1232 -> 1302 per the order-inversion rule.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1365}"
-# v3.6.0 polish (2026-05-27): +5 D1 credentials scope filter regression tests
-# (matchesAccessGroup pure predicate covering: no-group leak fix, matching
-# group, different group, empty string, non-string value).
+FLOOR="${BRIDGE_TEST_FLOOR:-1370}"
+# v3.6.0 polish (2026-05-27):
+#  +5 D1 credentials scope filter regression tests
+#    (matchesAccessGroup pure predicate covering: no-group leak fix,
+#    matching group, different group, empty string, non-string value).
+#  +5 D6 ModuleGroupCard expand-state persistence contract
+#    (key namespace, dict round-trip, no cross-group bleed, cold-launch
+#    collapsed default, ModuleGroupID rawValue dict-key safety).
 # v3.6 (2026-05-27): cumulative floor after PKT-876 + PKT-877 + PKT-878 + PKT-879 merges.
 # PKT-876: +14 Settings sections LG tests (shared BridgeSettingsSectionHeader,
 # dep-link derivation, SF Symbol presets across 5 reskinned sections).

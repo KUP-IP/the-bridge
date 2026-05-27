@@ -91,8 +91,12 @@ public struct ModuleGroupCard: View {
 
     @State private var isExpanded: Bool
 
-    /// Off groups auto-collapse on view load (DoD: "Off groups auto-
-    /// collapse on view load"). Initialiser inspects `masterState`.
+    /// v3.6.0 D6: per-group expand state persists in BridgeDefaults
+    /// (`moduleGroupExpanded` dictionary keyed by group id). Cold-launch
+    /// default is collapsed for every group — the previous "expanded if
+    /// any tool on" rule made the page a wall-of-toggles for users with
+    /// most modules enabled. Off groups still auto-collapse on each load
+    /// regardless of the saved value (DoD invariant).
     public init(
         group: ModuleGroup,
         toolDescriptions: [String: String],
@@ -105,9 +109,27 @@ public struct ModuleGroupCard: View {
         self.onPerToolChange = onPerToolChange
         self.onMasterChange = onMasterChange
         self.onDepLinkTapped = onDepLinkTapped
-        // Default expansion: collapsed if group is fully off, expanded
-        // otherwise. The user can override interactively.
-        self._isExpanded = State(initialValue: group.masterState != .off)
+        let saved = ModuleGroupCard.savedExpandState(forGroupId: group.id.rawValue)
+        let initial: Bool = {
+            // Off groups always collapse, regardless of saved state.
+            if group.masterState == .off { return false }
+            // Use saved value if present, otherwise default to collapsed.
+            return saved ?? false
+        }()
+        self._isExpanded = State(initialValue: initial)
+    }
+
+    private static func savedExpandState(forGroupId id: String) -> Bool? {
+        let dict = UserDefaults.standard
+            .dictionary(forKey: BridgeDefaults.moduleGroupExpanded) ?? [:]
+        return dict[id] as? Bool
+    }
+
+    private static func persistExpandState(forGroupId id: String, expanded: Bool) {
+        var dict = UserDefaults.standard
+            .dictionary(forKey: BridgeDefaults.moduleGroupExpanded) ?? [:]
+        dict[id] = expanded
+        UserDefaults.standard.set(dict, forKey: BridgeDefaults.moduleGroupExpanded)
     }
 
     public var body: some View {
@@ -164,7 +186,13 @@ public struct ModuleGroupCard: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
         .contentShape(Rectangle())
-        .onTapGesture { isExpanded.toggle() }
+        .onTapGesture {
+            isExpanded.toggle()
+            ModuleGroupCard.persistExpandState(
+                forGroupId: group.id.rawValue,
+                expanded: isExpanded
+            )
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "\(group.displayName) tool group, \(group.enabledCount) of \(group.total) enabled, " +

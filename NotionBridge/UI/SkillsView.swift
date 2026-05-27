@@ -426,26 +426,34 @@ struct SkillsView: View {
                     }
                     .frame(maxWidth: 200)
                 } else {
-                    Text(skill.name)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.primary)
-                        .onTapGesture {
-                            openSkillURL(skill.url ?? skill.notionPageId)
+                    // v3.6.0 D5: pair the skill name with a small link-out
+                    // glyph so its click-to-open affordance is visible without
+                    // a hover. Double-click still enters rename mode.
+                    HStack(spacing: 4) {
+                        Text(skill.name)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.primary)
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .onTapGesture {
+                        openSkillURL(skill.url ?? skill.notionPageId)
+                    }
+                    .onTapGesture(count: 2) {
+                        commitPendingEdit()
+                        renameError = nil
+                        renamingSkillName = skill.name
+                        renameText = skill.name
+                    }
+                    .onHover { hovering in
+                        if hovering {
+                            NSCursor.pointingHand.push()
+                        } else {
+                            NSCursor.pop()
                         }
-                        .onTapGesture(count: 2) {
-                            commitPendingEdit()
-                            renameError = nil
-                            renamingSkillName = skill.name
-                            renameText = skill.name
-                        }
-                        .onHover { hovering in
-                            if hovering {
-                                NSCursor.pointingHand.push()
-                            } else {
-                                NSCursor.pop()
-                            }
-                        }
-                        .help("Click to open in browser. Double-click to rename.")
+                    }
+                    .help("Click to open in browser. Double-click to rename.")
                 }
 
                 // PKT-487 F2: Inline URL edit — tap to edit, save on Enter/focus loss
@@ -513,6 +521,13 @@ struct SkillsView: View {
             // other than Notion (manual, future), the badge surfaces the
             // platform clearly without doubling.
             BridgeBadge(skill.platform.displayName, systemImage: skill.platform.systemImage)
+
+            // v3.6.0 D5: visually separate the informational platform badge
+            // from the interactive Routing/Palette toggles below — they share
+            // a row but represent different action classes.
+            Divider()
+                .frame(height: 18)
+                .padding(.horizontal, 2)
 
             // W4 (3.4.1): two independent flag toggles replace the
             // 3-state visibility picker. Routing = appears in

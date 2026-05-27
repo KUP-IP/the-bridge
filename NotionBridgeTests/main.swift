@@ -528,6 +528,9 @@ await runPKT879IconPickerTests()
 // v3.6.0 D1: Credentials scope filter regression guard.
 await runCredentialsScopeFilterTests()
 
+// v3.6.0 D6: ModuleGroupCard expand-state persistence contract.
+await runModuleGroupExpandPersistenceTests()
+
 // ============================================================
 // MARK: - Summary
 // ============================================================
