@@ -23,4 +23,8 @@ public extension Notification.Name {
     /// Posted after any job mutation (create, delete, pause, resume, update, import) so the Jobs UI can reload.
     static let jobsDidChange = Notification.Name("com.notionbridge.jobsDidChange")
 
+    /// PKT-879 (v3.6.4): posted when the onboarding wizard completes its
+    /// final step. Observers (AppDelegate) bring attention to the menu
+    /// bar so the user lands in the Dashboard popover, not raw Settings.
+    static let onboardingDidComplete = Notification.Name("com.notionbridge.onboardingDidComplete")
 }

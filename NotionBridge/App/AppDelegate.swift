@@ -222,6 +222,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // PKT-879 (v3.6.4): land users in the Dashboard, not raw Settings.
+        // When the wizard completes, flash the Dock badge / menu bar so
+        // the user notices the menu bar icon is the next interaction.
+        // We deliberately do NOT open the Settings window here.
+        NotificationCenter.default.addObserver(forName: .onboardingDidComplete, object: nil, queue: .main) { _ in
+            // requestUserAttention is the canonical macOS API for
+            // "hey, look over here" without stealing focus or windows.
+            NSApp.requestUserAttention(.informationalRequest)
+            print("[Onboarding] Completed — user attention requested for menu bar Dashboard")
+        }
+
         // Keep permission state fresh after returning from System Settings.
         // PKT-369 N3: Use async variant to include notification status
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in

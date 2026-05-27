@@ -512,6 +512,11 @@ await runStandingOrdersTests()
 // PKT-6 (v3.5): CommandStore (markdown-per-command + index.json).
 await runCommandStoreTests()
 
+// PKT-879 (v3.6.4): Dashboard / Onboarding / icon picker reskin.
+await runPKT879DashboardTests()
+await runPKT879OnboardingTests()
+await runPKT879IconPickerTests()
+
 // ============================================================
 // MARK: - Summary
 // ============================================================

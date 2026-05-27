@@ -73,7 +73,11 @@ public final class OnboardingWindowController {
         UserDefaults.standard.set(true, forKey: BridgeDefaults.hasCompletedOnboarding)
         window?.close()
         window = nil
-        print("[Onboarding] Completed — hasCompletedOnboarding = true")
+        // PKT-879 (v3.6.4): land the user in the Dashboard, not raw
+        // Settings. Posting this notification lets AppDelegate flash the
+        // menu-bar icon so the popover is the discovery surface.
+        NotificationCenter.default.post(name: .onboardingDidComplete, object: nil)
+        print("[Onboarding] Completed — hasCompletedOnboarding = true; posted onboardingDidComplete")
     }
 }
 
@@ -124,47 +128,109 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Progress indicator
-            progressBar
-                .padding(.top, 20)
-                .padding(.horizontal, 32)
-
-            Spacer()
+            // PKT-879: progress + step caption inside the glass head
+            progressHeader
+                .padding(.top, 16)
+                .padding(.horizontal, 22)
+                .padding(.bottom, 8)
 
             // Step content — PKT-357 F6: no implicit animation on step transitions
-            Group {
-                switch currentStep {
-                case .welcome:
-                    welcomeStep
-                case .legalAcceptance:
-                    legalAcceptanceStep
-                case .workspaceSetup:
-                    workspaceSetupStep
-                case .autoPermissions:
-                    autoPermissionsStep
-                case .manualPermissions:
-                    manualPermissionsStep
-                case .connection:
-                    connectionStep
-                case .testConnection:
-                    testConnectionStep
+            ScrollView {
+                Group {
+                    switch currentStep {
+                    case .welcome:
+                        welcomeStep
+                    case .legalAcceptance:
+                        legalAcceptanceStep
+                    case .workspaceSetup:
+                        workspaceSetupStep
+                    case .autoPermissions:
+                        autoPermissionsStep
+                    case .manualPermissions:
+                        manualPermissionsStep
+                    case .connection:
+                        connectionStep
+                    case .testConnection:
+                        testConnectionStep
+                    }
                 }
+                .padding(.horizontal, 28)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 32)
+            .frame(maxHeight: .infinity)
 
-            Spacer()
-
-            // Navigation buttons
+            // Navigation buttons in the foot rail
+            Divider()
+                .background(Color.white.opacity(0.08))
             navigationButtons
-                .padding(.horizontal, 32)
-                .padding(.bottom, 24)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 14)
         }
-        .frame(width: 520, height: 480)
+        .frame(width: PKT879Onboarding.windowWidth, height: PKT879Onboarding.windowHeight)
         .onChange(of: currentStep) { _, newValue in
             UserDefaults.standard.set(newValue.rawValue, forKey: OnboardingResumeKey.stepRaw)
         }
         .onAppear {
             hasAcceptedLegal = UserDefaults.standard.bool(forKey: BridgeDefaults.hasAcceptedLegalTerms)
+        }
+    }
+
+    // MARK: - Progress header (PKT-879)
+
+    private var progressHeader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Gradient progress bar matching design/onboarding.html
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(Color.white.opacity(0.08))
+                        .frame(height: 4)
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.54, green: 0.49, blue: 0.94),
+                                    Color(red: 0.70, green: 0.54, blue: 0.93)
+                                ],
+                                startPoint: .leading, endPoint: .trailing
+                            )
+                        )
+                        .frame(width: geo.size.width * progressFraction, height: 4)
+                }
+            }
+            .frame(height: 4)
+
+            HStack {
+                Text("Step \(currentStep.rawValue + 1) of \(OnboardingStep.allCases.count)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(1.1)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(stepCaption)
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(1.1)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Progress as a fraction of the total step count (1-based: at step 1
+    /// the bar is 1/7 full, at the final step it's full).
+    private var progressFraction: CGFloat {
+        let total = max(1, OnboardingStep.allCases.count)
+        return CGFloat(currentStep.rawValue + 1) / CGFloat(total)
+    }
+
+    private var stepCaption: String {
+        switch currentStep {
+        case .welcome:           return "Welcome"
+        case .legalAcceptance:   return "Privacy & Terms"
+        case .workspaceSetup:    return "Connect Workspace"
+        case .autoPermissions:   return "Auto Permissions"
+        case .manualPermissions: return "Manual Permissions"
+        case .connection:        return "Connect a Client"
+        case .testConnection:    return "You're Set"
         }
     }
 
@@ -184,18 +250,6 @@ struct OnboardingView: View {
     /// Matches auto-permissions → manual advance so Back/forward behavior stays consistent after resume.
     private static func loadDidAutoAdvanceForResumeStep() -> Bool {
         loadResumeStep().rawValue >= OnboardingStep.manualPermissions.rawValue
-    }
-
-    // MARK: - Progress Bar
-
-    private var progressBar: some View {
-        HStack(spacing: 8) {
-            ForEach(OnboardingStep.allCases, id: \.rawValue) { step in
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(step.rawValue <= currentStep.rawValue ? Color.purple : Color.gray.opacity(0.3))
-                    .frame(height: 4)
-            }
-        }
     }
 
     // MARK: - Welcome Step (PKT-357: F6, F7, F8)
@@ -622,9 +676,14 @@ struct OnboardingView: View {
 
             if healthCheckStatus.isSuccess {
                 VStack(alignment: .leading, spacing: 8) {
-                    tipRow(icon: "menubar.arrow.up.rectangle", text: "Click the menu bar icon for quick status")
-                    tipRow(icon: "gearshape", text: "Press \u{2318}, for Settings")
-                    tipRow(icon: "shield.checkered", text: "Destructive actions require approval via notification")
+                    // PKT-879: final step tips lead with the Dashboard (the
+                    // menu-bar popover) as the user's landing surface.
+                    tipRow(icon: "menubar.arrow.up.rectangle",
+                           text: "The menu bar icon opens the Dashboard \u{2014} status, clients, settings")
+                    tipRow(icon: "command",
+                           text: "Press \u{2318}\u{2325}\u{2303}C to open the Command Bridge")
+                    tipRow(icon: "shield.checkered",
+                           text: "Destructive actions require approval via notification")
                 }
                 .padding(.top, 4)
             }
@@ -694,7 +753,8 @@ struct OnboardingView: View {
                 // Workspace step has its own Save & Skip buttons
                 EmptyView()
             } else if currentStep == .testConnection {
-                Button("Done") {
+                // PKT-879: explicit "lands user in the Dashboard" CTA.
+                Button("Open Bridge") {
                     onComplete()
                 }
                 .buttonStyle(.borderedProminent)
@@ -730,4 +790,24 @@ extension OnboardingView.HealthCheckStatus {
         if case .checking = self { return true }
         return false
     }
+}
+
+// MARK: - PKT-879 constants surface (pinned by tests)
+
+/// Locked layout / step-count contract for the v3.6.4 onboarding refresh.
+public enum PKT879Onboarding {
+    /// Window width per design/onboarding.html (540pt mock; we use 520
+    /// to match the existing OnboardingWindowController frame).
+    public static let windowWidth: CGFloat = 520
+
+    /// Window height per design/onboarding.html (520pt mock; we use 520
+    /// to match the existing OnboardingWindowController frame).
+    public static let windowHeight: CGFloat = 520
+
+    /// Locked step count. The mock spec is "Step N of 7".
+    public static let totalSteps: Int = 7
+
+    /// The transport that wears the "Recommended" badge on step 6.
+    /// Pinned: Streamable HTTP (stdio's modern successor).
+    public static let recommendedTransport: String = "Streamable HTTP"
 }
