@@ -471,23 +471,20 @@
 # markers — receivers need non-trivial param wiring; full structural
 # merge deferred to Phase 2.5. Audit item 15 (snippets_* tier review)
 # explicitly deferred — operator open question.
-# PKT-877 (Bridge v3.6·2): Tools page rebuild adds ModuleGroup abstraction
-# (W1) + dispatch-time fail-closed SAFETY CONTRACT (W3). New suites
-# ModuleGroupTests + ToolRouterFailClosedTests landed 1232 → 1300 (+68):
-# 19 ModuleGroup derivation/state/live-registry tests + 6 router fail-
-# closed contract tests (every test asserts BridgeToolError by TYPE, not
-# by stringly text match) + the rest are the recompiled, still-passing
-# baseline. FLOOR raised to 1300.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1314}"
-# v3.6 (2026-05-27): cumulative floor after PKT-876 + PKT-877 merges.
+FLOOR="${BRIDGE_TEST_FLOOR:-1333}"
+# v3.6 (2026-05-27): cumulative floor after PKT-876 + PKT-877 + PKT-878 merges.
 # PKT-876: +14 Settings sections LG tests (shared BridgeSettingsSectionHeader,
 # dep-link derivation, SF Symbol presets across 5 reskinned sections).
 # PKT-877: +25 Tools tests (ModuleGroup derivation, override paths,
 # state machine, live-registry no-orphan invariant, + 6 SAFETY-CONTRACT
 # tests asserting BridgeToolError.moduleGroupDisabled by type).
-# Baseline 1275 at HEAD 4554d32 + 14 + 25 = 1314.
+# PKT-878: +19 Command Bridge tests — placement math (Q2 25%-up-from-bottom),
+# CommandBridgeRecents MRU + cap (Q1 in-memory), CommandBridgeAnimation
+# locked/reduce-motion values, viewModel pure builders, applyCommit
+# clipboard contract, controller lifecycle, hot-key plumbing-failure shape.
+# Baseline 1275 at HEAD 4554d32 + 14 + 25 + 19 = 1333.
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."

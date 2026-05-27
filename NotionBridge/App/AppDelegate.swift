@@ -65,7 +65,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// streamableHTTP connector-gating decision). The gating DECISION is
     /// unit-tested headlessly; the hot-key firing / panel / cross-app
     /// paste are an explicit operator manual-smoke (W3 GUI ceiling).
-    private var commandBox: CommandBoxController?
+    private var commandBridge: CommandBridgeController?
 
     /// cmd-ux W1: the single `@Observable` source of truth for the
     /// Settings → Commands section. The AppDelegate owns exactly one
@@ -245,9 +245,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // cmd-w3: tear down the palette hot-key if it was registered.
-        // No-op when the gate was off (commandBox == nil).
-        commandBox?.unregisterHotkey()
-        commandBox = nil
+        // No-op when the gate was off (commandBridge == nil).
+        commandBridge?.unregisterHotkey()
+        commandBridge = nil
 
         // PKT-357 F15: End activity assertion
         if let token = activityToken {
@@ -503,22 +503,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// cmd-ux W1: the registrar seam the `CommandsController` drives.
-    /// Returns a thin adapter over the live `CommandBoxController` so the
+    /// Returns a thin adapter over the live `CommandBridgeController` so the
     /// observable state machine and the Carbon glue stay decoupled (the
     /// state machine is unit-tested with an in-memory fake; this adapter
     /// is the production wiring). `nil` when the palette isn't built.
     private var commandsRegistrar: CommandsRegistrar? {
-        guard let box = commandBox else { return nil }
-        return CommandBoxRegistrarAdapter(box: box)
+        guard let box = commandBridge else { return nil }
+        return CommandBridgeRegistrarAdapter(box: box)
     }
 
     /// Idempotently build the palette + register the hot-key. Safe to
-    /// call repeatedly: if `commandBox` already exists this is a no-op
+    /// call repeatedly: if `commandBridge` already exists this is a no-op
     /// (the hot-key stays registered). Used by both startup and the
     /// live Settings toggle. Publishes the REAL registration outcome
     /// into the observable `commandsController` so Settings is live.
     private func startCommandsPalette() {
-        if let existing = commandBox {
+        if let existing = commandBridge {
             // Already constructed. If a prior Carbon registration failed
             // (the combo was owned by another app at the time), retry it
             // now — the conflicting app may have since released the
@@ -544,9 +544,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let provider = RegistrySkillsCommandProvider()
         let manager = CommandsManager()
         let coordinator = CommandPaletteCoordinator(provider: provider, manager: manager)
-        let box = CommandBoxController(hotkey: hotkey, coordinator: coordinator)
+        let box = CommandBridgeController(hotkey: hotkey, coordinator: coordinator)
         let registered = box.registerHotkey()
-        self.commandBox = box
+        self.commandBridge = box
         // Publish the TRUE launch-registration outcome into the single
         // observable source of truth (fixes Bug 2 structurally — the
         // status row now reflects the real registration state, live).
@@ -564,7 +564,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Carbon registration failed (the combo is owned by another app).
     public var isCommandsPaletteHotkeyRegistered: Bool {
         // Reads the single observable source of truth (kept in lock-step
-        // with the live `commandBox` via the publish* calls). Public
+        // with the live `commandBridge` via the publish* calls). Public
         // signature unchanged for existing call sites.
         commandsController.isRegistered
     }
@@ -582,7 +582,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Live enable/disable entrypoint for the Settings master toggle.
     /// Persists the preference, then registers/unregisters the global
-    /// hot-key WITHOUT a relaunch. Idempotent and safe when `commandBox`
+    /// hot-key WITHOUT a relaunch. Idempotent and safe when `commandBridge`
     /// is nil (disable becomes a clean no-op). An explicit
     /// `BRIDGE_ENABLE_COMMANDS` env override still wins on next launch;
     /// this only writes the persisted pref the gate consults when no
@@ -592,7 +592,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // single observable `CommandsController` for the persisted-pref
         // write + observable `enabled`/state transition. The Carbon
         // construction/teardown stays here (the AppDelegate owns
-        // `commandBox`); the controller publishes the REAL resulting
+        // `commandBridge`); the controller publishes the REAL resulting
         // registration so Settings is always live.
         //
         // We persist the pref via the controller (registrar nil here so
@@ -609,8 +609,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             startCommandsPalette() // builds box + publishes real registration
         } else {
-            commandBox?.unregisterHotkey()
-            commandBox = nil
+            commandBridge?.unregisterHotkey()
+            commandBridge = nil
             commandsController.publishUnregistered()
             print("[The Bridge] Commands palette disabled via Settings — hot-key unregistered")
         }
@@ -627,7 +627,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// user's intent so they can free the combo and relaunch, or pick
     /// another in-place.
     ///
-    /// If the palette is currently OFF (no `commandBox`) we still persist
+    /// If the palette is currently OFF (no `commandBridge`) we still persist
     /// — the recorded combo takes effect when the palette is next enabled
     /// — and report `false` (nothing is registered while disabled).
     @discardableResult
@@ -641,7 +641,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // Settings status row updates immediately and a true ⌃⌥⌘C
         // collision is distinguishable from a plumbing failure.
         let ok = commandsController.setHotkey(config, registrar: commandsRegistrar)
-        if commandBox == nil {
+        if commandBridge == nil {
             print("[The Bridge] Commands hot-key recorded (\(config.displayString)) — palette is OFF; applies when re-enabled")
         } else {
             print("[The Bridge] Commands hot-key rebind \(ok ? "succeeded" : "FAILED (combo taken — kept prior)") (\(config.displayString))")
@@ -656,7 +656,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// for the master toggle. No-op when the palette is disabled.
     @discardableResult
     public func retryHotkeyRegistration() -> Bool {
-        guard commandBox != nil else { return false }
+        guard commandBridge != nil else { return false }
         return setCommandsHotkey(commandsController.hotkeyConfig)
     }
 
@@ -741,11 +741,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 // ============================================================
-// MARK: - CommandBoxRegistrarAdapter (cmd-ux W1)
+// MARK: - CommandBridgeRegistrarAdapter (cmd-ux W1)
 //
 //   The production conformance of `CommandsRegistrar`: a thin,
 //   stateless adapter that forwards the controller's register/unregister/
-//   rebind intent to the live Carbon-backed `CommandBoxController` and
+//   rebind intent to the live Carbon-backed `CommandBridgeController` and
 //   translates the controller's `Bool`/`isRegistered`/`lastRegisterStatus`
 //   into the structured `HotkeyRegisterStatus`. Keeps the observable
 //   state machine (unit-tested with an in-memory fake) decoupled from
@@ -753,9 +753,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 // ============================================================
 
 @MainActor
-final class CommandBoxRegistrarAdapter: CommandsRegistrar {
-    private let box: CommandBoxController
-    init(box: CommandBoxController) { self.box = box }
+final class CommandBridgeRegistrarAdapter: CommandsRegistrar {
+    private let box: CommandBridgeController
+    init(box: CommandBridgeController) { self.box = box }
 
     var isRegistered: Bool { box.isRegistered }
     var currentHotkey: HotkeyConfig { box.hotkeyConfig }

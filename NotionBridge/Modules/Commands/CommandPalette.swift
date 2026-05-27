@@ -301,7 +301,7 @@ public enum CommandPaletteCommitResult: Sendable, Equatable {
     case unavailable(name: String, reason: String)
 }
 
-/// The headless core the GUI `CommandBoxController` delegates to. Holds
+/// The headless core the GUI `CommandBridgeController` delegates to. Holds
 /// NO UI; joins the W2 `CommandsManager` (body fetch/cache — NOT
 /// duplicated here) to the pure W3 search. Every method is pure-async
 /// and unit-tested with a synthetic descriptor provider + an injected
@@ -550,7 +550,7 @@ public enum CommandsSettingsStatus: Sendable, Equatable {
 
     /// - Parameters:
     ///   - enabled: the persisted master-toggle value.
-    ///   - isRegistered: `CommandBoxController.isRegistered` (false when
+    ///   - isRegistered: `CommandBridgeController.isRegistered` (false when
     ///     the controller is absent OR registration failed).
     ///   - hotkey: the combo glyph to show in the active state.
     public init(enabled: Bool, isRegistered: Bool, hotkey: String) {
