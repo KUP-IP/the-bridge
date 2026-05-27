@@ -35,11 +35,9 @@ private let SQLITE_TRANSIENT = unsafeBitCast(OpaquePointer(bitPattern: -1), to: 
 // MARK: - Constants
 
 public enum JobsPaths {
-    /// `~/Library/Application Support/NotionBridge/jobs.sqlite`
+    /// `~/Library/Application Support/The Bridge/jobs/jobs.sqlite` (PKT-1 v3.5)
     public static var sqliteURL: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return appSupport.appendingPathComponent("NotionBridge", isDirectory: true)
-            .appendingPathComponent("jobs.sqlite")
+        BridgePaths.applicationSupport(.jobs).appendingPathComponent("jobs.sqlite")
     }
 
     /// `~/Library/LaunchAgents/`
@@ -48,10 +46,9 @@ public enum JobsPaths {
             .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
     }
 
-    /// `~/Library/Logs/NotionBridge/jobs/`
+    /// `~/Library/Logs/The Bridge/jobs/` (PKT-1 v3.5)
     public static var logsDir: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/NotionBridge/jobs", isDirectory: true)
+        BridgePaths.logs(.jobs)
     }
 
     /// `solutions.kup.notionbridge.job.{id}`

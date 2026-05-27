@@ -94,37 +94,57 @@ public final class SettingsWindowController {
 /// Top-level section identity for the Settings window. Hoisted out of
 /// SettingsView (WS-H, PKT-804) so the menu-bar quick-page can deep-link
 /// directly to a section.
+/// PKT-3 v3.5: 9-section sidebar reordered by most-visited-first, with
+/// Standing Orders pinned top and Skills promoted to its own section
+/// (was previously inline under Commands). Order matches design/shell.js
+/// and the locked HTML mocks.
 public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
-    case connections = "Connections"
-    case credentials = "Credentials"
-    case permissions = "Permissions"
-    case tools = "Tools"
-    case commands = "Commands"
-    case jobs = "Jobs"
-    case advanced = "Advanced"
+    case standingOrders = "Standing Orders"
+    case commands       = "Commands"
+    case connections    = "Connections"
+    case skills         = "Skills"
+    case permissions    = "Permissions"
+    case credentials    = "Credentials"
+    case tools          = "Tools"
+    case jobs           = "Jobs"
+    case advanced       = "Advanced"
 
     public var id: String { rawValue }
 
     public var icon: String {
         switch self {
-        case .connections: return "network"
-        case .permissions: return "lock.shield"
-        case .tools: return "hammer"
-        case .commands: return "command"
-        case .credentials: return "key.fill"
-        case .jobs: return "clock.badge.checkmark"
-        case .advanced: return "wrench.and.screwdriver"
+        case .standingOrders: return "scroll"
+        case .commands:       return "command"
+        case .connections:    return "network"
+        case .skills:         return "sparkles"
+        case .permissions:    return "lock.shield"
+        case .credentials:    return "key.fill"
+        case .tools:          return "hammer"
+        case .jobs:           return "clock.badge.checkmark"
+        case .advanced:       return "wrench.and.screwdriver"
         }
     }
 }
 
 /// Shared selection model so the menu-bar quick-page can drive which Settings
 /// section is shown even when the window is already open (WS-H, PKT-804).
+///
+/// PKT-3 v3.5: opens by default to .standingOrders (top of the new
+/// most-visited sidebar order). The deep-link API also accepts an
+/// optional `anchor` string so cross-page nav can land on a sub-section
+/// (e.g. credential row by slug).
 @MainActor
 public final class SettingsNavigation: ObservableObject {
     public static let shared = SettingsNavigation()
-    @Published public var section: SettingsSection = .connections
+    @Published public var section: SettingsSection = .standingOrders
+    @Published public var anchor: String? = nil
     public init() {}
+
+    /// Programmatic deep-link. Used by Dashboard rows + dep-link chips.
+    public func go(_ section: SettingsSection, anchor: String? = nil) {
+        self.section = section
+        self.anchor = anchor
+    }
 }
 
 // MARK: - Settings View
@@ -190,11 +210,13 @@ public struct SettingsView: View {
     @ViewBuilder
     private var detailContent: some View {
         switch nav.section {
+        case .standingOrders: StandingOrdersSection()
+        case .commands: CommandsSection()
         case .connections: connectionsSection
+        case .skills: SkillsSection()
         case .permissions: permissionsSection
-        case .tools: toolsSection
-        case .commands: commandsSection
         case .credentials: credentialsSection
+        case .tools: toolsSection
         case .jobs: jobsSection
         case .advanced: advancedSection
         }

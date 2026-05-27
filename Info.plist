@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>Notion Bridge</string>
+	<string>The Bridge</string>
 	<key>CFBundleExecutable</key>
 	<string>NotionBridge</string>
 	<key>CFBundleIconFile</key>
@@ -13,21 +13,21 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Notion Bridge</string>
+	<string>The Bridge</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>3.4.2</string>
+	<string>3.5.0</string>
 	<key>CFBundleVersion</key>
-	<string>38</string>
+	<string>41</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>14.0</string>
+	<string>26.0</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Notion Bridge needs Automation access to control apps you explicitly request, like Messages and System Events.</string>
+	<string>The Bridge needs Automation access to control apps you explicitly request, like Messages and System Events.</string>
 	<key>NSContactsUsageDescription</key>
-	<string>Notion Bridge needs Contacts access to search and resolve contacts for messaging and workflow tasks you request.</string>
+	<string>The Bridge needs Contacts access to search and resolve contacts for messaging and workflow tasks you request.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>

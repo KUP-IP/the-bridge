@@ -6,7 +6,7 @@
 // Background subscriber polls NSPasteboard.general.changeCount every ~750ms;
 // when the count advances and the pasteboard contains a string payload,
 // captures a {text, timestamp, changeCount} entry into a rolling 50-entry
-// buffer persisted to ~/Library/Application Support/NotionBridge/pasteboard-history.json.
+// buffer persisted to ~/Library/Application Support/The Bridge/pasteboard/history.json.
 //
 // Permissions: none. NSPasteboard read does not require any TCC grant in
 // macOS 26 Tahoe (clipboard access is sandbox/profile-gated only).
@@ -39,12 +39,11 @@ public final class PasteboardHistoryStore: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.notionbridge.pasteboard-history", qos: .utility)
 
     private init() {
-        let fm = FileManager.default
-        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support", isDirectory: true)
-        let dir = appSupport.appendingPathComponent("NotionBridge", isDirectory: true)
-        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        self.storeURL = dir.appendingPathComponent("pasteboard-history.json")
+        // PKT-1 v3.5: BridgePaths is the canonical home — lands under
+        // ~/Library/Application Support/The Bridge/pasteboard/.
+        let dir = (try? BridgePaths.ensureApplicationSupport(.pasteboard))
+            ?? BridgePaths.applicationSupport(.pasteboard)
+        self.storeURL = dir.appendingPathComponent("history.json")
         loadFromDisk()
     }
 
@@ -178,7 +177,7 @@ public enum PasteboardHistoryModule {
             name: "pasteboard_history",
             module: moduleName,
             tier: .open,
-            description: "Return the rolling pasteboard (clipboard) history captured by the bridge — up to the 50 most-recent string clips with timestamps and changeCount markers. Polling rate: 750ms (documented). Persists across bridge restarts under ~/Library/Application Support/NotionBridge/pasteboard-history.json. No TCC permissions required.",
+            description: "Return the rolling pasteboard (clipboard) history captured by the bridge — up to the 50 most-recent string clips with timestamps and changeCount markers. Polling rate: 750ms (documented). Persists across bridge restarts under ~/Library/Application Support/The Bridge/pasteboard/history.json. No TCC permissions required.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([

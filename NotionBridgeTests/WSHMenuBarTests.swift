@@ -10,41 +10,59 @@ import NotionBridgeLib
 func runWSHMenuBarTests() async {
     print("\n\u{1F9ED} WS-H Menu-Bar Quick-Page Tests (PKT-804)")
 
-    await test("SettingsSection exposes the 3 deep-link targets") {
+    await test("SettingsSection exposes the v3.5 deep-link targets") {
         let ids = Set(SettingsSection.allCases.map(\.rawValue))
-        // cmd-ux Change A: the redundant standalone "Skills" tab was
-        // removed; the consolidated "Commands" tab IS the command/skill
-        // manager and is now the deep-link target in its place.
+        // PKT-3 v3.5: 9-section sidebar with Standing Orders pinned top
+        // and Skills promoted to its own section.
+        try expect(ids.contains("Standing Orders"), "missing Standing Orders section")
         try expect(ids.contains("Commands"), "missing Commands section")
-        try expect(!ids.contains("Skills"),
-                   "the redundant Skills tab must be GONE (Change A collapse)")
+        try expect(ids.contains("Skills"), "Skills must exist as its own top-level section")
         try expect(ids.contains("Tools"), "missing Tools section")
-        try expect(ids.contains("Connections"), "missing Connections (Settings home) section")
+        try expect(ids.contains("Connections"), "missing Connections section")
     }
 
     await test("Deep-link icons map to the expected SF Symbols") {
         try expect(SettingsSection.commands.icon == "command", "commands icon: \(SettingsSection.commands.icon)")
         try expect(SettingsSection.tools.icon == "hammer", "tools icon: \(SettingsSection.tools.icon)")
         try expect(SettingsSection.connections.icon == "network", "connections icon: \(SettingsSection.connections.icon)")
+        try expect(SettingsSection.standingOrders.icon == "scroll", "standingOrders icon: \(SettingsSection.standingOrders.icon)")
+        try expect(SettingsSection.skills.icon == "sparkles", "skills icon: \(SettingsSection.skills.icon)")
     }
 
     await test("SettingsSection is Identifiable + CaseIterable + stable raw ids") {
         for s in SettingsSection.allCases {
             try expect(s.id == s.rawValue, "id != rawValue for \(s)")
         }
-        // cmd-ux Change A: the redundant "Skills" tab was removed and
-        // collapsed into "Commands" — section count drops 8 → 7.
-        try expect(SettingsSection.allCases.count == 7, "expected 7 sections, got \(SettingsSection.allCases.count)")
+        // PKT-3 v3.5: 9 sections (Standing Orders + Commands + Connections +
+        // Skills + Permissions + Credentials + Tools + Jobs + Advanced).
+        try expect(SettingsSection.allCases.count == 9, "expected 9 sections, got \(SettingsSection.allCases.count)")
         try expect(SettingsSection.commands.icon == "command",
                    "commands icon: \(SettingsSection.commands.icon)")
         try expect(SettingsSection.commands.id == SettingsSection.commands.rawValue,
                    "commands id must equal rawValue")
     }
 
-    await test("SettingsNavigation defaults to Connections (Settings home)") {
+    await test("SettingsSection sidebar order opens to most-visited (Standing Orders)") {
+        // PKT-3 v3.5: order is Standing Orders → Commands → Connections →
+        // Skills → Permissions → Credentials → Tools → Jobs → Advanced.
+        let order = SettingsSection.allCases.map(\.rawValue)
+        let expected = ["Standing Orders", "Commands", "Connections", "Skills",
+                        "Permissions", "Credentials", "Tools", "Jobs", "Advanced"]
+        try expect(order == expected, "sidebar order drifted: \(order)")
+    }
+
+    await test("SettingsNavigation defaults to Standing Orders (sidebar top)") {
         let nav = await MainActor.run { SettingsNavigation() }
         let section = await MainActor.run { nav.section }
-        try expect(section == .connections, "default section was \(section)")
+        try expect(section == .standingOrders, "default section was \(section)")
+    }
+
+    await test("SettingsNavigation.go deep-link sets section + anchor") {
+        let nav = await MainActor.run { SettingsNavigation() }
+        await MainActor.run { nav.go(.credentials, anchor: "notion") }
+        let (sec, anch) = await MainActor.run { (nav.section, nav.anchor) }
+        try expect(sec == .credentials, "expected .credentials, got \(sec)")
+        try expect(anch == "notion", "expected anchor 'notion', got \(String(describing: anch))")
     }
 
     await test("SettingsNavigation deep-link mutation holds (commands / tools)") {

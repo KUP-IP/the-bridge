@@ -429,10 +429,10 @@ extension SettingsView {
 
                 LabeledContent("Log Directory") {
                     Button {
-                        let logPath = NSString("~/Library/Logs/NotionBridge").expandingTildeInPath
-                        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: logPath)
+                        // PKT-1 v3.5: BridgePaths.logs is the canonical home.
+                        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: BridgePaths.logs.path)
                     } label: {
-                        Text("~/Library/Logs/NotionBridge/")
+                        Text("~/Library/Logs/The Bridge/")
                             .font(.system(.caption, design: .monospaced))
                             .underline()
                     }

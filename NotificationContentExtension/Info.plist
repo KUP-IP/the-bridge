@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>NotionBridge Notification UI</string>
+	<string>The Bridge Notification UI</string>
 	<key>CFBundleExecutable</key>
 	<string>NotificationContentExtension</string>
 	<key>CFBundleIdentifier</key>

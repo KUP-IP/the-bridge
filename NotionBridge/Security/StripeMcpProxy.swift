@@ -108,7 +108,7 @@ public actor StripeMcpProxy {
             "protocolVersion": BridgeConstants.mcpProtocolVersion,
             "capabilities": [String: Any](),
             "clientInfo": [
-                "name": "NotionBridge",
+                "name": "The Bridge",  // PKT-1 v3.5: brand rename
                 "version": AppVersion.marketing
             ]
         ]

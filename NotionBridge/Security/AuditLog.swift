@@ -59,7 +59,7 @@ public actor AuditLog {
     public func append(_ entry: AuditEntry) {
         entries.append(entry)
 
-        // PKT-341: Persist to ~/Library/Logs/NotionBridge/ via LogManager
+        // PKT-341: Persist to ~/Library/Logs/The Bridge/ via LogManager
         Task.detached {
             await LogManager.shared.write(entry)
         }

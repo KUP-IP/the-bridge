@@ -162,10 +162,31 @@ public actor ServerManager {
         // 4. Build MCP Server — version from Bundle (single source of truth)
         let appVersion = AppVersion.resolved
         let routingInstructions = SkillsModule.buildRoutingInstructions()
+
+        // PKT-9 v3.5: prepend user-authored Standing Orders to the routing
+        // index so every MCP client receives the full operating preamble
+        // in `InitializeResult.instructions`. Best-effort: if the store
+        // read fails for any reason we fall back to routing-instructions-
+        // only so initialize still succeeds.
+        let composedInstructions: String = {
+            do {
+                let snapshot = try StandingOrdersStore.shared.read()
+                let orders = snapshot.markdown.trimmingCharacters(in: .whitespacesAndNewlines)
+                if orders.isEmpty { return routingInstructions }
+                return orders + "\n\n---\n\n" + routingInstructions
+            } catch {
+                return routingInstructions
+            }
+        }()
+
         let server = Server(
-            name: "NotionBridge",
+            // PKT-1 v3.5: serverInfo.name announces the new brand to clients.
+            // MCP spec treats this field as informational — clients should
+            // not key off it for routing. Existing clients that displayed
+            // "NotionBridge" will now see "The Bridge".
+            name: "The Bridge",
             version: appVersion,
-            instructions: routingInstructions,
+            instructions: composedInstructions,
             capabilities: .init(tools: .init())
         )
         self.server = server

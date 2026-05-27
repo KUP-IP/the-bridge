@@ -777,10 +777,9 @@ private struct JobDetailView: View {
     }
 
     private func revealLog() {
-        let logsDir = ("~/Library/Logs/NotionBridge/jobs" as NSString).expandingTildeInPath
-        let outLog = "\(logsDir)/\(job.id).out.log"
-        let url = URL(fileURLWithPath: outLog)
-        NSWorkspace.shared.activateFileViewerSelecting([url])
+        // PKT-1 v3.5: BridgePaths.logs(.jobs) is the canonical home.
+        let outLog = BridgePaths.logs(.jobs).appendingPathComponent("\(job.id).out.log")
+        NSWorkspace.shared.activateFileViewerSelecting([outLog])
     }
 
     // MARK: JSON helpers

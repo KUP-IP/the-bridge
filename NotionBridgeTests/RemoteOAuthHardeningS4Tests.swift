@@ -74,20 +74,24 @@ func runRemoteOAuthHardeningS4Tests() async {
     let gate = ConnectorScopeGate()
     let stepUp = ConnectorStepUpGate()
 
-    func validator() -> ConnectorBearerValidator {
+    // NB: Previously these were nested `func`s with default arguments.
+    // Swift 6.2.1 -O -strict-concurrency=complete crashes during type-
+    // checking that pattern when the enclosing function is `async` and
+    // the nested fn captures locals (compiler assertion
+    // "IsolationCrossing should not be set twice"). Closures with no
+    // default args avoid the crash. All 6 call sites use authCtx() with
+    // no arguments, so dropping the defaults is functionally a no-op.
+    let validator: @Sendable () -> ConnectorBearerValidator = {
         ConnectorBearerValidator(
             keys: keys.verify, hasKeys: true,
             expectedIssuer: s4Issuer, expectedAudience: s4Resource
         )
     }
-    func authCtx(
-        diagnostics: ConnectorAuthDiagnostics = ConnectorAuthDiagnostics(),
-        binding: ConnectorSessionBinding = ConnectorSessionBinding()
-    ) -> ConnectorAuthContext {
+    let authCtx: @Sendable () -> ConnectorAuthContext = {
         ConnectorAuthContext(
             validator: validator(),
-            sessionBinding: binding,
-            diagnostics: diagnostics,
+            sessionBinding: ConnectorSessionBinding(),
+            diagnostics: ConnectorAuthDiagnostics(),
             resourceMetadataURL: s4PRM
         )
     }

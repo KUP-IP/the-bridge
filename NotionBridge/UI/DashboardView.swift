@@ -60,9 +60,11 @@ public struct DashboardView: View {
             Spacer()
             Text("v\(appVersion)")
                 .bridgeSecondary()
-            // WS-H (PKT-804): quick-page deep-link icons → Settings sections.
+            // PKT-8 v3.5: quick-link icons now lead with Standing Orders
+            // (the top of the new sidebar) plus Commands and Settings
+            // (lands on the default top — Standing Orders).
+            quickLink(.standingOrders, systemImage: "scroll", help: "Open Standing Orders")
             quickLink(.commands, systemImage: "command", help: "Open Commands")
-            quickLink(.tools, systemImage: "hammer", help: "Open Tools")
             quickLink(.connections, systemImage: "gearshape", help: "Open Settings (\u{2318},)")
         }
         .bridgeRow()
