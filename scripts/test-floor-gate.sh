@@ -471,9 +471,16 @@
 # markers — receivers need non-trivial param wiring; full structural
 # merge deferred to Phase 2.5. Audit item 15 (snippets_* tier review)
 # explicitly deferred — operator open question.
+# PKT-877 (Bridge v3.6·2): Tools page rebuild adds ModuleGroup abstraction
+# (W1) + dispatch-time fail-closed SAFETY CONTRACT (W3). New suites
+# ModuleGroupTests + ToolRouterFailClosedTests landed 1232 → 1300 (+68):
+# 19 ModuleGroup derivation/state/live-registry tests + 6 router fail-
+# closed contract tests (every test asserts BridgeToolError by TYPE, not
+# by stringly text match) + the rest are the recompiled, still-passing
+# baseline. FLOOR raised to 1300.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1232}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1300}"
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."

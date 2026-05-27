@@ -512,6 +512,10 @@ await runStandingOrdersTests()
 // PKT-6 (v3.5): CommandStore (markdown-per-command + index.json).
 await runCommandStoreTests()
 
+// PKT-877 (Bridge v3.6·2): ModuleGroup + dispatch fail-closed SAFETY CONTRACT.
+await runModuleGroupTests()
+await runToolRouterFailClosedTests()
+
 // ============================================================
 // MARK: - Summary
 // ============================================================
