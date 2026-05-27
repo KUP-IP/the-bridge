@@ -129,6 +129,45 @@ public actor ToolRouter {
             throw ToolRouterError.unknownTool(toolName)
         }
 
+        // PKT-877 — SAFETY CONTRACT: fail closed when the tool's entire
+        // ModuleGroup is currently disabled by the user. This is checked
+        // BEFORE tier resolution / security gate / handler so disabling a
+        // group cannot leak through any code path. The check is pure and
+        // consumes the live registry — exactly the same source the UI
+        // groups derive from — so dispatch state cannot drift from what
+        // the user sees on the Tools page.
+        let registeredNames = Array(registry.keys)
+        let disabledNames = Set(
+            UserDefaults.standard.stringArray(forKey: BridgeDefaults.disabledTools) ?? []
+        )
+        let gate = ModuleGroupGate.isToolGated(
+            toolName: toolName,
+            registeredToolNames: registeredNames,
+            disabledNames: disabledNames
+        )
+        if gate.gated {
+            // Audit-log the gated dispatch so the failure is observable in
+            // AI LOGS, then throw the structured error. We use `.rejected`
+            // (parity with SecurityGate.reject) to keep the audit schema
+            // consistent.
+            let duration = ContinuousClock.now - start
+            let ms = Double(duration.components.attoseconds) / 1_000_000_000_000_000.0
+                + Double(duration.components.seconds) * 1000.0
+            await auditLog.append(AuditEntry(
+                timestamp: Date(),
+                toolName: toolName,
+                tier: tool.tier,
+                inputSummary: stringifySummary(arguments),
+                outputSummary: "REJECTED: module group '\(gate.groupID.displayName)' disabled",
+                durationMs: ms,
+                approvalStatus: .rejected
+            ))
+            throw BridgeToolError.moduleGroupDisabled(
+                toolName: toolName,
+                groupDisplayName: gate.groupID.displayName
+            )
+        }
+
         if tool.module == CredentialModule.moduleName && !CredentialsFeature.isEnabled {
             throw ToolRouterError.invalidArguments(
                 toolName: toolName,

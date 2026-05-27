@@ -1,4 +1,6 @@
 // BridgeToolError.swift — v3.0·0.5 (PKT — agentic-usability)
+//                      — PKT-877 (Bridge v3.6·2) adds the dispatch-time
+//                        fail-closed error type (THE SAFETY CONTRACT).
 // NotionBridge · Server
 //
 // Centralized parameter-misnomer recovery. AGENT_FEEDBACK logged repeated
@@ -12,6 +14,32 @@
 // per-handler edits (doctrine: centralize over N-site edits).
 
 import Foundation
+
+// MARK: - BridgeToolError (PKT-877)
+
+/// Structured errors thrown by the dispatch pipeline before a tool's
+/// handler runs. PKT-877 introduces this type so the Tools-page master
+/// toggle has a SAFETY CONTRACT: disabling a `ModuleGroup` must surface a
+/// recognisable, machine-readable error — never silent failure.
+///
+/// `ToolRouter.dispatch` checks `ModuleGroupGate.isToolGated` before any
+/// handler is invoked; a gated call throws `.moduleGroupDisabled`. The
+/// error carries the offending tool name AND its group id so callers (UI,
+/// audit log, connector clients) can render an accurate "enable in
+/// Settings → Tools → <group>" message without string-parsing.
+public enum BridgeToolError: Error, LocalizedError, Equatable {
+    /// The tool's entire module group is currently disabled by user
+    /// preference. Carries the offending tool name and the group's
+    /// display name (no SwiftUI type leakage into the error).
+    case moduleGroupDisabled(toolName: String, groupDisplayName: String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .moduleGroupDisabled(let toolName, let groupDisplayName):
+            return "\(toolName) is unavailable — the \(groupDisplayName) tool group is disabled in Settings → Tools. Re-enable the group to dispatch this tool."
+        }
+    }
+}
 
 public enum BridgeToolAliases {
 

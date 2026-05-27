@@ -54,14 +54,21 @@ extension SettingsView {
     // PKT-366 F9: Skills manager for Skills tab
 
     var toolsSection: some View {
-        ToolRegistryView(
+        // PKT-877 (Bridge v3.6·2): replace the flat 162-toggle list with
+        // the grouped card stack. Per-tool toggles inside expanded cards
+        // remain functional, and disabling a whole group triggers the
+        // dispatch-time fail-closed safety contract (see ToolRouter +
+        // ModuleGroupGate). The active-count badge in the status bar is
+        // kept in sync via the same `BridgeDefaults.disabledTools` write
+        // path the new list uses.
+        ModuleGroupList(
             tools: statusBar.toolInfoList,
-            onToggle: { _, _ in
-                let disabled = Set(UserDefaults.standard.stringArray(forKey: BridgeDefaults.disabledTools) ?? [])
-                statusBar.activeToolCount = statusBar.toolInfoList.count - disabled.count
-            },
-            notificationDenied: permissionManager.notificationStatus != .granted
+            nav: SettingsNavigation.shared
         )
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            let disabled = Set(UserDefaults.standard.stringArray(forKey: BridgeDefaults.disabledTools) ?? [])
+            statusBar.activeToolCount = statusBar.toolInfoList.count - disabled.count
+        }
     }
 
     // MARK: - Commands (cmd-ux, Change A + B)

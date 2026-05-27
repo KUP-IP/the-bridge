@@ -515,6 +515,10 @@ await runCommandStoreTests()
 // PKT-876 (v3.6.1): Settings sections Liquid Glass reskin.
 await runSettingsSectionsLGTests()
 
+// PKT-877 (Bridge v3.6·2): ModuleGroup + dispatch fail-closed SAFETY CONTRACT.
+await runModuleGroupTests()
+await runToolRouterFailClosedTests()
+
 // ============================================================
 // MARK: - Summary
 // ============================================================
