@@ -36,7 +36,7 @@ public final class PasteboardHistoryStore: @unchecked Sendable {
     private var lastChangeCount: Int = -1
     private var pollTimer: DispatchSourceTimer?
     private let storeURL: URL
-    private let queue = DispatchQueue(label: "com.notionbridge.pasteboard-history", qos: .utility)
+    private let queue = DispatchQueue(label: "kup.solutions.the-bridge.pasteboard-history", qos: .utility)
 
     private init() {
         // PKT-1 v3.5: BridgePaths is the canonical home — lands under

@@ -24,7 +24,7 @@ EXT_APPEX       = $(PLUGINS_DIR)/$(EXT_NAME).appex
 JOB_RUNNER_NAME = NBJobRunner
 JOB_RUNNER_PATH = $(APP_BUNDLE)/Contents/MacOS/$(JOB_RUNNER_NAME)
 VERSION        := $(shell /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Info.plist)
-DMG_NAME        = notion-bridge-v$(VERSION).dmg
+DMG_NAME        = the-bridge-v$(VERSION).dmg
 DMG_PATH        = $(BUILD_DIR)/$(DMG_NAME)
 DMG_STAGING     = $(BUILD_DIR)/dmg-staging
 DMG_BACKGROUND  = $(BUILD_DIR)/dmg-background.png
@@ -106,7 +106,7 @@ app: build extension jobrunner
 	@SPM_BUNDLE="$(RELEASE_DIR)/NotionBridge_NotionBridge.bundle"; \
 		if [ -d "$$SPM_BUNDLE" ]; then \
 			cp -R "$$SPM_BUNDLE" "$(APP_BUNDLE)/Contents/Resources/"; \
-			echo "  ↳ Copied SPM resource bundle (NotionBridge) to .app root"; \
+			echo "  ↳ Copied SPM resource bundle (NotionBridge) to Contents/Resources"; \
 		fi
 	@# ── Copy NotionBridgeLib resource bundle too (3.3.0 W3: bundled SKILL.md ──
 	@# ── skills declared in Package.swift on the NotionBridgeLib target — its  ──
@@ -114,7 +114,7 @@ app: build extension jobrunner
 	@LIB_BUNDLE="$(RELEASE_DIR)/NotionBridge_NotionBridgeLib.bundle"; \
 		if [ -d "$$LIB_BUNDLE" ]; then \
 			cp -R "$$LIB_BUNDLE" "$(APP_BUNDLE)/Contents/Resources/"; \
-			echo "  ↳ Copied SPM resource bundle (NotionBridgeLib — bundled skills) to .app root"; \
+			echo "  ↳ Copied SPM resource bundle (NotionBridgeLib — bundled skills) to Contents/Resources"; \
 		fi
 	@# ── Add MenuBarIcon-named copies for image(forResource:) lookup ──
 	@if [ -f "$(APP_BUNDLE)/Contents/Resources/NotionBridge_NotionBridge.bundle/notionbridge-menubar.png" ]; then \

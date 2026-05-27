@@ -673,7 +673,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             switch tokenStatus {
             case .missing:
                 await MainActor.run {
-                    statusBar.updateNotionTokenStatus("missing", detail: "Set NOTION_API_TOKEN or add to ~/.config/notion-bridge/config.json")
+                    statusBar.updateNotionTokenStatus("missing", detail: "Set NOTION_API_TOKEN or add to ~/.config/the-bridge/config.json")
                 }
                 print("[The Bridge] Notion API token not found")
 
