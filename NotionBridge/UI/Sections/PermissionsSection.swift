@@ -57,7 +57,7 @@ public struct PermissionsSection: View {
             Task { await permissionManager.checkAllAsync() }
         }
         .confirmationDialog(
-            "Reset all permissions for NotionBridge?",
+            "Reset all permissions for The Bridge?",
             isPresented: $showTCCResetDialog,
             titleVisibility: .visible
         ) {
@@ -69,7 +69,7 @@ public struct PermissionsSection: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This will reset all system permissions for NotionBridge. You\u{2019}ll need to re-grant each permission after resetting.")
+            Text("This will reset all system permissions for The Bridge. You\u{2019}ll need to re-grant each permission after resetting.")
         }
     }
 

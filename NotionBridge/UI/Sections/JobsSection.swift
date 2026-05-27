@@ -67,10 +67,12 @@ public struct JobsSection: View {
             VStack(alignment: .leading, spacing: 10) {
                 BridgeCardLabel("Last 24 hours")
                 HStack(spacing: 10) {
-                    statCell(value: "\(jobsSnapshot.count)", caption: "Total", color: Color.white.opacity(0.9))
+                    statCell(value: "\(jobsSnapshot.count)", caption: "Total", color: Color.primary)
                     statCell(value: "\(active)", caption: "Active", color: Color(red: 0.49, green: 0.84, blue: 0.63))
                     statCell(value: "\(paused)", caption: "Paused", color: Color(red: 0.96, green: 0.81, blue: 0.49))
-                    statCell(value: "0", caption: "Failed", color: Color(red: 1.0, green: 0.61, blue: 0.61))
+                    // v3.6: "Failed" cell removed — failure tracking infra not wired
+                    // (was hardcoded "0"). Returns in a dedicated packet alongside
+                    // JobStore failure-history derivation.
                 }
             }
         }

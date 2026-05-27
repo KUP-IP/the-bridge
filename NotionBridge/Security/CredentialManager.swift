@@ -155,13 +155,27 @@ public final class CredentialManager: Sendable {
         return "\(prefix)\(bundleID)"
     }
 
-    /// `true` when the keychain item belongs to this app’s default access group (or the attribute is absent).
-    private static func isKeychainItemManagedByThisApp(_ item: [String: Any]) -> Bool {
+    /// `true` when the keychain item belongs to this app's default access group.
+    /// v3.6 fix: missing-access-group no longer counts as "ours" — that defaulted-true
+    /// path surfaced every system keychain item (Apple system services, Chrome, Spark,
+    /// etc.) under "Stored credentials". Bridge-saved items still surface via the
+    /// fallback paths in `shouldSurfaceCredentialFromKeychainItem` (metadata flag or
+    /// `com.notionbridge` infrastructure service).
+    public static func isKeychainItemManagedByThisApp(_ item: [String: Any]) -> Bool {
         guard let expected = defaultKeychainAccessGroupForThisApp() else {
+            // Non-app context (tests): surface everything so unit tests can verify.
             return true
         }
+        return matchesAccessGroup(item: item, expected: expected)
+    }
+
+    /// Pure helper for `isKeychainItemManagedByThisApp` — testable without an
+    /// app-bundle access group. Returns `true` iff the item's
+    /// `kSecAttrAccessGroup` equals `expected`. Absent attribute → `false`
+    /// (the v3.6 audit fix; previously this leaked system keychain items).
+    public static func matchesAccessGroup(item: [String: Any], expected: String) -> Bool {
         guard let ag = item[kSecAttrAccessGroup as String] as? String else {
-            return true
+            return false
         }
         return ag == expected
     }

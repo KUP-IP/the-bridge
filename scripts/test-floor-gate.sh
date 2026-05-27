@@ -492,7 +492,10 @@
 # 1232 -> 1302 per the order-inversion rule.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1360}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1365}"
+# v3.6.0 polish (2026-05-27): +5 D1 credentials scope filter regression tests
+# (matchesAccessGroup pure predicate covering: no-group leak fix, matching
+# group, different group, empty string, non-string value).
 # v3.6 (2026-05-27): cumulative floor after PKT-876 + PKT-877 + PKT-878 + PKT-879 merges.
 # PKT-876: +14 Settings sections LG tests (shared BridgeSettingsSectionHeader,
 # dep-link derivation, SF Symbol presets across 5 reskinned sections).

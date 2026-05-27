@@ -525,6 +525,9 @@ await runPKT879DashboardTests()
 await runPKT879OnboardingTests()
 await runPKT879IconPickerTests()
 
+// v3.6.0 D1: Credentials scope filter regression guard.
+await runCredentialsScopeFilterTests()
+
 // ============================================================
 // MARK: - Summary
 // ============================================================
