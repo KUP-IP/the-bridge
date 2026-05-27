@@ -1,18 +1,22 @@
-# NotionBridge
+# The Bridge
 
 **A native macOS menu-bar app that turns your Mac into an MCP server for Notion AI agents and local coding clients.**
 
-NotionBridge exposes local Mac capabilities and connected services as MCP tools over **Streamable HTTP**, **legacy SSE**, and **stdio**. It is built in Swift 6.2 for macOS 26+ on Apple Silicon and is designed to be always-on, auto-launched, and safe enough for daily operator use.
+The Bridge exposes local Mac capabilities and connected services as MCP tools over **Streamable HTTP**, **legacy SSE**, and **stdio**. It is built in Swift 6.2 for macOS 26+ on Apple Silicon and is designed to be always-on, auto-launched, and safe enough for daily operator use.
 
-**81+N tools** (80 feature module tools + `echo` + **N** dynamic Stripe MCP tools) · **3 transports** · **3-tier security model** · **Customer-owned Cloudflare Tunnel support**
+**~173 tools** across 25 module groups · **3 transports** · **3-tier security model** · **Customer-owned Cloudflare Tunnel support** · **Liquid Glass UI** (v3.6+)
+
+**Latest release:** [v3.6.0](https://github.com/KUP-IP/the-bridge/releases/tag/v3.6.0) — Liquid Glass complete (May 2026). Existing v3.4.x installs auto-update via Sparkle.
 
 **Product page:** https://kup.solutions/notion-bridge
+
+> **Naming history:** "NotionBridge" was the product's original name. As of v3.6.0 the user-facing brand is **The Bridge**. The Swift target, bundle identifier (`kup.solutions.notion-bridge`), and Keychain service name (`com.notionbridge`) are intentionally preserved — that keeps existing user data continuous across the rename.
 
 ---
 
 ## What this repo is
 
-This is the product repository for **NotionBridge**.
+This is the product repository for **The Bridge** (Swift target name `NotionBridge`).
 
 It is not a generic Swift experiment and it is not an open-source demo server. It is the source-available codebase for a commercial macOS product that bridges Notion agents, local coding tools, and the user's Mac.
 
@@ -25,7 +29,7 @@ Current commercial posture:
 
 ## Current product surface
 
-NotionBridge currently ships the following module surface:
+The Bridge currently ships ~173 tools organized into 25 module groups, surfaced collapsibly in **Settings → Tools** (PKT-877 ModuleGroup UI). Highlights below; the full registry is in-app.
 
 | Module | Tools | Notes |
 |---|---:|---|
@@ -45,14 +49,16 @@ NotionBridge currently ships the following module surface:
 | SkillsModule | 3 | `fetch_skill`, `list_routing_skills`, `manage_skill` |
 | ConnectionsModule | 5 | connection inventory, health, validation |
 | BuiltinModule | 1 | `echo` (registered in `ServerManager`, not a Swift `*Module` type) |
-| **Total** | **81+N** | 80 feature module tools + `echo` + **N** dynamic Stripe MCP tools (currently 26 when configured) |
+| **Total** | **~173** | Across 25 ModuleGroups. Includes dynamic Stripe MCP tools (currently 26 when configured) and the v3.5+ additions: CommandStore (10-slot favorites), StandingOrders (per-client overlays), JobsManager (launchd-backed schedules), Git/Gh, BgProcess, LSP, Snippets, Dev, DevServer, Lighthouse, Playwright, Vitest, Wrangler |
 
 Core product traits:
 - Native macOS menu-bar app with onboarding, settings, and a status popover
+- **Liquid Glass UI** (v3.6+) — BridgeGlassCard, BridgeGlassBubble, dep-link chips, ModuleGroup cards, Standing Orders composer with per-client overlays
+- **Command Bridge popup** — global hotkey (⌃⌥⌘C default) opens a bottom-anchored SwiftUI tray with 10 favorite-slot bubbles + substring search + recents
 - Auto-launch via `SMAppService`
 - Streamable HTTP and legacy SSE on the same local server surface
 - stdio support for local clients such as Claude Code and Cursor
-- Local-first security gate with audit logging
+- Local-first security gate with audit logging + **dispatch fail-closed** (disabled tool groups return typed `BridgeToolError.moduleGroupDisabled`, never silent failure)
 - Optional remote access through a customer-owned Cloudflare Tunnel
 
 ---
@@ -61,22 +67,22 @@ Core product traits:
 
 ### Option 1: Download a release
 
-1. Download the latest DMG from [GitHub Releases](https://github.com/KUP-IP/Notion-bridge/releases).
+1. Download the latest DMG from [GitHub Releases](https://github.com/KUP-IP/the-bridge/releases).
 2. Open the DMG.
-3. Drag `NotionBridge.app` into `/Applications`.
+3. Drag **The Bridge** (`NotionBridge.app` in the DMG; renamed on install) into `/Applications`.
 4. Launch the app and complete onboarding.
 
 ### Option 2: Build from source
 
 ```bash
-git clone https://github.com/KUP-IP/Notion-bridge.git
+git clone https://github.com/KUP-IP/the-bridge.git
 cd Notion-bridge
 make app
 ```
 
 The app bundle is written to `.build/NotionBridge.app`.
 
-> **Install naming:** The Swift target is `NotionBridge` (no space), so build output and DMG contents use `NotionBridge.app`. The Finder display name is **Notion Bridge** (with space), set by `CFBundleName` / `CFBundleDisplayName` in `Info.plist`. `make install` places the app at `/Applications/Notion Bridge.app` to match the display name. Both names refer to the same product.
+> **Install naming:** The Swift target is `NotionBridge` (no space), so build output and DMG contents use `NotionBridge.app`. The Finder display name is **Notion Bridge** (with space), set by `CFBundleName` / `CFBundleDisplayName` in `Info.plist`. `make install` places the app at `/Applications/The Bridge.app` to match the display name. Both names refer to the same product.
 
 ---
 
@@ -100,7 +106,7 @@ Primary configuration path:
 ~/.config/notion-bridge/config.json
 ```
 
-NotionBridge supports:
+The Bridge supports:
 - Notion workspace connections
 - connection health checks
 - customer-owned remote-access configuration
@@ -110,7 +116,7 @@ If you are using Notion tools, add a valid Notion integration token through the 
 
 ### Factory reset (Settings → Maintenance)
 
-**Factory Reset** clears local config, Keychain entries for Notion Bridge, resets macOS permissions for the app, and reloads in-memory workspace connection state. **Skills** are cleared to an **empty** list.
+**Factory Reset** clears local config, Keychain entries for The Bridge, resets macOS permissions for the app, and reloads in-memory workspace connection state. **Skills** are cleared to an **empty** list.
 
 **Credentials** (Settings → Credentials) are **opt-in**: enable “Keychain credentials & MCP tools” to use `credential_*` and `payment_execute` with stored payment methods. When disabled, those MCP tools are omitted from listings and fail closed if called.
 
@@ -147,7 +153,7 @@ Use stdio when connecting local clients such as Claude Code or Cursor directly t
 
 #### Using Bridge with Antigravity
 
-Google Antigravity enforces a strict 100-tool limit per MCP server, whereas Notion Bridge exposes ~180 tools. To use Bridge with Antigravity, we have curated a subset of ~84 tools to stay under the limit.
+Google Antigravity enforces a strict 100-tool limit per MCP server, whereas The Bridge exposes ~173 tools. To use Bridge with Antigravity, we have curated a subset of ~84 tools to stay under the limit.
 
 You can launch the Bridge process with a `--multi-instance` flag (bypasses single-instance GUI guard) and `--allow-tools` flag pointing to the Antigravity allowlist:
 
@@ -159,7 +165,7 @@ You can launch the Bridge process with a `--multi-instance` flag (bypasses singl
       "args": [
         "--multi-instance",
         "--allow-tools",
-        "/path/to/notion-bridge/configs/antigravity-allowlist.json"
+        "/path/to/the-bridge/configs/antigravity-allowlist.json"
       ]
     }
   }
@@ -170,7 +176,7 @@ You can launch the Bridge process with a `--multi-instance` flag (bypasses singl
 
 ## Security model
 
-NotionBridge currently uses a **3-tier execution model**:
+The Bridge currently uses a **3-tier execution model**:
 
 - **Open**
 	- Executes immediately
@@ -188,7 +194,7 @@ The security gate also enforces command-aware escalation rules, sensitive-path h
 
 ## Permissions
 
-Depending on the tools you use, NotionBridge may require:
+Depending on the tools you use, The Bridge may require:
 - Auto-prompted on first launch: Contacts, Notifications, and Automation target registration
 - Manual in System Settings: Accessibility, Screen Recording, and Full Disk Access
 - Separate grants for Contacts privacy access and Automation access to Contacts.app
@@ -222,7 +228,7 @@ Sparkle cache-busting is handled at the app level via httpHeaders (PKT-431). Pre
 ## Repo structure
 
 ```text
-Notion-bridge/
+the-bridge/
 ├── NotionBridge/
 │   ├── App/
 │   ├── Config/
@@ -250,7 +256,7 @@ Report security issues per [SECURITY.md](SECURITY.md) (scope, out-of-scope, and 
 
 The app’s `SUFeedURL` (see `Info.plist`) points at the **Sparkle appcast** (`appcast.xml`). For automatic updates to work for end users, that URL must return valid XML **without** logging into GitHub:
 
-- **Option A — Public GitHub repo:** Keep the default `https://raw.githubusercontent.com/KUP-IP/Notion-bridge/main/appcast.xml` and set the repository to **public** (anonymous `curl` / incognito browser must show XML).
+- **Option A — Public GitHub repo:** Keep the default `https://raw.githubusercontent.com/KUP-IP/the-bridge/main/appcast.xml` and set the repository to **public** (anonymous `curl` / incognito browser must show XML).
 - **Option B — Private repo:** Host `appcast.xml` at any **public HTTPS** URL you control (e.g. CDN or static site), then set `SUFeedURL` to that URL and ship a new build. The file must match the repo’s generated appcast (`make dmg` / `make appcast`); **`length`** and **`sparkle:edSignature`** must match the exact DMG you publish.
 
 Verify locally: `make check-appcast` (committed `appcast.xml` vs `Info.plist`), then `make verify-sparkle-feed` (reads `SUFeedURL` from `Info.plist` and curls the live feed).
@@ -259,7 +265,7 @@ Verify locally: `make check-appcast` (committed `appcast.xml` vs `Info.plist`), 
 
 Stripe fulfillment uses the Cloudflare Worker in the **`kup.solutions`** repo (`workers/nb-fulfillment`). After each release:
 
-1. Run **`make dmg`** in this repo — artifact is **`.build/notion-bridge-v$(VERSION).dmg`**, where **`VERSION`** is **`CFBundleShortVersionString`** in **`Info.plist`** (same as **`DMG_NAME`** in the Makefile).
+1. Run **`make dmg`** in this repo — artifact is **`.build/the-bridge-v$(VERSION).dmg`**, where **`VERSION`** is **`CFBundleShortVersionString`** in **`Info.plist`** (same as **`DMG_NAME`** in the Makefile).
 2. Upload that file to R2 bucket **`nb-downloads`** with object key **`DMG_OBJECT_KEY`** from **`kup.solutions/workers/nb-fulfillment/wrangler.toml`** (must match the filename exactly).
 3. Deploy the worker if **`DMG_OBJECT_KEY`** changed: **`cd workers/nb-fulfillment && npx wrangler deploy --env production`**.
 
@@ -267,7 +273,7 @@ Until the new object exists in R2, paid downloads return **500** (“Download ar
 
 ## License and distribution
 
-NotionBridge is **source-available commercial software**.
+The Bridge is **source-available commercial software**.
 
 This repository is licensed under the **KUP Solutions Source-Available License** (Version 1.0, April 2026). You may view and reference the source code. Copying, modification, redistribution, derivative works, and commercial use are prohibited without written permission from KUP Solutions.
 
@@ -277,7 +283,7 @@ See [`LICENSE`](LICENSE) for the full license text. See also [`PRIVACY.md`](PRIV
 
 ## LSP server prerequisites (optional, for `lsp_*` tools)
 
-The `lsp_*` tools (PKT-745, v2.2 · 2.3) wrap external Language Server Protocol implementations. The tools register and report `capability_missing` if the underlying servers are absent, so they are safe to leave uninstalled — they only become functional once the matching server is on disk.
+The `lsp_*` tools (PKT-745, v2.2 · 2.3) wrap external Language Server Protocol implementations. The tools register and report `capability_missing` if the underlying servers are absent, so they are safe to leave uninstalled — they only become functional once the matching server is on disk. (The Bridge's `Tools` group `lsp` cleanly fails-closed via `BridgeToolError.moduleGroupDisabled` when the operator toggles the entire group off in Settings.)
 
 | Language    | LSP server                  | Install                                                                                                                       |
 |-------------|-----------------------------|-------------------------------------------------------------------------------------------------------------------------------|
@@ -293,7 +299,7 @@ If you install via a non-standard npm prefix, symlink the binary into one of the
 
 ### LSP session supervision (`lsp_session_list`)
 
-LSP servers are long-running processes; NotionBridge supervises them out-of-band from the short-lived shell processes managed by `bg_process_*`. Each `(language, workspaceRoot)` pair gets a single `LspSession` lazy-spawned on first request, idle-disposed after 15 minutes of inactivity, and observable via `lsp_session_list` (PID, server name/version, spawn / last-used timestamps, idle seconds, request count, open-file count).
+LSP servers are long-running processes; The Bridge supervises them out-of-band from the short-lived shell processes managed by `bg_process_*`. Each `(language, workspaceRoot)` pair gets a single `LspSession` lazy-spawned on first request, idle-disposed after 15 minutes of inactivity, and observable via `lsp_session_list` (PID, server name/version, spawn / last-used timestamps, idle seconds, request count, open-file count).
 
 - **`lsp_session_list`** — LSP server processes only (typescript-language-server, sourcekit-lsp). Use this for LSP-specific lifecycle questions: “is the TS server up?”, “how many open files does the Swift session have?”, “when will it idle out?”.
 - **`bg_process_list`** — Foreground-detached shell processes spawned via `bg_process_*` (long-running builds, watchers, dev servers). Use this for user-launched commands; LSP servers are **not** listed here.
