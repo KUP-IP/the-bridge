@@ -492,7 +492,13 @@
 # 1232 -> 1302 per the order-inversion rule.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1370}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1376}"
+# v3.6·6 hardening (2026-05-27): +6 CommandStore security tests
+#  (slug ASCII alphabet lock — homoglyph attack prevention, path-traversal
+#  character stripping, control-character stripping, empty/whitespace
+#  produces-empty-slug invariant). slugify previously accepted Unicode Ll
+#  (lowercase letter category) which permitted Cyrillic 'а' (U+0430) and
+#  other homoglyphs to slip through; now locked to ASCII [a-z0-9_-].
 # v3.6.0 polish (2026-05-27):
 #  +5 D1 credentials scope filter regression tests
 #    (matchesAccessGroup pure predicate covering: no-group leak fix,

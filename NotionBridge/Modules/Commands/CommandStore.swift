@@ -320,14 +320,19 @@ public final class CommandStore: @unchecked Sendable {
 
     // MARK: - Slugification
 
-    /// Lower-case, replace whitespace runs with `-`, strip non-alnum-dash chars.
+    /// Lower-case, replace whitespace runs with `-`, strip to ASCII [a-z0-9_-].
+    /// v3.6·6 audit: locked to ASCII (was `CharacterSet.lowercaseLetters` =
+    /// Unicode Ll). Cyrillic 'а' (U+0430) is visually identical to ASCII 'a'
+    /// — accepting both would let two visually-identical command names
+    /// produce different slugs, bypassing the duplicate-slug check.
     public static func slugify(_ name: String) -> String {
         let lower = name.lowercased()
         let collapsed = lower.split(whereSeparator: { $0.isWhitespace }).joined(separator: "-")
-        let filtered = collapsed.unicodeScalars.filter {
-            CharacterSet.lowercaseLetters.contains($0)
-                || CharacterSet.decimalDigits.contains($0)
-                || $0 == "-" || $0 == "_"
+        let filtered = collapsed.unicodeScalars.filter { scalar in
+            let v = scalar.value
+            let isAsciiLower = v >= 0x61 && v <= 0x7A   // a-z
+            let isAsciiDigit = v >= 0x30 && v <= 0x39   // 0-9
+            return isAsciiLower || isAsciiDigit || scalar == "-" || scalar == "_"
         }
         return String(String.UnicodeScalarView(filtered))
     }

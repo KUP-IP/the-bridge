@@ -43,9 +43,11 @@ public struct BridgeSettingsSectionHeader<Accessory: View>: View {
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(tint.opacity(0.85))
                 }
+                .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.system(size: 18, weight: .semibold))
+                        .accessibilityAddTraits(.isHeader)
                     Text(subtitle)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
@@ -54,6 +56,10 @@ public struct BridgeSettingsSectionHeader<Accessory: View>: View {
                 accessory
             }
         }
+        // v3.6.0 D6/v3.6·6: a single combined heading per section keeps the
+        // VoiceOver rotor uncluttered (title + subtitle in one rotor stop,
+        // the decorative icon hidden, the accessory left as its own element).
+        .accessibilityElement(children: .contain)
     }
 }
 

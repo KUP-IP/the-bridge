@@ -278,6 +278,7 @@ public struct AdvancedSection: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+            .accessibilityLabel("Copy endpoint URL to clipboard")
             Spacer()
         }
     }
@@ -324,6 +325,7 @@ public struct AdvancedSection: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
             .help("Reveal in Finder")
+            .accessibilityLabel("Reveal in Finder")
             Spacer()
         }
     }

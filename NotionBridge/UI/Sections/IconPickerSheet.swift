@@ -156,6 +156,8 @@ public struct IconPickerSheet: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(tab == .emoji)
+                .accessibilityLabel("\(c.rawValue) color")
+                .accessibilityAddTraits(selectedColor == c ? [.isSelected] : [])
             }
             Spacer()
             Text("Color applies to symbols, not emoji")
@@ -173,9 +175,11 @@ public struct IconPickerSheet: View {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
                 .font(.system(size: 11))
+                .accessibilityHidden(true)
             TextField(searchPlaceholder, text: $query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
+                .accessibilityLabel("Search \(tab == .emoji ? "emoji" : "symbols")")
             if !query.isEmpty {
                 Button {
                     query = ""
@@ -185,6 +189,7 @@ public struct IconPickerSheet: View {
                         .font(.system(size: 11))
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
             }
         }
         .padding(.horizontal, 10)

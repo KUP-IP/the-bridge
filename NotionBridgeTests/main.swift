@@ -531,6 +531,9 @@ await runCredentialsScopeFilterTests()
 // v3.6.0 D6: ModuleGroupCard expand-state persistence contract.
 await runModuleGroupExpandPersistenceTests()
 
+// v3.6·6: CommandStore security audit (slug sanitization defense-in-depth).
+await runCommandStoreSecurityTests()
+
 // ============================================================
 // MARK: - Summary
 // ============================================================
