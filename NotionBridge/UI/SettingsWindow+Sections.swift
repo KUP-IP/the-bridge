@@ -22,188 +22,31 @@ extension SettingsView {
         """
     }
 
-    // MARK: - Permissions
+    // MARK: - Permissions (PKT-876 v3.6.1 — Liquid Glass reskin)
 
     var permissionsSection: some View {
-        Form {
-            Section("System permissions") {
-                PermissionView(permissionManager: permissionManager)
+        PermissionsSection(
+            permissionManager: permissionManager,
+            liveTools: statusBar.toolInfoList,
+            isRecheckingPermissions: $isRecheckingPermissions,
+            permissionActionMessage: $permissionActionMessage,
+            showTCCResetDialog: $showTCCResetDialog,
+            onResetTCC: {
+                await resetTCCPermissions()
             }
-
-            // PKT-363 D3 + D4: Configurable sensitive paths editor
-            SensitivePathsEditor()
-
-            Section {
-                // PKT-362 D3: Uses animatedRecheckAll() for per-row animated feedback
-                Button(isRecheckingPermissions ? "Re-checking\u{2026}" : "Re-check All Permissions") {
-                    isRecheckingPermissions = true
-                    permissionActionMessage = nil
-                    Task {
-                        await permissionManager.animatedRecheckAll()
-                        isRecheckingPermissions = false
-                        permissionActionMessage = "Permission state refreshed at \(Date().formatted(date: .omitted, time: .standard))."
-                    }
-                }
-                .disabled(isRecheckingPermissions)
-
-                if let lastCheckedAt = permissionManager.lastCheckedAt {
-                    Text("Last refreshed: \(lastCheckedAt.formatted(date: .abbreviated, time: .standard))")
-                        .font(.caption2)
-                        .foregroundStyle(BridgeColors.muted)
-                }
-
-                // PKT-362 D4: User-facing language, no tccutil/bundle ID references
-                Button("Reset All Permissions") {
-                    showTCCResetDialog = true
-                }
-                .foregroundStyle(BridgeColors.error)
-                .confirmationDialog(
-                    "Reset all permissions for NotionBridge?",
-                    isPresented: $showTCCResetDialog,
-                    titleVisibility: .visible
-                ) {
-                    Button("Reset", role: .destructive) {
-                        Task {
-                            let resetResult = await resetTCCPermissions()
-                            permissionActionMessage = resetResult.message
-                        }
-                    }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    // PKT-362 D4: Plain-language copy — no mention of tccutil,
-                    // bundle IDs, or internal implementation details.
-                    Text("This will reset all system permissions for NotionBridge. You\u{2019}ll need to re-grant each permission after resetting.")
-                }
-
-                if let permissionActionMessage {
-                    Text(permissionActionMessage)
-                        .font(.caption)
-                        .foregroundStyle(BridgeColors.secondary)
-                }
-            }
-        }
-        .formStyle(.grouped)
+        )
     }
 
-    // MARK: - Connections
+    // MARK: - Connections (PKT-876 v3.6.1 — Liquid Glass reskin)
 
     var connectionsSection: some View {
-        Form {
-            // 1. Server status
-            Section("Server") {
-                LabeledContent("Status") {
-                    HStack(spacing: BridgeSpacing.xs) {
-                        Circle()
-                            .fill(statusBar.isServerRunning ? BridgeColors.success : BridgeColors.error)
-                            .frame(width: 8, height: 8)
-                        Text(statusBar.isServerRunning ? "Running" : "Stopped")
-                            .foregroundStyle(statusBar.isServerRunning ? BridgeColors.success : BridgeColors.error)
-                    }
-                }
-                LabeledContent("Tools", value: "\(statusBar.activeToolCount) active")
-                LabeledContent("Uptime", value: statusBar.uptimeString)
-            }
-
-            // 2. Integrated Tools
-            Section("Integrated tools") {
-                IntegratedToolsContent()
-            }
-
-            // 3. Connected Clients
-            Section("Connected clients") {
-                if statusBar.connectedClients.isEmpty {
-                    Text("No clients connected")
-                        .foregroundStyle(BridgeColors.secondary)
-                } else {
-                    ConnectedClientsContent(clients: statusBar.connectedClients)
-                }
-            }
-
-            // 4. Remote Access
-            Section("Remote access") {
-                ConnectionSetupView()
-            }
-
-            // 5. App Control
-            Section("App control") {
-                HStack {
-                    Text("Launch at login")
-                    Toggle("", isOn: $launchAtLogin)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                    Spacer()
-                }
-                        .onChange(of: launchAtLogin) { _, enabled in
-                            guard !isApplyingLaunchAtLoginChange else { return }
-                            launchAtLoginError = nil
-                            let service = SMAppService.mainApp
-                            do {
-                                if enabled {
-                                    if service.status == .enabled {
-                                        return
-                                    }
-                                    try? service.unregister()
-                                    try service.register()
-                                } else {
-                                    if service.status == .notRegistered {
-                                        return
-                                    }
-                                    try service.unregister()
-                                }
-                            } catch {
-                                let ns = error as NSError
-                                NSLog(
-                                    "[LaunchAtLogin] failed enabled=\(enabled) domain=\(ns.domain) code=\(ns.code) description=\(ns.localizedDescription) status=\(service.status.rawValue)"
-                                )
-                                let notPermitted = (ns.domain == NSPOSIXErrorDomain && ns.code == EPERM)
-                                    || ns.localizedDescription.localizedCaseInsensitiveContains("operation not permitted")
-                                if notPermitted {
-                                    launchAtLoginError = enabled
-                                        ? "Could not enable Launch at login. Operation not permitted."
-                                        : "Could not disable Launch at login. Operation not permitted."
-                                } else {
-                                    launchAtLoginError = enabled
-                                        ? "Could not enable Launch at login."
-                                        : "Could not disable Launch at login."
-                                }
-                                isApplyingLaunchAtLoginChange = true
-                                launchAtLogin.toggle()
-                                isApplyingLaunchAtLoginChange = false
-                            }
-                        }
-                HStack(spacing: 20) {
-                    Button {
-                        (NSApp.delegate as? AppDelegate)?.checkForUpdates()
-                    } label: {
-                        Label("Check Updates", systemImage: "arrow.down.circle")
-                    }
-                    .buttonStyle(.borderless)
-                    Button {
-                        restartApp(reopenSettings: true)
-                    } label: {
-                        Label("Restart Bridge", systemImage: "arrow.clockwise")
-                    }
-                    .buttonStyle(.borderless)
-                    Spacer()
-                }
-
-                if let err = launchAtLoginError {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(err)
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                        Text("Allow Notion Bridge in System Settings → General → Login Items (and Login Items / Background Items if shown). Install from /Applications/Notion Bridge.app.")
-                            .font(.caption2)
-                            .foregroundStyle(BridgeColors.secondary)
-                        Button("Open Login Items…") {
-                            Self.openLoginItemsSystemSettings()
-                        }
-                        .font(.caption)
-                    }
-                }
-            }
-        }
-        .formStyle(.grouped)
+        ConnectionsSection(
+            statusBar: statusBar,
+            permissionManager: permissionManager,
+            launchAtLogin: $launchAtLogin,
+            launchAtLoginError: $launchAtLoginError,
+            isApplyingLaunchAtLoginChange: $isApplyingLaunchAtLoginChange
+        )
     }
 
     // MARK: - Tools
@@ -347,15 +190,48 @@ extension SettingsView {
         .formStyle(.grouped)
     }
 
-    // MARK: - Credentials (PKT-372)
+    // MARK: - Credentials (PKT-876 v3.6.1 — Liquid Glass reskin)
 
     var credentialsSection: some View {
-        CredentialsView()
+        CredentialsSection(
+            liveTools: statusBar.toolInfoList,
+            anchor: nav.anchor
+        )
     }
 
-    // MARK: - Advanced
+    // MARK: - Advanced (PKT-876 v3.6.1 — Liquid Glass reskin)
 
     var advancedSection: some View {
+        AdvancedSection(
+            statusBar: statusBar,
+            permissionManager: permissionManager,
+            appVersion: appVersion,
+            ssePort: ssePort,
+            ssePortInput: $ssePortInput,
+            ssePortError: $ssePortError,
+            ssePortSaveSuccess: $ssePortSaveSuccess,
+            showSSEPortRestartPrompt: $showSSEPortRestartPrompt,
+            ssePortRevertOnCancel: $ssePortRevertOnCancel,
+            showResetConfirmation: $showResetConfirmation,
+            showResetBackgroundItemsConfirmation: $showResetBackgroundItemsConfirmation,
+            resetBackgroundItemsMessage: $resetBackgroundItemsMessage,
+            showFactoryResetConfirmation: $showFactoryResetConfirmation,
+            factoryResetMessage: $factoryResetMessage,
+            onSaveSSEPort: { saveSSEPort() },
+            onPerformFactoryReset: { await performFactoryReset() },
+            onExportDiagnostics: { exportDiagnostics() },
+            factoryResetConfirmationMessage: factoryResetConfirmationMessage,
+            screenOutputDir: screenOutputDir
+        )
+    }
+
+    /// Legacy advanced Form body — retained behind an unused computed prop
+    /// so the file still compiles after extracting the reskin. The new
+    /// `AdvancedSection` view above is what `SettingsView` actually
+    /// renders. PKT-876 v3.6.1: kept for diff reviewers; safe to delete in
+    /// a follow-on. NOT routed from anywhere in the live view tree.
+    @ViewBuilder
+    fileprivate var legacyAdvancedFormBody: some View {
         Form {
             Section("Version") {
                 LabeledContent("App Version", value: "v\(appVersion)")
@@ -899,12 +775,12 @@ private struct ConnectedClientsContent: View {
 }
 
 
-// MARK: - Jobs Section (Jobs Surface v1.10.0)
+// MARK: - Jobs Section (PKT-876 v3.6.1 — Liquid Glass reskin)
 
 extension SettingsView {
     @ViewBuilder
     var jobsSection: some View {
-        JobsView()
+        JobsSection()
     }
 }
 

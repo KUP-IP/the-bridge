@@ -106,7 +106,7 @@ public struct BridgeCardLabel: View {
 /// A small inline "→ jump to X" deep-link chip used to surface cross-page
 /// dependencies (Tools → Permissions, Credentials → Tools, etc.).
 public struct BridgeDepLink: View {
-    public enum Variant { case info, bad }
+    public enum Variant: Sendable { case info, bad }
     private let label: String
     private let variant: Variant
     private let action: () -> Void
