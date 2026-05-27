@@ -473,7 +473,15 @@
 # explicitly deferred — operator open question.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1232}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1289}"
+# PKT-876 v3.6.1 (2026-05-27): +14 PKT-876 Settings sections Liquid Glass
+# tests pinning the shared BridgeSettingsSectionHeader contract (one
+# component, 5 callers, no per-section branching), the live-tool
+# dep-link derivation for Credentials "Used by" + Permissions
+# "Required by" chips (locked decision Q1), and the SF Symbol +
+# preset round-trip for all 5 reskinned sections (Connections,
+# Credentials, Permissions, Jobs, Advanced). Baseline of 1275 at
+# HEAD 4554d32 + 14 new = 1289 (was stale 1232 from a prior packet).
 BIN=".build/debug/NotionBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."

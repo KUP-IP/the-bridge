@@ -512,6 +512,9 @@ await runStandingOrdersTests()
 // PKT-6 (v3.5): CommandStore (markdown-per-command + index.json).
 await runCommandStoreTests()
 
+// PKT-876 (v3.6.1): Settings sections Liquid Glass reskin.
+await runSettingsSectionsLGTests()
+
 // ============================================================
 // MARK: - Summary
 // ============================================================
