@@ -279,6 +279,10 @@ This repository is licensed under the **KUP Solutions Source-Available License**
 
 See [`LICENSE`](LICENSE) for the full license text. See also [`PRIVACY.md`](PRIVACY.md) and [`TERMS.md`](TERMS.md).
 
+### Commercial use
+
+For commercial use of The Bridge, a separate **Commercial Use License** is required. See [`COMMERCIAL_LICENSE.md`](COMMERCIAL_LICENSE.md) for the full terms and purchase at [thebridge.kup.solutions/pricing](https://thebridge.kup.solutions/pricing).
+
 ---
 
 ## LSP server prerequisites (optional, for `lsp_*` tools)
