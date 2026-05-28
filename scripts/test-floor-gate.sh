@@ -492,7 +492,26 @@
 # 1232 -> 1302 per the order-inversion rule.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1376}"
+# PKT-907 (Bridge v3.6 · 10, 2026-05-27): fetch_skill orchestrator —
+# slash-delimited path resolution + optional intent ranking + specialist
+# surfacing in `skills_routing_list`. +21 SkillPathResolverTests
+# covering:
+#   - W1: SkillPath.parse (6 tests — bare name, parent/child, depth >1,
+#     empty / whitespace, leading-slash / trailing-slash tolerance,
+#     per-segment whitespace trim);
+#   - W2: SkillIntentScorer (8 tests — exact title 1.0, alias 0.85,
+#     partial title 0.7, keyword overlap 0.4–0.6, low-confidence nil
+#     fallback, empty-intent defensive empty list, alpha-tie-break, and
+#     pre-PKT-907 bare-parent passthrough);
+#   - W1/Q4: SkillSpecialistFileResolver (3 tests — primary
+#     `specialists/<child>.md` resolution, frontmatter `specialists:`
+#     fallback, unknown-child nil);
+#   - W3: SpecialistSummaryExtractor + listAll (3 tests — first-sentence
+#     extraction, 160-char fallback, dir+frontmatter merge alpha-sorted
+#     and deduped);
+#   - 1 wire-stable annotation raw-values contract test.
+# Net-new pass count 1376 → 1397.
+FLOOR="${BRIDGE_TEST_FLOOR:-1397}"
 # v3.6·6 hardening (2026-05-27): +6 CommandStore security tests
 #  (slug ASCII alphabet lock — homoglyph attack prevention, path-traversal
 #  character stripping, control-character stripping, empty/whitespace
