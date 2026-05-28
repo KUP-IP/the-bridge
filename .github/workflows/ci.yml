@@ -9,6 +9,12 @@ on:
 jobs:
   build-and-test:
     runs-on: macos-26
+    # Workflow-level safety net. Cap the whole job at 30 minutes so a
+    # hanging test (or a Swift toolchain stall on the GHA runner) fails
+    # fast instead of riding the 6h default to cancellation. Locally
+    # the suite runs in <10min; 30min gives 3x headroom for the macos
+    # runner's slower IO and any cold-start tax.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,7 +25,15 @@ jobs:
           swift-version: "6.2"
 
       - name: Build release
+        # Per-step timeout — Swift release build on macos-26 with strict
+        # concurrency takes ~6-8 min locally; 15min cap catches a stuck
+        # compile without burning the whole job budget on it.
+        timeout-minutes: 15
         run: make build
 
       - name: Run test suite + floor gate
+        # Per-step timeout — local test run is ~5 min. 20min cap leaves
+        # the script's own perl-alarm watchdog (1500s) room to fire
+        # first and emit the test-output tail before this hard kill.
+        timeout-minutes: 20
         run: make test-floor

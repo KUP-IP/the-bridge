@@ -600,9 +600,31 @@ swift build -c debug
 LOG="$(mktemp -t bridge-test-floor.XXXXXX)"
 trap 'rm -f "$LOG"' EXIT
 
+# Watchdog: cap the test binary at 25 minutes (local run is ~5 min,
+# CI macos-26 is ~3x slower). If the binary hangs (e.g. a test waiting
+# on a process that won't exit on a headless runner), perl's SIGALRM
+# kills it and the workflow step still surfaces the last test that
+# logged — so future hangs are diagnosable instead of opaque 6h cancels.
+# perl is always present on macOS; no brew install needed.
 set +e
-"$BIN" | tee "$LOG"
+perl -e 'alarm 1500; exec @ARGV' "$BIN" | tee "$LOG"
+RC=${PIPESTATUS[0]}
 set -e
+
+if [ "$RC" -eq 142 ] || [ "$RC" -eq 14 ]; then
+  echo "::error::test-floor-gate: test binary exceeded 1500s watchdog and was killed"
+  echo "--- last 60 lines of test output (so you can see which test hung) ---"
+  tail -60 "$LOG" || true
+  echo "--- end of test output tail ---"
+  exit 124
+fi
+if [ "$RC" -ne 0 ]; then
+  echo "::error::test-floor-gate: test binary exited with code $RC (non-zero, non-timeout)"
+  echo "--- last 60 lines of test output ---"
+  tail -60 "$LOG" || true
+  echo "--- end of test output tail ---"
+  exit "$RC"
+fi
 
 LINE="$(grep -E '^Results: [0-9]+ passed, [0-9]+ failed, [0-9]+ total' "$LOG" | tail -1 || true)"
 if [ -z "$LINE" ]; then

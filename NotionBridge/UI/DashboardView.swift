@@ -441,11 +441,20 @@ public struct StatusPulseDot: View {
             .frame(width: radius, height: radius)
             .shadow(color: color.opacity(phase ? 0.65 : 0.30),
                     radius: phase ? 5 : 3)
+            // v3.7 fix: animation scoped to the shadow value, not a
+            // withAnimation transaction in onAppear. The transaction
+            // form was leaking the implicit animation to MenuBarExtra's
+            // panel-resize during first render — the dashboard card
+            // oscillated to upper-left then back to its anchor on every
+            // popover open. Scoping with .animation(_:value:) confines
+            // the animation to the shadow opacity/radius mutation only.
+            .animation(
+                reduceMotion ? nil : .easeInOut(duration: 1.6).repeatForever(autoreverses: true),
+                value: phase
+            )
             .onAppear {
                 guard !reduceMotion, isPulsable else { return }
-                withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
-                    phase = true
-                }
+                phase = true
             }
     }
 
