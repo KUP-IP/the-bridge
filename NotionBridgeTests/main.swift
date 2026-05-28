@@ -482,6 +482,7 @@ await runSkillSourceTests()         // W2 D2: SkillSource enum + legacy notionPa
 await runFilesystemSkillIndexTests() // W2 D3: SKILL.md filesystem index actor
 await runFetchSkillFileSourceTests() // W2 D5: file-source fetch_skill envelope shape
 await runListRoutingSkillsMergeTests() // W2 D6: merged routing-skills listing
+await runSkillPathResolverTests()      // PKT-907: fetch_skill orchestrator (path / intent / file specialist / W3 summary)
 await runToolAnnotationAuditTests() // PKT-803 (v2.3 · WS-B): annotation coverage audit
 await runTransportRouterTests()     // PKT-803 (v2.3 · WS-B): transport router default/env
 await runRemoteOAuthHTTPTests()     // PKT-800 (S1): RFC 9728 PRM + transport gating + route

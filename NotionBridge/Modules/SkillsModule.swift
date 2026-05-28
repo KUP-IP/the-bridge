@@ -116,17 +116,39 @@ public enum SkillsModule {
         let cache = SkillCache()
 
         // fetch_skill — open tier
+        // PKT-907: now accepts slash-delimited paths (`"parent/child"`)
+        // and an optional `intent` parameter for confidence-ranked
+        // specialist routing. Depth > 1 paths return parent + a
+        // `depth-guard` annotation (never crash). Path that names a
+        // non-existent child returns parent + `specialist-not-found`.
         await router.register(ToolRegistration(
             name: "fetch_skill",
             module: moduleName,
             tier: .open,
-            description: "Fetch the full body of one skill page from Notion by name. Call only after the routing index has selected a skill.",
+            description: """
+            Fetch one skill page's full body. Two ways to address a specialist sub-skill:
+
+              1. Path syntax: name="project-keepr/update" → resolves the "update" \
+            child page (Notion) or specialists/update.md (file source). Depth > 1 is \
+            rejected with a depth-guard annotation (parent body still returned).
+              2. Intent ranking: name="project-keepr", intent="triage stale projects" \
+            → ranks the parent's specialists and returns the best match (score ≥ 0.4); \
+            otherwise returns the parent body with a low-confidence annotation.
+
+            An unresolvable specialist name never errors — the envelope carries the \
+            parent body plus a `specialist-not-found` annotation. Use `name` alone \
+            for the parent body (pre-PKT-907 behavior, unchanged).
+            """,
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "name": .object([
                         "type": .string("string"),
-                        "description": .string("Name of the skill to fetch (case-insensitive). Must match a configured skill name.")
+                        "description": .string("Skill name (case-insensitive). Accepts slash-delimited paths like 'project-keepr/update' to address a specialist; depth > 1 is rejected with an annotation.")
+                    ]),
+                    "intent": .object([
+                        "type": .string("string"),
+                        "description": .string("Optional natural-language intent. When provided, ranks the named parent's specialists and returns the best match (score ≥ 0.4); otherwise falls back to the parent body with a low-confidence annotation.")
                     ]),
                     "includeNested": .object([
                         "type": .string("boolean"),
@@ -145,12 +167,30 @@ public enum SkillsModule {
             ]),
             handler: { arguments in
                 guard case .object(let args) = arguments,
-                      case .string(let name) = args["name"] else {
+                      case .string(let rawName) = args["name"] else {
                     throw ToolRouterError.invalidArguments(
                         toolName: "fetch_skill",
                         reason: "missing required 'name' parameter"
                     )
                 }
+
+                // PKT-907 W1: parse slash-delimited path. Pre-PKT-907
+                // single-name calls flow through unchanged (the parser
+                // returns parent only when no `/` is present). Empty /
+                // whitespace-only names fall through to the existing
+                // "skill not found" envelope path — never an error
+                // throw (pre-PKT-907 wire contract).
+                let parsedPath = SkillPath.parse(rawName) ?? SkillPath(parent: "", child: nil, depthExceeded: false)
+                let name = parsedPath.parent
+
+                // PKT-907 W2: optional intent string. Only triggers
+                // specialist ranking when both are present.
+                let intentArg: String? = {
+                    if case .string(let s) = args["intent"], !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                    return nil
+                }()
 
                 let includeNested: Bool = {
                     if case .bool(let b) = args["includeNested"] { return b }
@@ -179,7 +219,12 @@ public enum SkillsModule {
                                 "hint": .string("Enable it in Settings \u{2192} Skills tab.")
                             ])
                         }
-                        return await Self.buildFileSkillResult(fileSkill)
+                        // PKT-907: file-source path/intent dispatch.
+                        return await Self.dispatchFileSpecialist(
+                            parent: fileSkill,
+                            parsedPath: parsedPath,
+                            intent: intentArg
+                        )
                     }
                     let closeMatches = closestSkillMatches(for: name)
                     let allSkills = listAvailableSkillNames()
@@ -193,7 +238,16 @@ public enum SkillsModule {
                     ])
                 }
 
-                let cacheKey = "\(name.lowercased())|n=\(includeNested)|mb=\(maxBlocks)|md=\(maxDepth)|meta=\(skillConfig.metadataCacheToken)"
+                // PKT-907: cache key must include the resolved sub-skill
+                // selector so a `parent/child` request never returns the
+                // parent-body cache entry (and vice versa).
+                let pathSelectorKey: String = {
+                    if parsedPath.depthExceeded { return "|dg" }
+                    if let c = parsedPath.child { return "|p=\(c.lowercased())" }
+                    if let i = intentArg { return "|i=\(i.lowercased())" }
+                    return ""
+                }()
+                let cacheKey = "\(name.lowercased())|n=\(includeNested)|mb=\(maxBlocks)|md=\(maxDepth)|meta=\(skillConfig.metadataCacheToken)\(pathSelectorKey)"
 
                 if let cached = await cache.get(cacheKey) {
                     return cached
@@ -243,23 +297,48 @@ public enum SkillsModule {
                         title = NotionJSON.extractTitle(from: pageProperties)
                     }
 
+                    // PKT-907: specialist dispatch (path / intent / depth-guard).
+                    // Returns either a swapped-in specialist envelope OR
+                    // a nil signal meaning "use the parent body with the
+                    // (optionally) computed annotation injected below".
+                    let specialistDispatch = await Self.dispatchNotionSpecialist(
+                        client: client,
+                        parentPageId: pageId,
+                        parentName: skillConfig.name,
+                        parsedPath: parsedPath,
+                        intent: intentArg
+                    )
+
+                    // If the dispatch resolved a real specialist child page,
+                    // swap its identity in for the envelope build.
+                    let envelopeTitle = specialistDispatch.resolvedSpecialist?.title ?? title
+                    let envelopeURL = specialistDispatch.resolvedSpecialist?.url ?? url
+                    let envelopePageId = specialistDispatch.resolvedSpecialist?.pageId ?? pageId
+                    let envelopeProperties = specialistDispatch.resolvedSpecialist?.properties ?? pageProperties
+
                     // cmd-w4: body via the server /markdown render (one call;
                     // preserves headings/lists/code/tables) instead of the
                     // depth-first block walk + extractPlainText join.
-                    let markdownData = try await client.getPageMarkdown(pageId: pageId)
+                    let markdownData = try await client.getPageMarkdown(pageId: envelopePageId)
                     let rawMarkdown = Self.skillMarkdownString(fromMarkdownJSON: markdownData)
 
                     // Skill-body <mention-page> tags now render as
                     // [Title](url) via the shared MentionResolver (cmd-w2),
                     // resolved through the cached getPage title lookup;
                     // unresolved / non-page subtypes → safe [link](url).
-                    let result = await Self.buildSkillResult(
+                    var result = await Self.buildSkillResult(
                         skill: skillConfig,
-                        title: title,
-                        url: url,
+                        title: envelopeTitle,
+                        url: envelopeURL,
                         markdownJSONOrText: rawMarkdown,
                         titleLookup: Self.makeSkillMentionTitleLookup(),
-                        pageProperties: pageProperties
+                        pageProperties: envelopeProperties
+                    )
+                    // PKT-907: surface the resolution outcome in the envelope.
+                    result = Self.annotateEnvelope(
+                        result,
+                        parentName: skillConfig.name,
+                        dispatch: specialistDispatch
                     )
                     await cache.set(cacheKey, content: result)
                     return result
@@ -2116,6 +2195,453 @@ public enum SkillsModule {
             }
             return ln.localizedCaseInsensitiveCompare(rn) == .orderedAscending
         }
-        return rows
+        // PKT-907 W3: surface `specialists: [{path,title,summary}]` per
+        // row that has file-source children. Notion-source children are
+        // discovered lazily on demand (a sync scan of every parent's
+        // child pages would blow the connect-time budget); the path
+        // resolver still resolves them at fetch_skill call time, and
+        // the W3 routing-index `specialists:` array is best-effort for
+        // file-source parents now and reserved for Notion via a future
+        // background scan.
+        return await Self.surfaceSpecialistsInRows(rows)
+    }
+
+    // MARK: - PKT-907 (Bridge v3.6 · 10) fetch_skill orchestrator helpers
+
+    /// Resolution outcome from the path/intent dispatcher. Either we
+    /// swapped in a specialist (live page identity) or we are returning
+    /// the parent body with an annotation. `score` / `reason` only
+    /// populate when intent ranking ran.
+    /// `@unchecked Sendable`: the inner `[String: Any]` is a read-only
+    /// snapshot of the Notion `getPage` response. Created inside one
+    /// async task and consumed in the same task — never mutated, never
+    /// shared. The unchecked annotation suppresses the conservative
+    /// strict-concurrency diagnostic without weakening the actual safety
+    /// (no aliased mutable state is ever shared across actors).
+    fileprivate struct SpecialistDispatch: @unchecked Sendable {
+        struct ResolvedNotion {
+            let title: String
+            let url: String
+            let pageId: String
+            let properties: [String: Any]
+        }
+        let resolvedSpecialist: ResolvedNotion?
+        let resolvedPath: String?
+        let annotation: SkillAnnotation?
+        let matchScore: Double?
+        let matchReason: String?
+    }
+
+    /// PKT-907 W1: file-source path/intent dispatch.
+    /// Returns the full envelope for either the resolved child or the
+    /// parent body with an annotation injected.
+    fileprivate static func dispatchFileSpecialist(
+        parent: ParsedSkill,
+        parsedPath: SkillPath,
+        intent: String?
+    ) async -> Value {
+        let parentName = parent.name
+
+        // Depth guard wins over everything else.
+        if parsedPath.depthExceeded {
+            let parentEnvelope = await Self.buildFileSkillResult(parent)
+            return Self.annotateFileEnvelope(
+                parentEnvelope,
+                parentName: parentName,
+                annotation: .depthGuard,
+                resolvedPath: nil,
+                score: nil,
+                reason: nil
+            )
+        }
+
+        // Path lookup.
+        if let child = parsedPath.child {
+            if let resolved = SkillSpecialistFileResolver.resolve(parent: parent, child: child) {
+                let pseudo = ParsedSkill(
+                    name: resolved.name,
+                    path: resolved.path,
+                    isUserSource: parent.isUserSource,
+                    frontmatter: resolved.frontmatter,
+                    body: resolved.body,
+                    displayPath: parent.displayPath + "/specialists/\(resolved.name)"
+                )
+                let env = await Self.buildFileSkillResult(pseudo)
+                return Self.annotateFileEnvelope(
+                    env,
+                    parentName: parentName,
+                    annotation: nil,
+                    resolvedPath: "\(parentName)/\(resolved.name)",
+                    score: 1.0,
+                    reason: "exact path"
+                )
+            }
+            // Path looked valid but no such child file → parent + annotation.
+            let parentEnvelope = await Self.buildFileSkillResult(parent)
+            return Self.annotateFileEnvelope(
+                parentEnvelope,
+                parentName: parentName,
+                annotation: .specialistNotFound,
+                resolvedPath: nil,
+                score: nil,
+                reason: nil
+            )
+        }
+
+        // Intent ranking.
+        if let intent = intent {
+            let specialists = SkillSpecialistFileResolver.listAll(parent: parent)
+            let candidates: [SkillIntentCandidate] = specialists.map { s in
+                var aliases: [String] = []
+                if case .array(let arr) = s.frontmatter["aliases"] { aliases = arr }
+                let summary: String = {
+                    if case .string(let d) = s.frontmatter["description"] { return d }
+                    return SpecialistSummaryExtractor.firstSentence(from: s.body)
+                }()
+                return SkillIntentCandidate(name: s.name, aliases: aliases, summary: summary)
+            }
+            if let best = SkillIntentScorer.bestMatch(intent: intent, candidates: candidates),
+               let resolved = specialists.first(where: { $0.name.lowercased() == best.candidate.name.lowercased() }) {
+                let pseudo = ParsedSkill(
+                    name: resolved.name,
+                    path: resolved.path,
+                    isUserSource: parent.isUserSource,
+                    frontmatter: resolved.frontmatter,
+                    body: resolved.body,
+                    displayPath: parent.displayPath + "/specialists/\(resolved.name)"
+                )
+                let env = await Self.buildFileSkillResult(pseudo)
+                NSLog("[fetch_skill] intent=\"%@\" parent=%@ → %@/%@ score=%.2f (%@)",
+                      intent, parentName, parentName, resolved.name, best.score, best.reason)
+                return Self.annotateFileEnvelope(
+                    env,
+                    parentName: parentName,
+                    annotation: nil,
+                    resolvedPath: "\(parentName)/\(resolved.name)",
+                    score: best.score,
+                    reason: best.reason
+                )
+            }
+            // Low confidence → parent + annotation. Surface top score
+            // when one existed so the caller can diagnose.
+            let ranked = SkillIntentScorer.rank(intent: intent, candidates: candidates)
+            let parentEnvelope = await Self.buildFileSkillResult(parent)
+            NSLog("[fetch_skill] intent=\"%@\" parent=%@ → no candidate ≥ 0.4 (top=%.2f)",
+                  intent, parentName, ranked.first?.score ?? 0)
+            return Self.annotateFileEnvelope(
+                parentEnvelope,
+                parentName: parentName,
+                annotation: .lowConfidence,
+                resolvedPath: nil,
+                score: ranked.first?.score,
+                reason: ranked.first?.reason
+            )
+        }
+
+        // Bare parent name — pre-PKT-907 path.
+        return await Self.buildFileSkillResult(parent)
+    }
+
+    /// PKT-907 W1+W2: Notion-source path/intent dispatch. Returns a
+    /// `SpecialistDispatch` for the caller to splice into the envelope
+    /// build (we do this outside so the existing /markdown fetch path
+    /// stays the single network choke-point).
+    fileprivate static func dispatchNotionSpecialist(
+        client: NotionClient,
+        parentPageId: String,
+        parentName: String,
+        parsedPath: SkillPath,
+        intent: String?
+    ) async -> SpecialistDispatch {
+        // Depth guard short-circuits before any network call.
+        if parsedPath.depthExceeded {
+            return SpecialistDispatch(
+                resolvedSpecialist: nil,
+                resolvedPath: nil,
+                annotation: .depthGuard,
+                matchScore: nil,
+                matchReason: nil
+            )
+        }
+
+        // Bare-parent fast path — no extra network calls.
+        if parsedPath.child == nil && intent == nil {
+            return SpecialistDispatch(
+                resolvedSpecialist: nil,
+                resolvedPath: nil,
+                annotation: nil,
+                matchScore: nil,
+                matchReason: nil
+            )
+        }
+
+        // Enumerate child pages of the parent. `fetchAllSiblingBlocks`
+        // returns every direct child block; we filter on `type:
+        // "child_page"` to get the sub-skill candidates.
+        let childPages = await Self.listNotionChildPages(client: client, pageId: parentPageId)
+
+        if let childName = parsedPath.child {
+            let needle = childName.lowercased()
+            // Exact (case-insensitive), then partial substring (first
+            // match wins per packet) match on child page titles.
+            if let exact = childPages.first(where: { $0.title.lowercased() == needle }) {
+                return SpecialistDispatch(
+                    resolvedSpecialist: SpecialistDispatch.ResolvedNotion(
+                        title: exact.title,
+                        url: exact.url,
+                        pageId: exact.pageId,
+                        properties: exact.properties
+                    ),
+                    resolvedPath: "\(parentName)/\(exact.title)",
+                    annotation: nil,
+                    matchScore: 1.0,
+                    matchReason: "exact path"
+                )
+            }
+            if let partial = childPages.first(where: { $0.title.lowercased().contains(needle) || needle.contains($0.title.lowercased()) }) {
+                return SpecialistDispatch(
+                    resolvedSpecialist: SpecialistDispatch.ResolvedNotion(
+                        title: partial.title,
+                        url: partial.url,
+                        pageId: partial.pageId,
+                        properties: partial.properties
+                    ),
+                    resolvedPath: "\(parentName)/\(partial.title)",
+                    annotation: nil,
+                    matchScore: 0.7,
+                    matchReason: "partial title"
+                )
+            }
+            // Unresolvable child → parent + annotation.
+            return SpecialistDispatch(
+                resolvedSpecialist: nil,
+                resolvedPath: nil,
+                annotation: .specialistNotFound,
+                matchScore: nil,
+                matchReason: nil
+            )
+        }
+
+        // Intent path — score against child page titles.
+        if let intent = intent {
+            let candidates = childPages.map { cp in
+                SkillIntentCandidate(name: cp.title, aliases: [], summary: "")
+            }
+            if let best = SkillIntentScorer.bestMatch(intent: intent, candidates: candidates),
+               let resolved = childPages.first(where: { $0.title.lowercased() == best.candidate.name.lowercased() }) {
+                NSLog("[fetch_skill] intent=\"%@\" parent=%@ → %@/%@ score=%.2f (%@)",
+                      intent, parentName, parentName, resolved.title, best.score, best.reason)
+                return SpecialistDispatch(
+                    resolvedSpecialist: SpecialistDispatch.ResolvedNotion(
+                        title: resolved.title,
+                        url: resolved.url,
+                        pageId: resolved.pageId,
+                        properties: resolved.properties
+                    ),
+                    resolvedPath: "\(parentName)/\(resolved.title)",
+                    annotation: nil,
+                    matchScore: best.score,
+                    matchReason: best.reason
+                )
+            }
+            let ranked = SkillIntentScorer.rank(intent: intent, candidates: candidates)
+            NSLog("[fetch_skill] intent=\"%@\" parent=%@ → no candidate ≥ 0.4 (top=%.2f)",
+                  intent, parentName, ranked.first?.score ?? 0)
+            return SpecialistDispatch(
+                resolvedSpecialist: nil,
+                resolvedPath: nil,
+                annotation: .lowConfidence,
+                matchScore: ranked.first?.score,
+                matchReason: ranked.first?.reason
+            )
+        }
+
+        // Should not reach (early-exited above when both nil).
+        return SpecialistDispatch(
+            resolvedSpecialist: nil,
+            resolvedPath: nil,
+            annotation: nil,
+            matchScore: nil,
+            matchReason: nil
+        )
+    }
+
+    /// Inner record carrying just what `dispatchNotionSpecialist` needs.
+    /// `@unchecked Sendable`: see `SpecialistDispatch` doc above —
+    /// same read-only-snapshot-inside-one-task contract applies.
+    fileprivate struct NotionChildPageRef: @unchecked Sendable {
+        let pageId: String
+        let title: String
+        let url: String
+        let properties: [String: Any]
+    }
+
+    /// Enumerate direct `child_page` blocks of a parent skill page and
+    /// hydrate their title + url via a single `getPage` per child.
+    /// Failures degrade silently (empty list) — the caller maps that to
+    /// a `specialistNotFound` annotation, never an error envelope.
+    ///
+    /// Implementation note: uses `fetchChildBlocksRaw` (returns `Data`
+    /// which IS Sendable) + manual pagination instead of the actor's
+    /// `fetchAllSiblingBlocks` helper (returns `[[String: Any]]` which
+    /// is NOT Sendable under strict concurrency). Same wire contract.
+    fileprivate static func listNotionChildPages(
+        client: NotionClient,
+        pageId: String
+    ) async -> [NotionChildPageRef] {
+        var collectedIds: [String] = []
+        var collectedTitles: [String: String] = [:]   // id → block-level title
+        var cursor: String? = nil
+        // Bounded pagination — defensive 50-page (≈ 5000 blocks) cap.
+        for _ in 0..<50 {
+            guard let data = try? await client.fetchChildBlocksRaw(blockId: pageId, startCursor: cursor, pageSize: 100) else {
+                break
+            }
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let results = json["results"] as? [[String: Any]] else {
+                break
+            }
+            for block in results {
+                guard let type = block["type"] as? String, type == "child_page",
+                      let cid = block["id"] as? String else {
+                    continue
+                }
+                collectedIds.append(cid)
+                let blockTitle = (block["child_page"] as? [String: Any])?["title"] as? String ?? ""
+                if !blockTitle.isEmpty { collectedTitles[cid] = blockTitle }
+            }
+            let hasMore = json["has_more"] as? Bool ?? false
+            guard hasMore, let next = json["next_cursor"] as? String, !next.isEmpty else { break }
+            cursor = next
+        }
+
+        var out: [NotionChildPageRef] = []
+        for cid in collectedIds {
+            var props: [String: Any] = [:]
+            var url = ""
+            var resolvedTitle = collectedTitles[cid] ?? ""
+            if let pageData = try? await client.getPage(pageId: cid),
+               let json = try? JSONSerialization.jsonObject(with: pageData) as? [String: Any] {
+                url = json["url"] as? String ?? ""
+                props = json["properties"] as? [String: Any] ?? [:]
+                if !props.isEmpty {
+                    let t = NotionJSON.extractTitle(from: props)
+                    if !t.isEmpty && t != "Untitled" { resolvedTitle = t }
+                }
+            }
+            out.append(NotionChildPageRef(
+                pageId: cid,
+                title: resolvedTitle,
+                url: url,
+                properties: props
+            ))
+        }
+        return out
+    }
+
+    /// Inject the PKT-907 envelope keys (`resolvedPath`, `matchConfidence`,
+    /// `matchReason`, `annotation`) into a Notion-source envelope.
+    fileprivate static func annotateEnvelope(
+        _ envelope: Value,
+        parentName: String,
+        dispatch: SpecialistDispatch
+    ) -> Value {
+        guard case .object(var dict) = envelope else { return envelope }
+        if let rp = dispatch.resolvedPath {
+            dict["resolvedPath"] = .string(rp)
+        }
+        if let s = dispatch.matchScore {
+            dict["matchConfidence"] = .double(s)
+        }
+        if let r = dispatch.matchReason {
+            dict["matchReason"] = .string(r)
+        }
+        if let a = dispatch.annotation {
+            dict["annotation"] = .string(a.rawValue)
+            // Always surface the parent's name when annotating — agents
+            // need to know that they got the parent body and why.
+            dict["parentName"] = .string(parentName)
+        }
+        return .object(dict)
+    }
+
+    /// File-source annotation helper. Same envelope keys as the Notion
+    /// path — agents read one shape across both sources.
+    fileprivate static func annotateFileEnvelope(
+        _ envelope: Value,
+        parentName: String,
+        annotation: SkillAnnotation?,
+        resolvedPath: String?,
+        score: Double?,
+        reason: String?
+    ) -> Value {
+        guard case .object(var dict) = envelope else { return envelope }
+        if let rp = resolvedPath { dict["resolvedPath"] = .string(rp) }
+        if let s = score { dict["matchConfidence"] = .double(s) }
+        if let r = reason { dict["matchReason"] = .string(r) }
+        if let a = annotation {
+            dict["annotation"] = .string(a.rawValue)
+            dict["parentName"] = .string(parentName)
+        }
+        return .object(dict)
+    }
+
+    // MARK: - PKT-907 W3: surface specialists in skills_routing_list
+
+    /// Post-process the `mergedRoutingSkills` rows to attach a
+    /// `specialists: [{path,title,summary}]` array for every file-source
+    /// parent that has a `specialists/` directory or a frontmatter
+    /// `specialists:` array.
+    ///
+    /// Notion-source parents do NOT eagerly enumerate child pages here
+    /// (that would mean N×(getPage + fetchAllSiblingBlocks) at connect
+    /// time, blowing the cold-start budget). Their specialists are still
+    /// discoverable via the path syntax + intent dispatch at fetch_skill
+    /// call time — the routing index just doesn't pre-render them. This
+    /// is the explicit scope trade-off documented in the dispatch packet.
+    fileprivate static func surfaceSpecialistsInRows(_ rows: [Value]) async -> [Value] {
+        // Build a name → ParsedSkill map for file-source skills.
+        let fileSkills = await FilesystemSkillIndex.shared.allSkills()
+        var byName: [String: ParsedSkill] = [:]
+        for fs in fileSkills { byName[fs.name.lowercased()] = fs }
+
+        var out: [Value] = []
+        for row in rows {
+            guard case .object(var dict) = row else {
+                out.append(row)
+                continue
+            }
+            guard case .string(let name) = dict["name"] else {
+                out.append(row)
+                continue
+            }
+            // Only file-source rows carry specialists in this pass.
+            // (Notion source rows can still surface them on demand via
+            // fetch_skill path/intent dispatch.)
+            let isFileSource: Bool = {
+                if case .string(let src)? = dict["source"], src == "file" { return true }
+                return false
+            }()
+            if isFileSource, let parent = byName[name.lowercased()] {
+                let specialists = SkillSpecialistFileResolver.listAll(parent: parent)
+                if !specialists.isEmpty {
+                    let arr: [Value] = specialists.map { sp in
+                        let summary: String = {
+                            if case .string(let d) = sp.frontmatter["description"] { return d }
+                            if case .string(let s) = sp.frontmatter["summary"] { return s }
+                            return SpecialistSummaryExtractor.firstSentence(from: sp.body)
+                        }()
+                        return .object([
+                            "path": .string("\(name)/\(sp.name)"),
+                            "title": .string(sp.name),
+                            "summary": .string(summary)
+                        ])
+                    }
+                    dict["specialists"] = .array(arr)
+                }
+            }
+            out.append(.object(dict))
+        }
+        return out
     }
 }
