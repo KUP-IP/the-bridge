@@ -543,6 +543,11 @@ await runLicenseUITests()
 await runLicenseRevocationTests()
 await runLicenseDispatchGateTests()
 
+// v3.7·A: SkillsCacheReader/Writer pipeline — Notion-source eager
+// enumeration carve-out closure (PKT-907) + StandingOrders cached
+// routing-skills backing (v3.6·5 TODO closure).
+await runSkillsCacheTests()
+
 // ============================================================
 // MARK: - Summary
 // ============================================================

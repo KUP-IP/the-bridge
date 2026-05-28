@@ -55,6 +55,21 @@ public enum BridgeDefaults {
     /// until a file-source commit pipeline lands).
     public static let fileSkillInCommandPalette = "com.notionbridge.fileSkillInCommandPalette"
 
+    /// v3.7·1: Time-to-live (in hours) for entries in the on-disk skills
+    /// cache (`BridgePaths.applicationSupport(.skillsCache)`). Int. Reads
+    /// older than the TTL still return their data — flagged `stale: true`
+    /// in the routing payload — and a follow-on `refreshAll()` heals them.
+    /// Missing/<=0 entry: defaults to 24 hours via
+    /// `skillsCacheTTLHoursEffective`.
+    public static let skillsCacheTTLHours = "com.notionbridge.skillsCacheTTLHours"
+
+    /// Effective skills-cache TTL in hours. Reads `UserDefaults` and
+    /// falls back to 24 when missing or non-positive.
+    public static var skillsCacheTTLHoursEffective: Int {
+        let raw = UserDefaults.standard.integer(forKey: skillsCacheTTLHours)
+        return raw > 0 ? raw : 24
+    }
+
     // MARK: - Commands Palette (cmd-ux)
 
     /// Master on/off for the Commands palette (global-hotkey command box).

@@ -492,7 +492,32 @@
 # 1232 -> 1302 per the order-inversion rule.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1454}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1466}"
+# v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
+# +12 SkillsCacheTests covering the on-disk skills cache that closes the
+# PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5
+# StandingOrders cachedRoutingSkills TODO:
+#   • write→read round-trip preserving CachedParent + children +
+#     writtenAt + ttlHours + alias/summary fields;
+#   • multi-parent isolation (per-file storage, no cross-contamination);
+#   • readAll() set semantics across the .skills-cache directory;
+#   • TTL boundary inside the window → stale=false;
+#   • TTL exceeded → stale=true (clock-injected via the reader seam);
+#   • stale entries still readable — graceful-fallback contract (the
+#     cache is a hint, not a source of truth);
+#   • missing parent → graceful nil (no throw, no log);
+#   • BridgePaths resolution under applicationSupport(.skillsCache);
+#   • forwards-tolerant JSON decode (unknown top-level + child keys
+#     ignored so writer revisions don't break older readers);
+#   • concurrent-write safety (10× fan-out through a TaskGroup, asserts
+#     last-writer-wins with no torn payload across title+children);
+#   • BridgeDefaults.skillsCacheTTLHours UserDefaults override flowing
+#     through skillsCacheTTLHoursEffective (24 default / 0 fallback /
+#     negative fallback / positive override end-to-end via refreshAll);
+#   • refreshAll() byte-idempotency (same now + sorted-keys + sorted-
+#     children → byte-identical on-disk output across passes).
+# Floor 1454 → 1466 (+12) per order-inversion rule.
+#
 # v3.6·6 wave-2 integration (2026-05-27): cumulative floor after
 # PKT-907 + PKT-909 integration merge.
 #

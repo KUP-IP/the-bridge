@@ -2589,21 +2589,32 @@ public enum SkillsModule {
     // MARK: - PKT-907 W3: surface specialists in skills_routing_list
 
     /// Post-process the `mergedRoutingSkills` rows to attach a
-    /// `specialists: [{path,title,summary}]` array for every file-source
-    /// parent that has a `specialists/` directory or a frontmatter
-    /// `specialists:` array.
+    /// `specialists: [{path,title,summary}]` array for every parent that
+    /// has children — file-source parents from the local `specialists/`
+    /// directory or a frontmatter `specialists:` array, and (v3.7·1)
+    /// Notion-source parents from the on-disk `SkillsCacheReader` cache.
     ///
-    /// Notion-source parents do NOT eagerly enumerate child pages here
-    /// (that would mean N×(getPage + fetchAllSiblingBlocks) at connect
-    /// time, blowing the cold-start budget). Their specialists are still
-    /// discoverable via the path syntax + intent dispatch at fetch_skill
-    /// call time — the routing index just doesn't pre-render them. This
-    /// is the explicit scope trade-off documented in the dispatch packet.
+    /// Notion enumeration used to be deferred here ("N×(getPage +
+    /// fetchAllSiblingBlocks) blows the cold-start budget"); the v3.7·1
+    /// cache makes the read O(1) per parent so the eager surface is now
+    /// safe. Stale cache entries are still surfaced — flagged via the
+    /// row-level `specialistsStale` key — so a long-running operator
+    /// without network never loses the routing hints. Cache misses
+    /// remain silent (no specialists rendered), preserving the previous
+    /// degrade-gracefully contract.
     fileprivate static func surfaceSpecialistsInRows(_ rows: [Value]) async -> [Value] {
         // Build a name → ParsedSkill map for file-source skills.
         let fileSkills = await FilesystemSkillIndex.shared.allSkills()
         var byName: [String: ParsedSkill] = [:]
         for fs in fileSkills { byName[fs.name.lowercased()] = fs }
+
+        // v3.7·1: snapshot the Notion-source cache once per call. The
+        // reader is O(N) over cached parents (single JSON load each) so
+        // even with 100s of parents this is well under the per-handshake
+        // budget. The previous N×N cold-start path is gone.
+        let cachedParents = await SkillsCacheReader.shared.readAll()
+        var cacheByName: [String: CachedParent] = [:]
+        for cp in cachedParents { cacheByName[cp.parentTitle.lowercased()] = cp }
 
         var out: [Value] = []
         for row in rows {
@@ -2615,9 +2626,6 @@ public enum SkillsModule {
                 out.append(row)
                 continue
             }
-            // Only file-source rows carry specialists in this pass.
-            // (Notion source rows can still surface them on demand via
-            // fetch_skill path/intent dispatch.)
             let isFileSource: Bool = {
                 if case .string(let src)? = dict["source"], src == "file" { return true }
                 return false
@@ -2638,6 +2646,20 @@ public enum SkillsModule {
                         ])
                     }
                     dict["specialists"] = .array(arr)
+                }
+            } else if let cached = cacheByName[name.lowercased()], !cached.children.isEmpty {
+                // Notion-source row with a cache hit.
+                let arr: [Value] = cached.children.map { child in
+                    .object([
+                        "path": .string("\(name)/\(child.title)"),
+                        "title": .string(child.title),
+                        "summary": .string(child.summary),
+                        "pageId": .string(child.id)
+                    ])
+                }
+                dict["specialists"] = .array(arr)
+                if cached.stale {
+                    dict["specialistsStale"] = .bool(true)
                 }
             }
             out.append(.object(dict))
