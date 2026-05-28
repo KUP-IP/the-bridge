@@ -73,17 +73,27 @@ public struct AdvancedSection: View {
         self.screenOutputDir = screenOutputDir
     }
 
+    /// PKT-909 W3 — License card lives as a sibling card inside
+    /// Advanced. Self-hosted state via LicenseCardHost so the
+    /// AdvancedSection signature is unchanged.
+    @StateObject private var licenseHost = LicenseCardHost()
+
     public var body: some View {
         ScrollView {
             VStack(spacing: 14) {
                 header
                 aboutCard
+                licenseCard
                 networkCard
                 localEndpointsCard
                 systemPathsCard
                 maintenanceCard
             }
             .padding(18)
+        }
+        .task { await licenseHost.load() }
+        .onReceive(NotificationCenter.default.publisher(for: .licenseStateDidChange)) { _ in
+            Task { await licenseHost.load() }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
@@ -199,6 +209,21 @@ public struct AdvancedSection: View {
             Text(value).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
             Spacer()
         }
+    }
+
+    // MARK: - License (PKT-909 W3)
+
+    private var licenseCard: some View {
+        LicenseCard(
+            state: licenseHost.uiState,
+            pasteField: Binding(
+                get: { licenseHost.pasteField },
+                set: { licenseHost.pasteField = $0 }
+            ),
+            onActivate: { Task { await licenseHost.activate() } },
+            onDeactivate: { Task { await licenseHost.deactivate() } },
+            onBuy: { licenseHost.openBuyPage() }
+        )
     }
 
     // MARK: - Network

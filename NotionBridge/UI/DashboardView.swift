@@ -41,9 +41,18 @@ public struct DashboardView: View {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
     }
 
+    /// PKT-909 (Sell/Distribute v3 · 1) — license-status banner. Visible
+    /// only when the license has lapsed (trial-expired or
+    /// license-expired); silent for trial-active / licensed /
+    /// grandfathered states so the popover stays clean for paid users.
+    @State private var licenseStatus: LicenseStatus = .trial(daysRemaining: 30)
+
     public var body: some View {
         VStack(spacing: 0) {
             headerSection
+            if !licenseStatus.isActive {
+                licenseExpiredBanner
+            }
             divider
             statusRow
             divider
@@ -59,7 +68,40 @@ public struct DashboardView: View {
         .padding(.vertical, 6)
         .task {
             await permissionManager.checkAllAsync()
+            await refreshLicenseStatus()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .licenseStateDidChange)) { _ in
+            Task { await refreshLicenseStatus() }
+        }
+    }
+
+    private func refreshLicenseStatus() async {
+        self.licenseStatus = await LicenseManager.shared.currentStatus()
+    }
+
+    private var licenseExpiredBanner: some View {
+        Button {
+            onOpenSettings(.advanced)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                Text(licenseStatus.pillLabel)
+                    .font(.system(size: 11, weight: .semibold))
+                Spacer()
+                Text("Activate \u{2192}")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .opacity(0.85)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.red.opacity(0.18))
+            .foregroundStyle(Color.red.opacity(0.95))
+            .accessibilityLabel("Bridge license expired. Open Settings → Advanced → License to activate.")
+        }
+        .buttonStyle(.plain)
+        .help("Bridge tools are disabled until a license is activated.")
     }
 
     // MARK: - Header

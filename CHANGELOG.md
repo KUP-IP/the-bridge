@@ -1,5 +1,30 @@
 # Changelog
 
+## [unreleased] — Sell/Distribute v3 · 1 (PKT-909)
+
+### Added — Licensing foundation
+
+- **`LicenseManager`** actor at `NotionBridge/Core/Licensing/LicenseManager.swift` — single source of truth for the 30-day trial gate and paid-license activation. State persists to `~/Library/Application Support/The Bridge/license.json` via `BridgePaths`; atomic writes; offline-first.
+- **`LicenseToken`** at `NotionBridge/Core/Licensing/LicenseToken.swift` — Ed25519-signed JSON token format (`<base64url(payload)>.<base64url(sig)>`); verifier is pure + offline; signature tampering, payload tampering, wrong-key, malformed all fail closed.
+- **`LicenseState`** at `NotionBridge/Core/Licensing/LicenseState.swift` — on-disk schema (firstLaunchAt, optional token, grandfather flag, trial-expired-acknowledged); forwards-tolerant Codable.
+- **`LicenseRevocationClient`** at `NotionBridge/Core/Licensing/LicenseRevocationClient.swift` — best-effort online revocation check against the worker `/api/nb/verify` endpoint; injectable transport for tests; nil-on-network-error so a worker outage cannot lock users out (signature gate remains the security boundary).
+- **Grandfather SAFETY CONTRACT** — existing v3.4.x → v3.6.0 auto-update users (detected via PathMigration's `.bridge-migration-v3.5-complete` sentinel) land as `.grandfathered` and never see a trial countdown. The state is sticky across relaunches even if the sentinel is later removed.
+- **Settings → Advanced → License card** — status pill (Trial/Expired/Licensed/Grandfathered), paste field, Activate button with error states, Remove license, Buy a license deep-link. Self-hosted via `LicenseCardHost` so `AdvancedSection`'s signature is unchanged.
+- **Dashboard expired banner** — slim red banner above the status row when the trial or license has expired; clicking opens Settings → Advanced.
+
+### Changed — Dispatch gate
+
+- **`ToolRouter.dispatch`** now checks `LicenseManager.shared.currentStatus()` BEFORE the module-group gate and tier resolution. An elapsed trial or expired license causes the dispatch to throw the new `BridgeToolError.trialExpired(toolName:, kind:)` (kind: `"trial-expired"` or `"license-expired"`), audit-logged exactly like the `moduleGroupDisabled` path. The check is injectable (`ToolRouter(securityGate:auditLog:licenseStatusProvider:)`) for tests; production tracks the shared LicenseManager.
+- **`BridgeToolError`** gains `.trialExpired(toolName:, kind:)` carrying both the offending tool name and a machine-readable kind for connector routing.
+
+### Worker (kup.solutions/workers/nb-fulfillment)
+
+- **`POST /api/nb/verify`** — license revocation lookup. Request `{id, v:1}`, response `{status, expiresAt, checkedAt}`. KV-backed revocation table under `revoke:<id>`; absent ID returns `"active"` (worker is a hint, not the gate).
+
+### Tests
+
+- +57 tests across `LicenseTokenTests`, `LicenseManagerTests`, `LicenseUITests`, `LicenseRevocationTests`, `LicenseToolErrorTests`, `LicenseDispatchGateTests`. Test floor 1376 → 1433. Highlights: the SAFETY CONTRACT grandfather sentinel test pinning sticky-across-relaunch behavior; activate-with-wrong-key does not mutate state; loadOrInit idempotent (does not bump firstLaunchAt); trial day-math inclusive-boundary (30/1/0=expired).
+
 ## [3.6.0] — 2026-05-27 — Liquid Glass complete: rename, BridgePaths, Standing Orders, Command Bridge, ModuleGroup, Dashboard
 
 Project rename "NotionBridge → The Bridge" complete in user-visible surfaces. Bundle identifier (`kup.solutions.notion-bridge`), Keychain service name (`com.notionbridge`), and SPM binary/target names intentionally preserved to protect user data continuity. GitHub repository renamed `KUP-IP/Notion-bridge` → `KUP-IP/the-bridge`; Sparkle SUFeedURL and appcast download URLs updated in lockstep — existing v3.4.x installs will pick up this release via GitHub's automatic redirect from the old URL.

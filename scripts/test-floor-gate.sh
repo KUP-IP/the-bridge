@@ -492,7 +492,42 @@
 # 1232 -> 1302 per the order-inversion rule.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1376}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1433}"
+# PKT-909 (Sell/Distribute v3 · 1, 2026-05-27): +57 tests — License-key
+# system + 30-day trial gate + grandfather safety contract.
+#   • LicenseTokenTests (+15): Ed25519 sign/verify round-trip; payload
+#     tamper, signature tamper, wrong-key, malformed, invalid base64
+#     rejection; schema validation (version/kind/exp<iat); base64url
+#     no-padding round-trip; canonical-JSON determinism; LicenseState
+#     Codable round-trip + forwards-tolerant decode.
+#   • LicenseManagerTests (+19): pure trial day math (30/29d23h/0=expired
+#     inclusive boundary); grandfather/licensed/license-expired status
+#     derivation; status pill labels; isActive predicate matrix;
+#     loadOrInit fresh-install / SAFETY-CONTRACT grandfather-sentinel
+#     present / grandfather sticky-across-relaunch / fresh install
+#     no-sentinel; activate (paste-key) success + persistence;
+#     activate rejects wrong-key + does NOT mutate state;
+#     deactivate returns to trial; loadOrInit idempotent
+#     (does NOT bump firstLaunchAt); acknowledgeTrialExpired clears
+#     on activation; factoryReset removes license.json.
+#   • LicenseUITests (+9): LicenseUIState.from() mapping for every
+#     LicenseStatus variant; canPasteActivate preserved; lastError
+#     plumbed; Notification.Name.licenseStateDidChange under the
+#     com.notionbridge namespace.
+#   • LicenseRevocationTests (+8): worker /verify happy paths
+#     (active/revoked/refunded); 500 → nil; non-JSON → nil; transport
+#     nil → nil; client-side short-id reject; request body shape.
+#   • LicenseToolErrorTests (+3): BridgeToolError.trialExpired carries
+#     toolName + kind; errorDescription names tool; Equatable
+#     distinguishes kind.
+#   • LicenseDispatchGateTests (+5): ToolRouter end-to-end gate ON
+#     trial-active / .grandfathered / .licensed; throws
+#     BridgeToolError.trialExpired on .trialExpired (kind="trial-expired");
+#     throws BridgeToolError.trialExpired on .licenseExpired
+#     (kind="license-expired") — single error type, two distinct kinds.
+# Baseline 1376 + 57 = 1433. Verified release-build green with
+# `swift build -c release -Xswiftc -strict-concurrency=complete` (0
+# errors; only pre-existing warnings).
 # v3.6·6 hardening (2026-05-27): +6 CommandStore security tests
 #  (slug ASCII alphabet lock — homoglyph attack prevention, path-traversal
 #  character stripping, control-character stripping, empty/whitespace
