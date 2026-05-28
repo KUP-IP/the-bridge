@@ -258,6 +258,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // V1-QUALITY-C2: Show first-launch onboarding window
         onboardingController.showIfNeeded()
 
+        // v3.7·1: Kick off a non-blocking refresh of the on-disk
+        // skills cache. The routing index + Standing Orders composer
+        // both read this cache; refreshing on launch keeps it within
+        // the TTL window for the next handshake. Deferred 3 s so it
+        // never contends with MCP server startup or token validation.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            SkillsManager().kickoffBackgroundCacheRefresh()
+        }
+
         reopenSettingsIfRequested()
     }
 

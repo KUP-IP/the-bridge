@@ -10,6 +10,11 @@ public struct StandingOrdersSection: View {
     @State private var saveMessage: String? = nil
     @State private var saveIsError: Bool = false
     @State private var selectedTemplate: StandingOrdersStore.Template? = nil
+    /// v3.7·1: Routing skills loaded from the on-disk cache (populated by
+    /// `SkillsCacheWriter`). Empty until `.task` finishes; the composer
+    /// renders "None registered yet" until the cache is read. Refreshed
+    /// when the Notion-bound `routingSkillsForDiscovery` set changes.
+    @State private var cachedRouting: [RoutingSkillSummary] = []
 
     public init() {}
 
@@ -28,7 +33,10 @@ public struct StandingOrdersSection: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
-        .task { await load() }
+        .task {
+            await load()
+            await refreshCachedRouting()
+        }
     }
 
     // MARK: - Cards
@@ -237,13 +245,51 @@ public struct StandingOrdersSection: View {
         }
     }
 
-    /// Pull from the on-disk skills cache (populated by skills sync). For
-    /// the first cut this returns an empty array — the cache pipeline
-    /// itself is a follow-on; the composer + UI render correctly without it.
+    /// Snapshot of routing skills resolved at load time. Returns the
+    /// in-memory copy populated by `.task`; the composer is pure and
+    /// re-renders when this state updates. The cache pipeline itself
+    /// lives in `SkillsCacheReader/Writer`.
     private func cachedRoutingSkills() -> [RoutingSkillSummary] {
-        // TODO(PKT-9 follow-up): wire SkillsCacheReader once the sync
-        // pipeline lands. For now the empty array exercises the
-        // composer's "None registered yet" path.
-        []
+        cachedRouting
+    }
+
+    /// v3.7·1: Read every parent in the on-disk skills cache, map it to
+    /// the routing-summary shape the composer expects. The cache file
+    /// itself only carries the Notion-source parent identity + child
+    /// roll-up — triggers/anti-triggers/domain come from the
+    /// `SkillsManager` user-config so an operator's per-skill metadata
+    /// (which never leaves UserDefaults) is preserved. Cache misses
+    /// degrade to "no specialists" silently.
+    private func refreshCachedRouting() async {
+        // Snapshot SkillsManager on the main actor (it's @MainActor).
+        let manager = await MainActor.run { SkillsManager() }
+        let parents = await SkillsCacheReader.shared.readAll()
+        let parentByName: [String: CachedParent] = Dictionary(
+            uniqueKeysWithValues: parents.map { ($0.parentTitle.lowercased(), $0) }
+        )
+        let summaries: [RoutingSkillSummary] = await MainActor.run {
+            manager.routingSkillsForDiscovery.map { skill in
+                // The cache entry is keyed by parent title (matches the
+                // skill name); fall back to the skill metadata so a
+                // routing entry never disappears just because the cache
+                // hasn't been refreshed yet.
+                let cached = parentByName[skill.name.lowercased()]
+                let summary = skill.summary.isEmpty
+                    ? (cached?.parentTitle ?? skill.name)
+                    : skill.summary
+                return RoutingSkillSummary(
+                    slug: skill.name.lowercased().replacingOccurrences(of: " ", with: "-"),
+                    name: skill.name,
+                    domain: nil,
+                    maturity: nil,
+                    description: summary,
+                    triggers: skill.triggerPhrases,
+                    antiTriggers: skill.antiTriggerPhrases
+                )
+            }
+        }
+        await MainActor.run {
+            self.cachedRouting = summaries
+        }
     }
 }

@@ -433,6 +433,32 @@ public final class SkillsManager {
         load()
     }
 
+    /// v3.7·1: Kick off a non-blocking, background refresh of the on-disk
+    /// skills cache against the live Notion client. Safe to call multiple
+    /// times — the writer serializes per-parent and each call is
+    /// idempotent (same inputs → same bytes). Failures are logged and
+    /// swallowed; the cache is a hint, never a routing precondition.
+    ///
+    /// Tests do NOT call this (it would require a live Notion token).
+    /// Application startup wires it from the app delegate / first-launch
+    /// task; the Settings → Skills → "Refresh skill cache" button
+    /// triggers the same code path on demand.
+    public func kickoffBackgroundCacheRefresh() {
+        // Snapshot on the main actor (this method IS main-actor).
+        let source = SkillsCacheWriter.ParentSource.fromSkillsManager(self)
+        Task.detached(priority: .utility) {
+            guard let client = try? NotionClient() else {
+                NSLog("[SkillsManager] cache refresh skipped — no Notion token")
+                return
+            }
+            let enumerator = SkillsCacheWriter.ChildEnumerator.live(client: client)
+            _ = await SkillsCacheWriter.shared.refreshAll(
+                source: source,
+                enumerator: enumerator
+            )
+        }
+    }
+
     // MARK: - CRUD
 
     /// Add a new skill. Returns false if name is empty or not unique.
