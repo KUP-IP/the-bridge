@@ -5,9 +5,25 @@ import sys
 import urllib.request
 import urllib.error
 
-URL = os.environ.get("NOTION_BRIDGE_URL", "http://127.0.0.1:9700/mcp")
-BEARER = os.environ.get("NOTION_BRIDGE_BEARER", "")
-CLIENT_NAME = os.environ.get("NOTION_BRIDGE_CLIENT_NAME", "")
+# v3.6.0 rename: prefer THE_BRIDGE_* env vars (current); fall back to
+# NOTION_BRIDGE_* (legacy). Old Claude Desktop / Cursor configs that still
+# use NOTION_BRIDGE_* keep working; new configs that use THE_BRIDGE_*
+# (per README) work too. First non-empty wins.
+URL = (
+    os.environ.get("THE_BRIDGE_URL")
+    or os.environ.get("NOTION_BRIDGE_URL")
+    or "http://127.0.0.1:9700/mcp"
+)
+BEARER = (
+    os.environ.get("THE_BRIDGE_BEARER")
+    or os.environ.get("NOTION_BRIDGE_BEARER")
+    or ""
+)
+CLIENT_NAME = (
+    os.environ.get("THE_BRIDGE_CLIENT_NAME")
+    or os.environ.get("NOTION_BRIDGE_CLIENT_NAME")
+    or ""
+)
 SESSION_ID = None
 LAST_INITIALIZE = None
 
