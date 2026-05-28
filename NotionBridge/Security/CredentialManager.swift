@@ -163,8 +163,26 @@ public final class CredentialManager: Sendable {
     /// `com.notionbridge` infrastructure service).
     public static func isKeychainItemManagedByThisApp(_ item: [String: Any]) -> Bool {
         guard let expected = defaultKeychainAccessGroupForThisApp() else {
-            // Non-app context (tests): surface everything so unit tests can verify.
-            return true
+            // v3.7 hotfix: if we cannot resolve OUR keychain access group
+            // (e.g. AppIdentifierPrefix missing from Info.plist or the
+            // keychain-access-groups entitlement isn't declared), default
+            // DENY in every context. The previous behavior — `return true`
+            // — was meant to keep unit tests permissive, but it ALSO
+            // matched production installs of v3.6.x (which ship without
+            // AppIdentifierPrefix in Info.plist and without
+            // keychain-access-groups in NotionBridge.entitlements). The
+            // user observed every system keychain item leaking into
+            // Settings → Credentials because of this default-allow path.
+            //
+            // Tests that need to exercise the membership predicate use
+            // `matchesAccessGroup(item:expected:)` directly (a pure
+            // helper) — they don't hit this fallback.
+            //
+            // Bridge-saved credentials still surface via the fallback
+            // paths in `shouldSurfaceCredentialFromKeychainItem`
+            // (notionBridgeManaged metadata flag) and `list()` (explicit
+            // service == "com.notionbridge" path).
+            return false
         }
         return matchesAccessGroup(item: item, expected: expected)
     }
@@ -410,8 +428,24 @@ public final class CredentialManager: Sendable {
         // Filter to items with a valid CredentialType label.
         // Bridge: Also includes KeychainManager infrastructure items (com.notionbridge service)
         // as password-type entries with metadata-only visibility (no secrets exposed).
+        //
+        // v3.7 hotfix: `parseKeychainItem` falls back to `credType = .unknown`
+        // when `kSecAttrLabel` doesn't match a Bridge CredentialType. That
+        // matches every system keychain item (which has service + account
+        // but no Bridge-authored label). Combined with the predicate
+        // hotfix above, .unknown-type items now require the
+        // `notionBridgeManaged` metadata flag to surface — system items
+        // never have that flag, so they cannot leak through this path.
         return items.compactMap { item in
             if let entry = try? parseKeychainItem(item, includePassword: false) {
+                // Belt-and-suspenders: items parsed with .unknown type
+                // (label missing or not a Bridge type) must clear the
+                // explicit metadata-flag bar. The predicate also filters
+                // them via access-group matching when entitlements are
+                // declared; this is the second line of defense.
+                if entry.type == .unknown && entry.metadata.notionBridgeManaged != true {
+                    return nil
+                }
                 guard Self.shouldSurfaceCredentialFromKeychainItem(item, parsedEntry: entry) else {
                     return nil
                 }
