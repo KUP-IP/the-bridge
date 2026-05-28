@@ -33,10 +33,20 @@ public enum BridgeToolError: Error, LocalizedError, Equatable {
     /// display name (no SwiftUI type leakage into the error).
     case moduleGroupDisabled(toolName: String, groupDisplayName: String)
 
+    /// PKT-909 W5 — Sell/Distribute v3 · 1. The 30-day trial has elapsed
+    /// without a paid license activation, so the bridge fail-closes at
+    /// dispatch time. Carries the offending tool name + a machine-readable
+    /// "kind" the connector can route on ("trial-expired" today; could
+    /// fork to "license-expired" if a renewal flow ships later — both
+    /// land here in production today).
+    case trialExpired(toolName: String, kind: String)
+
     public var errorDescription: String? {
         switch self {
         case .moduleGroupDisabled(let toolName, let groupDisplayName):
             return "\(toolName) is unavailable — the \(groupDisplayName) tool group is disabled in Settings → Tools. Re-enable the group to dispatch this tool."
+        case .trialExpired(let toolName, _):
+            return "\(toolName) is unavailable — your Bridge trial has expired. Activate a license in Settings → Advanced → License to continue."
         }
     }
 }

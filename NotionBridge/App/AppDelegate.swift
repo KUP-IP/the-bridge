@@ -145,6 +145,20 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             print("[PathMigration] WARNING: migration failed: \(error)")
         }
 
+        // PKT-909 (Sell/Distribute v3 · 1): bootstrap the licensing gate.
+        // MUST come AFTER PathMigration — the grandfather detection looks
+        // at PathMigration's sentinel file. First-launch users seed
+        // firstLaunchAt = now here; existing 3.4.x → 3.6.0 auto-update
+        // users land as `.grandfathered` and never see a countdown.
+        Task {
+            do {
+                let status = try await LicenseManager.shared.loadOrInit()
+                print("[Licensing] bootstrap: \(status.pillLabel)")
+            } catch {
+                print("[Licensing] WARNING: loadOrInit failed: \(error)")
+            }
+        }
+
         CredentialsFeature.migrateIfNeeded()
 
         // PKT-441: One-time Stripe key migration to unified credential vault

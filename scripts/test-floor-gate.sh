@@ -492,26 +492,53 @@
 # 1232 -> 1302 per the order-inversion rule.
 set -euo pipefail
 
-# PKT-907 (Bridge v3.6 · 10, 2026-05-27): fetch_skill orchestrator —
-# slash-delimited path resolution + optional intent ranking + specialist
-# surfacing in `skills_routing_list`. +21 SkillPathResolverTests
-# covering:
+FLOOR="${BRIDGE_TEST_FLOOR:-1454}"
+# v3.6·6 wave-2 integration (2026-05-27): cumulative floor after
+# PKT-907 + PKT-909 integration merge.
+#
+# PKT-907 (Bridge v3.6 · 10): fetch_skill orchestrator — slash-delimited
+# path resolution + optional intent ranking + specialist surfacing in
+# `skills_routing_list`. +21 SkillPathResolverTests:
 #   - W1: SkillPath.parse (6 tests — bare name, parent/child, depth >1,
-#     empty / whitespace, leading-slash / trailing-slash tolerance,
-#     per-segment whitespace trim);
-#   - W2: SkillIntentScorer (8 tests — exact title 1.0, alias 0.85,
-#     partial title 0.7, keyword overlap 0.4–0.6, low-confidence nil
-#     fallback, empty-intent defensive empty list, alpha-tie-break, and
-#     pre-PKT-907 bare-parent passthrough);
-#   - W1/Q4: SkillSpecialistFileResolver (3 tests — primary
-#     `specialists/<child>.md` resolution, frontmatter `specialists:`
+#     empty/whitespace, leading/trailing-slash tolerance, segment trim);
+#   - W2: SkillIntentScorer (8 tests — exact 1.0, alias 0.85, partial 0.7,
+#     keyword overlap 0.4–0.6, low-confidence nil fallback, empty-intent
+#     defensive empty, alpha tie-break, bare-parent passthrough);
+#   - W1/Q4: SkillSpecialistFileResolver (3 tests — dir primary, frontmatter
 #     fallback, unknown-child nil);
-#   - W3: SpecialistSummaryExtractor + listAll (3 tests — first-sentence
-#     extraction, 160-char fallback, dir+frontmatter merge alpha-sorted
-#     and deduped);
-#   - 1 wire-stable annotation raw-values contract test.
-# Net-new pass count 1376 → 1397.
-FLOOR="${BRIDGE_TEST_FLOOR:-1397}"
+#   - W3: SpecialistSummaryExtractor + listAll (3 tests);
+#   - 1 wire-stable annotation contract.
+# Carve-out: Notion-source specialist eager enumeration deferred (per-parent
+# N×N cold-start regression); file-source surfacing shipped.
+#
+# PKT-909 (Sell/Distribute v3 · 1): License-key system + 30-day trial gate
+# + grandfather safety contract. +57 tests:
+#   • LicenseTokenTests (+15): Ed25519 sign/verify round-trip; payload/sig/
+#     wrong-key/malformed/invalid-base64 rejection; schema validation;
+#     base64url no-padding round-trip; canonical-JSON determinism;
+#     LicenseState Codable + forwards-tolerant decode.
+#   • LicenseManagerTests (+19): pure trial math (30/29d23h/0=expired);
+#     grandfather/licensed/license-expired derivation; pill labels;
+#     isActive matrix; SAFETY-CONTRACT loadOrInit grandfather-sentinel
+#     (present/sticky/fresh-install-no-sentinel); activate success +
+#     persistence; activate-wrong-key rejected + non-mutating; deactivate;
+#     loadOrInit idempotent; acknowledgeTrialExpired clears on activate;
+#     factoryReset removes license.json.
+#   • LicenseUITests (+9): LicenseUIState mapping for every LicenseStatus;
+#     canPasteActivate preserved; lastError plumbed; Notification.Name
+#     under com.notionbridge namespace.
+#   • LicenseRevocationTests (+8): worker /verify happy paths (active/
+#     revoked/refunded); 500/non-JSON/transport-nil → nil; client-side
+#     short-id reject; body shape.
+#   • LicenseToolErrorTests (+3): BridgeToolError.trialExpired carries
+#     toolName + kind; errorDescription; Equatable distinguishes kind.
+#   • LicenseDispatchGateTests (+5): ToolRouter end-to-end — trial-active/
+#     grandfathered/licensed pass; trial-expired → throws kind=trial-expired;
+#     license-expired → throws kind=license-expired.
+#
+# Baseline 1376 (v3.6·6 polish) + 21 (PKT-907) + 57 (PKT-909) = 1454.
+# Verified release-build green with `swift build -c release
+# -Xswiftc -strict-concurrency=complete` (0 errors).
 # v3.6·6 hardening (2026-05-27): +6 CommandStore security tests
 #  (slug ASCII alphabet lock — homoglyph attack prevention, path-traversal
 #  character stripping, control-character stripping, empty/whitespace

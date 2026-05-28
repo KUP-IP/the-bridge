@@ -535,6 +535,14 @@ await runModuleGroupExpandPersistenceTests()
 // v3.6·6: CommandStore security audit (slug sanitization defense-in-depth).
 await runCommandStoreSecurityTests()
 
+// PKT-909 (Sell/Distribute v3 · 1): License-key system + 30-day trial gate.
+await runLicenseTokenTests()
+await runLicenseManagerTests()
+await runLicenseToolErrorTests()
+await runLicenseUITests()
+await runLicenseRevocationTests()
+await runLicenseDispatchGateTests()
+
 // ============================================================
 // MARK: - Summary
 // ============================================================

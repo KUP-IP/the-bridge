@@ -82,12 +82,31 @@ public actor ToolRouter {
     private var registry: [String: ToolRegistration] = [:]
     private let securityGate: SecurityGate
     private let auditLog: AuditLog
+
+    /// PKT-909 (Sell/Distribute v3 · 1) — license-gate seam. Production
+    /// callers default to `LicenseManager.shared.currentStatus`; tests
+    /// can inject a fixed status to drive the trial-expired gate
+    /// without touching the shared singleton. Stored as an
+    /// `@Sendable` async-returning closure so the actor can call it
+    /// without crossing isolation boundaries.
+    public typealias LicenseStatusProvider = @Sendable () async -> LicenseStatus
+    private var licenseStatusProvider: LicenseStatusProvider
+
     public init(
         securityGate: SecurityGate,
-        auditLog: AuditLog
+        auditLog: AuditLog,
+        licenseStatusProvider: @escaping LicenseStatusProvider = { await LicenseManager.shared.currentStatus() }
     ) {
         self.securityGate = securityGate
         self.auditLog = auditLog
+        self.licenseStatusProvider = licenseStatusProvider
+    }
+
+    /// Replace the license-status provider (test-only). Production
+    /// dispatch never calls this; the default provider tracks the
+    /// shared LicenseManager.
+    public func setLicenseStatusProvider(_ p: @escaping LicenseStatusProvider) {
+        self.licenseStatusProvider = p
     }
 
     // MARK: Registration
@@ -127,6 +146,36 @@ public actor ToolRouter {
 
         guard let tool = registry[toolName] else {
             throw ToolRouterError.unknownTool(toolName)
+        }
+
+        // PKT-909 — Sell/Distribute v3 · 1: trial-expired gate. Checked
+        // BEFORE everything else (tier / module-gate / handler) so an
+        // elapsed trial cannot be bypassed by any tool-specific code
+        // path. The check is a sync snapshot read off the LicenseManager
+        // actor; status is recomputed every time the actor mutates so
+        // we never block dispatch on a slow disk roundtrip.
+        let licenseStatus = await licenseStatusProvider()
+        if !licenseStatus.isActive {
+            let kind: String
+            switch licenseStatus {
+            case .licenseExpired: kind = "license-expired"
+            default:              kind = "trial-expired"
+            }
+            // Audit-log the rejection so it surfaces in AI LOGS exactly
+            // like the moduleGroupDisabled path.
+            let duration = ContinuousClock.now - start
+            let ms = Double(duration.components.attoseconds) / 1_000_000_000_000_000.0
+                + Double(duration.components.seconds) * 1000.0
+            await auditLog.append(AuditEntry(
+                timestamp: Date(),
+                toolName: toolName,
+                tier: tool.tier,
+                inputSummary: stringifySummary(arguments),
+                outputSummary: "REJECTED: \(kind)",
+                durationMs: ms,
+                approvalStatus: .rejected
+            ))
+            throw BridgeToolError.trialExpired(toolName: toolName, kind: kind)
         }
 
         // PKT-877 — SAFETY CONTRACT: fail closed when the tool's entire

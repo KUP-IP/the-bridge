@@ -62,6 +62,8 @@ func runToolRouterFailClosedTests() async {
             case .moduleGroupDisabled(let toolName, let groupDisplayName):
                 try expect(toolName == "messages_send")
                 try expect(groupDisplayName == "messages")
+            case .trialExpired:
+                throw TestError.assertion("dispatch threw .trialExpired in the moduleGroupDisabled path")
             }
         } catch {
             throw TestError.assertion("dispatch threw the WRONG error type: \(type(of: error)) — \(error)")
