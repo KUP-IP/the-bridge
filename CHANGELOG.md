@@ -22,6 +22,16 @@
 
 > **Operator gate (PKT-933):** before merge, sign + notarize with the entitlement included (`codesign --display --entitlements` must list `keychain-access-groups`; `notarytool` must accept the entitled build) and run the manual migration verification — install a v3.6.x build with real credentials, update to this build, confirm every credential survives. Loss of even one credential is a release-blocker.
 
+## [unreleased] — Sparkle update deliverability (PKT-932)
+
+### Fixed — Sparkle "update failure" dialog (preventive)
+
+- **Root cause (triage):** the appcast advertised a version whose GitHub release DMG asset was missing — Sparkle saw a valid newer version, started the download, and failed. The artifact channel validates clean as of the 2026-05-27 v3.6.0 release cut (feed 200, enclosure 200, declared length 16,993,801 == served), so the originally-observed dialog predates the release and is resolved; this change prevents recurrence.
+- **`verify_sparkle_feed.sh` now verifies the enclosure, not just the feed.** It parses the appcast `<enclosure>` and asserts the DMG URL returns HTTP 200 **and** the served `Content-Length` equals the declared `length=`. A reachable feed alone never proved an update could complete — this closes that gap. Wired through `make verify-sparkle-feed` (run post-release).
+- **`docs/release/sparkle-troubleshooting.md`** — runbook: one-command check, failure-mode table (404 asset / length mismatch / signature / up-to-date / private-repo feed), and the operator end-to-end + grandfather-safety verification steps.
+
+> **Operator items (PKT-932):** the artifact channel is healthy; the remaining DoD is the manual end-to-end update test (install v3.6.0 → update → relaunch) and the grandfather-safety check (v3.4.x → current, no trial leak). Both need a running app and are release-blockers for v3.7·B.
+
 ## [unreleased] — Sell/Distribute v3 · 1 (PKT-909)
 
 ### Added — Licensing foundation
