@@ -1,5 +1,27 @@
 # Changelog
 
+## [unreleased] — Credentials leak hotfix + Keychain entitlement hardening (PKT-933)
+
+### Fixed — Credentials page leak (hotfix)
+
+- **Settings → Credentials no longer surfaces foreign Keychain items** (Apple system services, Chrome Safe Storage, Spark, etc.). Root cause was a default-allow path in `isKeychainItemManagedByThisApp` plus `.unknown`-type entries clearing the surface filter. Read-time post-filter landed in `e550401`; this release adds the architectural fix below.
+- **`StatusPulseDot` dashboard oscillation** — animation scoped to `.animation(value:)` instead of a `withAnimation` closure (`0871c51`).
+- **CI hang containment** — `timeout-minutes` + a perl-alarm watchdog so a stuck job surfaces in <30min instead of riding the 6h GitHub Actions default (`286525b`).
+
+### Added — Keychain access-group scoping (PKT-933)
+
+- **`keychain-access-groups` entitlement** (`NotionBridge.entitlements`) declaring `VP24Z9CS22.kup.solutions.notion-bridge` — the app's *implicit default* access group, so existing credentials already reside there and the entitlement landing is **non-destructive by construction**.
+- **`AppIdentifierPrefix`** wired into `Info.plist` so `defaultKeychainAccessGroupForThisApp()` resolves at runtime (the `e550401` post-filter previously fell through to its default-DENY branch).
+- **`CredentialManager` scopes every `SecItem*` query** (save / read / list / delete) to the access group — but only when a cached entitlement probe confirms the capability. Unsigned dev builds, the test executable, and pre-entitlement production installs detect `errSecMissingEntitlement` and fall back to the read-time post-filter, so **this change is safe to ship before the entitlement is signed in**. Once entitled, foreign items are filtered at the system level and never reach the post-filter.
+- **Non-destructive migration sentinel** (`migrateToAccessGroupIfNeeded`, wired at launch in `AppDelegate`) — idempotent continuity check that confirms our items are reachable in-group and logs a one-line receipt. It **never** deletes or re-creates an item (credential loss is a release-blocker). Defers (and re-runs) until the entitled build is installed.
+- The `e550401` read-time post-filter is intentionally **retained** as belt-and-suspenders; removal is gated on production verification per the packet DoD.
+
+### Tests
+
+- +5 `CredentialsScopeFilterTests` cases covering `applyingAccessGroup` (inject when entitled / no-op when nil, both preserving keys) and `needsAccessGroupMigration` (absent attr → false, in-group → false, foreign group → true). Test floor 1466 → 1471.
+
+> **Operator gate (PKT-933):** before merge, sign + notarize with the entitlement included (`codesign --display --entitlements` must list `keychain-access-groups`; `notarytool` must accept the entitled build) and run the manual migration verification — install a v3.6.x build with real credentials, update to this build, confirm every credential survives. Loss of even one credential is a release-blocker.
+
 ## [unreleased] — Sell/Distribute v3 · 1 (PKT-909)
 
 ### Added — Licensing foundation

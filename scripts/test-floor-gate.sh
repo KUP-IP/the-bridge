@@ -490,9 +490,12 @@
 # one carrier delta from the pre-existing suite re-counted under the
 # new harness order — measured 1302 passed, 0 failed. Floor raised
 # 1232 -> 1302 per the order-inversion rule.
+# PKT-933 (Keychain access-group scoping, credentials-leak root-cause fix):
+# +5 CredentialsScopeFilterTests (applyingAccessGroup + needsAccessGroupMigration
+# pure helpers). Measured 1471 passed, 0 failed. Floor raised 1466 -> 1471.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1466}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1471}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

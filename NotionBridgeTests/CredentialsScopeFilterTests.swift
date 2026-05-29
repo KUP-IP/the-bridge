@@ -71,4 +71,60 @@ func runCredentialsScopeFilterTests() async {
             CredentialManager.matchesAccessGroup(item: item, expected: expected) == false
         )
     }
+
+    // ── PKT-933: query scoping + migration helpers ─────────────────────────
+
+    await test("PKT-933: applyingAccessGroup injects kSecAttrAccessGroup when entitled") {
+        let base: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "svc",
+            kSecAttrAccount as String: "acct"
+        ]
+        let scoped = CredentialManager.applyingAccessGroup(base, group: expected)
+        try expect(scoped[kSecAttrAccessGroup as String] as? String == expected,
+                   "Access group must be set when a group is provided")
+        // Original keys preserved.
+        try expect(scoped[kSecAttrService as String] as? String == "svc")
+        try expect(scoped[kSecAttrAccount as String] as? String == "acct")
+    }
+
+    await test("PKT-933: applyingAccessGroup is a no-op when group is nil") {
+        // Pre-entitlement / unsigned / test contexts → nil group → unchanged
+        // query, so behavior falls back to the read-time post-filter.
+        let base: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "svc"
+        ]
+        let scoped = CredentialManager.applyingAccessGroup(base, group: nil)
+        try expect(scoped[kSecAttrAccessGroup as String] == nil,
+                   "No access group must be added when group is nil")
+        try expect(scoped.count == base.count)
+    }
+
+    await test("PKT-933: needsAccessGroupMigration false when attribute absent (implicit default group)") {
+        // Items written before the entitlement live in the implicit default
+        // group, which equals our declared group — nothing to move.
+        let item: [String: Any] = [
+            kSecAttrService as String: "com.notionbridge",
+            kSecAttrAccount as String: "stripe-secret"
+        ]
+        try expect(
+            CredentialManager.needsAccessGroupMigration(item: item, expected: expected) == false,
+            "Absent access-group attribute must not be flagged for migration"
+        )
+    }
+
+    await test("PKT-933: needsAccessGroupMigration false when already in our group") {
+        let item: [String: Any] = [kSecAttrAccessGroup as String: expected]
+        try expect(
+            CredentialManager.needsAccessGroupMigration(item: item, expected: expected) == false
+        )
+    }
+
+    await test("PKT-933: needsAccessGroupMigration true when in a different group") {
+        let item: [String: Any] = [kSecAttrAccessGroup as String: "OTHER123.com.example.app"]
+        try expect(
+            CredentialManager.needsAccessGroupMigration(item: item, expected: expected) == true
+        )
+    }
 }
