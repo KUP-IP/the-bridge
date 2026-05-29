@@ -123,10 +123,20 @@ public struct CredentialsSection: View {
                         .foregroundStyle(.red)
                 }
                 if stored.isEmpty && !isLoading {
-                    Text("No stored credentials. Add API keys, passwords, or cards from the Keychain CRUD pane below.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 6)
+                    // PKT-934 ·5: post-PKT-933 the list shows ONLY Bridge-saved
+                    // items — system + third-party Keychain entries are scoped
+                    // out. Explain why this looks emptier than Keychain Access so
+                    // users don't think their credentials vanished.
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("No stored credentials yet.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Only credentials saved through Bridge appear here — system and third-party Keychain items are intentionally hidden. Add API keys, passwords, or cards from the Keychain CRUD pane below.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.vertical, 6)
                 } else {
                     ForEach(Array(stored.enumerated()), id: \.offset) { idx, entry in
                         credentialRow(entry)

@@ -22,6 +22,14 @@
 
 > **Operator gate (PKT-933):** before merge, sign + notarize with the entitlement included (`codesign --display --entitlements` must list `keychain-access-groups`; `notarytool` must accept the entitled build) and run the manual migration verification — install a v3.6.x build with real credentials, update to this build, confirm every credential survives. Loss of even one credential is a release-blocker.
 
+## [unreleased] — v3.7·C polish (PKT-934, partial)
+
+### Changed — Credentials empty state (carve-out 5)
+
+- **Credentials empty state now explains the PKT-933 scoping.** Post-933 the list shows only Bridge-saved items, so it looks emptier than Keychain Access; the empty state now says system/third-party items are intentionally hidden, so users don't think credentials vanished.
+
+> **Scope note (PKT-934):** carve-out 5 (credentials) landed — it's behavioral copy tied to the leak fix, not throwaway. The remaining carve-outs are deferred: 1 (spacing-token alignment) and 2 (sidebar tint) are theme work the packet's own Scope OUT assigns to **Design System v1**; 3 (Skills row truncation) and 4 (Jobs cell polish) need the running app for the before/after screenshot DoD, which can't be produced headlessly. Recommend they ride with Design System v1 or a preview-capable session rather than blind edits to UI about to be redesigned.
+
 ## [unreleased] — Sparkle update deliverability (PKT-932)
 
 ### Fixed — Sparkle "update failure" dialog (preventive)
