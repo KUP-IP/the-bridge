@@ -493,6 +493,12 @@
 # PKT-933 (Keychain access-group scoping, credentials-leak root-cause fix):
 # +5 CredentialsScopeFilterTests (applyingAccessGroup + needsAccessGroupMigration
 # pure helpers). Measured 1471 passed, 0 failed. Floor raised 1466 -> 1471.
+# CI reliability (LegacySSEBridge E2E deadlock fix): the concurrent stress test
+# no longer drives EmbeddedChannel event-loop I/O (the direct sendEvent path)
+# across the cooperative pool, which starved/deadlocked constrained CI runners
+# → 20-min timeout. The bridge's lock-protected accounting (the regression
+# target) is still exercised under 200-way concurrency via the drop-path sends.
+# No net test count change. Measured 1471 passed, 0 failed. Floor stays 1471.
 set -euo pipefail
 
 FLOOR="${BRIDGE_TEST_FLOOR:-1471}"
@@ -609,29 +615,46 @@ trap 'rm -f "$LOG"' EXIT
 # kills it and the workflow step still surfaces the last test that
 # logged — so future hangs are diagnosable instead of opaque 6h cancels.
 # perl is always present on macOS; no brew install needed.
-set +e
-perl -e 'alarm 1500; exec @ARGV' "$BIN" | tee "$LOG"
-RC=${PIPESTATUS[0]}
-set -e
+#
+# Bounded retry on the harness teardown flake: the runner emits its summary
+# from a top-level-`await` tail that, on a fully-completed suite, intermittently
+# loses a race with process teardown and drops the final `Results:` line — the
+# binary still exits 0 and every test ran (the per-test ✅ lines are all
+# present). That is NOT a test failure, so re-run up to ATTEMPTS times until the
+# summary is captured. A real hang (watchdog) or a genuine non-zero exit fails
+# immediately with no retry, and the floor/failure checks below are unchanged.
+ATTEMPTS=3
+LINE=""
+for attempt in $(seq 1 "$ATTEMPTS"); do
+  set +e
+  perl -e 'alarm 1500; exec @ARGV' "$BIN" | tee "$LOG"
+  RC=${PIPESTATUS[0]}
+  set -e
 
-if [ "$RC" -eq 142 ] || [ "$RC" -eq 14 ]; then
-  echo "::error::test-floor-gate: test binary exceeded 1500s watchdog and was killed"
-  echo "--- last 60 lines of test output (so you can see which test hung) ---"
-  tail -60 "$LOG" || true
-  echo "--- end of test output tail ---"
-  exit 124
-fi
-if [ "$RC" -ne 0 ]; then
-  echo "::error::test-floor-gate: test binary exited with code $RC (non-zero, non-timeout)"
-  echo "--- last 60 lines of test output ---"
-  tail -60 "$LOG" || true
-  echo "--- end of test output tail ---"
-  exit "$RC"
-fi
+  if [ "$RC" -eq 142 ] || [ "$RC" -eq 14 ]; then
+    echo "::error::test-floor-gate: test binary exceeded 1500s watchdog and was killed"
+    echo "--- last 60 lines of test output (so you can see which test hung) ---"
+    tail -60 "$LOG" || true
+    echo "--- end of test output tail ---"
+    exit 124
+  fi
+  if [ "$RC" -ne 0 ]; then
+    echo "::error::test-floor-gate: test binary exited with code $RC (non-zero, non-timeout)"
+    echo "--- last 60 lines of test output ---"
+    tail -60 "$LOG" || true
+    echo "--- end of test output tail ---"
+    exit "$RC"
+  fi
 
-LINE="$(grep -E '^Results: [0-9]+ passed, [0-9]+ failed, [0-9]+ total' "$LOG" | tail -1 || true)"
+  LINE="$(grep -E '^Results: [0-9]+ passed, [0-9]+ failed, [0-9]+ total' "$LOG" | tail -1 || true)"
+  if [ -n "$LINE" ]; then
+    break
+  fi
+  echo "::warning::test-floor-gate: attempt ${attempt}/${ATTEMPTS} exited 0 but emitted no 'Results:' line (known harness teardown flake) — retrying"
+done
+
 if [ -z "$LINE" ]; then
-  echo "::error::test-floor-gate: could not find the 'Results:' summary line in test output"
+  echo "::error::test-floor-gate: no 'Results:' summary line after ${ATTEMPTS} attempts"
   exit 2
 fi
 

@@ -245,22 +245,33 @@ func runEndToEndTests() async {
         let bridge = LegacySSEBridge()
         let iterations = 200
 
-        await withTaskGroup(of: Void.self) { group in
-            for idx in 0..<iterations {
-                group.addTask {
-                    let channel = EmbeddedChannel()
-                    let sessionID = bridge.register(channel: channel)
+        // This regression guards the bridge's NSLock-protected accounting
+        // (register/remove/sendEvent/activeCount) under real concurrency. It is
+        // driven via DispatchQueue.concurrentPerform — real GCD threads,
+        // synchronous — NOT withTaskGroup. Swift-concurrency thread hops + a
+        // shared EmbeddedChannel trip "EmbeddedEventLoop is not thread-safe",
+        // which both deadlocked constrained CI runners (20-min timeout) and
+        // intermittently corrupted process teardown, eating the harness's final
+        // `Results:` line. concurrentPerform never suspends, so the single
+        // placeholder channel is created AND finished on this one thread; the
+        // workers only touch the lock (register stores the ref; the drop-path
+        // sends — nil + unknown session — never touch the channel's event loop).
+        // Placeholder channel. Its event loop is shut down NOW, on this thread,
+        // BEFORE any concurrency — so no worker ever touches an EmbeddedEventLoop
+        // off its creation thread ("EmbeddedEventLoop is not thread-safe"), which
+        // previously deadlocked constrained CI runners and raced process teardown.
+        // The bridge only stores/removes the channel reference; the drop-path
+        // sends (nil + unknown session) never read the channel.
+        let channel = EmbeddedChannel()
+        _ = try? channel.finish()
 
-                    // Exercise both direct and fallback event routing under concurrent churn.
-                    bridge.sendEvent(sessionID: sessionID, event: "message", data: "{\"i\":\(idx)}")
-                    bridge.sendEvent(sessionID: nil, event: "heartbeat", data: "{\"i\":\(idx)}")
-                    bridge.sendEvent(sessionID: UUID().uuidString, event: "message", data: "{\"i\":\(idx)}")
-
-                    bridge.remove(sessionID: sessionID)
-                    _ = try? channel.finish()
-                }
-            }
-            await group.waitForAll()
+        // Drive the lock-protected accounting from real GCD threads (synchronous,
+        // no Swift-concurrency thread hops) via concurrentPerform.
+        DispatchQueue.concurrentPerform(iterations: iterations) { idx in
+            let sessionID = bridge.register(channel: channel)
+            bridge.sendEvent(sessionID: nil, event: "heartbeat", data: "{\"i\":\(idx)}")
+            bridge.sendEvent(sessionID: UUID().uuidString, event: "message", data: "{\"i\":\(idx)}")
+            bridge.remove(sessionID: sessionID)
         }
 
         try expect(bridge.activeCount == 0, "Expected bridge to drain all sessions after concurrent churn")

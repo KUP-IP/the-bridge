@@ -552,14 +552,25 @@ await runSkillsCacheTests()
 // MARK: - Summary
 // ============================================================
 
-print("\n" + String(repeating: "=", count: 50))
-print("Results: \(passed) passed, \(failed) failed, \(passed + failed) total")
-print(String(repeating: "=", count: 50))
-
-if failed > 0 {
-    print("\u{274C} TESTS FAILED")
-    exit(1)
-} else {
-    print("\u{2705} ALL TESTS PASSED")
-    exit(0)
+// The summary + exit run INSIDE this awaited async function on purpose. With
+// top-level `await`, the synchronous continuation AFTER the final suspension
+// point races process teardown and was intermittently skipped entirely (the
+// `Results:` line vanished ~half the time once the suite stopped hanging; even
+// a stderr syscall placed there did not run). Code inside an awaited function
+// runs reliably — every test body proves it — so emitting the summary and
+// calling `exit()` from here, not from a post-await continuation, is
+// deterministic. fflush guards the buffered tail before exit.
+func emitSummary() async {
+    print("\n" + String(repeating: "=", count: 50))
+    print("Results: \(passed) passed, \(failed) failed, \(passed + failed) total")
+    print(String(repeating: "=", count: 50))
+    if failed > 0 {
+        print("\u{274C} TESTS FAILED")
+    } else {
+        print("\u{2705} ALL TESTS PASSED")
+    }
+    fflush(stdout)
+    exit(failed > 0 ? 1 : 0)
 }
+
+await emitSummary()
