@@ -12,15 +12,18 @@
     <true/>
     <key>com.apple.security.personal-information.addressbook</key>
     <true/>
-    <!-- PKT-933: scope Keychain to this app's partition so SecItem* queries
-         never surface foreign (system / third-party) items. This is the app's
-         IMPLICIT default access group (Team ID VP24Z9CS22 + bundle ID), so
-         existing credentials already live here — declaring it is non-destructive.
-         codesign does not expand $(AppIdentifierPrefix); the literal Team ID is
-         used here, mirroring SIGNING_ID in the Makefile. -->
-    <key>keychain-access-groups</key>
-    <array>
-        <string>VP24Z9CS22.kup.solutions.notion-bridge</string>
-    </array>
+    <!-- PKT-933 / hotfix 2026-05-30: keychain-access-groups was REMOVED.
+         A Developer-ID app distributed outside the App Store (no embedded
+         provisioning profile) that declares keychain-access-groups is refused
+         by launchd/RunningBoard at spawn time ("Launchd job spawn failed",
+         POSIX 163) even though codesign, notarization, and Gatekeeper all pass
+         — the app would not launch. The credentials leak is fully closed
+         WITHOUT this entitlement by the e550401 read-time post-filter, which
+         now resolves the access group correctly via AppIdentifierPrefix in
+         Info.plist (verified live: foreign items filtered, Bridge items intact).
+         The system-level scoping code in CredentialManager stays in place but is
+         dormant (its entitlement probe returns nil → falls back to the filter);
+         re-enabling it requires shipping a provisioning profile that authorizes
+         the access group. -->
 </dict>
 </plist>
