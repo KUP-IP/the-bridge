@@ -12,5 +12,15 @@
     <true/>
     <key>com.apple.security.personal-information.addressbook</key>
     <true/>
+    <!-- PKT-933: scope Keychain to this app's partition so SecItem* queries
+         never surface foreign (system / third-party) items. This is the app's
+         IMPLICIT default access group (Team ID VP24Z9CS22 + bundle ID), so
+         existing credentials already live here — declaring it is non-destructive.
+         codesign does not expand $(AppIdentifierPrefix); the literal Team ID is
+         used here, mirroring SIGNING_ID in the Makefile. -->
+    <key>keychain-access-groups</key>
+    <array>
+        <string>VP24Z9CS22.kup.solutions.notion-bridge</string>
+    </array>
 </dict>
 </plist>
