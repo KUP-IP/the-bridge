@@ -573,6 +573,11 @@ await runLicenseDispatchGateTests()
 // routing-skills backing (v3.6·5 TODO closure).
 await runSkillsCacheTests()
 
+// WS-C + WS-E (Mac-side cloud access): BridgeCloudManager state machine +
+// NL-3 auth-passdown (capability validation + mandatory passkey gate +
+// no-raw-credential invariant) + Remote Access settings section/sidebar.
+await runBridgeCloudManagerTests()
+
 // ============================================================
 // MARK: - Summary
 // ============================================================

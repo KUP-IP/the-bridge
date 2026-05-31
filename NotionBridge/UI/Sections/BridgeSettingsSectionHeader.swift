@@ -171,6 +171,13 @@ public enum BridgeSettingsHeaderPreset {
                 systemImage: BridgeSectionIcon.systemImage(for: .tools),
                 tint: NotionPalette.brown
             )
+        case .remoteAccess:
+            return Spec(
+                title: "Remote Access",
+                subtitle: "Reach this Mac from the cloud — capability-scoped, passkey-gated.",
+                systemImage: BridgeSectionIcon.systemImage(for: .remoteAccess),
+                tint: NotionPalette.blue
+            )
         }
     }
 

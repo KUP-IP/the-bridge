@@ -499,9 +499,23 @@
 # → 20-min timeout. The bridge's lock-protected accounting (the regression
 # target) is still exercised under 200-way concurrency via the drop-path sends.
 # No net test count change. Measured 1471 passed, 0 failed. Floor stays 1471.
+# WS-C + WS-E (Mac-side cloud access, 2026-05-30): BridgeCloudManager
+# (cloudflared tunnel lifecycle behind an injectable TunnelProcess + the
+# CloudConnectionState machine) and the NL-3 auth-passdown seam — a
+# delegated-capability validator (short-lived/scoped/owner-bound/
+# device-bound; rejects expired/out-of-scope/wrong-owner/wrong-device/
+# over-TTL/revoked) plus the mandatory local passkey gate (injectable
+# PasskeyGate) enforced BEFORE any Keychain/client-cred access, with the
+# capability + cloud-facing request modeled credential-free by
+# construction (asserted via Mirror). WS-E added the SwiftUI Remote Access
+# settings section + the .remoteAccess sidebar enum case (sidebar grew
+# 9 -> 10; two WSHMenuBar count/order assertions updated in-place to the
+# new contract — count-neutral). New BridgeCloudManagerTests = 22 harness
+# blocks. Measured 1493 passed, 0 failed. Floor raised 1471 -> 1493 per
+# the order-inversion rule.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1471}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1493}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

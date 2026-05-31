@@ -102,6 +102,7 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
     case standingOrders = "Standing Orders"
     case commands       = "Commands"
     case connections    = "Connections"
+    case remoteAccess   = "Remote Access"
     case skills         = "Skills"
     case permissions    = "Permissions"
     case credentials    = "Credentials"
@@ -116,6 +117,7 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
         case .standingOrders: return "scroll"
         case .commands:       return "command"
         case .connections:    return "network"
+        case .remoteAccess:   return "cloud"
         case .skills:         return "sparkles"
         case .permissions:    return "lock.shield"
         case .credentials:    return "key.fill"
@@ -214,6 +216,7 @@ public struct SettingsView: View {
         case .standingOrders: StandingOrdersSection()
         case .commands: CommandsSection()
         case .connections: connectionsSection
+        case .remoteAccess: RemoteAccessSection()
         case .skills: SkillsSection()
         case .permissions: permissionsSection
         case .credentials: credentialsSection
