@@ -34,9 +34,16 @@ func runSnippetsModuleTests() async {
         try expect(regs.count == 9, "expected 9, got \(regs.count)")
     }
 
-    await test("All snippets_* tools are tier .request") {
+    await test("snippets tier split: read-only tools .open, mutating tools .request (FB-5)") {
         let regs = await router.registrations(forModule: "snippets")
-        for r in regs { try expect(r.tier == .request, "\(r.name) tier=\(r.tier.rawValue)") }
+        let readOnly: Set<String> = ["snippets_list", "snippets_get", "snippets_search"]
+        for r in regs {
+            if readOnly.contains(r.name) {
+                try expect(r.tier == .open, "\(r.name) must be .open, got \(r.tier.rawValue)")
+            } else {
+                try expect(r.tier == .request, "\(r.name) must be .request, got \(r.tier.rawValue)")
+            }
+        }
     }
 
     await test("snippets_delete carries neverAutoApprove (destructive consent)") {

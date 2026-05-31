@@ -44,11 +44,16 @@ private func runLspModuleProbeOnlyTests() async {
         }
     }
 
-    await test("All lsp_* tools are tier .request") {
+    await test("lsp_* tier policy: read-only session list .open, rest .request (FB-5)") {
         let all = await router.registrations(forModule: "dev")
         for t in all where t.name.hasPrefix("lsp_") {
-            try expect(t.tier == .request,
-                       "\(t.name) tier should be .request, got \(t.tier.rawValue)")
+            if t.name == "lsp_session_list" {
+                try expect(t.tier == .open,
+                           "\(t.name) tier should be .open, got \(t.tier.rawValue)")
+            } else {
+                try expect(t.tier == .request,
+                           "\(t.name) tier should be .request, got \(t.tier.rawValue)")
+            }
         }
     }
 }
