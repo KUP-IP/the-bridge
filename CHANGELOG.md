@@ -1,5 +1,28 @@
 # Changelog
 
+## [3.6.1] — 2026-05-31 — Cloud-access foundation + test-suite hermeticity
+
+### Added — Mac-side cloud access (WS-C / WS-E)
+- **`BridgeCloudManager`** Swift actor: cloudflared tunnel lifecycle + `CloudConnectionState` machine (disabled/connecting/online/degraded/offline), tunnel control behind an injectable `TunnelProcess` seam.
+- **NL-3 auth-passdown**: `DelegatedCapability` (short-lived, scoped, owner+device-bound; no credential field by construction) + `DelegatedCapabilityValidator` (fail-closed, 120s local TTL ceiling) + `CloudPasskeyGate` — capability validated, then a mandatory passkey gate, before any local Keychain/client-cred access. Raw client credentials never reach the cloud path (Mirror-asserted).
+- **Remote Access settings section** + sidebar entry (static layout; live `BridgeCloudManager` wiring is a later slice).
+
+### Added — MCP tool feedback fixes (FB-2 / FB-3 / FB-6)
+- **`system_info`** now returns `homeDirectory` / `userName` / `currentDirectory` (ends repeated `/Users/<wrong-user>` path-guessing by agents).
+- **`notion_comment_create`** auto-chunks text past Notion's 2000-char per-run limit instead of hard-failing.
+- **`notion_block_delete`** accepts a `blockIds` array for bulk delete with per-id status (single-`blockId` back-compat preserved).
+
+### Changed — security tiers (FB-5)
+- Read-only list/get/read/search tools demoted to tier `.open` (no confirmation prompt); a tier-audit test locks the contract with an explicit allowlist for deliberate exceptions (`credential_*`, GitModule's uniform policy).
+
+### Fixed — test-suite reliability
+- **Hermetic ConfigManager tests**: `BRIDGE_CONFIG_PATH` env override (operator-usable; main.swift seeds a temp config) so tests never read or mutate the user's real `~/.config/.../config.json`. Root cause of the wandering pass-counts. Proven: real config md5 unchanged across a full run.
+- **Mislabeled test fixed**: `datasource_update succeeds with API key` was in the no-key branch (could only fail); moved into the `hasAPIKey` branch and renamed `datasource_get`.
+- **Floor-gate hardened**: control-char-tolerant `Results:` parse + `atexit` summary emitter + line-buffered stdout, so an all-green run can't false-fail on output mangling or a teardown race. Floor 1466 → 1501 (verified green, 0 failed).
+
+### Known issues
+- Intermittent test-binary hang under heavy concurrent machine load (multiple test runners). Mitigated by running the gate solo; a per-test harness watchdog is a tracked follow-up.
+
 ## [unreleased] — Credentials leak hotfix + Keychain entitlement hardening (PKT-933)
 
 ### Fixed — Credentials page leak (hotfix)
