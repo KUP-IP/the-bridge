@@ -161,6 +161,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         CredentialsFeature.migrateIfNeeded()
 
+        // PKT-933: One-time keychain access-group continuity check (no-op until
+        // the entitled build is installed; never destructive).
+        Task { CredentialManager.shared.migrateToAccessGroupIfNeeded() }
+
         // PKT-441: One-time Stripe key migration to unified credential vault
         Task { await ConnectionRegistry.shared.migrateStripeKeyIfNeeded() }
 

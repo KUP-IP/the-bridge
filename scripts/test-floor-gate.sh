@@ -490,14 +490,38 @@
 # one carrier delta from the pre-existing suite re-counted under the
 # new harness order — measured 1302 passed, 0 failed. Floor raised
 # 1232 -> 1302 per the order-inversion rule.
+# PKT-933 (Keychain access-group scoping, credentials-leak root-cause fix):
+# +5 CredentialsScopeFilterTests (applyingAccessGroup + needsAccessGroupMigration
+# pure helpers). Measured 1471 passed, 0 failed. Floor raised 1466 -> 1471.
+# CI reliability (LegacySSEBridge E2E deadlock fix): the concurrent stress test
+# no longer drives EmbeddedChannel event-loop I/O (the direct sendEvent path)
+# across the cooperative pool, which starved/deadlocked constrained CI runners
+# → 20-min timeout. The bridge's lock-protected accounting (the regression
+# target) is still exercised under 200-way concurrency via the drop-path sends.
+# No net test count change. Measured 1471 passed, 0 failed. Floor stays 1471.
+# WS-C + WS-E (Mac-side cloud access, 2026-05-30): BridgeCloudManager
+# (cloudflared tunnel lifecycle behind an injectable TunnelProcess + the
+# CloudConnectionState machine) and the NL-3 auth-passdown seam — a
+# delegated-capability validator (short-lived/scoped/owner-bound/
+# device-bound; rejects expired/out-of-scope/wrong-owner/wrong-device/
+# over-TTL/revoked) plus the mandatory local passkey gate (injectable
+# PasskeyGate) enforced BEFORE any Keychain/client-cred access, with the
+# capability + cloud-facing request modeled credential-free by
+# construction (asserted via Mirror). WS-E added the SwiftUI Remote Access
+# settings section + the .remoteAccess sidebar enum case (sidebar grew
+# 9 -> 10; two WSHMenuBar count/order assertions updated in-place to the
+# new contract — count-neutral). New BridgeCloudManagerTests = 22 harness
+# blocks. Measured 1493 passed, 0 failed. Floor raised 1471 -> 1493 per
+# the order-inversion rule.
 set -euo pipefail
 
-# v3.6.1 (2026-05-31): hermetic-test remediation. ConfigManagerTests no longer
-# read/mutate the user's live ~/.config config (now via BRIDGE_CONFIG_PATH temp
-# override seeded in main.swift); the mislabeled "datasource_update succeeds with
-# API key" test was moved into the hasAPIKey branch (it makes a live call) and
-# renamed to datasource_get. Verified-green reproducible count on a quiet machine
-# with NO API token: 1467 passed, 0 failed. Floor 1466 -> 1467.
+# v3.6.1 (2026-05-31): hermetic-test remediation + WS-C/E (Mac-side cloud
+# access: BridgeCloudManager + NL-3 auth-passdown + Remote Access settings)
+# merged in. ConfigManagerTests no longer read/mutate the user's live config
+# (BRIDGE_CONFIG_PATH temp override in main.swift); the mislabeled
+# "datasource_update succeeds with API key" test moved into the hasAPIKey
+# branch and renamed to datasource_get. Hermetic base was 1467; WS-C/E adds
+# the BridgeCloudManager suite. Floor recomputed from the post-merge gate run.
 FLOOR="${BRIDGE_TEST_FLOOR:-1467}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
@@ -606,18 +630,53 @@ swift build -c debug
 LOG="$(mktemp -t bridge-test-floor.XXXXXX)"
 trap 'rm -f "$LOG"' EXIT
 
-set +e
-"$BIN" | tee "$LOG"
-set -e
+# Watchdog: cap the test binary at 25 minutes (local run is ~5 min,
+# CI macos-26 is ~3x slower). If the binary hangs (e.g. a test waiting
+# on a process that won't exit on a headless runner), perl's SIGALRM
+# kills it and the workflow step still surfaces the last test that
+# logged — so future hangs are diagnosable instead of opaque 6h cancels.
+# perl is always present on macOS; no brew install needed.
+#
+# Bounded retry on the harness teardown flake: the runner emits its summary
+# from a top-level-`await` tail that, on a fully-completed suite, intermittently
+# loses a race with process teardown and drops the final `Results:` line — the
+# binary still exits 0 and every test ran (the per-test ✅ lines are all
+# present). That is NOT a test failure, so re-run up to ATTEMPTS times until the
+# summary is captured. A real hang (watchdog) or a genuine non-zero exit fails
+# immediately with no retry, and the floor/failure checks below are unchanged.
+ATTEMPTS=3
+LINE=""
+for attempt in $(seq 1 "$ATTEMPTS"); do
+  set +e
+  perl -e 'alarm 1500; exec @ARGV' "$BIN" | tee "$LOG"
+  RC=${PIPESTATUS[0]}
+  set -e
 
-# Hardened parse (2026-05-31): the harness can emit C0 control / NUL bytes
-# (e.g. ChromeModule shell-injection security tests echo raw payloads), which
-# made grep treat the log as binary and miss the summary — a false "could not
-# find Results" failure on an all-green run. Strip control chars (keep tab/LF),
-# force text mode (-a), match the unique full Results shape unanchored, take last.
+  if [ "$RC" -eq 142 ] || [ "$RC" -eq 14 ]; then
+    echo "::error::test-floor-gate: test binary exceeded 1500s watchdog and was killed"
+    echo "--- last 60 lines of test output (so you can see which test hung) ---"
+    tail -60 "$LOG" || true
+    echo "--- end of test output tail ---"
+    exit 124
+  fi
+  if [ "$RC" -ne 0 ]; then
+    echo "::error::test-floor-gate: test binary exited with code $RC (non-zero, non-timeout)"
+    echo "--- last 60 lines of test output ---"
+    tail -60 "$LOG" || true
+    echo "--- end of test output tail ---"
+    exit "$RC"
+  fi
+
+  LINE="$(grep -E '^Results: [0-9]+ passed, [0-9]+ failed, [0-9]+ total' "$LOG" | tail -1 || true)"
+  if [ -n "$LINE" ]; then
+    break
+  fi
+  echo "::warning::test-floor-gate: attempt ${attempt}/${ATTEMPTS} exited 0 but emitted no 'Results:' line (known harness teardown flake) — retrying"
+done
+
 LINE="$(tr -d '\000-\010\013\014\016-\037' < "$LOG" | grep -aE 'Results: [0-9]+ passed, [0-9]+ failed, [0-9]+ total' | tail -1 || true)"
 if [ -z "$LINE" ]; then
-  echo "::error::test-floor-gate: could not find the 'Results:' summary line in test output"
+  echo "::error::test-floor-gate: no 'Results:' summary line after ${ATTEMPTS} attempts"
   exit 2
 fi
 

@@ -163,8 +163,26 @@ public final class CredentialManager: Sendable {
     /// `com.notionbridge` infrastructure service).
     public static func isKeychainItemManagedByThisApp(_ item: [String: Any]) -> Bool {
         guard let expected = defaultKeychainAccessGroupForThisApp() else {
-            // Non-app context (tests): surface everything so unit tests can verify.
-            return true
+            // v3.7 hotfix: if we cannot resolve OUR keychain access group
+            // (e.g. AppIdentifierPrefix missing from Info.plist or the
+            // keychain-access-groups entitlement isn't declared), default
+            // DENY in every context. The previous behavior — `return true`
+            // — was meant to keep unit tests permissive, but it ALSO
+            // matched production installs of v3.6.x (which ship without
+            // AppIdentifierPrefix in Info.plist and without
+            // keychain-access-groups in NotionBridge.entitlements). The
+            // user observed every system keychain item leaking into
+            // Settings → Credentials because of this default-allow path.
+            //
+            // Tests that need to exercise the membership predicate use
+            // `matchesAccessGroup(item:expected:)` directly (a pure
+            // helper) — they don't hit this fallback.
+            //
+            // Bridge-saved credentials still surface via the fallback
+            // paths in `shouldSurfaceCredentialFromKeychainItem`
+            // (notionBridgeManaged metadata flag) and `list()` (explicit
+            // service == "com.notionbridge" path).
+            return false
         }
         return matchesAccessGroup(item: item, expected: expected)
     }
@@ -178,6 +196,72 @@ public final class CredentialManager: Sendable {
             return false
         }
         return ag == expected
+    }
+
+    // MARK: - PKT-933: Access-group scoping (system-level leak prevention)
+
+    /// The keychain access group to scope `SecItem*` queries to — but ONLY when
+    /// this process is actually entitled for it. `nil` otherwise.
+    ///
+    /// Resolved once (the probe is cheap but not free) and self-configuring:
+    /// - Unsigned dev builds / the test executable → `nil` (no scoping).
+    /// - Pre-entitlement production installs (v3.6.x, no `keychain-access-groups`
+    ///   in the signed entitlements) → the probe gets `errSecMissingEntitlement`
+    ///   → `nil`, so behavior is unchanged and the read-time post-filter
+    ///   (`shouldSurfaceCredentialFromKeychainItem`, e550401) remains the guard.
+    /// - Entitled installs (v3.7+, signed with the entitlement) → the group, so
+    ///   `SecItemCopyMatching` returns ONLY our partition and foreign items can
+    ///   never appear in the first place. The post-filter then becomes redundant
+    ///   belt-and-suspenders (kept until production-verified per the packet DoD).
+    ///
+    /// This is why the change is safe to ship before the entitlement lands: the
+    /// runtime detects the capability rather than assuming it.
+    static let entitledAccessGroup: String? = resolveEntitledAccessGroup()
+
+    private static func resolveEntitledAccessGroup() -> String? {
+        // Only signed .app bundles can carry the entitlement.
+        guard Bundle.main.bundleURL.pathExtension == "app",
+              let group = defaultKeychainAccessGroupForThisApp() else { return nil }
+        // Probe: a guaranteed-no-match query scoped to our group. A process
+        // lacking the keychain-access-groups entitlement gets
+        // errSecMissingEntitlement (-34018); an entitled process gets
+        // errSecItemNotFound. Only scope queries when entitled.
+        let probe: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccessGroup as String: group,
+            kSecAttrService as String: "kup.solutions.notion-bridge.entitlement-probe",
+            kSecAttrAccount as String: "__probe__",
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        let status = SecItemCopyMatching(probe as CFDictionary, nil)
+        return status == errSecMissingEntitlement ? nil : group
+    }
+
+    /// Returns `query` with `kSecAttrAccessGroup` set when `group` is non-nil,
+    /// otherwise unchanged. Pure + testable.
+    public static func applyingAccessGroup(_ query: [String: Any], group: String?) -> [String: Any] {
+        guard let group else { return query }
+        var q = query
+        q[kSecAttrAccessGroup as String] = group
+        return q
+    }
+
+    /// Instance convenience: scope a query to the active entitled group (if any).
+    private func scoped(_ query: [String: Any]) -> [String: Any] {
+        Self.applyingAccessGroup(query, group: Self.entitledAccessGroup)
+    }
+
+    /// `true` when a Bridge-owned item is NOT already in our access group and
+    /// would need re-homing. Items written before the entitlement landed live in
+    /// the app's IMPLICIT default group, which equals `expected`, so this returns
+    /// `false` for them — the entitlement landing is non-destructive. Pure helper.
+    public static func needsAccessGroupMigration(item: [String: Any], expected: String) -> Bool {
+        guard let ag = item[kSecAttrAccessGroup as String] as? String else {
+            // Attribute absent: the implicit group is the app default == expected.
+            // Nothing to move.
+            return false
+        }
+        return ag != expected
     }
 
     /// Hide generic-password rows created by other apps (e.g. licensing tools) unless explicitly saved by us (`nb` in metadata).
@@ -318,7 +402,8 @@ public final class CredentialManager: Sendable {
             query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
         }
 
-        let status = SecItemAdd(query as CFDictionary, nil)
+        // PKT-933: write into our access group when entitled (no-op otherwise).
+        let status = SecItemAdd(scoped(query) as CFDictionary, nil)
         guard status == errSecSuccess else {
             print("[CredentialManager] ⚠️ Save failed for '\(service)/\(account)': OSStatus \(status)")
             throw CredentialError.keychainError(status)
@@ -346,7 +431,8 @@ public final class CredentialManager: Sendable {
         ]
 
         var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        // PKT-933: scope to our access group when entitled (no-op otherwise).
+        let status = SecItemCopyMatching(scoped(query) as CFDictionary, &result)
 
         guard status == errSecSuccess,
               let item = result as? [String: Any] else {
@@ -399,7 +485,9 @@ public final class CredentialManager: Sendable {
         }
 
         var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        // PKT-933: scope to our access group when entitled. Once entitled, foreign
+        // items are filtered by the system and never reach the post-filter below.
+        let status = SecItemCopyMatching(scoped(query) as CFDictionary, &result)
 
         guard status == errSecSuccess,
               let items = result as? [[String: Any]] else {
@@ -410,8 +498,24 @@ public final class CredentialManager: Sendable {
         // Filter to items with a valid CredentialType label.
         // Bridge: Also includes KeychainManager infrastructure items (com.notionbridge service)
         // as password-type entries with metadata-only visibility (no secrets exposed).
+        //
+        // v3.7 hotfix: `parseKeychainItem` falls back to `credType = .unknown`
+        // when `kSecAttrLabel` doesn't match a Bridge CredentialType. That
+        // matches every system keychain item (which has service + account
+        // but no Bridge-authored label). Combined with the predicate
+        // hotfix above, .unknown-type items now require the
+        // `notionBridgeManaged` metadata flag to surface — system items
+        // never have that flag, so they cannot leak through this path.
         return items.compactMap { item in
             if let entry = try? parseKeychainItem(item, includePassword: false) {
+                // Belt-and-suspenders: items parsed with .unknown type
+                // (label missing or not a Bridge type) must clear the
+                // explicit metadata-flag bar. The predicate also filters
+                // them via access-group matching when entitlements are
+                // declared; this is the second line of defense.
+                if entry.type == .unknown && entry.metadata.notionBridgeManaged != true {
+                    return nil
+                }
                 guard Self.shouldSurfaceCredentialFromKeychainItem(item, parsedEntry: entry) else {
                     return nil
                 }
@@ -454,7 +558,8 @@ public final class CredentialManager: Sendable {
         ]
 
         var result: AnyObject?
-        let copyStatus = SecItemCopyMatching(lookup as CFDictionary, &result)
+        // PKT-933: scope to our access group when entitled (no-op otherwise).
+        let copyStatus = SecItemCopyMatching(scoped(lookup) as CFDictionary, &result)
         if copyStatus == errSecItemNotFound {
             throw CredentialError.notFound
         }
@@ -532,8 +637,49 @@ public final class CredentialManager: Sendable {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account
         ]
-        let status = SecItemDelete(query as CFDictionary)
+        // PKT-933: scope to our access group when entitled (no-op otherwise).
+        let status = SecItemDelete(scoped(query) as CFDictionary)
         return status == errSecSuccess || status == errSecItemNotFound
+    }
+
+    // MARK: - PKT-933: Access-group migration sentinel
+
+    /// One-time, idempotent continuity check, run at launch once the
+    /// keychain-access-groups entitlement is active. Existing items live in the
+    /// app's implicit default group (== our declared group), so this is a SAFETY
+    /// NET, not a move: it confirms our items are reachable in-group and logs a
+    /// one-line receipt.
+    ///
+    /// It NEVER deletes or re-creates an item — credential loss is a
+    /// release-blocker per the packet safety contract. Until the entitlement is
+    /// active the done-flag is left unset so the check re-runs on the first
+    /// launch after the entitled build is installed.
+    public func migrateToAccessGroupIfNeeded() {
+        let doneKey = "com.notionbridge.credentials.accessGroupMigration.v1"
+        guard isAppBundle else { return }
+        guard let group = Self.entitledAccessGroup else { return }
+        guard !UserDefaults.standard.bool(forKey: doneKey) else { return }
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecAttrAccessGroup as String: group
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        var reachable = 0
+        if status == errSecSuccess, let items = result as? [[String: Any]] {
+            reachable = items.count
+        } else if status != errSecItemNotFound {
+            // Unexpected error — don't claim success; retry next launch.
+            print("[CredentialManager] PKT-933 access-group migration v1: probe error OSStatus \(status); will retry next launch.")
+            return
+        }
+
+        UserDefaults.standard.set(true, forKey: doneKey)
+        print("[CredentialManager] PKT-933 access-group migration v1: \(reachable) item(s) reachable in \(group); credential continuity OK.")
     }
 
     // MARK: - Private: Parse Keychain Item

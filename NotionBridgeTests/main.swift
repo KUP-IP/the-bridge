@@ -10,6 +10,15 @@ import Foundation
 import MCP
 import NotionBridgeLib
 
+// Line-buffer stdout. When this runner's output is a pipe (CI: `… | tee`),
+// stdout defaults to FULL buffering, so on an intermittent hang the buffered
+// tail never flushes and the CI log's last line is NOT where it actually hung —
+// it just shows the last flushed block. Line buffering flushes on every newline
+// (negligible overhead: ~one flush per test line, unlike per-byte unbuffered),
+// so the CI log always pinpoints the hanging test. Distinct from the summary
+// teardown race, which is handled by the atexit summary handler below.
+setvbuf(stdout, nil, _IOLBF, 0)
+
 // HERMETIC TEST ISOLATION (v3.6.1): point ConfigManager at a throwaway temp
 // config file BEFORE any test (or ConfigManager.shared) touches it. Without
 // this, ConfigManagerTests read and mutate the user's real
@@ -51,6 +60,22 @@ enum TestError: Error, LocalizedError {
     var errorDescription: String? {
         switch self { case .assertion(let m): return m }
     }
+}
+
+// Emit the final summary from an atexit handler so it is GUARANTEED to print.
+// With top-level `await`, the synchronous continuation after the final
+// suspension point intermittently loses a race with process teardown and is
+// skipped entirely (the binary still exits 0 and every test ran) — which
+// dropped the `Results:` line the floor gate parses. atexit handlers run during
+// any normal process exit, after all top-level code, so the summary is
+// deterministic regardless of that race or of stdout buffering mode. The
+// closure references only globals, so it captures nothing (@convention(c)-safe).
+atexit {
+    print("\n" + String(repeating: "=", count: 50))
+    print("Results: \(passed) passed, \(failed) failed, \(passed + failed) total")
+    print(String(repeating: "=", count: 50))
+    print(failed > 0 ? "\u{274C} TESTS FAILED" : "\u{2705} ALL TESTS PASSED")
+    fflush(stdout)
 }
 
 // ============================================================
@@ -561,18 +586,18 @@ await runLicenseDispatchGateTests()
 // routing-skills backing (v3.6·5 TODO closure).
 await runSkillsCacheTests()
 
+// WS-C + WS-E (Mac-side cloud access): BridgeCloudManager state machine +
+// NL-3 auth-passdown (capability validation + mandatory passkey gate +
+// no-raw-credential invariant) + Remote Access settings section/sidebar.
+await runBridgeCloudManagerTests()
+
 // ============================================================
 // MARK: - Summary
 // ============================================================
 
-print("\n" + String(repeating: "=", count: 50))
-print("Results: \(passed) passed, \(failed) failed, \(passed + failed) total")
-print(String(repeating: "=", count: 50))
-
-if failed > 0 {
-    print("\u{274C} TESTS FAILED")
-    exit(1)
-} else {
-    print("\u{2705} ALL TESTS PASSED")
-    exit(0)
-}
+// Summary is emitted by the atexit handler registered at startup (reliable even
+// if this top-level continuation is skipped by the teardown race). This exit is
+// best-effort: when it runs it sets the proper code AND triggers the atexit
+// summary; if the race skips it, the implicit exit(0) still fires the atexit
+// summary and the floor gate derives pass/fail from the `Results:` count.
+exit(failed > 0 ? 1 : 0)
