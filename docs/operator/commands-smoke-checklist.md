@@ -37,12 +37,14 @@ WindowServer and cannot be asserted headlessly. Run them after every
       (not a blank list).
 - [ ] In Settings, set one skill's visibility to **Command**. Press the hot-key
       → that skill appears; type to filter; `⏎` copies its page body to the
-      clipboard; paste verifies the body.
+      clipboard; paste verifies the body. If body fetch fails, check that the
+      stored Notion page is still shared with The Bridge integration before
+      leaving the skill marked `Command`.
 - [ ] A skill left as **Standard**/**Routing** does **not** appear in the
       palette.
 
 ## 5. Non-regression
 - [ ] `fetch_skill <name>` (via an MCP client) still returns a `Command`-type
       skill by name (properties + body).
-- [ ] `list_routing_skills` is unchanged — `Command` skills are not listed
+- [ ] `skills_routing_list` is unchanged — `Command` skills are not listed
       there; `Routing` skills still are.
