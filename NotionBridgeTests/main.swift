@@ -10,6 +10,19 @@ import Foundation
 import MCP
 import NotionBridgeLib
 
+// HERMETIC TEST ISOLATION (v3.6.1): point ConfigManager at a throwaway temp
+// config file BEFORE any test (or ConfigManager.shared) touches it. Without
+// this, ConfigManagerTests read and mutate the user's real
+// ~/.config/.../config.json — non-hermetic, order-dependent, destructive.
+// Seeds a minimal valid config so first reads succeed.
+if ProcessInfo.processInfo.environment["BRIDGE_CONFIG_PATH"] == nil {
+    let tmpConfig = FileManager.default.temporaryDirectory
+        .appendingPathComponent("bridge-test-config-\(ProcessInfo.processInfo.processIdentifier).json")
+    setenv("BRIDGE_CONFIG_PATH", tmpConfig.path, 1)
+    let seed = #"{"sensitivePaths":["~/.ssh","~/.aws","~/.gnupg","~/.config","~/Library/Keychains"]}"#
+    try? seed.data(using: .utf8)?.write(to: tmpConfig, options: .atomic)
+}
+
 // Credential / payment MCP tests assume the Keychain credentials feature is enabled.
 UserDefaults.standard.set(true, forKey: CredentialsFeature.userDefaultsKey)
 

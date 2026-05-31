@@ -492,7 +492,13 @@
 # 1232 -> 1302 per the order-inversion rule.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1466}"
+# v3.6.1 (2026-05-31): hermetic-test remediation. ConfigManagerTests no longer
+# read/mutate the user's live ~/.config config (now via BRIDGE_CONFIG_PATH temp
+# override seeded in main.swift); the mislabeled "datasource_update succeeds with
+# API key" test was moved into the hasAPIKey branch (it makes a live call) and
+# renamed to datasource_get. Verified-green reproducible count on a quiet machine
+# with NO API token: 1467 passed, 0 failed. Floor 1466 -> 1467.
+FLOOR="${BRIDGE_TEST_FLOOR:-1467}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

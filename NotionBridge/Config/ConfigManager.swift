@@ -30,8 +30,17 @@ public final class ConfigManager: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.notionbridge.config", attributes: .concurrent)
 
     private init() {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        configURL = home.appendingPathComponent(".config/notion-bridge/config.json")
+        // BRIDGE_CONFIG_PATH override: an explicit config-file path wins over the
+        // default location. Lets operators relocate config (e.g. sandboxed/CI
+        // environments) and lets the test suite point at a temp file so tests
+        // never read or mutate the user's real ~/.config/.../config.json.
+        if let override = ProcessInfo.processInfo.environment["BRIDGE_CONFIG_PATH"],
+           !override.isEmpty {
+            configURL = URL(fileURLWithPath: (override as NSString).expandingTildeInPath)
+        } else {
+            let home = FileManager.default.homeDirectoryForCurrentUser
+            configURL = home.appendingPathComponent(".config/notion-bridge/config.json")
+        }
     }
 
     // MARK: - Raw Config I/O

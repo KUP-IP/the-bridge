@@ -637,9 +637,11 @@ func runNotionModuleTests() async {
                 throw TestError.assertion("Expected object result")
             }
         }
-    } else {
 
-        await test("notion_datasource_update succeeds with API key (read schema)") {
+        // v3.6.1: moved into the hasAPIKey branch — this makes a LIVE
+        // notion_datasource_get call that requires a key; in the else (no-key)
+        // branch it could only ever fail. Name corrected (get, not update).
+        await test("notion_datasource_get succeeds with API key (read schema)") {
             let result = try await router.dispatch(
                 toolName: "notion_datasource_get",
                 arguments: .object(["dataSourceId": .string("992fd5ac-d938-4be4-95fb-8ef18bd86bba")])
@@ -651,6 +653,8 @@ func runNotionModuleTests() async {
                 throw TestError.assertion("Expected object result")
             }
         }
+    } else {
+
         await test("notion_search reports missing API key gracefully") {
             do {
                 _ = try await router.dispatch(
