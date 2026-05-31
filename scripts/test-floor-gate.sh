@@ -604,7 +604,12 @@ set +e
 "$BIN" | tee "$LOG"
 set -e
 
-LINE="$(grep -E '^Results: [0-9]+ passed, [0-9]+ failed, [0-9]+ total' "$LOG" | tail -1 || true)"
+# Hardened parse (2026-05-31): the harness can emit C0 control / NUL bytes
+# (e.g. ChromeModule shell-injection security tests echo raw payloads), which
+# made grep treat the log as binary and miss the summary — a false "could not
+# find Results" failure on an all-green run. Strip control chars (keep tab/LF),
+# force text mode (-a), match the unique full Results shape unanchored, take last.
+LINE="$(tr -d '\000-\010\013\014\016-\037' < "$LOG" | grep -aE 'Results: [0-9]+ passed, [0-9]+ failed, [0-9]+ total' | tail -1 || true)"
 if [ -z "$LINE" ]; then
   echo "::error::test-floor-gate: could not find the 'Results:' summary line in test output"
   exit 2
