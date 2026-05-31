@@ -74,6 +74,36 @@ func runSystemModuleTests() async {
         }
     }
 
+    // FB-2: system_info exposes home/user/cwd so agents stop guessing /Users paths.
+    await test("system_info returns homeDirectory, userName, currentDirectory") {
+        let result = try await router.dispatch(
+            toolName: "system_info",
+            arguments: .object([:])
+        )
+        guard case .object(let dict) = result else {
+            throw TestError.assertion("Expected object result")
+        }
+        try expect(dict["homeDirectory"] != nil, "Expected homeDirectory field")
+        try expect(dict["userName"] != nil, "Expected userName field")
+        try expect(dict["currentDirectory"] != nil, "Expected currentDirectory field")
+
+        guard case .string(let home)? = dict["homeDirectory"] else {
+            throw TestError.assertion("homeDirectory should be a string")
+        }
+        try expect(!home.isEmpty, "homeDirectory must be non-empty")
+        try expect(home.hasPrefix("/Users/"), "homeDirectory should begin with /Users/, got \(home)")
+
+        guard case .string(let user)? = dict["userName"] else {
+            throw TestError.assertion("userName should be a string")
+        }
+        try expect(!user.isEmpty, "userName must be non-empty")
+
+        guard case .string(let cwd)? = dict["currentDirectory"] else {
+            throw TestError.assertion("currentDirectory should be a string")
+        }
+        try expect(cwd.hasPrefix("/"), "currentDirectory should be an absolute path, got \(cwd)")
+    }
+
     // Functional tests — process_list
     await test("process_list returns processes") {
         let result = try await router.dispatch(

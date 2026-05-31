@@ -24,7 +24,7 @@ public enum SystemModule {
             name: "system_info",
             module: moduleName,
             tier: .open,
-            description: "Return the host Mac's model, OS version, RAM, and uptime.",
+            description: "Return the host Mac's model, OS version, RAM, uptime, plus homeDirectory, userName, and currentDirectory (use these instead of guessing /Users paths).",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([:]),
@@ -53,6 +53,12 @@ public enum SystemModule {
 
                 // Hostname
                 info["hostname"] = .string(ProcessInfo.processInfo.hostName)
+
+                // FB-2: Environment paths — kills the recurring /Users/<guess> path-guess bug.
+                // Agents read the real home/user/cwd instead of guessing.
+                info["homeDirectory"] = .string(NSHomeDirectory())
+                info["userName"] = .string(NSUserName())
+                info["currentDirectory"] = .string(FileManager.default.currentDirectoryPath)
 
                 // CPU info via sysctl
                 if let cpuBrand = try? shellOutput("/usr/sbin/sysctl", args: ["-n", "machdep.cpu.brand_string"]) {

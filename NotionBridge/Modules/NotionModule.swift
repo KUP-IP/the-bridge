@@ -547,32 +547,88 @@ public enum NotionModule {
             name: "notion_block_delete",
             module: moduleName,
             tier: .notify,
-            description: "Soft-delete a block (recoverable from Notion's trash). Reversible.",
+            description: "Soft-delete one block (`blockId`) or many (`blockIds` array) — recoverable from Notion's trash. Bulk deletes run sequentially with per-id status and partial-failure reporting.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
-                    "blockId": .object(["type": .string("string"), "description": .string("Block ID to delete")]),
+                    "blockId": .object(["type": .string("string"), "description": .string("Single block ID to delete")]),
+                    "blockIds": .object([
+                        "type": .string("array"),
+                        "description": .string("Optional array of block IDs to delete sequentially; returns per-id status."),
+                        "items": .object(["type": .string("string")])
+                    ]),
                     "workspace": workspaceParam
                 ]),
-                "required": .array([.string("blockId")])
+                "required": .array([])
             ]),
             handler: { arguments in
-                guard case .object(let args) = arguments,
-                      case .string(let blockId) = args["blockId"] else {
-                    throw ToolRouterError.invalidArguments(toolName: "notion_block_delete", reason: "missing 'blockId'")
+                guard case .object(let args) = arguments else {
+                    throw ToolRouterError.invalidArguments(toolName: "notion_block_delete", reason: "missing arguments")
+                }
+
+                // FB-6: Resolve targets — either a `blockIds` array (bulk) or a single `blockId`.
+                let isBulk: Bool
+                var blockIds: [String] = []
+                if case .array(let arr)? = args["blockIds"] {
+                    isBulk = true
+                    for v in arr { if case .string(let s) = v { blockIds.append(s) } }
+                } else if case .string(let single)? = args["blockId"] {
+                    isBulk = false
+                    blockIds = [single]
+                } else {
+                    throw ToolRouterError.invalidArguments(toolName: "notion_block_delete", reason: "missing 'blockId' or 'blockIds'")
+                }
+
+                if blockIds.isEmpty {
+                    throw ToolRouterError.invalidArguments(toolName: "notion_block_delete", reason: "'blockIds' must contain at least one block ID")
                 }
 
                 let client = try await registryHolder.getClient(workspace: extractWorkspace(args))
-                let data = try await client.deleteBlock(blockId: blockId)
 
-                guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    return .object(["error": .string("Failed to parse delete response")])
+                // Single-block back-compat path: identical response shape as before.
+                if !isBulk {
+                    let blockId = blockIds[0]
+                    let data = try await client.deleteBlock(blockId: blockId)
+                    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                        return .object(["error": .string("Failed to parse delete response")])
+                    }
+                    return .object([
+                        "success": .bool(true),
+                        "id": .string(json["id"] as? String ?? blockId),
+                        "in_trash": .bool(json["in_trash"] as? Bool ?? true)
+                    ])
+                }
+
+                // Bulk path: delete sequentially, capture per-id status, never abort on one failure.
+                var results: [Value] = []
+                var deleted = 0
+                var failed = 0
+                for blockId in blockIds {
+                    do {
+                        let data = try await client.deleteBlock(blockId: blockId)
+                        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                        deleted += 1
+                        results.append(.object([
+                            "id": .string((json?["id"] as? String) ?? blockId),
+                            "success": .bool(true),
+                            "in_trash": .bool((json?["in_trash"] as? Bool) ?? true)
+                        ]))
+                    } catch {
+                        failed += 1
+                        results.append(.object([
+                            "id": .string(blockId),
+                            "success": .bool(false),
+                            "error": .string("\(error)")
+                        ]))
+                    }
                 }
 
                 return .object([
-                    "success": .bool(true),
-                    "id": .string(json["id"] as? String ?? blockId),
-                    "in_trash": .bool(json["in_trash"] as? Bool ?? true)
+                    "success": .bool(failed == 0),
+                    "requested": .int(blockIds.count),
+                    "deleted": .int(deleted),
+                    "failed": .int(failed),
+                    "results": .array(results)
                 ])
             }
         ))
@@ -672,7 +728,7 @@ public enum NotionModule {
             name: "notion_comment_create",
             module: moduleName,
             tier: .notify,
-            description: "Post a top-level inline-only markdown comment on a Notion page. Preflights Notion's 2000-character rich_text run limit. For threaded replies use notion_discussion_create.",
+            description: "Post a top-level inline-only markdown comment on a Notion page. Text over Notion's 2000-character per-run limit is auto-chunked into sequential comments preserving order. For threaded replies use notion_discussion_create.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -685,8 +741,7 @@ public enum NotionModule {
             metadata: ToolMetadata(
                 title: "Notion: Create Comment",
                 whenToUse: ["posting a short inline comment on a page"],
-                whenNotToUse: ["text > 2000 chars (split first — preflight rejects with a structured hint)",
-                               "threaded replies (use notion_discussion_create)",
+                whenNotToUse: ["threaded replies (use notion_discussion_create)",
                                "long code/text (use notion_code_block_append)"],
                 relatedTools: ["notion_discussion_create", "notion_comments_list", "notion_code_block_append"]
             ),
@@ -697,27 +752,34 @@ public enum NotionModule {
                     throw ToolRouterError.invalidArguments(toolName: "notion_comment_create", reason: "missing 'pageId' or 'text'")
                 }
 
-                let maxChars = 2000
-                if text.count > maxChars {
-                    return .object([
-                        "success": .bool(false),
-                        "error": .string("notion_comment_create: rich_text.text.content exceeds Notion's 2000-character per-run limit"),
-                        "maxChars": .int(maxChars),
-                        "actualChars": .int(text.count),
-                        "hint": .string("Split long comments into multiple shorter comments or use notion_code_block_append for long code/text blocks. Comments support inline-only markdown, not block markdown.")
-                    ])
-                }
-
                 let client = try await registryHolder.getClient(workspace: extractWorkspace(args))
-                let data = try await client.createComment(pageId: pageId, text: text)
 
-                guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    return .object(["error": .string("Failed to parse comment response")])
+                // FB-3: Auto-chunk into sequential <=2000-char comments preserving order,
+                // instead of hard-rejecting. Notion enforces a 2000-character per-run limit;
+                // post one comment per chunk and report all created IDs in order.
+                let chunks = NotionModule.chunkCommentText(text, maxChars: 2000)
+
+                var ids: [Value] = []
+                for chunk in chunks {
+                    let data = try await client.createComment(pageId: pageId, text: chunk)
+                    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                        return .object([
+                            "success": .bool(false),
+                            "error": .string("Failed to parse comment response"),
+                            "postedChunks": .int(ids.count),
+                            "totalChunks": .int(chunks.count),
+                            "ids": .array(ids)
+                        ])
+                    }
+                    ids.append(.string(json["id"] as? String ?? ""))
                 }
 
+                // Back-compat: single chunk keeps the original `id` field; multi-chunk adds `ids`.
                 return .object([
                     "success": .bool(true),
-                    "id": .string(json["id"] as? String ?? "")
+                    "id": ids.first ?? .string(""),
+                    "ids": .array(ids),
+                    "chunks": .int(chunks.count)
                 ])
             }
         ))
@@ -1427,6 +1489,27 @@ public enum NotionModule {
                 ])
             }
         ))
+    }
+}
+
+// MARK: - NotionModule Pure Helpers
+
+extension NotionModule {
+    /// FB-3: Split comment text into ordered chunks no longer than `maxChars` characters.
+    /// Uses Swift `Character` counting to match the handler's `text.count` semantics, so the
+    /// 2000-character boundary lines up with Notion's per-run limit. Order is preserved and
+    /// concatenating the chunks reproduces the original text exactly.
+    public static func chunkCommentText(_ text: String, maxChars: Int) -> [String] {
+        guard maxChars > 0 else { return [text] }
+        guard text.count > maxChars else { return [text] }
+        var chunks: [String] = []
+        var idx = text.startIndex
+        while idx < text.endIndex {
+            let end = text.index(idx, offsetBy: maxChars, limitedBy: text.endIndex) ?? text.endIndex
+            chunks.append(String(text[idx..<end]))
+            idx = end
+        }
+        return chunks
     }
 }
 
