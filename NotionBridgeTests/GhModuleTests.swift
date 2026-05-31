@@ -38,7 +38,7 @@ func runGhModuleTests() async {
             "missing gh_* tools — got \(names.sorted())")
     }
 
-    await test("All gh_* tools are tier .request") {
+    await test("gh_* tier policy: read-only listing .open, rest .request (FB-5)") {
         let gate = SecurityGate()
         let log = AuditLog()
         let router = ToolRouter(securityGate: gate, auditLog: log)
@@ -47,9 +47,17 @@ func runGhModuleTests() async {
         let ghRegs = regs.filter { $0.name.hasPrefix("gh_") }
         try expect(ghRegs.count >= 9,
             "expected >=9 gh_* tools, got \(ghRegs.count)")
+        // FB-5: read-only listing tools (gh_actions_runs_list + its deprecated
+        // alias gh_actions_runs) are tier .open; all other gh_* are .request.
+        let readOnly: Set<String> = ["gh_actions_runs_list", "gh_actions_runs"]
         for r in ghRegs {
-            try expect(r.tier == .request,
-                "\(r.name) tier expected .request, got \(r.tier.rawValue)")
+            if readOnly.contains(r.name) {
+                try expect(r.tier == .open,
+                    "\(r.name) tier expected .open, got \(r.tier.rawValue)")
+            } else {
+                try expect(r.tier == .request,
+                    "\(r.name) tier expected .request, got \(r.tier.rawValue)")
+            }
         }
     }
 

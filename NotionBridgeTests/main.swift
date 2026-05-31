@@ -478,6 +478,7 @@ await runPaymentModuleTests()
 await runConnectionsModuleTests()
 await runStripeTokenizationTests()
 await runSecurityAuditTests()
+await runReadOnlyTierAuditTests()
 
 
 // ============================================================

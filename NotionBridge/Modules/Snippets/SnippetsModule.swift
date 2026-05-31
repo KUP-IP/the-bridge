@@ -1,8 +1,11 @@
 // SnippetsModule.swift — WS-D (v2.3, PKT-2135a9e9)
 // NotionBridge · Modules · Snippets
 //
-// 9 snippets_* MCP tools under module="snippets", tier .request, wrapping
-// SnippetStore. snippets_delete carries neverAutoApprove (the existing
+// 9 snippets_* MCP tools under module="snippets", wrapping SnippetStore.
+// Read-only tools (snippets_list/get/search) are tier .open (FB-5: read-only
+// list/get/search tools execute without confirmation); the mutating tools
+// (create/update/rename/delete/import/export) remain tier .request.
+// snippets_delete carries neverAutoApprove (the existing
 // confirmation mechanism) — the formal ToolAnnotations field + ratchet audit
 // is WS-B's deliverable per Decision D1; wiring it here would do WS-B's job.
 
@@ -69,7 +72,7 @@ public enum SnippetsModule {
 
     private static func makeList(_ store: SnippetStore) -> ToolRegistration {
         ToolRegistration(
-            name: "snippets_list", module: moduleName, tier: .request,
+            name: "snippets_list", module: moduleName, tier: .open,
             description: "List all snippets as [{id, name, preview, tags, updated}]. Read-only.",
             inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
             handler: { _ in
@@ -80,7 +83,7 @@ public enum SnippetsModule {
 
     private static func makeGet(_ store: SnippetStore) -> ToolRegistration {
         ToolRegistration(
-            name: "snippets_get", module: moduleName, tier: .request,
+            name: "snippets_get", module: moduleName, tier: .open,
             description: "Get one snippet by id or name → {id, name, text, tags, created, updated, source}.",
             inputSchema: .object([
                 "type": .string("object"),
@@ -100,7 +103,7 @@ public enum SnippetsModule {
 
     private static func makeSearch(_ store: SnippetStore) -> ToolRegistration {
         ToolRegistration(
-            name: "snippets_search", module: moduleName, tier: .request,
+            name: "snippets_search", module: moduleName, tier: .open,
             description: "Ranked search (exact > prefix > fuzzy > text-contains). Optional tags AND-filter. Read-only.",
             inputSchema: .object([
                 "type": .string("object"),

@@ -235,7 +235,7 @@ public enum BgProcessModule {
         await router.register(ToolRegistration(
             name: "bg_process_list",
             module: moduleName,
-            tier: .request,
+            tier: .open,
             description: "List all known jobs (newest started first). Optional status filter: 'running'|'done'|'failed'|'killed'|'unknown'. Optional label filter (substring match on the start-time label). Reconciles orphaned jobs first if reconcile=true (defaults true on first call after Bridge launch via the bootstrap, but agents may pass true to force a re-scan).",
             inputSchema: .object([
                 "type": .string("object"),

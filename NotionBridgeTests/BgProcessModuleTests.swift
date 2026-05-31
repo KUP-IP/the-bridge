@@ -70,7 +70,7 @@ func runBgProcessModuleTests() async {
         await runtime.purgeAll()
     }
 
-    await test("All bg_process_* tools are tier .request") {
+    await test("bg_process_* tier policy: list .open, control .request (FB-5)") {
         let gate = SecurityGate()
         let log = AuditLog()
         let router = ToolRouter(securityGate: gate, auditLog: log)
@@ -79,9 +79,15 @@ func runBgProcessModuleTests() async {
         let regs = await router.registrations(forModule: "dev")
         let bgRegs = regs.filter { $0.name.hasPrefix("bg_process_") }
         try expect(bgRegs.count >= 5, "expected >=5 bg_process_* tools, got \(bgRegs.count)")
+        // FB-5: read-only bg_process_list is .open; process-control tools .request.
         for r in bgRegs {
-            try expect(r.tier == .request,
-                "\(r.name) tier expected .request, got \(r.tier.rawValue)")
+            if r.name == "bg_process_list" {
+                try expect(r.tier == .open,
+                    "\(r.name) tier expected .open, got \(r.tier.rawValue)")
+            } else {
+                try expect(r.tier == .request,
+                    "\(r.name) tier expected .request, got \(r.tier.rawValue)")
+            }
         }
         await runtime.purgeAll()
     }
