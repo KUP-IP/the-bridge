@@ -16,8 +16,21 @@ import NotionBridgeLib
 // it just shows the last flushed block. Line buffering flushes on every newline
 // (negligible overhead: ~one flush per test line, unlike per-byte unbuffered),
 // so the CI log always pinpoints the hanging test. Distinct from the summary
-// teardown race, which is handled by emitSummary() + the gate's retry.
+// teardown race, which is handled by the atexit summary handler below.
 setvbuf(stdout, nil, _IOLBF, 0)
+
+// HERMETIC TEST ISOLATION (v3.6.1): point ConfigManager at a throwaway temp
+// config file BEFORE any test (or ConfigManager.shared) touches it. Without
+// this, ConfigManagerTests read and mutate the user's real
+// ~/.config/.../config.json — non-hermetic, order-dependent, destructive.
+// Seeds a minimal valid config so first reads succeed.
+if ProcessInfo.processInfo.environment["BRIDGE_CONFIG_PATH"] == nil {
+    let tmpConfig = FileManager.default.temporaryDirectory
+        .appendingPathComponent("bridge-test-config-\(ProcessInfo.processInfo.processIdentifier).json")
+    setenv("BRIDGE_CONFIG_PATH", tmpConfig.path, 1)
+    let seed = #"{"sensitivePaths":["~/.ssh","~/.aws","~/.gnupg","~/.config","~/Library/Keychains"]}"#
+    try? seed.data(using: .utf8)?.write(to: tmpConfig, options: .atomic)
+}
 
 // Credential / payment MCP tests assume the Keychain credentials feature is enabled.
 UserDefaults.standard.set(true, forKey: CredentialsFeature.userDefaultsKey)
@@ -465,6 +478,7 @@ await runPaymentModuleTests()
 await runConnectionsModuleTests()
 await runStripeTokenizationTests()
 await runSecurityAuditTests()
+await runReadOnlyTierAuditTests()
 
 
 // ============================================================
@@ -572,6 +586,11 @@ await runLicenseDispatchGateTests()
 // enumeration carve-out closure (PKT-907) + StandingOrders cached
 // routing-skills backing (v3.6·5 TODO closure).
 await runSkillsCacheTests()
+
+// WS-C + WS-E (Mac-side cloud access): BridgeCloudManager state machine +
+// NL-3 auth-passdown (capability validation + mandatory passkey gate +
+// no-raw-credential invariant) + Remote Access settings section/sidebar.
+await runBridgeCloudManagerTests()
 
 // ============================================================
 // MARK: - Summary

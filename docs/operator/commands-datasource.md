@@ -1,5 +1,10 @@
 # Commands Data Source — operator setup (cmd-w2)
 
+Status: historical/deferred. The current production Commands palette is backed
+by the local markdown-per-command store and by Skills marked `Command` in
+Settings. This data-source design remains a reference for a later Notion-backed
+Commands slice; it is not the active palette registry.
+
 This is the **operator-only** schema for the Notion data source backing
 the **Commands** feature. The cmd-w2 code change ships the data layer
 only (fetch + mention-resolve + cache); it does **not** create anything

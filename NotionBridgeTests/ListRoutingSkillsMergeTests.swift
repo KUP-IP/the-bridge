@@ -4,15 +4,12 @@
 // `SkillsModule.mergedRoutingSkills` combines Notion-source routing
 // skills (from UserDefaults) with file-source skills (from
 // `FilesystemSkillIndex.shared`). Verifies stable alphabetical ordering
-// and the `shadows` annotation on Notion-source rows whose name
-// collides with a file-source skill.
+// and the file-source routing visibility filter.
 //
 // Note: production `mergedRoutingSkills` reads from
 // `FilesystemSkillIndex.shared` (process-shared actor). These tests
-// drive a parallel envelope-shape assertion through a fresh Notion-only
-// UserDefaults seed — the file-source merge is exercised by the
-// FilesystemSkillIndexTests suite. The integration is one method call,
-// and the per-piece semantics are independently locked.
+// drive focused assertions through UserDefaults seeds and the shared
+// file-source index. The per-piece semantics are independently locked.
 
 import Foundation
 import MCP
@@ -23,9 +20,17 @@ func runListRoutingSkillsMergeTests() async {
 
     let key = BridgeDefaults.skills
     let saved = UserDefaults.standard.data(forKey: key)
+    let fileRoutingKey = BridgeDefaults.fileSkillRoutingDiscoverable
+    let savedFileRouting = UserDefaults.standard.object(forKey: fileRoutingKey)
+    let fileEnabledKey = BridgeDefaults.fileSkillEnabled
+    let savedFileEnabled = UserDefaults.standard.object(forKey: fileEnabledKey)
     defer {
         if let saved { UserDefaults.standard.set(saved, forKey: key) }
         else { UserDefaults.standard.removeObject(forKey: key) }
+        if let savedFileRouting { UserDefaults.standard.set(savedFileRouting, forKey: fileRoutingKey) }
+        else { UserDefaults.standard.removeObject(forKey: fileRoutingKey) }
+        if let savedFileEnabled { UserDefaults.standard.set(savedFileEnabled, forKey: fileEnabledKey) }
+        else { UserDefaults.standard.removeObject(forKey: fileEnabledKey) }
     }
 
     @Sendable func seedNotionSkills(_ entries: [[String: Any]]) {
@@ -113,6 +118,52 @@ func runListRoutingSkillsMergeTests() async {
             if case .object(let o) = r, case .string(let n)? = o["name"] {
                 try expect(n != "StdOnly", "standard-visibility skill leaked into routing merge")
             }
+        }
+    }
+
+    await test("mergedRoutingSkills: file-source routing honors effective routing flag") {
+        UserDefaults.standard.removeObject(forKey: key)
+        UserDefaults.standard.removeObject(forKey: fileRoutingKey)
+        UserDefaults.standard.removeObject(forKey: fileEnabledKey)
+
+        let fileSkills = await FilesystemSkillIndex.shared.allSkills()
+        let hiddenByDefault = fileSkills.first { fs in
+            fs.frontmatter["visibility"] == nil
+        }
+        let frontmatterRouting = fileSkills.first { fs in
+            if case .string(let v) = fs.frontmatter["visibility"] { return v == "routing" }
+            return false
+        }
+
+        let rows = await SkillsModule.mergedRoutingSkills()
+        let names: Set<String> = Set(rows.compactMap { r in
+            guard case .object(let o) = r, case .string(let n)? = o["name"] else { return nil }
+            return n
+        })
+
+        if let hiddenByDefault {
+            try expect(!names.contains(hiddenByDefault.name),
+                       "file skill without visibility:routing must not leak into routing list: \(hiddenByDefault.name)")
+        }
+        if let frontmatterRouting {
+            try expect(names.contains(frontmatterRouting.name),
+                       "file skill with visibility:routing should be discoverable: \(frontmatterRouting.name)")
+        }
+    }
+
+    await test("mergedRoutingSkills: source-available stubs are not routing discoverable") {
+        UserDefaults.standard.removeObject(forKey: key)
+        UserDefaults.standard.removeObject(forKey: fileRoutingKey)
+        UserDefaults.standard.removeObject(forKey: fileEnabledKey)
+
+        let rows = await SkillsModule.mergedRoutingSkills()
+        let names: Set<String> = Set(rows.compactMap { r in
+            guard case .object(let o) = r, case .string(let n)? = o["name"] else { return nil }
+            return n
+        })
+
+        for stub in ["docx", "pdf", "pptx", "xlsx"] {
+            try expect(!names.contains(stub), "source-available stub leaked into routing list: \(stub)")
         }
     }
 }

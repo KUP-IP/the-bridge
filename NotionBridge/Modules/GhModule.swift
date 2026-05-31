@@ -219,7 +219,7 @@ public enum GhModule {
         ToolRegistration(
             name: "gh_actions_runs_list",
             module: moduleName,
-            tier: .request,
+            tier: .open,
             description: "List recent GitHub Actions runs via `gh run list --json ...`. Filter by branch, status ('queued'|'in_progress'|'completed'|'success'|'failure'|...), workflow (name or filename). Default limit 20.",
             inputSchema: schemaObj([
                 "repo":     strProp("Optional OWNER/REPO override."),

@@ -388,9 +388,10 @@ public enum SkillsModule {
                 "required": .array([])
             ]),
             handler: { _ in
-                // W2 D6: merged listing — Notion-source routing-visible
-                // skills + file-source skills (default routing-visible,
-                // opt-out via frontmatter `visibility: standard`).
+                // W2 D6/W4: merged listing — Notion-source routing-visible
+                // skills + file-source skills whose effective routing flag
+                // is true (explicit toggle or frontmatter
+                // `visibility: routing`).
                 // Collisions annotate the Notion-source row with a
                 // `shadows: file:<path>` field for operator clarity;
                 // Notion wins on collision (D4).
@@ -2069,6 +2070,19 @@ public enum SkillsModule {
         return false
     }
 
+    /// Same effective routing predicate for already-parsed SKILL.md
+    /// frontmatter. Keeps the routing list on the same flag semantics as
+    /// Settings → Skills without lossy type-erasure at the call site.
+    public static func isFileSkillRoutingDiscoverable(path: URL, frontmatter: [String: FrontmatterValue]) -> Bool {
+        if let explicit = explicitFileSkillRoutingDiscoverable(path: path) {
+            return explicit
+        }
+        if case .string(let v) = frontmatter["visibility"], v == "routing" {
+            return true
+        }
+        return false
+    }
+
     /// W4 (3.4.1): effective palette-membership for a file-source
     /// skill — explicit toggle only (no frontmatter default).
     public static func isFileSkillInCommandPalette(path: URL) -> Bool {
@@ -2133,18 +2147,12 @@ public enum SkillsModule {
     }
 
     /// W2 D6: build the merged routing-skills list returned by
-    /// `list_routing_skills`. Notion-source routing entries first (with
+    /// `skills_routing_list`. Notion-source routing entries first (with
     /// a `shadows` annotation when a file-source skill of the same name
-    /// is being overridden), then file-source skills that opt-in via
-    /// frontmatter `visibility: routing` — OR, by the decision-under-
-    /// agency below, ALL enabled bundled skills (file-source defaults
-    /// to routing-visible unless frontmatter explicitly opts out).
-    ///
-    /// Decision-under-agency (D6): bundled skills default to ROUTING
-    /// visibility. Rationale: the bundled set is curated and the whole
-    /// point of bundling them is so agents can discover them via the
-    /// routing index without manual configuration. An author can still
-    /// opt out by setting `visibility: standard` in frontmatter.
+    /// is being overridden), then file-source skills whose effective
+    /// routing flag is true. That flag is controlled by the operator's
+    /// per-path toggle when present, otherwise by frontmatter
+    /// `visibility: routing`.
     public static func mergedRoutingSkills() async -> [Value] {
         let notionSkills = readAllSkills().filter { s in
             s.enabled && s.routingDiscoverable
@@ -2153,11 +2161,10 @@ public enum SkillsModule {
         let fileSkills = await FilesystemSkillIndex.shared.allSkills().filter { fs in
             // Honour per-path disable.
             guard isFileSkillEnabled(path: fs.path) else { return false }
-            // Opt-out: frontmatter `visibility: standard` excludes from routing.
-            if case .string(let v) = fs.frontmatter["visibility"], v == "standard" {
-                return false
-            }
-            return true
+            return isFileSkillRoutingDiscoverable(
+                path: fs.path,
+                frontmatter: fs.frontmatter
+            )
         }
         let notionNames = Set(notionSkills.map { $0.name.lowercased() })
         var rows: [Value] = []
@@ -2603,6 +2610,8 @@ public enum SkillsModule {
     /// remain silent (no specialists rendered), preserving the previous
     /// degrade-gracefully contract.
     fileprivate static func surfaceSpecialistsInRows(_ rows: [Value]) async -> [Value] {
+        let maxSurfacedSpecialists = 5
+
         // Build a name → ParsedSkill map for file-source skills.
         let fileSkills = await FilesystemSkillIndex.shared.allSkills()
         var byName: [String: ParsedSkill] = [:]
@@ -2633,7 +2642,8 @@ public enum SkillsModule {
             if isFileSource, let parent = byName[name.lowercased()] {
                 let specialists = SkillSpecialistFileResolver.listAll(parent: parent)
                 if !specialists.isEmpty {
-                    let arr: [Value] = specialists.map { sp in
+                    let visible = specialists.prefix(maxSurfacedSpecialists)
+                    let arr: [Value] = visible.map { sp in
                         let summary: String = {
                             if case .string(let d) = sp.frontmatter["description"] { return d }
                             if case .string(let s) = sp.frontmatter["summary"] { return s }
@@ -2646,10 +2656,15 @@ public enum SkillsModule {
                         ])
                     }
                     dict["specialists"] = .array(arr)
+                    dict["specialistCount"] = .int(specialists.count)
+                    if specialists.count > maxSurfacedSpecialists {
+                        dict["specialistsTruncated"] = .bool(true)
+                    }
                 }
             } else if let cached = cacheByName[name.lowercased()], !cached.children.isEmpty {
                 // Notion-source row with a cache hit.
-                let arr: [Value] = cached.children.map { child in
+                let visible = cached.children.prefix(maxSurfacedSpecialists)
+                let arr: [Value] = visible.map { child in
                     .object([
                         "path": .string("\(name)/\(child.title)"),
                         "title": .string(child.title),
@@ -2658,6 +2673,10 @@ public enum SkillsModule {
                     ])
                 }
                 dict["specialists"] = .array(arr)
+                dict["specialistCount"] = .int(cached.children.count)
+                if cached.children.count > maxSurfacedSpecialists {
+                    dict["specialistsTruncated"] = .bool(true)
+                }
                 if cached.stale {
                     dict["specialistsStale"] = .bool(true)
                 }

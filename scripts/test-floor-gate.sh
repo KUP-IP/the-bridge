@@ -499,9 +499,30 @@
 # → 20-min timeout. The bridge's lock-protected accounting (the regression
 # target) is still exercised under 200-way concurrency via the drop-path sends.
 # No net test count change. Measured 1471 passed, 0 failed. Floor stays 1471.
+# WS-C + WS-E (Mac-side cloud access, 2026-05-30): BridgeCloudManager
+# (cloudflared tunnel lifecycle behind an injectable TunnelProcess + the
+# CloudConnectionState machine) and the NL-3 auth-passdown seam — a
+# delegated-capability validator (short-lived/scoped/owner-bound/
+# device-bound; rejects expired/out-of-scope/wrong-owner/wrong-device/
+# over-TTL/revoked) plus the mandatory local passkey gate (injectable
+# PasskeyGate) enforced BEFORE any Keychain/client-cred access, with the
+# capability + cloud-facing request modeled credential-free by
+# construction (asserted via Mirror). WS-E added the SwiftUI Remote Access
+# settings section + the .remoteAccess sidebar enum case (sidebar grew
+# 9 -> 10; two WSHMenuBar count/order assertions updated in-place to the
+# new contract — count-neutral). New BridgeCloudManagerTests = 22 harness
+# blocks. Measured 1493 passed, 0 failed. Floor raised 1471 -> 1493 per
+# the order-inversion rule.
 set -euo pipefail
 
-FLOOR="${BRIDGE_TEST_FLOOR:-1471}"
+# v3.6.1 (2026-05-31): hermetic-test remediation + WS-C/E (Mac-side cloud
+# access: BridgeCloudManager + NL-3 auth-passdown + Remote Access settings)
+# merged in. ConfigManagerTests no longer read/mutate the user's live config
+# (BRIDGE_CONFIG_PATH temp override in main.swift); the mislabeled
+# "datasource_update succeeds with API key" test moved into the hasAPIKey
+# branch and renamed to datasource_get. Hermetic base was 1467; WS-C/E adds
+# the BridgeCloudManager suite. Floor recomputed from the post-merge gate run.
+FLOOR="${BRIDGE_TEST_FLOOR:-1501}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5
@@ -653,6 +674,7 @@ for attempt in $(seq 1 "$ATTEMPTS"); do
   echo "::warning::test-floor-gate: attempt ${attempt}/${ATTEMPTS} exited 0 but emitted no 'Results:' line (known harness teardown flake) — retrying"
 done
 
+LINE="$(tr -d '\000-\010\013\014\016-\037' < "$LOG" | grep -aE 'Results: [0-9]+ passed, [0-9]+ failed, [0-9]+ total' | tail -1 || true)"
 if [ -z "$LINE" ]; then
   echo "::error::test-floor-gate: no 'Results:' summary line after ${ATTEMPTS} attempts"
   exit 2

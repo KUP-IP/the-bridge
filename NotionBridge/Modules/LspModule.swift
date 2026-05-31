@@ -531,7 +531,7 @@ public enum LspModule {
         ToolRegistration(
             name: "lsp_session_list",
             module: moduleName,
-            tier: .request,
+            tier: .open,
             description: "List every live LSP session under LspRuntime supervision: per-workspace process info, server name/version, spawn + last-used timestamps, idle seconds, request count, open-file count. The substitute for bg_process_list in the LSP supervision domain (PM Decision Log #29, PKT-745).",
             inputSchema: .object([
                 "type":       .string("object"),

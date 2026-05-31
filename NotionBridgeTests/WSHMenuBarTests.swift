@@ -35,7 +35,8 @@ func runWSHMenuBarTests() async {
         }
         // PKT-3 v3.5: 9 sections (Standing Orders + Commands + Connections +
         // Skills + Permissions + Credentials + Tools + Jobs + Advanced).
-        try expect(SettingsSection.allCases.count == 9, "expected 9 sections, got \(SettingsSection.allCases.count)")
+        // WS-E (Mac-side cloud access): +Remote Access (after Connections) → 10.
+        try expect(SettingsSection.allCases.count == 10, "expected 10 sections, got \(SettingsSection.allCases.count)")
         try expect(SettingsSection.commands.icon == "command",
                    "commands icon: \(SettingsSection.commands.icon)")
         try expect(SettingsSection.commands.id == SettingsSection.commands.rawValue,
@@ -45,9 +46,11 @@ func runWSHMenuBarTests() async {
     await test("SettingsSection sidebar order opens to most-visited (Standing Orders)") {
         // PKT-3 v3.5: order is Standing Orders → Commands → Connections →
         // Skills → Permissions → Credentials → Tools → Jobs → Advanced.
+        // WS-E: Remote Access inserted directly after Connections (its
+        // natural sibling — both are "how this Mac is reachable").
         let order = SettingsSection.allCases.map(\.rawValue)
-        let expected = ["Standing Orders", "Commands", "Connections", "Skills",
-                        "Permissions", "Credentials", "Tools", "Jobs", "Advanced"]
+        let expected = ["Standing Orders", "Commands", "Connections", "Remote Access",
+                        "Skills", "Permissions", "Credentials", "Tools", "Jobs", "Advanced"]
         try expect(order == expected, "sidebar order drifted: \(order)")
     }
 

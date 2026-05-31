@@ -1,7 +1,7 @@
 ---
 name: pdf
 description: "Linked, not redistributed (source-available license)"
-visibility: routing
+visibility: standard
 ---
 
 This skill is **source-available** (not Apache-2.0) and is therefore not

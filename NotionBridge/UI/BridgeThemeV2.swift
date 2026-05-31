@@ -268,6 +268,7 @@ public enum BridgeSectionIcon {
         case .standingOrders: return "scroll"
         case .commands:       return "command"
         case .connections:    return "network"
+        case .remoteAccess:   return "cloud"
         case .skills:         return "sparkles"
         case .permissions:    return "lock.shield"
         case .credentials:    return "key.fill"

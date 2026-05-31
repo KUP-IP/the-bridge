@@ -237,25 +237,30 @@ func runNotionModuleTests() async {
         }
     }
 
-    await test("notion_comment_create preflights rich_text length before API call") {
-        let longText = String(repeating: "x", count: 2001)
-        let result = try await router.dispatch(
-            toolName: "notion_comment_create",
-            arguments: .object([
-                "pageId": .string("00000000-0000-0000-0000-000000000000"),
-                "text": .string(longText)
-            ])
-        )
-        if case .object(let dict) = result,
-           case .bool(let success) = dict["success"],
-           case .int(let maxChars) = dict["maxChars"],
-           case .int(let actualChars) = dict["actualChars"] {
-            try expect(!success, "Expected long comment preflight to fail structurally")
-            try expect(maxChars == 2000, "Expected maxChars 2000")
-            try expect(actualChars == 2001, "Expected actualChars 2001")
-        } else {
-            throw TestError.assertion("Expected structured preflight response")
-        }
+    // FB-3: comment text over Notion's 2000-char per-run limit is auto-chunked
+    // into ordered <=2000-char runs (no hard-reject). Exercise the pure helper
+    // directly — network-free, deterministic, covers the 2000/2001 boundary.
+    await test("notion_comment_create auto-chunks text over the 2000-char per-run limit") {
+        // Boundary: exactly 2000 chars stays a single chunk.
+        let at2000 = NotionModule.chunkCommentText(String(repeating: "x", count: 2000), maxChars: 2000)
+        try expect(at2000.count == 1, "2000 chars should be 1 chunk, got \(at2000.count)")
+        try expect(at2000[0].count == 2000, "the single chunk should be 2000 chars")
+
+        // Boundary: 2001 chars splits into [2000, 1].
+        let at2001 = NotionModule.chunkCommentText(String(repeating: "x", count: 2001), maxChars: 2000)
+        try expect(at2001.count == 2, "2001 chars should be 2 chunks, got \(at2001.count)")
+        try expect(at2001[0].count == 2000 && at2001[1].count == 1, "2001 -> [2000, 1], got [\(at2001[0].count), \(at2001[1].count)]")
+
+        // 2500 chars splits into [2000, 500] preserving order; join reproduces input.
+        let big = String(repeating: "a", count: 2000) + String(repeating: "b", count: 500)
+        let chunks = NotionModule.chunkCommentText(big, maxChars: 2000)
+        try expect(chunks.count == 2, "2500 chars should be 2 chunks, got \(chunks.count)")
+        try expect(chunks[0].count == 2000 && chunks[1].count == 500, "2500 -> [2000, 500]")
+        try expect(chunks.joined() == big, "joined chunks must reproduce the original text")
+
+        // Short text is returned unchanged as a single chunk.
+        let short = NotionModule.chunkCommentText("hello", maxChars: 2000)
+        try expect(short.count == 1 && short[0] == "hello", "short text should be one unchanged chunk")
     }
 
     await test("notion_page_move rejects missing params") {
@@ -279,6 +284,40 @@ func runNotionModuleTests() async {
             throw TestError.assertion("Expected error for missing filePath")
         } catch is ToolRouterError {
             // Expected
+        }
+    }
+
+    // FB-6: notion_block_delete supports bulk deletes via an optional `blockIds`
+    // array while keeping single `blockId` back-compat. Assert the schema
+    // declares both; required[] must be empty so either form is accepted.
+    await test("notion_block_delete schema declares optional blockIds plus back-compat blockId") {
+        let tools = await router.registrations(forModule: "notion")
+        guard let tool = tools.first(where: { $0.name == "notion_block_delete" }) else {
+            throw TestError.assertion("notion_block_delete not found")
+        }
+        let schema = String(describing: tool.inputSchema)
+        try expect(schema.contains("blockIds"), "block_delete schema should declare blockIds for bulk deletes")
+        try expect(schema.contains("blockId"), "block_delete schema should keep blockId for back-compat")
+    }
+
+    // FB-6: a `blockIds` array argument is accepted (not rejected as malformed).
+    // Without a live registry the dispatch surfaces a client/registry error, but
+    // it must NOT be a ToolRouterError invalid-arguments rejection of blockIds.
+    await test("notion_block_delete accepts a blockIds array (no invalid-arguments rejection)") {
+        do {
+            _ = try await router.dispatch(
+                toolName: "notion_block_delete",
+                arguments: .object(["blockIds": .array([.string("b1"), .string("b2")])])
+            )
+            // Reaching here (e.g. live registry present) is fine — args were accepted.
+        } catch let e as ToolRouterError {
+            // The only acceptable ToolRouterError here is NOT an arg-shape rejection;
+            // a missing-args/invalid-args error would mean blockIds wasn't recognized.
+            let d = "\(e)"
+            try expect(!d.contains("missing 'blockId'"), "blockIds array must be recognized, got: \(d)")
+        } catch {
+            // Any non-router error (e.g. no Notion connection configured) is expected
+            // here and means the blockIds argument was accepted past validation.
         }
     }
 
@@ -637,9 +676,11 @@ func runNotionModuleTests() async {
                 throw TestError.assertion("Expected object result")
             }
         }
-    } else {
 
-        await test("notion_datasource_update succeeds with API key (read schema)") {
+        // v3.6.1: moved into the hasAPIKey branch — this makes a LIVE
+        // notion_datasource_get call that requires a key; in the else (no-key)
+        // branch it could only ever fail. Name corrected (get, not update).
+        await test("notion_datasource_get succeeds with API key (read schema)") {
             let result = try await router.dispatch(
                 toolName: "notion_datasource_get",
                 arguments: .object(["dataSourceId": .string("992fd5ac-d938-4be4-95fb-8ef18bd86bba")])
@@ -651,6 +692,8 @@ func runNotionModuleTests() async {
                 throw TestError.assertion("Expected object result")
             }
         }
+    } else {
+
         await test("notion_search reports missing API key gracefully") {
             do {
                 _ = try await router.dispatch(
