@@ -1,8 +1,23 @@
-// main.swift – V1-06 Test Runner
+// TestRunner.swift – V1-06 Test Runner
 // NotionBridge · Tests (standalone executable — no XCTest needed)
 //
 // Runs: SecurityGate, ToolRouter, AuditLog, Module tests, Integration/E2E tests
 // PKT-376: SecurityGate tests updated for 3-tier model
+//
+// MAIN-ACTOR REENTRANCY FIX (summary; full reasoning at the @main entry point
+// below): the UI/contract tests hop to the main actor via
+// `await MainActor.run { ... }` (55 call sites across 11 files). If the driver
+// itself runs ON the main actor those hops are reentrant self-calls that
+// nondeterministically deadlock (the suite froze at 0% progress on ~50% of
+// runs, always GREEN when it finished). The driver MUST run off the main actor.
+// This file used to be a `main.swift` (top-level code → implicitly main-actor)
+// and the deadlock was endemic. It is now `TestRunner.swift` with a `@main`
+// struct whose SYNCHRONOUS `main()` runs the whole sequence on a `Task.detached`
+// (off the main actor) while pumping the main run loop with `RunLoop.main.run()`.
+// (A `main.swift` file and a `@main` attribute are mutually exclusive in one
+// target, hence the rename.) The shared harness primitives (`test`, `expect`,
+// `TestError`, `passed`, `failed`) stay at file scope because the other test
+// files call them as free functions.
 
 import Foundation
 
@@ -10,37 +25,30 @@ import Foundation
 import MCP
 import NotionBridgeLib
 
-// Line-buffer stdout. When this runner's output is a pipe (CI: `… | tee`),
-// stdout defaults to FULL buffering, so on an intermittent hang the buffered
-// tail never flushes and the CI log's last line is NOT where it actually hung —
-// it just shows the last flushed block. Line buffering flushes on every newline
-// (negligible overhead: ~one flush per test line, unlike per-byte unbuffered),
-// so the CI log always pinpoints the hanging test. Distinct from the summary
-// teardown race, which is handled by the atexit summary handler below.
-setvbuf(stdout, nil, _IOLBF, 0)
-
-// HERMETIC TEST ISOLATION (v3.6.1): point ConfigManager at a throwaway temp
-// config file BEFORE any test (or ConfigManager.shared) touches it. Without
-// this, ConfigManagerTests read and mutate the user's real
-// ~/.config/.../config.json — non-hermetic, order-dependent, destructive.
-// Seeds a minimal valid config so first reads succeed.
-if ProcessInfo.processInfo.environment["BRIDGE_CONFIG_PATH"] == nil {
-    let tmpConfig = FileManager.default.temporaryDirectory
-        .appendingPathComponent("bridge-test-config-\(ProcessInfo.processInfo.processIdentifier).json")
-    setenv("BRIDGE_CONFIG_PATH", tmpConfig.path, 1)
-    let seed = #"{"sensitivePaths":["~/.ssh","~/.aws","~/.gnupg","~/.config","~/Library/Keychains"]}"#
-    try? seed.data(using: .utf8)?.write(to: tmpConfig, options: .atomic)
-}
-
-// Credential / payment MCP tests assume the Keychain credentials feature is enabled.
-UserDefaults.standard.set(true, forKey: CredentialsFeature.userDefaultsKey)
-
-// MARK: - Test Harness
+// MARK: - Test Harness (file scope — other test files call these as free functions)
 
 nonisolated(unsafe) var passed = 0
 nonisolated(unsafe) var failed = 0
 
-func test(_ name: String, _ body: () async throws -> Void) async {
+// Process exit code, set by the detached run task when the suite finishes and
+// read by `main()` after the main run loop stops. The detached task no longer
+// calls `exit()` itself (see the entry-point note) — it hands the code back to
+// the MAIN thread, which exits cleanly there.
+nonisolated(unsafe) var exitCode: Int32 = 0
+
+// Set true (on the main thread) when the suite has finished and the main loop
+// should stop pumping. `main()` drives the run loop in a `while !suiteFinished`
+// loop and checks this after each iteration, so a stop returns control to it
+// (a bare `RunLoop.main.run()` re-enters its inner mode loop forever after a
+// CFRunLoopStop and never returns — that re-entry was the residual teardown hang).
+nonisolated(unsafe) var suiteFinished = false
+
+// `body` is `sending`: the driver now runs OFF the main actor (see the @main
+// note above), so each test closure is created in the driver's isolation domain
+// and handed to `test()` — marking it `sending` lets ownership transfer across
+// that boundary without a Sendable conformance, which is safe because the
+// closure is used exactly once and never escapes.
+func test(_ name: String, _ body: sending () async throws -> Void) async {
     do {
         try await body()
         passed += 1
@@ -62,29 +70,184 @@ enum TestError: Error, LocalizedError {
     }
 }
 
-// Emit the final summary from an atexit handler so it is GUARANTEED to print.
-// With top-level `await`, the synchronous continuation after the final
-// suspension point intermittently loses a race with process teardown and is
-// skipped entirely (the binary still exits 0 and every test ran) — which
-// dropped the `Results:` line the floor gate parses. atexit handlers run during
-// any normal process exit, after all top-level code, so the summary is
-// deterministic regardless of that race or of stdout buffering mode. The
-// closure references only globals, so it captures nothing (@convention(c)-safe).
-atexit {
-    print("\n" + String(repeating: "=", count: 50))
-    print("Results: \(passed) passed, \(failed) failed, \(passed + failed) total")
-    print(String(repeating: "=", count: 50))
-    print(failed > 0 ? "\u{274C} TESTS FAILED" : "\u{2705} ALL TESTS PASSED")
-    fflush(stdout)
+// AuditLog test fixture. Hoisted to file scope (was a local func inside the
+// driver) so the off-main-actor `sending` test closures can call it without
+// crossing an actor boundary; `nonisolated` because AuditEntry is a plain value.
+nonisolated func makeSampleEntry(
+    toolName: String = "test_tool",
+    tier: SecurityTier = .open,
+    status: ApprovalStatus = .approved
+) -> AuditEntry {
+    AuditEntry(
+        timestamp: Date(), toolName: toolName, tier: tier,
+        inputSummary: "test input", outputSummary: "test output",
+        durationMs: 42.0, approvalStatus: status
+    )
 }
 
-// ============================================================
-// MARK: - SecurityGate Tests (v3: 3-tier model)
-// ============================================================
+// MARK: - Entry point
 
-print("\n\u{1F512} SecurityGate Tests (v3)")
+@main
+struct NotionBridgeTestRunner {
+    // MAIN-ACTOR REENTRANCY FIX (corrected). Symptom: the suite froze at 0%
+    // forward progress on ~50% of local runs, at varying points, always GREEN
+    // when it did finish — a nondeterministic deadlock on the main actor.
+    //
+    // Root cause: the UI/contract tests hop to the main actor via
+    // `await MainActor.run { ... }` (55 call sites across 11 files) to touch
+    // @MainActor types (SwiftUI views, @Observable controllers, AppKit). If the
+    // DRIVER itself runs ON the main actor, those hops are REENTRANT self-calls on
+    // the same actor, which nondeterministically deadlock.
+    //
+    // The original driver was a `main.swift` whose top-level code is implicitly
+    // @MainActor-isolated → on the main actor → deadlock. Renaming it to an
+    // `async @main` did NOT fix it: under swift-tools-version 6.2 ("approachable
+    // concurrency") the `async static func main()` of a `@main` type is INFERRED
+    // @MainActor-isolated, so it STILL ran on the main actor (verified
+    // empirically: `main()`'s body and its nested `MainActor.run` bodies both ran
+    // on the main thread → still reentrant → still deadlocked). A bare
+    // `Task.detached` wrapper with `await runner.value` ALSO failed: while `main()`
+    // was suspended the main run loop was not pumped, so SCK/AppKit replies and
+    // MainActor scheduling stalled → intermittent hangs AND a teardown SIGTRAP.
+    //
+    // FIX: a SYNCHRONOUS `main()` (synchronous → NOT an async main-actor task; it
+    // is the plain process entry on the main thread). It spawns the whole test
+    // sequence on a `Task.detached`, which runs OFF the main actor, then PUMPS the
+    // main run loop (a `while !suiteFinished { CFRunLoopRunInMode(.defaultMode…) }`
+    // drive — see the entry-point body for why a bare `RunLoop.main.run()` cannot
+    // be cleanly stopped). Result: the driver body runs off the main actor (every
+    // `MainActor.run` is now a REAL cross-actor hop, not a reentrant self-call — no
+    // deadlock), and the live main run loop keeps the main actor serviced AND
+    // services CFRunLoop-dependent system callbacks (ScreenCaptureKit / AppKit).
+    // When the suite finishes, the detached task hands the exit code back to the
+    // MAIN thread (via a main-queue enqueue that stops the loop); `main()` then
+    // exits cleanly THERE — no more `exit()` from the detached task out from under
+    // a live run loop (that was the teardown SIGTRAP / hang). `runAllTests()` is
+    // `nonisolated` so its body inherits the detached (non-main) executor.
+    static func main() {
+        // Line-buffer stdout. When this runner's output is a pipe (CI: `… | tee`),
+        // stdout defaults to FULL buffering, so on an intermittent hang the buffered
+        // tail never flushes and the CI log's last line is NOT where it actually hung —
+        // it just shows the last flushed block. Line buffering flushes on every newline
+        // (negligible overhead: ~one flush per test line, unlike per-byte unbuffered),
+        // so the CI log always pinpoints the hanging test. Distinct from the summary
+        // teardown race, which is handled by the atexit summary handler below.
+        setvbuf(stdout, nil, _IOLBF, 0)
 
-let gate = SecurityGate()
+        // HERMETIC TEST ISOLATION (v3.6.1): point ConfigManager at a throwaway temp
+        // config file BEFORE any test (or ConfigManager.shared) touches it. Without
+        // this, ConfigManagerTests read and mutate the user's real
+        // ~/.config/.../config.json — non-hermetic, order-dependent, destructive.
+        // Seeds a minimal valid config so first reads succeed.
+        if ProcessInfo.processInfo.environment["BRIDGE_CONFIG_PATH"] == nil {
+            let tmpConfig = FileManager.default.temporaryDirectory
+                .appendingPathComponent("bridge-test-config-\(ProcessInfo.processInfo.processIdentifier).json")
+            setenv("BRIDGE_CONFIG_PATH", tmpConfig.path, 1)
+            let seed = #"{"sensitivePaths":["~/.ssh","~/.aws","~/.gnupg","~/.config","~/Library/Keychains"]}"#
+            try? seed.data(using: .utf8)?.write(to: tmpConfig, options: .atomic)
+        }
+
+        // Credential / payment MCP tests assume the Keychain credentials feature is enabled.
+        UserDefaults.standard.set(true, forKey: CredentialsFeature.userDefaultsKey)
+
+        // Emit the final summary from an atexit handler so it is GUARANTEED to print.
+        // The synchronous continuation after the final suspension point can
+        // intermittently lose a race with process teardown and be skipped entirely
+        // (the binary still exits 0 and every test ran) — which dropped the
+        // `Results:` line the floor gate parses. atexit handlers run during any
+        // normal process exit, after all code, so the summary is deterministic
+        // regardless of that race or of stdout buffering mode. The closure
+        // references only globals, so it captures nothing (@convention(c)-safe).
+        atexit {
+            print("\n" + String(repeating: "=", count: 50))
+            print("Results: \(passed) passed, \(failed) failed, \(passed + failed) total")
+            print(String(repeating: "=", count: 50))
+            print(failed > 0 ? "\u{274C} TESTS FAILED" : "\u{2705} ALL TESTS PASSED")
+            fflush(stdout)
+        }
+
+        // Run the test sequence OFF the main actor (see the entry-point note),
+        // then pump the main run loop so the (now real) MainActor.run hops and any
+        // CFRunLoop-dependent system callbacks (ScreenCaptureKit / AppKit) are
+        // serviced while the suite runs.
+        //
+        // CLEAN MAIN-THREAD SHUTDOWN (teardown-SIGTRAP fix). The driver used to
+        // call `exit()` from INSIDE the detached task while the main thread was
+        // blocked in `RunLoop.main.run()`. That tore the process down from under a
+        // live CFRunLoop mid-iteration: the C++/Swift-runtime teardown ran while
+        // the run loop was still servicing the main dispatch queue, which
+        // intermittently SIGTRAP'd during teardown BEFORE the atexit summary
+        // handler could print the `Results:` line — so a run that passed every
+        // test exited with no summary (and the operator's truncated-count race has
+        // the same root cause). It could also HANG: if an arming subsystem (e.g. a
+        // test that constructs a real AppDelegate → Sparkle auto-updater) had
+        // scheduled main-queue work, the still-pumping run loop would service it
+        // and present a modal `NSAlert`, wedging the main thread forever.
+        //
+        // FIX: when the suite finishes, the detached task records the exit code and
+        // enqueues a MAIN-QUEUE work item (DispatchQueue.main.async) that sets the
+        // `suiteFinished` flag and stops the loop. The main thread drives the run
+        // loop in a `while !suiteFinished` loop using CFRunLoopRunInMode, then falls
+        // through and exits ON the main thread. Why each piece is the robust form:
+        //   • Hand-off via the main queue (not exit() / CFRunLoopStop from the
+        //     task's own thread): CFRunLoopStop from a FOREIGN thread races an idle
+        //     main loop — it sets the stop flag but the loop only notices on wake,
+        //     and a loop parked in mach_msg with no pending source can miss the
+        //     wakeup and sleep forever. A main-queue enqueue is itself a source the
+        //     main loop always services, so it reliably WAKES the loop and the block
+        //     runs ON the main thread, where the stop is race-free.
+        //   • A `while !suiteFinished { CFRunLoopRunInMode(...) }` drive instead of
+        //     `RunLoop.main.run()`: NSRunLoop.run() runs the loop "permanently" by
+        //     re-entering its inner runMode loop after every return, so a
+        //     CFRunLoopStop breaks ONE inner iteration and run() immediately
+        //     re-enters — it never hands control back (observed: every test printed,
+        //     then a permanent hang in RunLoop.main.run()). Driving the mode
+        //     ourselves and re-checking the flag each iteration makes the stop
+        //     actually return to us. We pump in .defaultMode, which is what
+        //     RunLoop.main.run() used and what services MainActor + the
+        //     CFRunLoop-dependent SCK/AppKit callbacks the suite relies on.
+        // Net: exit() runs on the main thread with the loop torn down in an orderly
+        // way; the atexit summary handler fires on that clean exit, so the
+        // `Results:` summary is emitted deterministically with the full count, every
+        // run.
+        Task.detached(priority: .userInitiated) {
+            await runAllTests()
+            exitCode = failed > 0 ? 1 : 0
+            DispatchQueue.main.async {
+                suiteFinished = true
+                CFRunLoopStop(CFRunLoopGetMain())
+            }
+        }
+        while !suiteFinished {
+            // Block until a source fires (test-driven MainActor hops, SCK/AppKit
+            // callbacks, or the shutdown enqueue), then re-check the flag. Result
+            // handling: .stopped/.handledSource → just loop and re-check. .finished
+            // means the mode momentarily had NO sources/timers and returned at once;
+            // re-running immediately would busy-spin, so back off briefly. In
+            // practice the main dispatch-queue port keeps the mode non-empty for the
+            // whole suite, so .finished is a defensive guard, not the steady state.
+            let result = CFRunLoopRunInMode(.defaultMode, 0.1, false)
+            if result == .finished {
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+        }
+
+        // Reached only after the shutdown block set the flag + stopped the loop.
+        // Exit on the MAIN thread with the suite's code; the atexit handler prints
+        // the summary.
+        exit(exitCode)
+    }
+
+    // The full test sequence. `nonisolated` so it runs on whatever (non-main)
+    // executor the detached task provides, NOT the main actor.
+    nonisolated static func runAllTests() async {
+        // ============================================================
+        // MARK: - SecurityGate Tests (v3: 3-tier model)
+        // ============================================================
+
+        print("\n\u{1F512} SecurityGate Tests (v3)")
+
+        let gate = SecurityGate()
 
 await test("Open tier allows immediately") {
     let d = await gate.enforce(toolName: "read_file", tier: .open, arguments: .object(["path": .string("/tmp/test.txt")]))
@@ -352,18 +515,6 @@ await test("Dispatch returns handoff for fork-bomb commands") {
 
 print("\n\u{1F4CB} AuditLog Tests")
 
-func makeSampleEntry(
-    toolName: String = "test_tool",
-    tier: SecurityTier = .open,
-    status: ApprovalStatus = .approved
-) -> AuditEntry {
-    AuditEntry(
-        timestamp: Date(), toolName: toolName, tier: tier,
-        inputSummary: "test input", outputSummary: "test output",
-        durationMs: 42.0, approvalStatus: status
-    )
-}
-
 await test("Append adds entry to in-memory log") {
     let log = AuditLog()
     await log.append(makeSampleEntry())
@@ -596,9 +747,11 @@ await runBridgeCloudManagerTests()
 // MARK: - Summary
 // ============================================================
 
-// Summary is emitted by the atexit handler registered at startup (reliable even
-// if this top-level continuation is skipped by the teardown race). This exit is
-// best-effort: when it runs it sets the proper code AND triggers the atexit
-// summary; if the race skips it, the implicit exit(0) still fires the atexit
-// summary and the floor gate derives pass/fail from the `Results:` count.
-exit(failed > 0 ? 1 : 0)
+// Summary is emitted by the atexit handler registered at startup, which fires on
+// the clean main-thread exit() that `main()` performs after this task stops the
+// run loop. This function NO LONGER calls exit() itself: exiting from here (off
+// the main thread, mid-RunLoop) is exactly the teardown-SIGTRAP this fix removes.
+// The exit code + CFRunLoopStop are handled by the detached-task wrapper in
+// main(); when control returns there, main() exits on the main thread.
+    } // static func runAllTests()
+} // @main struct NotionBridgeTestRunner

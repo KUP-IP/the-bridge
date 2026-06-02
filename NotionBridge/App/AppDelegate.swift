@@ -105,9 +105,26 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         permissionManager: permissionManager
     )
 
+    /// Detect the standalone NotionBridgeTests executable. The test harness
+    /// constructs a real `AppDelegate()` (e.g. to assert the Commands palette
+    /// master toggle persists), and the harness pumps a live main run loop to
+    /// service MainActor + CFRunLoop system callbacks. With `startingUpdater:
+    /// true`, Sparkle schedules an automatic appcast check on the main dispatch
+    /// queue; once that async fetch returns INTO the pumped main run loop it can
+    /// present an `NSAlert runModal` (a new-version / permission dialog), which
+    /// wedges the main thread in a nested modal event loop and hangs/SIGTRAPs the
+    /// suite at teardown. A headless unit-test binary must never auto-check for
+    /// updates, so we start the updater disarmed in that process (production
+    /// startup is unchanged). Mirrors the SecurityGate.runningInTestProcess idiom.
+    private static var runningInTestProcess: Bool {
+        let processName = ProcessInfo.processInfo.processName.lowercased()
+        if processName.contains("notionbridgetests") { return true }
+        return CommandLine.arguments.joined(separator: " ").lowercased().contains("notionbridgetests")
+    }
+
     public override init() {
         updaterController = SPUStandardUpdaterController(
-            startingUpdater: true,
+            startingUpdater: !Self.runningInTestProcess,
             updaterDelegate: nil,
             userDriverDelegate: nil
         )
