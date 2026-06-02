@@ -515,6 +515,17 @@
 # the order-inversion rule.
 set -euo pipefail
 
+# PKT-957 / v3.7·D (2026-06-01): reminders_* MCP tool family over EventKit
+# (RemindersModule + injectable RemindersStoring seam). New
+# RemindersModuleTests contributes 17 harness `test()` blocks (6 top-level
+# + 6 nested access-denied sub-tests + 5 CRUD/idempotency/listing blocks)
+# against the in-memory mock seam — no live EventKit/TCC. Also bumped
+# staticFeatureModuleToolCount 172 -> 178 and family count 19 -> 20
+# (registry-count / E2E family assertions move with the constants). Measured
+# 1518 passed, 0 failed. Floor raised 1501 -> 1518 per the order-inversion
+# rule. (Known ScreenModuleTests/screen_record_stop sandbox hang handled by
+# the watchdog/retry below — unaffected.)
+
 # v3.6.1 (2026-05-31): hermetic-test remediation + WS-C/E (Mac-side cloud
 # access: BridgeCloudManager + NL-3 auth-passdown + Remote Access settings)
 # merged in. ConfigManagerTests no longer read/mutate the user's live config
@@ -522,7 +533,7 @@ set -euo pipefail
 # "datasource_update succeeds with API key" test moved into the hasAPIKey
 # branch and renamed to datasource_get. Hermetic base was 1467; WS-C/E adds
 # the BridgeCloudManager suite. Floor recomputed from the post-merge gate run.
-FLOOR="${BRIDGE_TEST_FLOOR:-1501}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1518}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

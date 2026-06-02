@@ -12,6 +12,26 @@
     <true/>
     <key>com.apple.security.personal-information.addressbook</key>
     <true/>
+    <!-- PKT-957 / v3.7·D (2026-06-01): calendars entitlement for the new
+         reminders_* tool family (EventKit EKEventStore .reminder entities,
+         RemindersModule). EventKit reminder access is gated behind this
+         entitlement + a runtime Reminders TCC grant.
+
+         ⚠️ OPERATOR ACTION REQUIRED — VALIDATE AGAINST NOTARIZE BEFORE SHIP.
+         Per the PKT-933 lesson (keychain-access-groups, removed 2026-05-30):
+         a Developer-ID app distributed outside the App Store has NO embedded
+         provisioning profile, and an entitlement the profile/notarization
+         refuses can make launchd reject the app at spawn ("Launchd job spawn
+         failed", POSIX 163) even when codesign + notarize + Gatekeeper pass.
+         This packet DECLARES the entitlement but did NOT sign/notarize/launch
+         the app. The operator MUST: (1) build+sign+notarize a Developer-ID
+         build with this key, (2) confirm the notarized app LAUNCHES, and
+         (3) confirm the Reminders TCC prompt appears + reminders_* tools work
+         live. If notarize/launch refuses this key, the documented fallback is
+         AppleScript via the existing com.apple.security.automation.apple-events
+         entitlement (already present above) — remove this key in that case. -->
+    <key>com.apple.security.personal-information.calendars</key>
+    <true/>
     <!-- PKT-933 / hotfix 2026-05-30: keychain-access-groups was REMOVED.
          A Developer-ID app distributed outside the App Store (no embedded
          provisioning profile) that declares keychain-access-groups is refused
