@@ -41,6 +41,7 @@ public enum ModuleGroupID: String, CaseIterable, Sendable, Hashable {
     case notes
     case contacts
     case reminders
+    case calendar
     case screen
     case chrome
     case stripe
@@ -72,6 +73,7 @@ public enum ModuleGroupID: String, CaseIterable, Sendable, Hashable {
         case .notes:         return "notes"
         case .contacts:      return "contacts"
         case .reminders:     return "reminders"
+        case .calendar:      return "calendar"
         case .screen:        return "screen"
         case .chrome:        return "chrome"
         case .stripe:        return "stripe"
@@ -105,6 +107,7 @@ public enum ModuleGroupID: String, CaseIterable, Sendable, Hashable {
         case .notes:         return "Apple Notes — list, read, write, search"
         case .contacts:      return "handle resolution for relationship work"
         case .reminders:     return "iCloud Reminders — list, create, complete"
+        case .calendar:      return "Calendar — list, query events, create/update/delete"
         case .screen:        return "capture, OCR, recording"
         case .chrome:        return "tab inspection, JS exec, navigation"
         case .stripe:        return "billing, payments, customers"
@@ -138,6 +141,7 @@ public enum ModuleGroupID: String, CaseIterable, Sendable, Hashable {
         case .notes:         return "note.text"
         case .contacts:      return "person.crop.circle.fill"
         case .reminders:     return "checklist"
+        case .calendar:      return "calendar"
         case .screen:        return "rectangle.on.rectangle"
         case .chrome:        return "globe"
         case .stripe:        return "dollarsign.circle.fill"
@@ -325,6 +329,7 @@ public enum ModuleGroupDerivation {
         "notes":       .notes,
         "contacts":    .contacts,
         "reminders":   .reminders,
+        "calendar":    .calendar,
         "screen":      .screen,
         "chrome":      .chrome,
         "stripe":      .stripe,
@@ -385,6 +390,8 @@ public enum ModuleGroupDerivation {
             return [ModuleGroupDependency(label: "Contacts permission", route: "permissions") ]
         case .reminders:
             return [ModuleGroupDependency(label: "Reminders permission", route: "permissions") ]
+        case .calendar:
+            return [ModuleGroupDependency(label: "Calendar permission", route: "permissions") ]
         case .screen:
             return [ModuleGroupDependency(label: "Screen Recording", route: "permissions") ]
         case .chrome:

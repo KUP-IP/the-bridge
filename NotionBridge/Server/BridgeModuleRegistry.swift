@@ -48,6 +48,7 @@ public enum BridgeModuleRegistry {
         await SystemModule.register(on: router)
         await ContactsModule.register(on: router)
         await RemindersModule.register(on: router)
+        await CalendarModule.register(on: router)
         await NotionModule.register(on: router)
         await ScreenModule.register(on: router)
         await ScreenModule.registerRecording(on: router)

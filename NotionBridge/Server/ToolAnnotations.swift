@@ -280,6 +280,16 @@ public enum ToolAnnotationCatalog {
         "playwright_run": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: true),
         "port_inspect": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: false),
         "process_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
+        // PKT-962 (v3.7·I): Calendar family over EventKit (.event entities,
+        // reusing v3.7·D's store + calendars entitlement). list/events are
+        // read-only (.open); create/update non-destructive but writing
+        // (.notify); delete is destructive + confirmation-gated (tier
+        // .request). Mirrors the reminders annotations below.
+        "calendar_create": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "calendar_delete": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: true, openWorld: true),
+        "calendar_events": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "calendar_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "calendar_update": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         // PKT-957 (v3.7·D): Reminders family over EventKit. lists/list are
         // read-only (.open); create/update non-destructive but writing;
         // complete is idempotent (set-to-state X); delete is destructive +

@@ -73,7 +73,10 @@ public enum BridgeConstants {
     ///   + 5 mail_* tools (PKT-961, v3.7·H): mail_list/read/search/draft/send (Apple Mail).
     ///   + 6 notes_* tools (PKT-960, v3.7·G): notes_list/read/search/create/update/delete (Apple Notes).
     /// v3.7 Wave-1 integration: 182 + 2 (shortcuts) + 5 (mail) + 6 (notes) = 195.
-    public static let staticFeatureModuleToolCount = 195
+    ///   + 5 calendar_* tools (PKT-962, v3.7·I): calendar_list/events/create/update/delete
+    ///     (native EventKit .event entities; reuses v3.7·D's store + calendars entitlement).
+    /// v3.7·I (PKT-962): 195 + 5 (calendar) = 200.
+    public static let staticFeatureModuleToolCount = 200
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.
@@ -88,5 +91,6 @@ public enum BridgeConstants {
     /// v3.7·H (PKT-961): + mail family.
     /// v3.7·G (PKT-960): + notes family.
     /// v3.7 Wave-1 integration: 21 + 1 (shortcuts) + 1 (mail) + 1 (notes) = 24.
-    public static let staticFeatureModuleFamilyCount = 24
+    /// v3.7·I (PKT-962): + calendar family = 25.
+    public static let staticFeatureModuleFamilyCount = 25
 }
