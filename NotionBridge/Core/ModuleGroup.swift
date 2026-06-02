@@ -39,6 +39,7 @@ public enum ModuleGroupID: String, CaseIterable, Sendable, Hashable {
     case notion
     case messages
     case contacts
+    case reminders
     case screen
     case chrome
     case stripe
@@ -68,6 +69,7 @@ public enum ModuleGroupID: String, CaseIterable, Sendable, Hashable {
         case .notion:        return "notion"
         case .messages:      return "messages"
         case .contacts:      return "contacts"
+        case .reminders:     return "reminders"
         case .screen:        return "screen"
         case .chrome:        return "chrome"
         case .stripe:        return "stripe"
@@ -99,6 +101,7 @@ public enum ModuleGroupID: String, CaseIterable, Sendable, Hashable {
         case .notion:        return "workspace data sources, pages, comments"
         case .messages:      return "Messages.app — iMessage / SMS"
         case .contacts:      return "handle resolution for relationship work"
+        case .reminders:     return "iCloud Reminders — list, create, complete"
         case .screen:        return "capture, OCR, recording"
         case .chrome:        return "tab inspection, JS exec, navigation"
         case .stripe:        return "billing, payments, customers"
@@ -130,6 +133,7 @@ public enum ModuleGroupID: String, CaseIterable, Sendable, Hashable {
         case .notion:        return "n.square.fill"
         case .messages:      return "bubble.left.and.bubble.right.fill"
         case .contacts:      return "person.crop.circle.fill"
+        case .reminders:     return "checklist"
         case .screen:        return "rectangle.on.rectangle"
         case .chrome:        return "globe"
         case .stripe:        return "dollarsign.circle.fill"
@@ -315,6 +319,7 @@ public enum ModuleGroupDerivation {
         "notion":      .notion,
         "messages":    .messages,
         "contacts":    .contacts,
+        "reminders":   .reminders,
         "screen":      .screen,
         "chrome":      .chrome,
         "stripe":      .stripe,
@@ -369,6 +374,8 @@ public enum ModuleGroupDerivation {
             return [ModuleGroupDependency(label: "Full Disk Access", route: "permissions") ]
         case .contacts:
             return [ModuleGroupDependency(label: "Contacts permission", route: "permissions") ]
+        case .reminders:
+            return [ModuleGroupDependency(label: "Reminders permission", route: "permissions") ]
         case .screen:
             return [ModuleGroupDependency(label: "Screen Recording", route: "permissions") ]
         case .chrome:

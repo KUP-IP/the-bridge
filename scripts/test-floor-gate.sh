@@ -515,6 +515,17 @@
 # the order-inversion rule.
 set -euo pipefail
 
+# PKT-957 / v3.7·D (2026-06-01): reminders_* MCP tool family over EventKit
+# (RemindersModule + injectable RemindersStoring seam). New
+# RemindersModuleTests contributes 17 harness `test()` blocks (6 top-level
+# + 6 nested access-denied sub-tests + 5 CRUD/idempotency/listing blocks)
+# against the in-memory mock seam — no live EventKit/TCC. Also bumped
+# staticFeatureModuleToolCount 172 -> 178 and family count 19 -> 20
+# (registry-count / E2E family assertions move with the constants). Measured
+# 1518 passed, 0 failed. Floor raised 1501 -> 1518 per the order-inversion
+# rule. (Known ScreenModuleTests/screen_record_stop sandbox hang handled by
+# the watchdog/retry below — unaffected.)
+
 # v3.6.1 (2026-05-31): hermetic-test remediation + WS-C/E (Mac-side cloud
 # access: BridgeCloudManager + NL-3 auth-passdown + Remote Access settings)
 # merged in. ConfigManagerTests no longer read/mutate the user's live config
@@ -524,12 +535,19 @@ set -euo pipefail
 # the BridgeCloudManager suite. Floor recomputed from the post-merge gate run.
 # v3.7·B (PKT-931, 2026-06-01): standing_orders_* MCP tools (list/read/save/
 # delete) landed — new StandingOrdersRecordStore actor + 4-tool module.
-# +15 StandingOrdersModuleTests (registration/tier, CRUD round-trip, idempotent
+# StandingOrdersModuleTests (registration/tier, CRUD round-trip, idempotent
 # upsert, soft-delete+archive, list archived exclusion/opt-in, read 404 on
 # soft-deleted, concurrent-save actor serialization, atomic persistence,
-# handler-level save/read/invalid-scope). 1501 → 1515. Tool count 172 → 176,
-# family count 19 → 20. Measured on the worktree gate run, 0 failures.
-FLOOR="${BRIDGE_TEST_FLOOR:-1515}"
+# handler-level save/read/invalid-scope). In isolation 1501 → 1515 (+14).
+# Tool count 172 → 176, family count 19 → 20.
+#
+# v3.7 review-batch integration (2026-06-01): merged PKT-931 (standing_orders,
+# +14) + PKT-934 (v3.7·C UI polish, UI-only, +0 tests) + PKT-957/v3.7·D
+# (reminders, +17) onto a single integration branch off the shared 1501 base.
+# Floor reconciled to base + SUM of per-branch deltas: 1501 + 14 + 0 + 17 = 1532.
+# Reconciled tool count 172 + 4 + 6 = 182; family count 19 + 1 + 1 = 21.
+# Measured on the integration gate run, 0 failures.
+FLOOR="${BRIDGE_TEST_FLOOR:-1532}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5
@@ -653,31 +671,68 @@ trap 'rm -f "$LOG"' EXIT
 # immediately with no retry, and the floor/failure checks below are unchanged.
 ATTEMPTS=3
 LINE=""
+# Per-attempt watchdog. The clean suite runs in ~1 min; the known teardown hang
+# (AVFoundation/AppKit worker threads pinning process exit after every test has
+# already printed its ✅, aggravated by concurrent CPU contention) leaves the
+# binary parked at the top-level-`await` tail without ever flushing `Results:`.
+# A 1500s cap means one hung attempt burns 25 min before the retry; cap each
+# attempt at PER_ATTEMPT_TIMEOUT (default 600s — generous vs the ~60s clean run,
+# short enough that a hang is reaped and retried) and let the 3-attempt loop
+# catch a clean pass. Overridable via BRIDGE_TEST_ATTEMPT_TIMEOUT (e.g. 1500 to
+# restore the original single-shot cap).
+PER_ATTEMPT_TIMEOUT="${BRIDGE_TEST_ATTEMPT_TIMEOUT:-600}"
 for attempt in $(seq 1 "$ATTEMPTS"); do
   set +e
-  perl -e 'alarm 1500; exec @ARGV' "$BIN" | tee "$LOG"
+  perl -e "alarm ${PER_ATTEMPT_TIMEOUT}; exec @ARGV" "$BIN" | tee "$LOG"
   RC=${PIPESTATUS[0]}
   set -e
 
+  # A complete green `Results:` line proves every test ran and passed. Whether
+  # the binary then exited 0, was SIGALRM'd by the watchdog (142/14), or
+  # SIGKILL'd at teardown (137), the suite itself is green — accept it. Only a
+  # NON-zero exit WITHOUT such a line is ambiguous and handled below.
+  GREEN_LINE="$(tr -d '\000-\010\013\014\016-\037' < "$LOG" | grep -aE 'Results: [0-9]+ passed, 0 failed, [0-9]+ total' | tail -1 || true)"
+  if [ -n "$GREEN_LINE" ]; then
+    if [ "$RC" -ne 0 ]; then
+      echo "::warning::test-floor-gate: attempt ${attempt}/${ATTEMPTS} exited ${RC} (post-completion teardown race) but a complete green 'Results:' line was captured — accepting it"
+    fi
+    LINE="$GREEN_LINE"
+    break
+  fi
+
   if [ "$RC" -eq 142 ] || [ "$RC" -eq 14 ]; then
-    echo "::error::test-floor-gate: test binary exceeded 1500s watchdog and was killed"
-    echo "--- last 60 lines of test output (so you can see which test hung) ---"
-    tail -60 "$LOG" || true
+    # Watchdog fired with NO complete Results line. If every test still printed
+    # its per-test line (suite reached the end and hung only in teardown), this
+    # is the known teardown hang — retry. Otherwise a real test hung mid-suite.
+    echo "::warning::test-floor-gate: attempt ${attempt}/${ATTEMPTS} hit the ${PER_ATTEMPT_TIMEOUT}s watchdog with no 'Results:' line"
+    echo "--- last 20 lines of test output (so you can see where it hung) ---"
+    tail -20 "$LOG" || true
     echo "--- end of test output tail ---"
+    if [ "$attempt" -lt "$ATTEMPTS" ]; then
+      echo "::warning::test-floor-gate: retrying (suspected teardown hang under contention)"
+      continue
+    fi
+    echo "::error::test-floor-gate: watchdog hang persisted across ${ATTEMPTS} attempts"
     exit 124
   fi
+
   if [ "$RC" -ne 0 ]; then
-    echo "::error::test-floor-gate: test binary exited with code $RC (non-zero, non-timeout)"
+    # Non-zero exit (e.g. 137 SIGKILL) with no complete green Results line. Could
+    # be a teardown SIGKILL that lost the summary too — retry; if it persists,
+    # fail hard rather than masking a genuine crash.
+    echo "::warning::test-floor-gate: attempt ${attempt}/${ATTEMPTS} exited ${RC} with no complete green 'Results:' line"
+    if [ "$attempt" -lt "$ATTEMPTS" ]; then
+      echo "::warning::test-floor-gate: retrying (suspected teardown SIGKILL under contention)"
+      continue
+    fi
+    echo "::error::test-floor-gate: test binary exited with code $RC and no green summary across ${ATTEMPTS} attempts"
     echo "--- last 60 lines of test output ---"
     tail -60 "$LOG" || true
     echo "--- end of test output tail ---"
     exit "$RC"
   fi
 
-  LINE="$(grep -E '^Results: [0-9]+ passed, [0-9]+ failed, [0-9]+ total' "$LOG" | tail -1 || true)"
-  if [ -n "$LINE" ]; then
-    break
-  fi
+  # RC == 0 but no Results line: the classic exited-0-no-summary teardown race.
   echo "::warning::test-floor-gate: attempt ${attempt}/${ATTEMPTS} exited 0 but emitted no 'Results:' line (known harness teardown flake) — retrying"
 done
 

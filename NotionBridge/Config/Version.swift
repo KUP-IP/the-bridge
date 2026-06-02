@@ -67,7 +67,9 @@ public enum BridgeConstants {
     ///   + 2 jobs_pause_all / jobs_resume_all reinstated as catalog-present aliases routing to job_pause/_resume all:true
     /// Aliases all carry one-cycle deprecation prefix; full removal in 3.5.0 (Sprint B's release in the patch ladder).
     ///   + 4 standing_orders_{list,read,save,delete} (PKT-931, v3.7·B): new standing_orders family.
-    public static let staticFeatureModuleToolCount = 176
+    ///   + 6 reminders_* tools (PKT-957, v3.7·D): reminders_lists/list/create/update/complete/delete.
+    /// v3.7 review-batch integration: 172 + 4 (standing_orders) + 6 (reminders) = 182.
+    public static let staticFeatureModuleToolCount = 182
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.
@@ -75,6 +77,8 @@ public enum BridgeConstants {
     /// v2.2 · integration closeout: + jobs + cursor + computer = 19.
     /// v2.3 · 0.1 (PKT-804): − cursor family = 18.
     /// v2.3 · WS-D (PKT-2135a9e9): + snippets family = 19.
-    /// v3.7·B (PKT-931): + standing_orders family = 20.
-    public static let staticFeatureModuleFamilyCount = 20
+    /// v3.7·B (PKT-931): + standing_orders family.
+    /// v3.7·D (PKT-957): + reminders family.
+    /// v3.7 review-batch integration: 19 + 1 (standing_orders) + 1 (reminders) = 21.
+    public static let staticFeatureModuleFamilyCount = 21
 }
