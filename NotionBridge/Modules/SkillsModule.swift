@@ -84,6 +84,11 @@ public enum SkillsModule {
     shortcuts_run (run one by name with optional input, capture its output). \
     A Shortcut can do anything, so shortcuts_run is Notify-tier and never \
     auto-executes silently.
+    Calendar: the calendar_* family is native EventKit (.event entities) — \
+    calendar_list (enumerate calendars) and calendar_events (query a date \
+    range) are read-only/Open-tier; calendar_create and calendar_update are \
+    Notify-tier writes; calendar_delete is Request-tier (confirmation \
+    required, irreversible). Events use ISO-8601 start/end times.
     """
 
     public static func buildRoutingInstructions() -> String {

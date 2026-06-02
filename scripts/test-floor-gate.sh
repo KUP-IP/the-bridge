@@ -615,7 +615,20 @@ set -euo pipefail
 # MCPToolFactory/EndToEnd count assertions move with the constants).
 # Floor recomputed from the merged suite's measured green (see value below),
 # per the order-inversion rule — never lowered.
-FLOOR="${BRIDGE_TEST_FLOOR:-1607}"
+#
+# v3.7·I (PKT-962): CalendarModule (native EventKit `.event` entities over an
+# INJECTABLE `CalendarStoring` seam — production EventKitCalendarStore mirrors
+# v3.7·D's EventKitRemindersStore + REUSES the same calendars entitlement; tests
+# inject MockCalendarStore) added 5 MCP tools (calendar_list/events/create/
+# update/delete) + CalendarModuleTests (+18 measured test() blocks: registration,
+# tiering open/notify/request, list, CRUD round-trip, required-field validation,
+# notFound, date-range overlap filter, calendar-scoped filter, delete + re-delete
+# notFound, access-denied across all 5 tools + notDetermined). All against the
+# mock seam; NO live EventKit / TCC. calendar_list/events are .open (read-only),
+# create/update .notify, delete .request. Tool count 195 + 5 = 200; family count
+# 24 + 1 = 25 (the strict count assertions move with the constants). Floor raised
+# to the merged suite's measured green per the order-inversion rule — never lowered.
+FLOOR="${BRIDGE_TEST_FLOOR:-1625}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

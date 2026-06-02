@@ -621,6 +621,7 @@ await runMailModuleTests()           // PKT-961 (v3.7·H): mail_* Apple Mail mod
 await runNotesModuleTests()
 await runSystemModuleTests()
 await runRemindersModuleTests()   // PKT-957 (v3.7·D): reminders_* EventKit module (mock seam)
+await runCalendarModuleTests()    // PKT-962 (v3.7·I): calendar_* EventKit module (mock seam; reuses v3.7·D store + entitlement)
 await runNotionModuleTests()
 await runAccessibilityModuleTests()
 await runScreenModuleTests()
