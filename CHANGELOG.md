@@ -23,6 +23,23 @@
 ### Known issues
 - Intermittent test-binary hang under heavy concurrent machine load (multiple test runners). Mitigated by running the gate solo; a per-test harness watchdog is a tracked follow-up.
 
+## [unreleased] — v3.7·C UI polish round (PKT-934)
+
+> Draft release-notes entry. Minimal-intervention UX polish on the existing visual language — NOT a redesign. Anything that conflicts with Design System v1 is re-implemented later when that redesign lands. No theme changes, no new components, no animation overhauls.
+
+### Changed — visual consistency polish (5 carve-outs)
+
+- **Card spacing aligned to the grid (Tools + Jobs).** The Tools (`ModuleGroupList`) and Jobs (`JobsView`) card stacks shared an off-grid literal `10`pt gap; both now use `BridgeSpacing.sm` (12) with a `BridgeSpacing.md` (16) outer inset, so the two card pages read on one tier. (Skills uses a native grouped `Form`, governed by carve-out 3 below rather than a literal gap.)
+- **Skills row wrap + status-indicator alignment.** Long skill titles (80+ chars) now truncate with a tail ellipsis instead of wrapping unbounded and shoving the trailing toggles out of line; the row is top-aligned so the leading enable toggle (status indicator) tracks the title line when the summary wraps. Applied to both Notion-source and file-source rows.
+- **Jobs cells.** Each job card now shows a last-updated relative timestamp in the app-wide compact format (`just now` / `Xm` / `Xh` / `Xd ago`, matching `DashboardView` and `SettingsWindow`); empty-state spacing aligned to the BridgeSpacing grid; bulk-action **failures** now surface as a consistent warning pill (shared `BridgeBadge`) rather than bare grey text, while success notices stay quiet.
+- **Credentials onboarding / all-foreign-filtered banner.** When the feature is enabled but no Bridge-scoped credentials exist, a single `BridgeEmptyState` onboarding banner explains how to add the first credential and that foreign Keychain items are intentionally hidden — covering both the brand-new-user empty case and the post-hotfix all-foreign-filtered case, which previously rendered as three bare "No saved X" rows that read like an error.
+
+### Notes
+
+- No credential logic, biometrics, Keychain storage, signing, or Sparkle paths were touched — UI-only.
+- Test floor held at **1501 / 1501**, 0 failures (floor not lowered, no tests removed).
+- Residual (visual QA): before/after screenshots under `design/audit/v3.7c/` are an operator capture step — a headless agent cannot render the live AppKit UI.
+
 ## [unreleased] — Credentials leak hotfix + Keychain entitlement hardening (PKT-933)
 
 ### Fixed — Credentials page leak (hotfix)
