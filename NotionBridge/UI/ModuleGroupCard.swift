@@ -325,7 +325,10 @@ public struct ModuleGroupList: View {
 
     public var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
+            // PKT-934 W1: card-stack spacing aligned to the BridgeSpacing
+            // grid (sm) so the Tools and Jobs card pages share one tier;
+            // was an off-grid literal 10.
+            VStack(alignment: .leading, spacing: BridgeSpacing.sm) {
                 hero
                 ForEach(groups) { group in
                     ModuleGroupCard(
@@ -343,7 +346,7 @@ public struct ModuleGroupList: View {
                     )
                 }
             }
-            .padding(16)
+            .padding(BridgeSpacing.md)
         }
         .onReceive(NotificationCenter.default.publisher(
             for: UserDefaults.didChangeNotification
