@@ -580,7 +580,19 @@ set -euo pipefail
 # TestRunner (runEnableCloudAccessFlowTests) — it did NOT auto-merge across the
 # main.swift→TestRunner.swift rename, so the test file would otherwise have
 # compiled but never run. Measured 1557/0 on every one of 5 gate runs.
-FLOOR="${BRIDGE_TEST_FLOOR:-1557}"
+#
+# v3.7·H (PKT-961, 2026-06-02): MailModule (Apple Mail over an INJECTABLE
+# AppleScript seam) added 5 MCP tools (mail_list/read/search/draft/send) +
+# MailModuleTests (+12 test() blocks: registration, tiering, list/read/search/
+# draft, the send-guard proved 3 ways — wrong token refused, missing-key
+# rejected, seam never invoked — confirmed send, TCC -1743 error path,
+# validation, annotation mirror). All against the mock seam; NO live mail.
+# Reconciled tool count 182 + 5 = 187; family count 21 + 1 (mail) = 22 (the
+# strict BridgeModuleRegistry/MCPToolFactory/EndToEnd == 187 + family == 22
+# assertions pass green). Integrated green measured 1557 + 12 = 1569 passed /
+# 0 failed, twice on the watchdog-protected gate. FLOOR raised to the measured
+# integrated count (1569) per the order-inversion rule.
+FLOOR="${BRIDGE_TEST_FLOOR:-1569}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

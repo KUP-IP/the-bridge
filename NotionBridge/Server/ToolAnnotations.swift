@@ -213,6 +213,16 @@ public enum ToolAnnotationCatalog {
         "lsp_references": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: true, openWorld: true),
         "lsp_rename": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: true),
         "lsp_session_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        // v3.7·H (PKT-961): Apple Mail family. list/read/search are read-only
+        // (.open → requiresConfirmation:false); draft is non-destructive but
+        // writing (.notify → creates an UNSENT draft, requiresConfirmation:false);
+        // send is the GUARDED tool (.request → requiresConfirmation:true, mirrors
+        // tier==.request). All openWorld (Mail.app is an external surface).
+        "mail_draft": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "mail_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "mail_read": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
+        "mail_search": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "mail_send": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: true),
         // Sprint A · mcp-builder #2: manage_skill split into 5 primitives.
         // The 11-action polymorphism is preserved as a one-cycle alias.
         "manage_skill": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
