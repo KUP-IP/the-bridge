@@ -105,6 +105,9 @@ public enum ToolAnnotationCatalog {
         "bg_process_logs": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: false),
         "bg_process_start": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: false),
         "bg_process_status": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: false),
+        // WS-D (PKT-921): cloud-gated health probe. Reads the local
+        // BridgeCloudManager state machine; touches nothing — pure read.
+        "bridge_status": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
         "cgevent_send": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "chrome_execute_js": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "chrome_navigate": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
@@ -213,6 +216,16 @@ public enum ToolAnnotationCatalog {
         "lsp_references": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: true, openWorld: true),
         "lsp_rename": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: true),
         "lsp_session_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        // v3.7·H (PKT-961): Apple Mail family. list/read/search are read-only
+        // (.open → requiresConfirmation:false); draft is non-destructive but
+        // writing (.notify → creates an UNSENT draft, requiresConfirmation:false);
+        // send is the GUARDED tool (.request → requiresConfirmation:true, mirrors
+        // tier==.request). All openWorld (Mail.app is an external surface).
+        "mail_draft": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "mail_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "mail_read": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
+        "mail_search": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "mail_send": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: true),
         // Sprint A · mcp-builder #2: manage_skill split into 5 primitives.
         // The 11-action polymorphism is preserved as a one-cycle alias.
         "manage_skill": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
@@ -228,6 +241,17 @@ public enum ToolAnnotationCatalog {
         "messages_search": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "messages_send": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: true),
         "mouse_click": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        // v3.7·G — notes_* (Apple Notes via AppleScript). list/read/search are
+        // pure reads (.open → requiresConfirmation:false). create/update are
+        // .notify (informational notification, NOT a human gate). delete is
+        // .request + destructive (move-to-trash, irreversible from the API).
+        // openWorld:true — each tool drives Notes.app over Apple events.
+        "notes_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "notes_read": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
+        "notes_search": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "notes_create": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "notes_update": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
+        "notes_delete": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: true, openWorld: true),
         "notify": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "notion_block_delete": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         // Sprint A · mcp-builder #1: notion_block_read removed
@@ -259,6 +283,26 @@ public enum ToolAnnotationCatalog {
         "playwright_run": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: true),
         "port_inspect": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: false),
         "process_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
+        // PKT-962 (v3.7·I): Calendar family over EventKit (.event entities,
+        // reusing v3.7·D's store + calendars entitlement). list/events are
+        // read-only (.open); create/update non-destructive but writing
+        // (.notify); delete is destructive + confirmation-gated (tier
+        // .request). Mirrors the reminders annotations below.
+        "calendar_create": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "calendar_delete": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: true, openWorld: true),
+        "calendar_events": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "calendar_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "calendar_update": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        // PKT-957 (v3.7·D): Reminders family over EventKit. lists/list are
+        // read-only (.open); create/update non-destructive but writing;
+        // complete is idempotent (set-to-state X); delete is destructive +
+        // confirmation-gated (tier .request).
+        "reminders_complete": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
+        "reminders_create": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "reminders_delete": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: true, openWorld: true),
+        "reminders_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "reminders_lists": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "reminders_update": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "run_script": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: true, openWorld: true),
         "screen_analyze": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         "screen_capture": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
@@ -268,6 +312,12 @@ public enum ToolAnnotationCatalog {
         "session_clear": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "session_info": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "shell_exec": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: true, openWorld: true),
+        // shortcuts_* (PKT-959, v3.7·F): Apple Shortcuts via /usr/bin/shortcuts.
+        // _list is read-only (.open). _run is destructive (a Shortcut can do
+        // anything) but tier .notify, so requiresConfirmation stays false —
+        // .notify surfaces every run to the operator without a hard gate.
+        "shortcuts_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
+        "shortcuts_run": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "snippets_create": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: false),
         "snippets_delete": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: true, openWorld: false),
         "snippets_export": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: false),
@@ -278,6 +328,12 @@ public enum ToolAnnotationCatalog {
         "snippets_search": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "snippets_update": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: true, openWorld: false),
         "spotlight_query": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        // standing_orders_* (PKT-931): operator-curated config. read/list are
+        // read-only but tier .notify (deliberate exception — see ReadOnlyTierAuditTests).
+        "standing_orders_delete": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: true, openWorld: false),
+        "standing_orders_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
+        "standing_orders_read": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
+        "standing_orders_save": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
         "stripe_reconnect": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         "system_info": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
         "tools_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),

@@ -240,6 +240,31 @@ public final class KeychainManager: @unchecked Sendable {
         public static let stripeAPIKey = "stripe_api_key"
         /// Bearer secret for `POST /mcp` when remote tunnel URL is configured (Streamable HTTP).
         public static let mcpBearerToken = "mcp_bearer_token"
+        /// WS-F: WorkOS session token from the `bridge-auth://callback` code
+        /// exchange. Persisted so a returning user skips the browser sign-in.
+        public static let cloudToken = "bridge.kup.solutions.workos_token"
+    }
+
+    // MARK: - Cloud token convenience (WS-F)
+
+    /// The stored WorkOS cloud session token, or `nil` if the user has not
+    /// signed in (or is running outside an .app bundle, where Keychain ops
+    /// are no-ops). Read by `EnableCloudAccessFlow.start()` to decide whether
+    /// to skip the browser sign-in step.
+    public var cloudToken: String? {
+        read(key: Key.cloudToken)
+    }
+
+    /// Persist the WorkOS cloud session token (overwrites any prior value).
+    @discardableResult
+    public func saveCloudToken(_ value: String) -> Bool {
+        save(key: Key.cloudToken, value: value)
+    }
+
+    /// Remove the stored WorkOS cloud session token.
+    @discardableResult
+    public func clearCloudToken() -> Bool {
+        delete(key: Key.cloudToken)
     }
 
     /// List all keys stored under this service.

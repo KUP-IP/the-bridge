@@ -27,6 +27,32 @@ public actor ServerManager {
     private var securityGate: SecurityGate?
     private let toolAllowlist: Set<String>?
 
+    // MARK: - WS-D (PKT-921): Bridge Cloud Access wiring
+
+    /// The live cloud manager, assembled in `setup()` ONLY when Bridge Cloud
+    /// Access is enabled (`BridgeDefaults.cloudAccessEnabled`). Owns the
+    /// connection-state machine the heartbeat probes and the `bridge_status`
+    /// tool reads. nil in every default (cloud-off) install.
+    private var cloudManager: BridgeCloudManager?
+
+    /// The heartbeat loop driving `cloudManager.refreshHealth()` on a ~30s
+    /// cadence while cloud access is enabled. Started at launch when enabled
+    /// and on the cloudAccessEnabled→true toggle; stopped on the →false toggle.
+    private var cloudHeartbeat: CloudHeartbeat?
+
+    /// Injectable resolver for "is THIS tools/list request arriving over the
+    /// CLOUD transport?". A cloud-originated request (served via the WS-A/WS-B
+    /// tunnel) must have its Mac tools hidden when the channel is offline; a
+    /// local stdio/SSE request always sees the full surface.
+    ///
+    /// Live cloud-route header detection lands with the operator tunnel
+    /// (PKT-810 / WS-A / WS-B); until then the production resolver returns
+    /// `false`, so the stdio/SSE ListTools handler is byte-for-byte unchanged.
+    /// The seam exists so the conditional is unit-testable now and the cloud
+    /// transport can flip it without re-plumbing `setup()`.
+    public typealias CloudRouteResolver = @Sendable () async -> Bool
+    private let isCloudRequest: CloudRouteResolver
+
     /// WS-B (PKT-803): the active-transport router. Default config resolves
     /// to `[.stdio]` only, so existing clients are unaffected;
     /// `BRIDGE_ENABLE_HTTP=1` additively opts into streamableHTTP.
@@ -67,7 +93,8 @@ public actor ServerManager {
         onClientConnected: @escaping @MainActor @Sendable (String, String) -> Void = { _, _ in },
         onClientDisconnected: @escaping @MainActor @Sendable (String) -> Void = { _ in },
         toolAllowlist: Set<String>? = nil,
-        transportRouter: TransportRouter = TransportRouter()
+        transportRouter: TransportRouter = TransportRouter(),
+        isCloudRequest: @escaping CloudRouteResolver = { false }
     ) {
         self.onToolCall = onToolCall
         self.onClientConnected = onClientConnected
@@ -75,6 +102,7 @@ public actor ServerManager {
         self.toolAllowlist = toolAllowlist
         self.transportRouter = transportRouter
         self.ssePort = ConfigManager.shared.ssePort
+        self.isCloudRequest = isCloudRequest
     }
 
     // MARK: - Setup
@@ -150,6 +178,19 @@ public actor ServerManager {
                 )
             }
         )
+        // WS-D (PKT-921): Bridge Cloud Access — register the cloud-gated
+        // `bridge_status` tool and start the health heartbeat ONLY when cloud
+        // access is enabled. In every default (cloud-off) install this whole
+        // block is skipped: no `bridge_status` tool, no heartbeat task, and the
+        // static tool surface is byte-for-byte unchanged. WS-F added both the
+        // `cloudAccessEnabled` key and the manager assembly seam.
+        if BridgeDefaults.cloudAccessEnabledValue {
+            let manager = Self.makeCloudManager()
+            self.cloudManager = manager
+            await BridgeModuleRegistry.registerCloudStatusTool(on: router, manager: manager)
+            await startCloudHeartbeat(for: manager)
+        }
+
         // Reconcile any jobs orphaned by a prior Bridge force-quit. Flips dead-pid running jobs to .unknown
         // and runs the 7-day cleanup pass for terminal jobs.
         _ = await BgProcessRuntime.shared.reconcileOrphans()
@@ -192,14 +233,25 @@ public actor ServerManager {
         self.server = server
 
         // 5. Wire ListTools handler — PKT-350: filter disabled tools
-        await server.withMethodHandler(ListTools.self) { [router, toolAllowlist] _ in
+        let isCloudRequest = self.isCloudRequest
+        let cloudManager = self.cloudManager
+        await server.withMethodHandler(ListTools.self) { [router, toolAllowlist, isCloudRequest, cloudManager] _ in
             let disabledNames = CredentialsFeature.mergedDisabledToolNames()
             var registrations = await router.enabledRegistrations(disabledNames: disabledNames)
-            
+
             if let allowlist = toolAllowlist {
                 registrations = registrations.filter { allowlist.contains($0.name) }
             }
-            
+
+            // WS-D (PKT-921): on a CLOUD request, hide Mac tools when the cloud
+            // channel is offline/disabled. A local stdio/SSE request (the
+            // default — `isCloudRequest` resolves false) always sees the full
+            // surface, so this is behaviour-preserving for existing clients.
+            if await isCloudRequest() {
+                let cloudState = await cloudManager?.state ?? .disabled
+                registrations = Self.filterForCloud(registrations, cloudState: cloudState)
+            }
+
             // v3.0·0.5: single source of truth — same factory as SSETransport.
             let tools = registrations.map { MCPToolFactory.tool(for: $0) }
             return .init(tools: tools)
@@ -219,6 +271,92 @@ public actor ServerManager {
         // 7. SSE server was created before module registration so session diagnostics can be injected
 
         return await router.allRegistrations().count
+    }
+
+    // MARK: - WS-D (PKT-921): Bridge Cloud Access — heartbeat + tools/list filter
+
+    /// The set of tools a CLOUD caller may always see, regardless of channel
+    /// health. `bridge_status` is the cloud-safe probe; everything else is a
+    /// "Mac tool" hidden when the channel is offline/disabled.
+    public static let cloudAlwaysVisibleTools: Set<String> = [CloudStatusModule.toolName]
+
+    /// Pure, unit-testable tools/list conditional. For a CLOUD request:
+    ///   • state ∈ {.offline, .disabled} → omit Mac tools (keep only
+    ///     `cloudAlwaysVisibleTools`, e.g. `bridge_status`).
+    ///   • state ∈ {.online, .degraded, .connecting} → full list.
+    /// A non-cloud (local) request never calls this; it always gets the full
+    /// list. Mirrors `CloudStatusPayload.macToolsAvailable`.
+    public static func filterForCloud(
+        _ registrations: [ToolRegistration],
+        cloudState: CloudConnectionState
+    ) -> [ToolRegistration] {
+        guard CloudStatusPayload.macToolsAvailable(cloudState) else {
+            return registrations.filter { cloudAlwaysVisibleTools.contains($0.name) }
+        }
+        return registrations
+    }
+
+    /// Assemble the production `BridgeCloudManager` over the WS-C seams. The
+    /// real cloudflared / Secure-Enclave conformers land with the live Worker
+    /// (PKT-810 / WS-A); until then the manager runs over the in-memory fakes
+    /// so the state machine + heartbeat + `bridge_status` are all live without
+    /// touching the network. Mirrors `RemoteAccessSection.defaultFlow()`.
+    static func makeCloudManager() -> BridgeCloudManager {
+        let host = ProcessInfo.processInfo.hostName
+            .replacingOccurrences(of: ".local", with: "")
+            .replacingOccurrences(of: " ", with: "-")
+        let deviceID = host.isEmpty ? "this-mac" : host
+        return BridgeCloudManager(
+            tunnel: FakeTunnelProcess(),
+            passkeyGate: FakePasskeyGate(outcome: .approved),
+            node: LocalNodeContext(ownerID: "local", deviceID: deviceID)
+        )
+    }
+
+    /// Start (or restart) the health heartbeat over `manager`. Idempotent: a
+    /// prior loop is stopped first so a re-enable never leaves two timers.
+    func startCloudHeartbeat(for manager: BridgeCloudManager) async {
+        await cloudHeartbeat?.stop()
+        let heartbeat = CloudHeartbeat(manager: manager)
+        self.cloudHeartbeat = heartbeat
+        await heartbeat.start()
+    }
+
+    /// Stop the heartbeat loop (cloud access disabled). Safe when not running.
+    func stopCloudHeartbeat() async {
+        await cloudHeartbeat?.stop()
+        cloudHeartbeat = nil
+    }
+
+    /// React to a live `cloudAccessEnabled` toggle WITHOUT a relaunch.
+    /// ON  → assemble the manager (if absent), enable the tunnel, register
+    ///       `bridge_status`, and start the heartbeat.
+    /// OFF → stop the heartbeat, deregister `bridge_status`, and disable the
+    ///       manager. Mirrors the launch-time gate in `setup()`.
+    public func setCloudAccessEnabled(_ enabled: Bool) async {
+        guard let router = self.router else { return }
+        if enabled {
+            let manager = cloudManager ?? Self.makeCloudManager()
+            self.cloudManager = manager
+            _ = await manager.enable()
+            await BridgeModuleRegistry.registerCloudStatusTool(on: router, manager: manager)
+            await startCloudHeartbeat(for: manager)
+        } else {
+            await stopCloudHeartbeat()
+            await router.deregister(name: CloudStatusModule.toolName)
+            if let manager = cloudManager { _ = await manager.disable() }
+        }
+    }
+
+    /// Current cloud connection state (`.disabled` when cloud access is off /
+    /// no manager). Drives the `bridge_status` payload + the tools/list filter.
+    public func cloudConnectionState() async -> CloudConnectionState {
+        await cloudManager?.state ?? .disabled
+    }
+
+    /// Whether the heartbeat loop is currently scheduled (test/diagnostic).
+    public func isCloudHeartbeatRunning() async -> Bool {
+        await cloudHeartbeat?.isRunning ?? false
     }
 
     // MARK: - Tool Info (PKT-350: F2)

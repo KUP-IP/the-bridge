@@ -143,7 +143,10 @@ public struct JobsView: View {
             emptyState
         } else {
             ScrollView {
-                LazyVStack(spacing: 10) {
+                // PKT-934 W1: card-stack spacing aligned to the
+                // BridgeSpacing grid (sm) so the Jobs and Tools card pages
+                // share one tier; was an off-grid literal 10.
+                LazyVStack(spacing: BridgeSpacing.sm) {
                     ForEach(filteredJobs, id: \.id) { job in
                         JobCard(
                             job: job,
@@ -157,20 +160,24 @@ public struct JobsView: View {
                         )
                     }
                 }
-                .padding(16)
+                .padding(BridgeSpacing.md)
             }
         }
     }
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
+        // PKT-934 W2: empty-state spacing aligned to the BridgeSpacing grid
+        // (sm between stack items, xs between the action buttons); copy
+        // tightened. Two CTAs are retained, so the shared single-CTA
+        // BridgeEmptyState component is intentionally not used here.
+        VStack(spacing: BridgeSpacing.sm) {
             Image(systemName: "clock.badge.checkmark")
                 .font(.system(size: 42))
                 .foregroundStyle(.tertiary)
             Text("No scheduled jobs yet").font(.headline)
             Text("Tap **New** to create a job, or import a job export file.")
                 .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            HStack {
+            HStack(spacing: BridgeSpacing.xs) {
                 Button("New Job") { showNewJobSheet = true }.buttonStyle(.borderedProminent)
                 Button("Import…") { showImportSheet = true }
             }
@@ -196,7 +203,15 @@ public struct JobsView: View {
             Button { showImportSheet = true } label: { Label("Import", systemImage: "square.and.arrow.down") }
                 .controlSize(.small)
             if let msg = bulkMessage {
-                Text(msg).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                // PKT-934 W2: bulk-action failures surface as a consistent
+                // warning pill (shared BridgeBadge), not bare grey text, so
+                // the error treatment matches the rest of the app; success
+                // notices stay as quiet secondary text.
+                if msg.localizedCaseInsensitiveContains("failed") {
+                    BridgeBadge(msg, systemImage: "exclamationmark.triangle.fill", tone: .warning)
+                } else {
+                    Text(msg).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
         }
     }
@@ -346,6 +361,12 @@ private struct JobCardHeader: View {
                         Text("·").foregroundStyle(.tertiary)
                         Text(primary.tool).monospaced()
                     }
+                    // PKT-934 W2: surface a last-updated relative timestamp
+                    // in the app-wide compact format (just now / Xm / Xh /
+                    // Xd ago) — matches DashboardView.relativeTime and
+                    // SettingsWindow.relativeTimestamp.
+                    Text("·").foregroundStyle(.tertiary)
+                    Text("updated \(Self.relativeTime(from: job.updatedAt))")
                     if job.skipOnBattery {
                         Text("·").foregroundStyle(.tertiary)
                         Image(systemName: "battery.25percent")
@@ -396,6 +417,17 @@ private struct JobCardHeader: View {
         case .active: return .green
         case .paused: return .orange
         }
+    }
+
+    /// PKT-934 W2: compact relative timestamp — same format as
+    /// DashboardView.relativeTime / SettingsWindow.relativeTimestamp so
+    /// timestamps read identically across the app.
+    static func relativeTime(from date: Date) -> String {
+        let interval = Date().timeIntervalSince(date)
+        if interval < 60 { return "just now" }
+        else if interval < 3600 { return "\(Int(interval / 60))m ago" }
+        else if interval < 86400 { return "\(Int(interval / 3600))h ago" }
+        else { return "\(Int(interval / 86400))d ago" }
     }
 }
 

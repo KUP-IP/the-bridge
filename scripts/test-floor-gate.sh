@@ -515,6 +515,17 @@
 # the order-inversion rule.
 set -euo pipefail
 
+# PKT-957 / v3.7·D (2026-06-01): reminders_* MCP tool family over EventKit
+# (RemindersModule + injectable RemindersStoring seam). New
+# RemindersModuleTests contributes 17 harness `test()` blocks (6 top-level
+# + 6 nested access-denied sub-tests + 5 CRUD/idempotency/listing blocks)
+# against the in-memory mock seam — no live EventKit/TCC. Also bumped
+# staticFeatureModuleToolCount 172 -> 178 and family count 19 -> 20
+# (registry-count / E2E family assertions move with the constants). Measured
+# 1518 passed, 0 failed. Floor raised 1501 -> 1518 per the order-inversion
+# rule. (Known ScreenModuleTests/screen_record_stop sandbox hang handled by
+# the watchdog/retry below — unaffected.)
+
 # v3.6.1 (2026-05-31): hermetic-test remediation + WS-C/E (Mac-side cloud
 # access: BridgeCloudManager + NL-3 auth-passdown + Remote Access settings)
 # merged in. ConfigManagerTests no longer read/mutate the user's live config
@@ -522,7 +533,129 @@ set -euo pipefail
 # "datasource_update succeeds with API key" test moved into the hasAPIKey
 # branch and renamed to datasource_get. Hermetic base was 1467; WS-C/E adds
 # the BridgeCloudManager suite. Floor recomputed from the post-merge gate run.
-FLOOR="${BRIDGE_TEST_FLOOR:-1501}"
+# fix/sck-continuation-leak (2026-06-02): +2 SCK off-main-actor
+# continuation-leak regression guards in ScreenModuleTests (screen_capture +
+# chrome_tabs dispatched from a Task.detached must return/throw promptly, not
+# hang). Floor raised 1501 → 1503 to match the added passing tests.
+#
+# v3.7·B (PKT-931, 2026-06-01): standing_orders_* MCP tools (list/read/save/
+# delete) landed — new StandingOrdersRecordStore actor + 4-tool module.
+# StandingOrdersModuleTests (registration/tier, CRUD round-trip, idempotent
+# upsert, soft-delete+archive, list archived exclusion/opt-in, read 404 on
+# soft-deleted, concurrent-save actor serialization, atomic persistence,
+# handler-level save/read/invalid-scope) = +14.
+#
+# v3.7·D (PKT-957, 2026-06-01): reminders_* MCP tool family over EventKit
+# (RemindersModule + injectable RemindersStoring seam). RemindersModuleTests
+# contributes +17 harness test() blocks against the in-memory mock seam — no
+# live EventKit/TCC.
+#
+# v3.7·C (PKT-934, 2026-06-01): UI polish (Jobs/Credentials/Skills/
+# ModuleGroupCard) — UI-only, +0 tests.
+#
+# WS-F (PKT-922, commit 57dfc4b): EnableCloudAccessFlow @Observable state
+# machine + WorkOS sign-in URL builder + bridge-auth:// callback exchange +
+# timeouts/revert + ProvisioningProgressView mapping, all against mocks.
+# EnableCloudAccessFlowTests = +21.
+#
+# v3.7-rc integration (2026-06-02): layered the review-batch (standing_orders
+# +14, v3.7·C +0, reminders +17) and WS-F (+21) onto the VERIFIED test-infra
+# base (1503: SCK continuation-leak guards + real watchdog + TestRunner harness
+# fix). The per-branch-delta SUM (1503 + 14 + 0 + 17 + 21 = 1555) was the
+# PREDICTED arithmetic; the ACTUAL integrated green, measured 5/5 deterministic
+# on the watchdog-protected gate after WS-F merged, is 1557 passed / 0 failed.
+# Per the order-inversion rule we set FLOOR to the MEASURED integrated count
+# (1557), not the predicted 1555 — the +2 is harness-delta drift (the documented
+# per-branch counts undercount nested/loop-driven test() blocks in the trio's
+# files; e.g. RemindersModuleTests' 17 = 6 top-level + 6 nested + 5 CRUD).
+# Raising to the measured green is required so the gate cannot later let 2 real
+# tests be silently dropped. Reconciled tool count 172 + 4 (standing_orders) + 6
+# (reminders) = 182 (WS-F is UI/flow, adds no MCP tools — Version.swift
+# unchanged; the strict BridgeModuleRegistry/MCPToolFactory == 182 assertions
+# pass green); family count 19 + 1 + 1 = 21. The review-batch's own
+# `perl -e 'alarm'` watchdog rewrite was REJECTED — it regresses the base's real
+# external-killer watchdog (alarm() is cleared by exec() on macOS, so it never
+# kills a hung binary). The base watchdog/retry block below is kept verbatim.
+# WS-F's main.swift test-registration call was hand-ported into the @main
+# TestRunner (runEnableCloudAccessFlowTests) — it did NOT auto-merge across the
+# main.swift→TestRunner.swift rename, so the test file would otherwise have
+# compiled but never run. Measured 1557/0 on every one of 5 gate runs.
+#
+# v3.7 Wave-1 integration (2026-06-02): three Mac/iCloud modules merged onto
+# main (315a868) on branch integration/v3.7-wave1. Each was independently
+# floor-gated on its own base; the floor below is recomputed from the MERGED
+# suite's measured green (never the sum of per-branch numbers).
+#
+# v3.7·F (PKT-959): shortcuts_* MCP tool family over the /usr/bin/shortcuts CLI
+# (NO entitlement) — ShortcutsModule + injectable `ShortcutsRunning` process
+# seam (production CLIShortcutsRunner spawns the CLI; tests inject
+# MockShortcutsRunner). Two tools: shortcuts_list (.open, read-only enumeration)
+# + shortcuts_run (.notify — a Shortcut can do anything, so it never
+# auto-executes silently). +11 harness test() blocks against the mock seam — no
+# live CLI.
+#
+# v3.7·H (PKT-961): MailModule (Apple Mail over an INJECTABLE AppleScript seam)
+# added 5 MCP tools (mail_list/read/search/draft/send) + MailModuleTests
+# (+12 test() blocks: registration, tiering, list/read/search/draft, the
+# send-guard proved 3 ways — wrong token refused, missing-key rejected, seam
+# never invoked — confirmed send, TCC -1743 error path, validation, annotation
+# mirror). All against the mock seam; NO live mail.
+#
+# v3.7·G (PKT-960): NotesModule (Apple Notes over an INJECTABLE NotesScriptRunner
+# AppleScript seam) added 6 MCP tools (notes_list/read/search/create/update/
+# delete) + NotesModuleTests (+27 test() blocks). notes_delete is .request +
+# confirm:'DELETE'. All against the mock seam; NO live Notes.app. (Notes was
+# built on the OLD base 4455b50 and registered its test in the now-deleted
+# main.swift; that registration was hand-ported into the @main TestRunner during
+# this integration — the test file landed but its run-sequence call did not
+# auto-merge across the main.swift→TestRunner.swift rename.)
+#
+# Reconciled tool count 182 + 2 (shortcuts) + 5 (mail) + 6 (notes) = 195;
+# family count 21 + 1 + 1 + 1 = 24 (the strict BridgeModuleRegistry/
+# MCPToolFactory/EndToEnd count assertions move with the constants).
+# Floor recomputed from the merged suite's measured green (see value below),
+# per the order-inversion rule — never lowered.
+#
+# v3.7·I (PKT-962): CalendarModule (native EventKit `.event` entities over an
+# INJECTABLE `CalendarStoring` seam — production EventKitCalendarStore mirrors
+# v3.7·D's EventKitRemindersStore + REUSES the same calendars entitlement; tests
+# inject MockCalendarStore) added 5 MCP tools (calendar_list/events/create/
+# update/delete) + CalendarModuleTests (+18 measured test() blocks: registration,
+# tiering open/notify/request, list, CRUD round-trip, required-field validation,
+# notFound, date-range overlap filter, calendar-scoped filter, delete + re-delete
+# notFound, access-denied across all 5 tools + notDetermined). All against the
+# mock seam; NO live EventKit / TCC. calendar_list/events are .open (read-only),
+# create/update .notify, delete .request. Tool count 195 + 5 = 200; family count
+# 24 + 1 = 25 (the strict count assertions move with the constants).
+#
+# WS-D (PKT-921, 2026-06-02): Bridge Cloud Access heartbeat wiring +
+# cloud-gated bridge_status MCP tool + ServerManager tools/list cloud
+# conditional. +12 CloudStatusModuleTests (heartbeat start/stop/idempotent,
+# bridge_status gated registration + canonical payload + NOT-in-static-count,
+# tools/list CLOUD+offline/disabled→only bridge_status, CLOUD+online/degraded→
+# full, local-never-filtered). Static module count UNCHANGED at 200 (bridge_status
+# is cloud-gated, not static).
+#
+# WS-G (PKT-923, 2026-06-02 · Bridge Cloud Access · terminal UI packet):
+# CloudAccessWSGTests added +11 test() blocks for the first-run modal gate
+# (Q2 one-time, BridgeDefaults.hasSeenCloudAccessFirstRun), the Add-to-
+# Claude.ai MCP-URL derivation + query-value percent-encoding contract +
+# Q3 copy+hint shipped mode, and the Disable flow (EnableCloudAccessFlow.
+# disable() → CloudTeardown seam + cleared toggle/host; live BridgeCloudManager.
+# disable() → .disabled; cancel = no side effects). All against fakes (no
+# SwiftUI render / WindowServer / cloudflared / network). Also hardened the
+# WS-F `waitFor` test helper to interleave a tiny real sleep once cooperative
+# yields are exhausted — removes a pre-existing load-sensitive flake on the
+# provision-timeout test (off-actor continuation + withTaskGroup cancel hop)
+# without weakening any assertion.
+#
+# v3.7 Wave-2 integration (2026-06-02): FLOOR recomputed from the MERGED suite's
+# measured green across 5 clean runs, per the order-inversion rule — derived from
+# the ACTUAL reconciled count (1647), never lowered, never trusting per-branch
+# numbers. Note: the naive per-branch sum (1607 +18 calendar +12 WS-D +11 WS-G =
+# 1648) over-counts by one against the merged suite; the honest measured green is
+# 1647/1647 (0 failed), so the floor is set to that, not the arithmetic estimate.
+FLOOR="${BRIDGE_TEST_FLOOR:-1647}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5
@@ -630,30 +763,60 @@ swift build -c debug
 LOG="$(mktemp -t bridge-test-floor.XXXXXX)"
 trap 'rm -f "$LOG"' EXIT
 
-# Watchdog: cap the test binary at 25 minutes (local run is ~5 min,
-# CI macos-26 is ~3x slower). If the binary hangs (e.g. a test waiting
-# on a process that won't exit on a headless runner), perl's SIGALRM
-# kills it and the workflow step still surfaces the last test that
-# logged — so future hangs are diagnosable instead of opaque 6h cancels.
-# perl is always present on macOS; no brew install needed.
+# Watchdog: cap the test binary at DEADLINE seconds (default 1500 = 25 min;
+# local run is ~5 min, CI macos-26 is ~3x slower). Override with
+# TEST_WATCHDOG_SECONDS — a short value (e.g. 5) makes the watchdog testable.
 #
-# Bounded retry on the harness teardown flake: the runner emits its summary
-# from a top-level-`await` tail that, on a fully-completed suite, intermittently
-# loses a race with process teardown and drops the final `Results:` line — the
-# binary still exits 0 and every test ran (the per-test ✅ lines are all
-# present). That is NOT a test failure, so re-run up to ATTEMPTS times until the
-# summary is captured. A real hang (watchdog) or a genuine non-zero exit fails
-# immediately with no retry, and the floor/failure checks below are unchanged.
+# This is a REAL EXTERNAL watchdog, not `perl -e 'alarm N; exec'`. On macOS the
+# SIGALRM timer set by alarm() is CLEARED by exec() (the new image starts with no
+# pending alarm), so the old pattern never actually killed a hung binary — it ran
+# until the CI step/job timeout. Instead we now: launch the binary in the
+# background, capture its PID, start a separate killer subshell that SIGKILLs that
+# PID after DEADLINE, and `wait` on the binary. On normal completion we KILL THE
+# KILLER so a finished run leaves no stray `sleep` and the script never blocks on
+# it. On a watchdog kill we FAIL FAST with the last logged test line so the hang
+# is diagnosable instead of an opaque multi-hour cancel.
+DEADLINE="${TEST_WATCHDOG_SECONDS:-1500}"
+#
+# Bounded retry on the harness teardown flake: the runner emits its summary from
+# a tail that, on a fully-completed suite, can intermittently lose a race with
+# process teardown and drop the final `Results:` line — the binary still exits 0
+# and every test ran (the per-test ✅ lines are all present). That is NOT a test
+# failure, so re-run up to ATTEMPTS times until the summary is captured. A real
+# hang (watchdog) or a genuine non-zero exit fails immediately with no retry, and
+# the floor/failure checks below are unchanged.
 ATTEMPTS=3
 LINE=""
 for attempt in $(seq 1 "$ATTEMPTS"); do
   set +e
-  perl -e 'alarm 1500; exec @ARGV' "$BIN" | tee "$LOG"
-  RC=${PIPESTATUS[0]}
+  # Run the binary in the background, tee'ing its combined output to the log so
+  # the timeout path can print the last test line. `$!` is the binary's PID.
+  "$BIN" > >(tee "$LOG") 2>&1 &
+  BIN_PID=$!
+
+  # External killer: SIGKILL the binary if it outlives DEADLINE. Captured PID so
+  # we can cancel it on a clean finish.
+  ( sleep "$DEADLINE"; kill -9 "$BIN_PID" 2>/dev/null ) &
+  KILLER_PID=$!
+
+  # Block until the binary exits (normally, or via the killer's SIGKILL).
+  wait "$BIN_PID"
+  RC=$?
+
+  # Cleanup: cancel + reap the killer so a completed run leaves no stray sleep
+  # and the script doesn't block waiting on it. Kill the killer's `sleep` CHILD
+  # first (while the subshell is still alive so `pkill -P` can resolve it),
+  # otherwise killing only the subshell orphans the `sleep` and it keeps running
+  # for the full DEADLINE. Then kill + reap the subshell itself.
+  pkill -P "$KILLER_PID" 2>/dev/null
+  kill "$KILLER_PID" 2>/dev/null
+  wait "$KILLER_PID" 2>/dev/null
   set -e
 
-  if [ "$RC" -eq 142 ] || [ "$RC" -eq 14 ]; then
-    echo "::error::test-floor-gate: test binary exceeded 1500s watchdog and was killed"
+  # SIGKILL from the watchdog surfaces as 137 (128+9). (128+SIGALRM=142 / 14 are
+  # kept as a defensive fallback in case a future change reintroduces an alarm.)
+  if [ "$RC" -eq 137 ] || [ "$RC" -eq 142 ] || [ "$RC" -eq 14 ]; then
+    echo "::error::test-floor-gate: test binary exceeded ${DEADLINE}s watchdog and was killed"
     echo "--- last 60 lines of test output (so you can see which test hung) ---"
     tail -60 "$LOG" || true
     echo "--- end of test output tail ---"

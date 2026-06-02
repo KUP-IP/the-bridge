@@ -105,9 +105,26 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         permissionManager: permissionManager
     )
 
+    /// Detect the standalone NotionBridgeTests executable. The test harness
+    /// constructs a real `AppDelegate()` (e.g. to assert the Commands palette
+    /// master toggle persists), and the harness pumps a live main run loop to
+    /// service MainActor + CFRunLoop system callbacks. With `startingUpdater:
+    /// true`, Sparkle schedules an automatic appcast check on the main dispatch
+    /// queue; once that async fetch returns INTO the pumped main run loop it can
+    /// present an `NSAlert runModal` (a new-version / permission dialog), which
+    /// wedges the main thread in a nested modal event loop and hangs/SIGTRAPs the
+    /// suite at teardown. A headless unit-test binary must never auto-check for
+    /// updates, so we start the updater disarmed in that process (production
+    /// startup is unchanged). Mirrors the SecurityGate.runningInTestProcess idiom.
+    private static var runningInTestProcess: Bool {
+        let processName = ProcessInfo.processInfo.processName.lowercased()
+        if processName.contains("notionbridgetests") { return true }
+        return CommandLine.arguments.joined(separator: " ").lowercased().contains("notionbridgetests")
+    }
+
     public override init() {
         updaterController = SPUStandardUpdaterController(
-            startingUpdater: true,
+            startingUpdater: !Self.runningInTestProcess,
             updaterDelegate: nil,
             userDriverDelegate: nil
         )
@@ -232,6 +249,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // WS-D (PKT-921): Bridge Cloud Access master toggle flipped — start/stop
+        // the health heartbeat and register/deregister the `bridge_status` MCP
+        // tool on the running server WITHOUT a relaunch. (Launch-time wiring is
+        // handled inside ServerManager.setup() from BridgeDefaults.)
+        NotificationCenter.default.addObserver(forName: .cloudAccessEnabledDidChange, object: nil, queue: .main) { [weak self] note in
+            let enabled = (note.userInfo?[cloudAccessEnabledKey] as? Bool) ?? BridgeDefaults.cloudAccessEnabledValue
+            Task {
+                await self?.serverManager?.setCloudAccessEnabled(enabled)
+            }
+        }
+
         // PKT-349 B2: Observe reset onboarding notification from Settings.
         // Dispatch to MainActor to satisfy Swift 6 strict concurrency.
         NotificationCenter.default.addObserver(forName: .resetOnboarding, object: nil, queue: .main) { [weak self] _ in
@@ -311,6 +339,30 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         openSettings()
         return true
     }
+
+    // MARK: - WS-F: bridge-auth:// callback (Bridge Cloud Access)
+
+    /// Handle inbound `bridge-auth://callback?code=…` URLs opened against the
+    /// app's registered CFBundleURLTypes scheme. Delegates the brittle
+    /// parse → WorkOS token-exchange → Keychain-write → Notification-post to
+    /// the unit-tested `CloudAuthCallbackHandler` (lib). The in-flight
+    /// `EnableCloudAccessFlow` observes `.cloudAuthCallbackReceived` to
+    /// advance from `.signingIn` to `.provisioning`.
+    ///
+    /// The live code→token exchange requires the operator's WorkOS tenant
+    /// (PKT-810) + a real client id; until then `URLSessionTokenExchange`
+    /// is wired but no live tenant will mint a token (live-QA gate).
+    public func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.scheme?.lowercased() == "bridge-auth" {
+            cloudAuthCallbackHandler.handle(url)
+        }
+    }
+
+    /// The WS-F callback handler, assembled over the production seams
+    /// (URLSession exchange + Keychain persistence).
+    private lazy var cloudAuthCallbackHandler = CloudAuthCallbackHandler(
+        exchange: URLSessionTokenExchange()
+    )
 
     // MARK: - Public API (V1-QUALITY-C2)
 

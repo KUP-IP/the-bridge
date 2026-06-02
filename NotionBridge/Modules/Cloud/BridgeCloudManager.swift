@@ -67,7 +67,34 @@ public enum CloudDelegationDecision: Sendable, Equatable {
     case refused(CloudDelegationRefusal)
 }
 
-public actor BridgeCloudManager {
+/// WS-F: the provisioning seam the Enable flow depends on. Lets
+/// `EnableCloudAccessFlow` drive `provision()` + `startTunnel()` against a
+/// deterministic mock in unit tests (no cloudflared, no network, no live
+/// Worker — the live path is gated on PKT-810 + WS-A). `BridgeCloudManager`
+/// is the production conformer.
+public protocol CloudProvisioning: Sendable {
+    /// Provision this Mac as a Bridge Cloud node against `baseURL`
+    /// (configurable so tests/un-provisioned builds never hit the live
+    /// Worker). Returns the assigned tunnel hostname on success; throws on
+    /// failure.
+    func provision(baseURL: String) async throws -> String
+    /// Bring the cloudflared tunnel up after a successful provision.
+    func startTunnel() async throws
+}
+
+/// WS-G: the teardown seam the Disable flow depends on. Lets the Disable
+/// confirmation tear the tunnel down against a deterministic mock in unit
+/// tests (no cloudflared, no network). `BridgeCloudManager.disable()` is the
+/// production conformer — it stops the tunnel and returns the machine to
+/// `.disabled` from any state.
+public protocol CloudTeardown: Sendable {
+    /// Stop the tunnel and return cloud access to its off state. Safe from any
+    /// state (a not-running stop is swallowed). Returns the resulting state.
+    @discardableResult
+    func disable() async -> CloudConnectionState
+}
+
+public actor BridgeCloudManager: CloudProvisioning, CloudTeardown {
 
     // MARK: Dependencies (all injected — fakes in tests)
 
@@ -116,6 +143,35 @@ public actor BridgeCloudManager {
             state = .offline
         }
         return state
+    }
+
+    // MARK: - Provisioning (WS-F · CloudProvisioning)
+
+    /// Provision this Mac as a Bridge Cloud node against `baseURL`. The base
+    /// URL is configurable so unit tests and an un-provisioned local build
+    /// never reach the live Worker (WS-A) — full live provisioning is gated
+    /// on PKT-810 + WS-A. The production implementation will POST the node
+    /// registration to the Worker and parse back the assigned hostname; until
+    /// WS-A is live it returns a deterministic, hostname-shaped value derived
+    /// from the local node so the Enable flow + `BridgeDefaults` wiring can be
+    /// exercised end-to-end against the real type.
+    public func provision(baseURL: String) async throws -> String {
+        // LIVE PATH (PKT-810 + WS-A): POST `\(baseURL)/provision` with the
+        // node identity, await the assigned hostname. Intentionally NOT wired
+        // to a live network call here — see the packet's live-QA gate.
+        let host = "\(node.deviceID).bridge.kup.solutions"
+        return host
+    }
+
+    /// Bring the cloudflared tunnel up after provisioning. Delegates to the
+    /// injected `TunnelProcess` seam (a fake in tests) and reconciles the
+    /// connection-state machine.
+    public func startTunnel() async throws {
+        if state != .online && state != .degraded {
+            state = .connecting
+        }
+        try await tunnel.start()
+        await refreshHealth()
     }
 
     /// Disable Bridge Cloud Access: stop the tunnel and return to

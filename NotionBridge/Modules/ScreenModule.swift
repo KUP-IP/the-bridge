@@ -84,10 +84,27 @@ public enum ScreenModule {
         guard CGPreflightScreenCaptureAccess() else {
             throw ScreenModuleError.screenRecordingDenied
         }
-        return try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        // SCK delivers its reply on the main run loop; calling it off the main
+        // actor leaks the continuation and hangs forever. Route through the
+        // main-actor boundary (see ScreenCaptureKitBoundary.swift). The
+        // preflight gate above keeps the denied path fast — we never reach the
+        // SCK call when access is not granted.
+        return try await SCKBoundary.fetchShareableContent()
     }
 
     /// Capture a CGImage based on target parameters.
+    ///
+    /// `@MainActor`: every ScreenCaptureKit async API used here
+    /// (`SCShareableContent.excludingDesktopWindows` via `getShareableContent`
+    /// and `SCScreenshotManager.captureImage`) delivers its reply on the main
+    /// run loop. Calling them off the main actor leaks the checked continuation
+    /// and hangs forever (it was masked only because GUI dispatch ran on main;
+    /// it surfaces as intermittent suite hangs from the nonisolated test
+    /// harness). Pinning the whole helper to the main actor makes every SCK
+    /// reply land on a serviced context. The fast denied-path short-circuit is
+    /// preserved: `getShareableContent` preflights TCC and throws before any
+    /// SCK call.
+    @MainActor
     private static func captureImage(
         target: String,
         windowId: Int?,
@@ -316,9 +333,11 @@ public enum ScreenModule {
 
                 let fileSize = (try? FileManager.default.attributesOfItem(atPath: filePath)[.size] as? Int) ?? 0
 
-                // Fetch display info for response metadata
+                // Fetch display info for response metadata. Route through the
+                // main-actor SCK boundary — an off-main call leaks its
+                // continuation and hangs. `try?` keeps metadata best-effort.
                 let displayInfoArray: [Value]
-                if let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) {
+                if let content = try? await SCKBoundary.fetchShareableContent() {
                     displayInfoArray = content.displays.enumerated().map { idx, d in
                         .object([
                             "index": .int(idx),

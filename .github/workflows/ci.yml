@@ -24,6 +24,9 @@ jobs:
         with:
           swift-version: "6.2"
 
+      - name: Install ripgrep (code_search dependency — CodeEditModule tests require `rg` on PATH)
+        run: brew install ripgrep
+
       - name: Build release
         # Per-step timeout — Swift release build on macos-26 with strict
         # concurrency takes ~6-8 min locally; 15min cap catches a stuck

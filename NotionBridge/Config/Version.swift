@@ -11,11 +11,14 @@ import Foundation
 public enum AppVersion {
     /// Marketing version (CFBundleShortVersionString equivalent).
     /// Format: MAJOR.MINOR.PATCH (Semantic Versioning).
-    public static let marketing = "3.6.1"
+    public static let marketing = "3.7.0"
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
-    public static let build = "43"
+    /// v3.7 WS-D (PKT-921): 43 → 44 — heartbeat wiring + cloud-gated
+    /// `bridge_status` MCP tool + tools/list cloud conditional.
+    /// v3.7.0 release: 44 → 45 — marketing 3.6.1 → 3.7.0; Info.plist CFBundleVersion reconciled to 45.
+    public static let build = "45"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }
@@ -66,7 +69,23 @@ public enum BridgeConstants {
     ///   + 1 file_edit new (file_str_replace + file_apply_patch kept as aliases)
     ///   + 2 jobs_pause_all / jobs_resume_all reinstated as catalog-present aliases routing to job_pause/_resume all:true
     /// Aliases all carry one-cycle deprecation prefix; full removal in 3.5.0 (Sprint B's release in the patch ladder).
-    public static let staticFeatureModuleToolCount = 172
+    ///   + 4 standing_orders_{list,read,save,delete} (PKT-931, v3.7·B): new standing_orders family.
+    ///   + 6 reminders_* tools (PKT-957, v3.7·D): reminders_lists/list/create/update/complete/delete.
+    /// v3.7 review-batch integration: 172 + 4 (standing_orders) + 6 (reminders) = 182.
+    ///   + 2 shortcuts_* tools (PKT-959, v3.7·F): shortcuts_list/run over the /usr/bin/shortcuts CLI.
+    ///   + 5 mail_* tools (PKT-961, v3.7·H): mail_list/read/search/draft/send (Apple Mail).
+    ///   + 6 notes_* tools (PKT-960, v3.7·G): notes_list/read/search/create/update/delete (Apple Notes).
+    /// v3.7 Wave-1 integration: 182 + 2 (shortcuts) + 5 (mail) + 6 (notes) = 195.
+    ///   + 5 calendar_* tools (PKT-962, v3.7·I): calendar_list/events/create/update/delete
+    ///     (native EventKit .event entities; reuses v3.7·D's store + calendars entitlement).
+    /// v3.7·I (PKT-962): 195 + 5 (calendar) = 200.
+    /// v3.7 WS-D (PKT-921): static count UNCHANGED by WS-D. `bridge_status` is
+    ///   registered ONLY when `BridgeDefaults.cloudAccessEnabled` (via
+    ///   `BridgeModuleRegistry.registerCloudStatusTool`, NOT
+    ///   `registerStaticFeatureModules`), so it deliberately does NOT count
+    ///   toward this always-present static surface. A default (cloud-off)
+    ///   install exposes exactly these 200 module tools (195 Wave-1 + 5 calendar).
+    public static let staticFeatureModuleToolCount = 200
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.
@@ -74,5 +93,13 @@ public enum BridgeConstants {
     /// v2.2 · integration closeout: + jobs + cursor + computer = 19.
     /// v2.3 · 0.1 (PKT-804): − cursor family = 18.
     /// v2.3 · WS-D (PKT-2135a9e9): + snippets family = 19.
-    public static let staticFeatureModuleFamilyCount = 19
+    /// v3.7·B (PKT-931): + standing_orders family.
+    /// v3.7·D (PKT-957): + reminders family.
+    /// v3.7 review-batch integration: 19 + 1 (standing_orders) + 1 (reminders) = 21.
+    /// v3.7·F (PKT-959): + shortcuts family.
+    /// v3.7·H (PKT-961): + mail family.
+    /// v3.7·G (PKT-960): + notes family.
+    /// v3.7 Wave-1 integration: 21 + 1 (shortcuts) + 1 (mail) + 1 (notes) = 24.
+    /// v3.7·I (PKT-962): + calendar family = 25.
+    public static let staticFeatureModuleFamilyCount = 25
 }

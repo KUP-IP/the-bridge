@@ -73,6 +73,22 @@ public enum SkillsModule {
     "When to use" / "Not for" / "Related" guidance — read it before \
     selecting. On a wrong/missing parameter the error returns a \
     "did you mean: x→y" hint; trust it and retry once.
+    Standing orders: persistent operator directives live behind the \
+    standing_orders_* family — standing_orders_list (metadata only), \
+    standing_orders_read (full body by id), standing_orders_save \
+    (idempotent upsert), standing_orders_delete (soft-delete + archive). \
+    These are operator-curated config; writes are Notify-tier and never \
+    auto-execute.
+    Apple Shortcuts: the shortcuts_* family wraps the macOS `shortcuts` CLI \
+    — shortcuts_list (enumerate the user's shortcuts/folders, read-only) and \
+    shortcuts_run (run one by name with optional input, capture its output). \
+    A Shortcut can do anything, so shortcuts_run is Notify-tier and never \
+    auto-executes silently.
+    Calendar: the calendar_* family is native EventKit (.event entities) — \
+    calendar_list (enumerate calendars) and calendar_events (query a date \
+    range) are read-only/Open-tier; calendar_create and calendar_update are \
+    Notify-tier writes; calendar_delete is Request-tier (confirmation \
+    required, irreversible). Events use ISO-8601 start/end times.
     """
 
     public static func buildRoutingInstructions() -> String {

@@ -41,6 +41,12 @@ func runReadOnlyTierAuditTests() async {
         // tools (see GitModule.swift header). `git_worktree_list` is the only
         // read-only-named member and inherits that deliberate policy.
         "git_worktree_list",
+        // standing_orders_* (PKT-931) are operator-curated config. The packet
+        // DoD mandates tier .notify for ALL FOUR tools (config must not change
+        // silently). list/read are read-only-named but intentionally .notify,
+        // mirroring the credential_read / credential_list precedent above.
+        "standing_orders_list",
+        "standing_orders_read",
     ]
 
     func matchesReadOnlyPattern(_ name: String) -> Bool {

@@ -127,4 +127,28 @@ func runScreenModuleTests() async {
         try expect(ScreenModule.moduleName == "screen",
                    "Expected 'screen', got '\(ScreenModule.moduleName)'")
     }
+
+    // --- SCK off-main-actor continuation-leak regression guard ---
+    // Before the SCKBoundary fix, dispatching an SCK-backed tool from a
+    // nonisolated / off-main-actor context (`Task.detached`) leaked the
+    // ScreenCaptureKit checked continuation and HUNG FOREVER ("SWIFT TASK
+    // CONTINUATION MISUSE"). The fix routes the SCK call onto the main actor
+    // and guards it with a libdispatch watchdog, so the call must now RETURN
+    // or THROW promptly. We only assert "did not hang" — content depends on
+    // live TCC/display/Chrome state, which we do not gate on here.
+    await test("screen_capture from a detached (off-main) task returns promptly, never hangs") {
+        let result = await Task.detached {
+            try? await router.dispatch(toolName: "screen_capture", arguments: .object([:]))
+        }.value
+        try expect(result != nil, "screen_capture dispatch should produce a value off-main, not hang")
+    }
+
+    await test("chrome_tabs from a detached (off-main) task returns promptly, never hangs") {
+        let chromeRouter = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
+        await ChromeModule.register(on: chromeRouter)
+        let result = await Task.detached {
+            try? await chromeRouter.dispatch(toolName: "chrome_tabs", arguments: .object([:]))
+        }.value
+        try expect(result != nil, "chrome_tabs dispatch should produce a value off-main, not hang")
+    }
 }

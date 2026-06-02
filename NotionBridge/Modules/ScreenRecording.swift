@@ -295,12 +295,16 @@ private actor RecordingManager {
             throw RecordingError.recordingAlreadyActive
         }
 
-        // Verify Screen Recording TCC
+        // Verify Screen Recording TCC. The preflight gate keeps the denied
+        // path fast — we never enter the SCK call below when access is denied.
         guard CGPreflightScreenCaptureAccess() else {
             throw RecordingError.screenRecordingDenied
         }
 
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        // SCK delivers its reply on the main run loop; an off-main call leaks
+        // the continuation and hangs forever. Route through the main-actor
+        // boundary (see ScreenCaptureKitBoundary.swift).
+        let content = try await SCKBoundary.fetchShareableContent()
         guard let display = content.displays.first else {
             throw RecordingError.noDisplays
         }
