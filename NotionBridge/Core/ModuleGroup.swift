@@ -38,6 +38,7 @@ public enum ModuleGroupID: String, CaseIterable, Sendable, Hashable {
     case file
     case notion
     case messages
+    case notes
     case contacts
     case reminders
     case screen
@@ -68,6 +69,7 @@ public enum ModuleGroupID: String, CaseIterable, Sendable, Hashable {
         case .file:          return "file"
         case .notion:        return "notion"
         case .messages:      return "messages"
+        case .notes:         return "notes"
         case .contacts:      return "contacts"
         case .reminders:     return "reminders"
         case .screen:        return "screen"
@@ -100,6 +102,7 @@ public enum ModuleGroupID: String, CaseIterable, Sendable, Hashable {
         case .file:          return "local file I/O — sensitive-path-aware"
         case .notion:        return "workspace data sources, pages, comments"
         case .messages:      return "Messages.app — iMessage / SMS"
+        case .notes:         return "Apple Notes — list, read, write, search"
         case .contacts:      return "handle resolution for relationship work"
         case .reminders:     return "iCloud Reminders — list, create, complete"
         case .screen:        return "capture, OCR, recording"
@@ -132,6 +135,7 @@ public enum ModuleGroupID: String, CaseIterable, Sendable, Hashable {
         case .file:          return "doc.fill"
         case .notion:        return "n.square.fill"
         case .messages:      return "bubble.left.and.bubble.right.fill"
+        case .notes:         return "note.text"
         case .contacts:      return "person.crop.circle.fill"
         case .reminders:     return "checklist"
         case .screen:        return "rectangle.on.rectangle"
@@ -318,6 +322,7 @@ public enum ModuleGroupDerivation {
         "file":        .file,
         "notion":      .notion,
         "messages":    .messages,
+        "notes":       .notes,
         "contacts":    .contacts,
         "reminders":   .reminders,
         "screen":      .screen,
@@ -372,6 +377,10 @@ public enum ModuleGroupDerivation {
             ]
         case .messages:
             return [ModuleGroupDependency(label: "Full Disk Access", route: "permissions") ]
+        case .notes:
+            // Notes is driven over Apple events; the per-app Notes Automation
+            // grant is a macOS first-use operator prompt (no entitlement change).
+            return [ModuleGroupDependency(label: "Automation", route: "permissions") ]
         case .contacts:
             return [ModuleGroupDependency(label: "Contacts permission", route: "permissions") ]
         case .reminders:

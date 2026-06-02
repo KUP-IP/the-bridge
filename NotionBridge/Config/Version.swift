@@ -71,8 +71,9 @@ public enum BridgeConstants {
     /// v3.7 review-batch integration: 172 + 4 (standing_orders) + 6 (reminders) = 182.
     ///   + 2 shortcuts_* tools (PKT-959, v3.7·F): shortcuts_list/run over the /usr/bin/shortcuts CLI.
     ///   + 5 mail_* tools (PKT-961, v3.7·H): mail_list/read/search/draft/send (Apple Mail).
-    /// v3.7 Wave-1 integration: 182 + 2 (shortcuts) + 5 (mail) = 189.
-    public static let staticFeatureModuleToolCount = 189
+    ///   + 6 notes_* tools (PKT-960, v3.7·G): notes_list/read/search/create/update/delete (Apple Notes).
+    /// v3.7 Wave-1 integration: 182 + 2 (shortcuts) + 5 (mail) + 6 (notes) = 195.
+    public static let staticFeatureModuleToolCount = 195
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.
@@ -85,6 +86,7 @@ public enum BridgeConstants {
     /// v3.7 review-batch integration: 19 + 1 (standing_orders) + 1 (reminders) = 21.
     /// v3.7·F (PKT-959): + shortcuts family.
     /// v3.7·H (PKT-961): + mail family.
-    /// v3.7 Wave-1 integration: 21 + 1 (shortcuts) + 1 (mail) = 23.
-    public static let staticFeatureModuleFamilyCount = 23
+    /// v3.7·G (PKT-960): + notes family.
+    /// v3.7 Wave-1 integration: 21 + 1 (shortcuts) + 1 (mail) + 1 (notes) = 24.
+    public static let staticFeatureModuleFamilyCount = 24
 }

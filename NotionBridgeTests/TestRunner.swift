@@ -612,6 +612,13 @@ await runSessionModuleTests()
 await runMessagesModuleTests()
 await runMessagesSuiteAuditTests()   // Messages-suite every-angle-of-attack audit
 await runMailModuleTests()           // PKT-961 (v3.7·H): mail_* Apple Mail module (mock seam; send-guard)
+// PKT-960 (v3.7·G): notes_* Apple Notes module (injectable NotesScriptRunner
+// mock seam; notes_delete is .request + confirm:'DELETE'). Registration PORTED
+// into this @main TestRunner during the Wave-1 integration — the Notes branch
+// was built on the old base and registered this call in the now-deleted
+// main.swift, which does NOT auto-merge across the main.swift→TestRunner rename
+// (the NotesModuleTests.swift file landed but its run-sequence call did not).
+await runNotesModuleTests()
 await runSystemModuleTests()
 await runRemindersModuleTests()   // PKT-957 (v3.7·D): reminders_* EventKit module (mock seam)
 await runNotionModuleTests()
