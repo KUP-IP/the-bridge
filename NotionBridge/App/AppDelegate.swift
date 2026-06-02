@@ -249,6 +249,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // WS-D (PKT-921): Bridge Cloud Access master toggle flipped — start/stop
+        // the health heartbeat and register/deregister the `bridge_status` MCP
+        // tool on the running server WITHOUT a relaunch. (Launch-time wiring is
+        // handled inside ServerManager.setup() from BridgeDefaults.)
+        NotificationCenter.default.addObserver(forName: .cloudAccessEnabledDidChange, object: nil, queue: .main) { [weak self] note in
+            let enabled = (note.userInfo?[cloudAccessEnabledKey] as? Bool) ?? BridgeDefaults.cloudAccessEnabledValue
+            Task {
+                await self?.serverManager?.setCloudAccessEnabled(enabled)
+            }
+        }
+
         // PKT-349 B2: Observe reset onboarding notification from Settings.
         // Dispatch to MainActor to satisfy Swift 6 strict concurrency.
         NotificationCenter.default.addObserver(forName: .resetOnboarding, object: nil, queue: .main) { [weak self] _ in

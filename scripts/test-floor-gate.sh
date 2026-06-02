@@ -615,7 +615,16 @@ set -euo pipefail
 # MCPToolFactory/EndToEnd count assertions move with the constants).
 # Floor recomputed from the merged suite's measured green (see value below),
 # per the order-inversion rule — never lowered.
-FLOOR="${BRIDGE_TEST_FLOOR:-1607}"
+#
+# WS-D (PKT-921, 2026-06-02): Bridge Cloud Access heartbeat wiring +
+# cloud-gated bridge_status MCP tool + ServerManager tools/list cloud
+# conditional. +12 CloudStatusModuleTests (heartbeat start/stop/idempotent,
+# bridge_status gated registration + canonical payload + NOT-in-static-count,
+# tools/list CLOUD+offline/disabled→only bridge_status, CLOUD+online/degraded→
+# full, local-never-filtered). Independently measured green = 1618 (1606 +12).
+# FLOOR raised 1607 → 1618 per the order-inversion rule. Static module count
+# UNCHANGED at 195 (bridge_status is cloud-gated, not static).
+FLOOR="${BRIDGE_TEST_FLOOR:-1618}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

@@ -101,6 +101,15 @@ public enum BridgeDefaults {
     /// ABSENT ⇒ OFF.
     public static let cloudAccessEnabled = "com.notionbridge.cloudAccessEnabled"
 
+    /// WS-D (PKT-921): effective ON/OFF read of `cloudAccessEnabled`.
+    /// `ServerManager.setup()` consults this at launch to decide whether to
+    /// register the cloud-gated `bridge_status` tool + start the heartbeat.
+    /// ABSENT ⇒ `false` (cloud access off), matching the key's documented
+    /// default so a default install is byte-for-byte its prior self.
+    public static var cloudAccessEnabledValue: Bool {
+        UserDefaults.standard.bool(forKey: cloudAccessEnabled)
+    }
+
     /// The cloudflared tunnel hostname surfaced after a successful provision
     /// (`.connected`). String. Written by the Enable flow on success; read by
     /// RemoteAccessView to populate the MCP URL row. ABSENT ⇒ no URL yet.

@@ -15,7 +15,9 @@ public enum AppVersion {
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
-    public static let build = "43"
+    /// v3.7 WS-D (PKT-921): 43 → 44 — heartbeat wiring + cloud-gated
+    /// `bridge_status` MCP tool + tools/list cloud conditional.
+    public static let build = "44"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }
@@ -73,6 +75,12 @@ public enum BridgeConstants {
     ///   + 5 mail_* tools (PKT-961, v3.7·H): mail_list/read/search/draft/send (Apple Mail).
     ///   + 6 notes_* tools (PKT-960, v3.7·G): notes_list/read/search/create/update/delete (Apple Notes).
     /// v3.7 Wave-1 integration: 182 + 2 (shortcuts) + 5 (mail) + 6 (notes) = 195.
+    /// v3.7 WS-D (PKT-921): UNCHANGED at 195. `bridge_status` is registered
+    ///   ONLY when `BridgeDefaults.cloudAccessEnabled` (via
+    ///   `BridgeModuleRegistry.registerCloudStatusTool`, NOT
+    ///   `registerStaticFeatureModules`), so it deliberately does NOT count
+    ///   toward this always-present static surface. A default (cloud-off)
+    ///   install exposes exactly these 195 module tools.
     public static let staticFeatureModuleToolCount = 195
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).

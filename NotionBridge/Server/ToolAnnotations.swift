@@ -105,6 +105,9 @@ public enum ToolAnnotationCatalog {
         "bg_process_logs": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: false),
         "bg_process_start": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: false),
         "bg_process_status": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: false),
+        // WS-D (PKT-921): cloud-gated health probe. Reads the local
+        // BridgeCloudManager state machine; touches nothing — pure read.
+        "bridge_status": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
         "cgevent_send": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "chrome_execute_js": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "chrome_navigate": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),

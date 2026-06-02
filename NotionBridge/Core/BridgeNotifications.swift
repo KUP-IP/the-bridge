@@ -35,7 +35,19 @@ public extension Notification.Name {
     /// `.signingIn` to `.provisioning`. The `userInfo` carries no secret
     /// material — only a `success: Bool` under `cloudAuthSuccessKey`.
     static let cloudAuthCallbackReceived = Notification.Name("com.notionbridge.cloudAuthCallbackReceived")
+
+    /// WS-D (PKT-921): posted when `BridgeDefaults.cloudAccessEnabled` flips
+    /// (the Enable flow reached `.connected` → ON, or reverted to OFF on
+    /// failure/cancel). `AppDelegate` observes this to start/stop the cloud
+    /// health heartbeat + register/deregister the `bridge_status` MCP tool on
+    /// the running `ServerManager` WITHOUT a relaunch. The `userInfo` carries
+    /// the new boolean under `cloudAccessEnabledKey`.
+    static let cloudAccessEnabledDidChange = Notification.Name("com.notionbridge.cloudAccessEnabledDidChange")
 }
+
+/// `userInfo` key on `.cloudAccessEnabledDidChange` carrying the new
+/// enabled-state (`Bool`).
+public let cloudAccessEnabledKey = "enabled"
 
 /// `userInfo` key on `.cloudAuthCallbackReceived` carrying whether the code
 /// exchange succeeded (`Bool`). Never carries the token itself.

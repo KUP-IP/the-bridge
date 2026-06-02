@@ -206,6 +206,12 @@ public final class EnableCloudAccessFlow {
         teardownAuthWait()
         provisionTask?.cancel()
         provisionTask = nil
+        // WS-D (PKT-921): an explicit OFF toggle must also persist the master
+        // state and stop the heartbeat / deregister `bridge_status`. (The flow
+        // never set `.failed` here, so without this the running ServerManager
+        // would keep a stale heartbeat after a mid-flow cancel.)
+        defaults.cloudAccessEnabled = false
+        postCloudAccessEnabledDidChange(false)
         state = .idle
     }
 
@@ -325,12 +331,29 @@ public final class EnableCloudAccessFlow {
     private func succeed(hostname: String) {
         defaults.cloudTunnelHostname = hostname
         defaults.cloudAccessEnabled = true
+        // WS-D (PKT-921): tell the running ServerManager to start the heartbeat
+        // + register `bridge_status` now that cloud access is ON (no relaunch).
+        postCloudAccessEnabledDidChange(true)
         state = .connected
     }
 
     private func fail(_ error: CloudError) {
         // Revert the toggle to OFF so the switch snaps back (DoD).
         defaults.cloudAccessEnabled = false
+        // WS-D (PKT-921): cloud access reverted to OFF — stop the heartbeat +
+        // deregister `bridge_status`.
+        postCloudAccessEnabledDidChange(false)
         state = .failed(error)
+    }
+
+    /// WS-D (PKT-921): notify observers (AppDelegate → ServerManager) that the
+    /// `cloudAccessEnabled` master state changed, so the heartbeat +
+    /// `bridge_status` registration track the toggle live.
+    private func postCloudAccessEnabledDidChange(_ enabled: Bool) {
+        notificationCenter.post(
+            name: .cloudAccessEnabledDidChange,
+            object: nil,
+            userInfo: [cloudAccessEnabledKey: enabled]
+        )
     }
 }
