@@ -48,6 +48,24 @@ private func crashFlushHandler(_ sig: Int32) {
     raise(sig)
 }
 
+/// PKT-932: minimal `SPUUpdaterDelegate` that logs update-check outcomes and
+/// errors. The updater was previously created with `updaterDelegate: nil`, so a
+/// failed/aborted check (or "no update found") produced no log and no UI — the
+/// reason "Check for Updates" silently did nothing. These NSLog lines surface
+/// the actual outcome in the unified log (filter: process == "NotionBridge").
+private final class UpdaterLogger: NSObject, SPUUpdaterDelegate {
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        NSLog("[Bridge][Updater] found valid update: \(item.versionString)")
+    }
+    func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: Error) {
+        NSLog("[Bridge][Updater] no update found (already current): \(error.localizedDescription)")
+    }
+    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+        let ns = error as NSError
+        NSLog("[Bridge][Updater] check ABORTED: \(ns.domain)#\(ns.code) — \(error.localizedDescription)")
+    }
+}
+
 /// Manages app lifecycle, auto-launch registration, and MCP server lifecycle.
 /// The server starts in a detached Task on launch (Nudge Server pattern) so the
 /// SwiftUI main thread is never blocked. StatusBarController receives live updates
@@ -94,6 +112,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// PKT-430: Sparkle auto-updater controller for delivering post-launch updates.
     private let updaterController: SPUStandardUpdaterController
 
+    /// PKT-932: strong-held updater delegate that LOGS update outcomes/errors.
+    /// The controller was previously created with `updaterDelegate: nil`, which
+    /// swallowed every check failure silently (no error, no log, no UI) — the
+    /// reason "Check for Updates" appeared to do nothing.
+    private let updaterLogger: UpdaterLogger
+
     /// V1-QUALITY-C2: Onboarding window controller for first-launch experience.
     private lazy var onboardingController = OnboardingWindowController(
         permissionManager: permissionManager
@@ -123,9 +147,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public override init() {
+        let logger = UpdaterLogger()
+        updaterLogger = logger
         updaterController = SPUStandardUpdaterController(
             startingUpdater: !Self.runningInTestProcess,
-            updaterDelegate: nil,
+            updaterDelegate: logger,
             userDriverDelegate: nil
         )
         // PKT-431: Force revalidation on every appcast fetch to prevent stale NSURLSession cache.
@@ -372,8 +398,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsController.show(section: section)
     }
 
-    /// PKT-430: Trigger manual Sparkle update check.
+    /// PKT-430 / PKT-932: Trigger a manual Sparkle update check.
+    /// As an `LSUIElement` app we may not be frontmost when the check returns,
+    /// so activate first to ensure Sparkle's update window/alert surfaces; and
+    /// log the updater's checkable state so a silent no-op (the historical
+    /// PKT-932 bug) is diagnosable in the unified log rather than vanishing.
     public func checkForUpdates() {
+        NSApp.activate(ignoringOtherApps: true)
+        let u = updaterController.updater
+        NSLog("[Bridge][Updater] checkForUpdates tapped — canCheckForUpdates=\(u.canCheckForUpdates) sessionInProgress=\(u.sessionInProgress) feedURL=\(u.feedURL?.absoluteString ?? "nil")")
         updaterController.checkForUpdates(nil)
     }
 
