@@ -43,6 +43,7 @@ public enum BridgeModuleRegistry {
         await FileModule.register(on: router)
         await registerSession(router)
         await MessagesModule.register(on: router)
+        await MailModule.register(on: router)
         await SystemModule.register(on: router)
         await ContactsModule.register(on: router)
         await RemindersModule.register(on: router)

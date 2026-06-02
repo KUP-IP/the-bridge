@@ -581,21 +581,41 @@ set -euo pipefail
 # main.swift→TestRunner.swift rename, so the test file would otherwise have
 # compiled but never run. Measured 1557/0 on every one of 5 gate runs.
 #
-# v3.7·F (PKT-959, 2026-06-02): shortcuts_* MCP tool family over the
-# /usr/bin/shortcuts CLI (NO entitlement) — ShortcutsModule + injectable
-# `ShortcutsRunning` process seam (production CLIShortcutsRunner spawns the
-# CLI; tests inject MockShortcutsRunner). Two tools: shortcuts_list (.open,
-# read-only enumeration) + shortcuts_run (.notify — a Shortcut can do anything,
-# so it never auto-executes silently). New ShortcutsModuleTests contributes +11
-# harness test() blocks against the mock seam (registration/tier, list parse +
-# argv, folders + folderName argv, run output-capture + argv, input-passing via
-# --input-path temp file + cleanup, run-failure envelope, invalid-arg
-# short-circuit, capability_missing short-circuit, parseLines pure helper) — no
-# live CLI. Also bumped staticFeatureModuleToolCount 182 -> 184 and family count
-# 21 -> 22 (the strict BridgeModuleRegistry/MCPToolFactory/E2E count assertions
-# move with the constants). Measured 1568 passed, 0 failed. Floor raised
-# 1557 -> 1568 per the order-inversion rule.
-FLOOR="${BRIDGE_TEST_FLOOR:-1568}"
+# v3.7 Wave-1 integration (2026-06-02): three Mac/iCloud modules merged onto
+# main (315a868) on branch integration/v3.7-wave1. Each was independently
+# floor-gated on its own base; the floor below is recomputed from the MERGED
+# suite's measured green (never the sum of per-branch numbers).
+#
+# v3.7·F (PKT-959): shortcuts_* MCP tool family over the /usr/bin/shortcuts CLI
+# (NO entitlement) — ShortcutsModule + injectable `ShortcutsRunning` process
+# seam (production CLIShortcutsRunner spawns the CLI; tests inject
+# MockShortcutsRunner). Two tools: shortcuts_list (.open, read-only enumeration)
+# + shortcuts_run (.notify — a Shortcut can do anything, so it never
+# auto-executes silently). +11 harness test() blocks against the mock seam — no
+# live CLI.
+#
+# v3.7·H (PKT-961): MailModule (Apple Mail over an INJECTABLE AppleScript seam)
+# added 5 MCP tools (mail_list/read/search/draft/send) + MailModuleTests
+# (+12 test() blocks: registration, tiering, list/read/search/draft, the
+# send-guard proved 3 ways — wrong token refused, missing-key rejected, seam
+# never invoked — confirmed send, TCC -1743 error path, validation, annotation
+# mirror). All against the mock seam; NO live mail.
+#
+# v3.7·G (PKT-960): NotesModule (Apple Notes over an INJECTABLE NotesScriptRunner
+# AppleScript seam) added 6 MCP tools (notes_list/read/search/create/update/
+# delete) + NotesModuleTests (+27 test() blocks). notes_delete is .request +
+# confirm:'DELETE'. All against the mock seam; NO live Notes.app. (Notes was
+# built on the OLD base 4455b50 and registered its test in the now-deleted
+# main.swift; that registration was hand-ported into the @main TestRunner during
+# this integration — the test file landed but its run-sequence call did not
+# auto-merge across the main.swift→TestRunner.swift rename.)
+#
+# Reconciled tool count 182 + 2 (shortcuts) + 5 (mail) + 6 (notes) = 195;
+# family count 21 + 1 + 1 + 1 = 24 (the strict BridgeModuleRegistry/
+# MCPToolFactory/EndToEnd count assertions move with the constants).
+# Floor recomputed from the merged suite's measured green (see value below),
+# per the order-inversion rule — never lowered.
+FLOOR="${BRIDGE_TEST_FLOOR:-1607}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

@@ -70,8 +70,9 @@ public enum BridgeConstants {
     ///   + 6 reminders_* tools (PKT-957, v3.7·D): reminders_lists/list/create/update/complete/delete.
     /// v3.7 review-batch integration: 172 + 4 (standing_orders) + 6 (reminders) = 182.
     ///   + 2 shortcuts_* tools (PKT-959, v3.7·F): shortcuts_list/run over the /usr/bin/shortcuts CLI.
-    /// v3.7·F: 182 + 2 (shortcuts) = 184.
-    public static let staticFeatureModuleToolCount = 184
+    ///   + 5 mail_* tools (PKT-961, v3.7·H): mail_list/read/search/draft/send (Apple Mail).
+    /// v3.7 Wave-1 integration: 182 + 2 (shortcuts) + 5 (mail) = 189.
+    public static let staticFeatureModuleToolCount = 189
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.
@@ -82,6 +83,8 @@ public enum BridgeConstants {
     /// v3.7·B (PKT-931): + standing_orders family.
     /// v3.7·D (PKT-957): + reminders family.
     /// v3.7 review-batch integration: 19 + 1 (standing_orders) + 1 (reminders) = 21.
-    /// v3.7·F (PKT-959): + shortcuts family = 22.
-    public static let staticFeatureModuleFamilyCount = 22
+    /// v3.7·F (PKT-959): + shortcuts family.
+    /// v3.7·H (PKT-961): + mail family.
+    /// v3.7 Wave-1 integration: 21 + 1 (shortcuts) + 1 (mail) = 23.
+    public static let staticFeatureModuleFamilyCount = 23
 }
