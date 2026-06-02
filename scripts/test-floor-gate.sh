@@ -642,10 +642,12 @@ set -euo pipefail
 # Claude.ai MCP-URL derivation + query-value percent-encoding contract +
 # Q3 copy+hint shipped mode, and the Disable flow (EnableCloudAccessFlow.
 # disable() → CloudTeardown seam + cleared toggle/host; live BridgeCloudManager.
-# disable() → .disabled; cancel = no side effects). Also hardened the WS-F
-# `waitFor` test helper to interleave a tiny real sleep once cooperative yields
-# are exhausted — removes a pre-existing load-sensitive flake on the
-# provision-timeout test without weakening any assertion.
+# disable() → .disabled; cancel = no side effects). All against fakes (no
+# SwiftUI render / WindowServer / cloudflared / network). Also hardened the
+# WS-F `waitFor` test helper to interleave a tiny real sleep once cooperative
+# yields are exhausted — removes a pre-existing load-sensitive flake on the
+# provision-timeout test (off-actor continuation + withTaskGroup cancel hop)
+# without weakening any assertion.
 #
 # v3.7 Wave-2 integration (2026-06-02): FLOOR recomputed from the MERGED suite's
 # measured green across 5 clean runs (Calendar +18, WS-D +12, WS-G +11 on the

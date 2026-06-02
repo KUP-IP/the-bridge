@@ -153,8 +153,15 @@ private final class FakePersister: CloudTokenPersisting, @unchecked Sendable {
 // MARK: - Helpers
 
 /// Poll the @MainActor flow's state until `predicate` holds or a bounded
-/// number of yields elapse (deterministic — fakes resolve fast). Avoids any
-/// real wall-clock sleep.
+/// number of poll cycles elapse. The fast path is cooperative `Task.yield()`
+/// (fakes resolve in a few turns); but a transition that resolves a
+/// timeout-guard via a background-executor continuation + a `withTaskGroup`
+/// cancellation hop (the provision-timeout path) can need more scheduler
+/// progress than pure yields guarantee under load. So after a short burst of
+/// yields each cycle interleaves a tiny real sleep — guaranteeing wall-clock
+/// progress for the off-actor continuation — which removes the load-sensitive
+/// flake without weakening any assertion. Total worst-case wait stays well
+/// under a second.
 @MainActor
 private func waitFor(
     _ flow: EnableCloudAccessFlow,
@@ -164,7 +171,13 @@ private func waitFor(
     var i = 0
     while i < maxYields {
         if predicate(flow.state) { return true }
-        await Task.yield()
+        if i < 64 {
+            await Task.yield()
+        } else {
+            // ~0.5ms per cycle — guarantees the off-actor continuation/cancel
+            // hop gets real time even when the executor is saturated.
+            try? await Task.sleep(nanoseconds: 500_000)
+        }
         i += 1
     }
     return predicate(flow.state)

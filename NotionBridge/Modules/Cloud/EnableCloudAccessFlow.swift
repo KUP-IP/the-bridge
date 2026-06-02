@@ -133,6 +133,10 @@ public final class EnableCloudAccessFlow {
     private let tokenStore: CloudTokenStore
     private let browser: AuthBrowserOpening
     private let provisioner: CloudProvisioning
+    /// WS-G: the teardown seam the Disable flow drives. Optional so existing
+    /// call sites (and tests that only exercise Enable) need not supply one;
+    /// `.live()` wires the production `BridgeCloudManager`.
+    private let teardown: CloudTeardown?
     private let defaults: CloudFlowDefaults
     private let config: WorkOSConfig
     /// Configurable provisioning base URL (mocks in tests; PKT-810/WS-A live).
@@ -157,6 +161,7 @@ public final class EnableCloudAccessFlow {
         browser: AuthBrowserOpening,
         provisioner: CloudProvisioning,
         defaults: CloudFlowDefaults,
+        teardown: CloudTeardown? = nil,
         config: WorkOSConfig = .resolved(),
         provisionBaseURL: String,
         clock: CloudClock = TaskClock(),
@@ -167,6 +172,7 @@ public final class EnableCloudAccessFlow {
         self.tokenStore = tokenStore
         self.browser = browser
         self.provisioner = provisioner
+        self.teardown = teardown
         self.defaults = defaults
         self.config = config
         self.provisionBaseURL = provisionBaseURL
@@ -212,6 +218,30 @@ public final class EnableCloudAccessFlow {
         // would keep a stale heartbeat after a mid-flow cancel.)
         defaults.cloudAccessEnabled = false
         postCloudAccessEnabledDidChange(false)
+        state = .idle
+    }
+
+    // MARK: - Disable (WS-G)
+
+    /// Tear down a live cloud connection (Disable flow, confirmed). Stops any
+    /// in-flight run, drives the injected `CloudTeardown` (production:
+    /// `BridgeCloudManager.disable()` → tunnel stopped, machine `.disabled`),
+    /// clears the persisted toggle + hostname, and returns the flow to
+    /// `.idle`. Idempotent and safe from any state.
+    ///
+    /// Mirrors the real API per the PKT-923 reconciliation: there is no
+    /// `stopTunnel()`/`.disconnected` — teardown is `disable()` and the off
+    /// state is `.disabled`.
+    public func disable() async {
+        // Stop any in-flight Enable run first (no .failed surfaced).
+        teardownAuthWait()
+        provisionTask?.cancel()
+        provisionTask = nil
+        // Tear the tunnel down (no-op-safe if not running).
+        await teardown?.disable()
+        // Clear persisted state so the toggle stays OFF + the URL row clears.
+        defaults.cloudAccessEnabled = false
+        defaults.cloudTunnelHostname = nil
         state = .idle
     }
 

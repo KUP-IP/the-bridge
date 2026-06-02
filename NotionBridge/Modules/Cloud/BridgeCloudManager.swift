@@ -82,7 +82,19 @@ public protocol CloudProvisioning: Sendable {
     func startTunnel() async throws
 }
 
-public actor BridgeCloudManager: CloudProvisioning {
+/// WS-G: the teardown seam the Disable flow depends on. Lets the Disable
+/// confirmation tear the tunnel down against a deterministic mock in unit
+/// tests (no cloudflared, no network). `BridgeCloudManager.disable()` is the
+/// production conformer — it stops the tunnel and returns the machine to
+/// `.disabled` from any state.
+public protocol CloudTeardown: Sendable {
+    /// Stop the tunnel and return cloud access to its off state. Safe from any
+    /// state (a not-running stop is swallowed). Returns the resulting state.
+    @discardableResult
+    func disable() async -> CloudConnectionState
+}
+
+public actor BridgeCloudManager: CloudProvisioning, CloudTeardown {
 
     // MARK: Dependencies (all injected — fakes in tests)
 
