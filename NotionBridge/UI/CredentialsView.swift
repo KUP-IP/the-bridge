@@ -117,6 +117,26 @@ struct CredentialsView: View {
             }
 
             if credentialsEnabledUI {
+                // MARK: Onboarding / all-foreign-filtered banner (PKT-934 W3)
+                // When the feature is on but no Bridge-scoped credentials are
+                // present, three bare "No saved X" rows read like an error
+                // and give a brand-new user no next step. They also can't
+                // tell an empty keychain apart from one whose entries were
+                // all filtered out by the v3.6.x scoping hotfix (foreign
+                // keychain items are intentionally hidden here). A single
+                // onboarding banner covers both: empty-new and
+                // all-foreign-filtered. Suppressed once any add-form is open
+                // or any Bridge credential exists.
+                if credentials.isEmpty && !showAddApiKey && !showAddPassword && !showAddCard {
+                    Section {
+                        BridgeEmptyState(
+                            systemImage: "key.horizontal",
+                            title: "No Bridge credentials yet",
+                            body: "Add an API key, password, or tokenized card below to store it in the macOS Keychain with biometric protection. Only credentials created here appear in this list — existing Keychain items from other apps are intentionally hidden."
+                        )
+                    }
+                }
+
                 // MARK: API Keys (PKT-441)
                 Section("API Keys") {
                     if apiKeys.isEmpty && !showAddApiKey {

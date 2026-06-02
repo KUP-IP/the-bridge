@@ -274,7 +274,9 @@ struct SkillsView: View {
 
     @ViewBuilder
     private func fileSkillRow(_ fs: ParsedSkill) -> some View {
-        HStack(spacing: 12) {
+        // PKT-934 W2: parity with skillRow — top-align so the status
+        // toggle tracks the title line when the summary wraps.
+        HStack(alignment: .top, spacing: 12) {
             Toggle("", isOn: Binding(
                 get: { fileSkillEnabledMap[fs.path.path] ?? true },
                 set: { newValue in
@@ -290,6 +292,8 @@ struct SkillsView: View {
                 Text(fs.name)
                     .fontWeight(.medium)
                     .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 let summary: String = {
                     if case .string(let d) = fs.frontmatter["description"] { return d }
                     return ""
@@ -395,7 +399,10 @@ struct SkillsView: View {
 
     @ViewBuilder
     private func skillRow(_ skill: SkillsManager.Skill, at index: Int) -> some View {
-        HStack(spacing: 12) {
+        // PKT-934 W2: top-align the row so the leading status toggle and
+        // trailing controls sit against the title line even when the
+        // summary wraps to a second line (was center → toggle floated).
+        HStack(alignment: .top, spacing: 12) {
             Toggle("", isOn: Binding(
                 get: { skill.enabled },
                 set: { _ in skillsManager.toggleSkill(named: skill.name) }
@@ -430,9 +437,14 @@ struct SkillsView: View {
                     // glyph so its click-to-open affordance is visible without
                     // a hover. Double-click still enters rename mode.
                     HStack(spacing: 4) {
+                        // PKT-934 W2: long titles (80+ chars) truncate with a
+                        // tail glyph instead of wrapping unbounded and
+                        // shoving the trailing controls out of alignment.
                         Text(skill.name)
                             .fontWeight(.medium)
                             .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                         Image(systemName: "arrow.up.right.square")
                             .font(.caption2)
                             .foregroundStyle(.secondary)

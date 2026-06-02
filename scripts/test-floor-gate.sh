@@ -515,6 +515,17 @@
 # the order-inversion rule.
 set -euo pipefail
 
+# PKT-957 / v3.7·D (2026-06-01): reminders_* MCP tool family over EventKit
+# (RemindersModule + injectable RemindersStoring seam). New
+# RemindersModuleTests contributes 17 harness `test()` blocks (6 top-level
+# + 6 nested access-denied sub-tests + 5 CRUD/idempotency/listing blocks)
+# against the in-memory mock seam — no live EventKit/TCC. Also bumped
+# staticFeatureModuleToolCount 172 -> 178 and family count 19 -> 20
+# (registry-count / E2E family assertions move with the constants). Measured
+# 1518 passed, 0 failed. Floor raised 1501 -> 1518 per the order-inversion
+# rule. (Known ScreenModuleTests/screen_record_stop sandbox hang handled by
+# the watchdog/retry below — unaffected.)
+
 # v3.6.1 (2026-05-31): hermetic-test remediation + WS-C/E (Mac-side cloud
 # access: BridgeCloudManager + NL-3 auth-passdown + Remote Access settings)
 # merged in. ConfigManagerTests no longer read/mutate the user's live config
@@ -522,11 +533,42 @@ set -euo pipefail
 # "datasource_update succeeds with API key" test moved into the hasAPIKey
 # branch and renamed to datasource_get. Hermetic base was 1467; WS-C/E adds
 # the BridgeCloudManager suite. Floor recomputed from the post-merge gate run.
-FLOOR="${BRIDGE_TEST_FLOOR:-1503}"
 # fix/sck-continuation-leak (2026-06-02): +2 SCK off-main-actor
 # continuation-leak regression guards in ScreenModuleTests (screen_capture +
 # chrome_tabs dispatched from a Task.detached must return/throw promptly, not
 # hang). Floor raised 1501 → 1503 to match the added passing tests.
+#
+# v3.7·B (PKT-931, 2026-06-01): standing_orders_* MCP tools (list/read/save/
+# delete) landed — new StandingOrdersRecordStore actor + 4-tool module.
+# StandingOrdersModuleTests (registration/tier, CRUD round-trip, idempotent
+# upsert, soft-delete+archive, list archived exclusion/opt-in, read 404 on
+# soft-deleted, concurrent-save actor serialization, atomic persistence,
+# handler-level save/read/invalid-scope) = +14.
+#
+# v3.7·D (PKT-957, 2026-06-01): reminders_* MCP tool family over EventKit
+# (RemindersModule + injectable RemindersStoring seam). RemindersModuleTests
+# contributes +17 harness test() blocks against the in-memory mock seam — no
+# live EventKit/TCC.
+#
+# v3.7·C (PKT-934, 2026-06-01): UI polish (Jobs/Credentials/Skills/
+# ModuleGroupCard) — UI-only, +0 tests.
+#
+# WS-F (PKT-922, commit 57dfc4b): EnableCloudAccessFlow @Observable state
+# machine + WorkOS sign-in URL builder + bridge-auth:// callback exchange +
+# timeouts/revert + ProvisioningProgressView mapping, all against mocks.
+# EnableCloudAccessFlowTests = +21.
+#
+# v3.7-rc integration (2026-06-02): layered the review-batch (standing_orders
+# +14, v3.7·C +0, reminders +17) and WS-F (+21) onto the VERIFIED test-infra
+# base (1503: SCK continuation-leak guards + real watchdog + TestRunner harness
+# fix). Floor reconciled from the base + SUM of per-branch test deltas:
+# 1503 + 14 + 0 + 17 + 21 = 1555. Reconciled tool count 172 + 4 (standing_orders)
+# + 6 (reminders) = 182; family count 19 + 1 + 1 = 21. The review-batch's own
+# `perl -e 'alarm'` watchdog rewrite was REJECTED — it regresses the base's real
+# external-killer watchdog (alarm() is cleared by exec() on macOS, so it never
+# kills a hung binary). The base watchdog/retry block below is kept verbatim.
+# Measured on the integration gate run, 0 failures.
+FLOOR="${BRIDGE_TEST_FLOOR:-1555}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5
