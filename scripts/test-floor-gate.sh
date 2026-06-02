@@ -522,7 +522,23 @@ set -euo pipefail
 # "datasource_update succeeds with API key" test moved into the hasAPIKey
 # branch and renamed to datasource_get. Hermetic base was 1467; WS-C/E adds
 # the BridgeCloudManager suite. Floor recomputed from the post-merge gate run.
-FLOOR="${BRIDGE_TEST_FLOOR:-1501}"
+# v3.7·G (PKT-960, 2026-06-02): notes_* MCP tools (Apple Notes via AppleScript).
+# New NotesModule over an INJECTABLE NotesScriptRunner seam (NSAppleScript in
+# production; a recording mock in tests — zero contact with live Notes.app).
+# Six tools registered: notes_list/read/search (.open), notes_create/update
+# (.notify), notes_delete (.request + confirm:'DELETE'). Wired into
+# BridgeModuleRegistry; ToolAnnotationCatalog gained 6 explicit entries
+# (tier↔requiresConfirmation coherent); ModuleGroup gained a first-class
+# `notes` case + prefix + Automation dependency chip; staticFeatureModuleToolCount
+# 172→178 (+6) and family count 19→20 (+1). New NotesModuleTests.swift adds 27
+# harness test() blocks (registration + tier matrix + camelCase schema-key guard
+# + CRUD via the mock seam + search + AppleScript-error path incl. -1743 TCC
+# guidance + id-vs-name addressing + missing-param rejection + pure escaping/
+# selector/record-parse/script-builder checks). Measured 1528 passed, 0 failed.
+# Floor raised 1501 -> 1528 per the order-inversion rule. The Notes per-app
+# Automation TCC grant is a macOS operator first-use prompt (no entitlement
+# change — uses the existing apple-events automation entitlement).
+FLOOR="${BRIDGE_TEST_FLOOR:-1528}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

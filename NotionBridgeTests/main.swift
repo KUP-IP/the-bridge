@@ -460,6 +460,7 @@ await runFileModuleTests()
 await runSessionModuleTests()
 await runMessagesModuleTests()
 await runMessagesSuiteAuditTests()   // Messages-suite every-angle-of-attack audit
+await runNotesModuleTests()          // v3.7·G: Apple Notes (notes_*) over injectable AppleScript seam
 await runSystemModuleTests()
 await runNotionModuleTests()
 await runAccessibilityModuleTests()

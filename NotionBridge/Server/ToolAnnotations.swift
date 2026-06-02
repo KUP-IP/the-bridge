@@ -228,6 +228,17 @@ public enum ToolAnnotationCatalog {
         "messages_search": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "messages_send": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: true),
         "mouse_click": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        // v3.7·G — notes_* (Apple Notes via AppleScript). list/read/search are
+        // pure reads (.open → requiresConfirmation:false). create/update are
+        // .notify (informational notification, NOT a human gate). delete is
+        // .request + destructive (move-to-trash, irreversible from the API).
+        // openWorld:true — each tool drives Notes.app over Apple events.
+        "notes_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "notes_read": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
+        "notes_search": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "notes_create": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "notes_update": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
+        "notes_delete": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: true, openWorld: true),
         "notify": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "notion_block_delete": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         // Sprint A · mcp-builder #1: notion_block_read removed
