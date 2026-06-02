@@ -73,6 +73,12 @@ public enum SkillsModule {
     "When to use" / "Not for" / "Related" guidance — read it before \
     selecting. On a wrong/missing parameter the error returns a \
     "did you mean: x→y" hint; trust it and retry once.
+    Standing orders: persistent operator directives live behind the \
+    standing_orders_* family — standing_orders_list (metadata only), \
+    standing_orders_read (full body by id), standing_orders_save \
+    (idempotent upsert), standing_orders_delete (soft-delete + archive). \
+    These are operator-curated config; writes are Notify-tier and never \
+    auto-execute.
     """
 
     public static func buildRoutingInstructions() -> String {

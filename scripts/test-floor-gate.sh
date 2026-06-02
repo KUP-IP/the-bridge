@@ -522,7 +522,14 @@ set -euo pipefail
 # "datasource_update succeeds with API key" test moved into the hasAPIKey
 # branch and renamed to datasource_get. Hermetic base was 1467; WS-C/E adds
 # the BridgeCloudManager suite. Floor recomputed from the post-merge gate run.
-FLOOR="${BRIDGE_TEST_FLOOR:-1501}"
+# v3.7·B (PKT-931, 2026-06-01): standing_orders_* MCP tools (list/read/save/
+# delete) landed — new StandingOrdersRecordStore actor + 4-tool module.
+# +15 StandingOrdersModuleTests (registration/tier, CRUD round-trip, idempotent
+# upsert, soft-delete+archive, list archived exclusion/opt-in, read 404 on
+# soft-deleted, concurrent-save actor serialization, atomic persistence,
+# handler-level save/read/invalid-scope). 1501 → 1515. Tool count 172 → 176,
+# family count 19 → 20. Measured on the worktree gate run, 0 failures.
+FLOOR="${BRIDGE_TEST_FLOOR:-1515}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5
