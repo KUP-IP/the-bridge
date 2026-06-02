@@ -768,6 +768,16 @@ await runBridgeCloudManagerTests()
 // rename.)
 await runEnableCloudAccessFlowTests()
 
+// WS-D (PKT-921, Bridge Cloud Access): heartbeat loop over the WS-C
+// BridgeCloudManager (start/stop on toggle, idempotent start), the
+// cloud-gated `bridge_status` MCP tool (gated registration + canonical
+// state-derived payload, NOT in the static feature-module count), and the
+// ServerManager tools/list cloud conditional (CLOUD+offline/disabled → only
+// bridge_status; CLOUD+online/degraded → full; local request never filtered).
+// All against the in-memory WS-C fakes — no cloudflared, no network, no 30s
+// waits (the heartbeat interval is shrunk + ticks observed via onTick).
+await runCloudStatusModuleTests()
+
 // ============================================================
 // MARK: - Summary
 // ============================================================

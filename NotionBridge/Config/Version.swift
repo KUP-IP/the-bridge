@@ -15,7 +15,9 @@ public enum AppVersion {
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
-    public static let build = "43"
+    /// v3.7 WS-D (PKT-921): 43 → 44 — heartbeat wiring + cloud-gated
+    /// `bridge_status` MCP tool + tools/list cloud conditional.
+    public static let build = "44"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }
@@ -76,6 +78,12 @@ public enum BridgeConstants {
     ///   + 5 calendar_* tools (PKT-962, v3.7·I): calendar_list/events/create/update/delete
     ///     (native EventKit .event entities; reuses v3.7·D's store + calendars entitlement).
     /// v3.7·I (PKT-962): 195 + 5 (calendar) = 200.
+    /// v3.7 WS-D (PKT-921): static count UNCHANGED by WS-D. `bridge_status` is
+    ///   registered ONLY when `BridgeDefaults.cloudAccessEnabled` (via
+    ///   `BridgeModuleRegistry.registerCloudStatusTool`, NOT
+    ///   `registerStaticFeatureModules`), so it deliberately does NOT count
+    ///   toward this always-present static surface. A default (cloud-off)
+    ///   install exposes exactly these 200 module tools (195 Wave-1 + 5 calendar).
     public static let staticFeatureModuleToolCount = 200
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).

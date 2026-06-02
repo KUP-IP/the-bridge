@@ -85,4 +85,20 @@ public enum BridgeModuleRegistry {
         await StandingOrdersModule.register(on: router)
         await ShortcutsModule.register(on: router)
     }
+
+    /// WS-D (PKT-921): register the cloud-gated `bridge_status` tool.
+    ///
+    /// Kept OUT of `registerStaticFeatureModules` on purpose: `bridge_status`
+    /// is conditional on `BridgeDefaults.cloudAccessEnabled`, so it must not
+    /// inflate `BridgeConstants.staticFeatureModuleToolCount` (which counts the
+    /// always-present surface) nor trip the registry's
+    /// every-tool-has-an-annotation / no-duplicate guards. The caller (e.g.
+    /// `ServerManager.setup()`) invokes this ONLY when cloud access is enabled,
+    /// passing the live `BridgeCloudManager` whose `state` the handler reads.
+    public static func registerCloudStatusTool(
+        on router: ToolRouter,
+        manager: BridgeCloudManager
+    ) async {
+        await CloudStatusModule.register(on: router, manager: manager)
+    }
 }

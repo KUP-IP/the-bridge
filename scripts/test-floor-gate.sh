@@ -626,9 +626,32 @@ set -euo pipefail
 # notFound, access-denied across all 5 tools + notDetermined). All against the
 # mock seam; NO live EventKit / TCC. calendar_list/events are .open (read-only),
 # create/update .notify, delete .request. Tool count 195 + 5 = 200; family count
-# 24 + 1 = 25 (the strict count assertions move with the constants). Floor raised
-# to the merged suite's measured green per the order-inversion rule — never lowered.
-FLOOR="${BRIDGE_TEST_FLOOR:-1625}"
+# 24 + 1 = 25 (the strict count assertions move with the constants).
+#
+# WS-D (PKT-921, 2026-06-02): Bridge Cloud Access heartbeat wiring +
+# cloud-gated bridge_status MCP tool + ServerManager tools/list cloud
+# conditional. +12 CloudStatusModuleTests (heartbeat start/stop/idempotent,
+# bridge_status gated registration + canonical payload + NOT-in-static-count,
+# tools/list CLOUD+offline/disabled→only bridge_status, CLOUD+online/degraded→
+# full, local-never-filtered). Static module count UNCHANGED at 200 (bridge_status
+# is cloud-gated, not static).
+#
+# WS-G (PKT-923, 2026-06-02 · Bridge Cloud Access · terminal UI packet):
+# CloudAccessWSGTests added +11 test() blocks for the first-run modal gate
+# (Q2 one-time, BridgeDefaults.hasSeenCloudAccessFirstRun), the Add-to-
+# Claude.ai MCP-URL derivation + query-value percent-encoding contract +
+# Q3 copy+hint shipped mode, and the Disable flow (EnableCloudAccessFlow.
+# disable() → CloudTeardown seam + cleared toggle/host; live BridgeCloudManager.
+# disable() → .disabled; cancel = no side effects). Also hardened the WS-F
+# `waitFor` test helper to interleave a tiny real sleep once cooperative yields
+# are exhausted — removes a pre-existing load-sensitive flake on the
+# provision-timeout test without weakening any assertion.
+#
+# v3.7 Wave-2 integration (2026-06-02): FLOOR recomputed from the MERGED suite's
+# measured green across 5 clean runs (Calendar +18, WS-D +12, WS-G +11 on the
+# Wave-1 base of 1607), per the order-inversion rule — derived from the ACTUAL
+# reconciled count, never lowered, never trusting per-branch numbers.
+FLOOR="${BRIDGE_TEST_FLOOR:-1648}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5
