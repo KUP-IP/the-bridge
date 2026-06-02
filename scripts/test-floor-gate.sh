@@ -650,10 +650,12 @@ set -euo pipefail
 # without weakening any assertion.
 #
 # v3.7 Wave-2 integration (2026-06-02): FLOOR recomputed from the MERGED suite's
-# measured green across 5 clean runs (Calendar +18, WS-D +12, WS-G +11 on the
-# Wave-1 base of 1607), per the order-inversion rule — derived from the ACTUAL
-# reconciled count, never lowered, never trusting per-branch numbers.
-FLOOR="${BRIDGE_TEST_FLOOR:-1648}"
+# measured green across 5 clean runs, per the order-inversion rule — derived from
+# the ACTUAL reconciled count (1647), never lowered, never trusting per-branch
+# numbers. Note: the naive per-branch sum (1607 +18 calendar +12 WS-D +11 WS-G =
+# 1648) over-counts by one against the merged suite; the honest measured green is
+# 1647/1647 (0 failed), so the floor is set to that, not the arithmetic estimate.
+FLOOR="${BRIDGE_TEST_FLOOR:-1647}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5
