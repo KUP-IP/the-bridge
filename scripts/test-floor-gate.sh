@@ -580,7 +580,22 @@ set -euo pipefail
 # TestRunner (runEnableCloudAccessFlowTests) — it did NOT auto-merge across the
 # main.swift→TestRunner.swift rename, so the test file would otherwise have
 # compiled but never run. Measured 1557/0 on every one of 5 gate runs.
-FLOOR="${BRIDGE_TEST_FLOOR:-1557}"
+#
+# v3.7·F (PKT-959, 2026-06-02): shortcuts_* MCP tool family over the
+# /usr/bin/shortcuts CLI (NO entitlement) — ShortcutsModule + injectable
+# `ShortcutsRunning` process seam (production CLIShortcutsRunner spawns the
+# CLI; tests inject MockShortcutsRunner). Two tools: shortcuts_list (.open,
+# read-only enumeration) + shortcuts_run (.notify — a Shortcut can do anything,
+# so it never auto-executes silently). New ShortcutsModuleTests contributes +11
+# harness test() blocks against the mock seam (registration/tier, list parse +
+# argv, folders + folderName argv, run output-capture + argv, input-passing via
+# --input-path temp file + cleanup, run-failure envelope, invalid-arg
+# short-circuit, capability_missing short-circuit, parseLines pure helper) — no
+# live CLI. Also bumped staticFeatureModuleToolCount 182 -> 184 and family count
+# 21 -> 22 (the strict BridgeModuleRegistry/MCPToolFactory/E2E count assertions
+# move with the constants). Measured 1568 passed, 0 failed. Floor raised
+# 1557 -> 1568 per the order-inversion rule.
+FLOOR="${BRIDGE_TEST_FLOOR:-1568}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

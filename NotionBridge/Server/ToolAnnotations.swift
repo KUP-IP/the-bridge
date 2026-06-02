@@ -278,6 +278,12 @@ public enum ToolAnnotationCatalog {
         "session_clear": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "session_info": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "shell_exec": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: true, openWorld: true),
+        // shortcuts_* (PKT-959, v3.7·F): Apple Shortcuts via /usr/bin/shortcuts.
+        // _list is read-only (.open). _run is destructive (a Shortcut can do
+        // anything) but tier .notify, so requiresConfirmation stays false —
+        // .notify surfaces every run to the operator without a hard gate.
+        "shortcuts_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
+        "shortcuts_run": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "snippets_create": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: false),
         "snippets_delete": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: true, openWorld: false),
         "snippets_export": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: false),

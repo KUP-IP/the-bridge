@@ -80,5 +80,6 @@ public enum BridgeModuleRegistry {
         await ArtifactModule.register(on: router)
         await SnippetsModule.register(on: router)
         await StandingOrdersModule.register(on: router)
+        await ShortcutsModule.register(on: router)
     }
 }
