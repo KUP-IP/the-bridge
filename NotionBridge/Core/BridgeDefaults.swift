@@ -105,4 +105,10 @@ public enum BridgeDefaults {
     /// (`.connected`). String. Written by the Enable flow on success; read by
     /// RemoteAccessView to populate the MCP URL row. ABSENT ⇒ no URL yet.
     public static let cloudTunnelHostname = "com.notionbridge.cloudTunnelHostname"
+
+    /// WS-G (PKT-923): one-time gate for the FirstRunCloudAccessModal. Bool.
+    /// Written `true` when the user dismisses the first-run guide (the "Got it"
+    /// button); read by RemoteAccessSection before presenting the sheet on the
+    /// first transition to `.online`. ABSENT ⇒ not yet seen (modal shows once).
+    public static let hasSeenCloudAccessFirstRun = "com.notionbridge.hasSeenCloudAccessFirstRun"
 }

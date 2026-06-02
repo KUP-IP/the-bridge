@@ -615,7 +615,21 @@ set -euo pipefail
 # MCPToolFactory/EndToEnd count assertions move with the constants).
 # Floor recomputed from the merged suite's measured green (see value below),
 # per the order-inversion rule — never lowered.
-FLOOR="${BRIDGE_TEST_FLOOR:-1607}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1618}"
+# WS-G (PKT-923, 2026-06-02 · Bridge Cloud Access · terminal UI packet):
+# CloudAccessWSGTests added +11 test() blocks for the first-run modal gate
+# (Q2 one-time, BridgeDefaults.hasSeenCloudAccessFirstRun), the Add-to-
+# Claude.ai MCP-URL derivation + query-value percent-encoding contract +
+# Q3 copy+hint shipped mode, and the Disable flow (EnableCloudAccessFlow.
+# disable() → CloudTeardown seam + cleared toggle/host; live BridgeCloudManager.
+# disable() → .disabled; cancel = no side effects). All against fakes (no
+# SwiftUI render / WindowServer / cloudflared / network). Also hardened the
+# WS-F `waitFor` test helper to interleave a tiny real sleep once cooperative
+# yields are exhausted — removes a pre-existing load-sensitive flake on the
+# provision-timeout test (off-actor continuation + withTaskGroup cancel hop)
+# without weakening any assertion. Floor 1607 → 1618 (+11) per the
+# order-inversion rule — never lowered.
+#
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

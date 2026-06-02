@@ -79,6 +79,11 @@ public extension EnableCloudAccessFlow {
             browser: SystemBrowserOpener(),
             provisioner: provisioner,
             defaults: UserDefaultsCloudFlowDefaults(),
+            // WS-G: the production provisioner (BridgeCloudManager) is also the
+            // teardown seam — disable() stops the tunnel. Non-teardown
+            // provisioners simply don't supply one (Disable becomes a
+            // state/defaults clear with no tunnel stop).
+            teardown: provisioner as? CloudTeardown,
             config: .resolved(environment: environment),
             provisionBaseURL: baseURL
         )

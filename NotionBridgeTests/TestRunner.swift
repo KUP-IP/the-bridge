@@ -767,6 +767,15 @@ await runBridgeCloudManagerTests()
 // rename.)
 await runEnableCloudAccessFlowTests()
 
+// WS-G (PKT-923 · Bridge Cloud Access · terminal UI packet): the one-time
+// FirstRunCloudAccessModal gate (Q2: shown once, BridgeDefaults flag), the
+// Add-to-Claude.ai MCP-URL derivation + query-value percent-encoding contract
+// + Q3 copy+hint shipped mode, and the Disable flow (confirmationDialog →
+// EnableCloudAccessFlow.disable() → CloudTeardown seam + cleared toggle/host;
+// live BridgeCloudManager.disable() → .disabled). All against fakes (no
+// SwiftUI render / WindowServer / cloudflared / network).
+await runCloudAccessWSGTests()
+
 // ============================================================
 // MARK: - Summary
 // ============================================================
