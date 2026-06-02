@@ -574,7 +574,11 @@ public enum ChromeModule {
 
     /// Returns the window ID of the first on-screen Chrome window, or nil if none visible on current Space.
     private static func visibleChromeWindowID() async -> Int? {
-        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else {
+        // Fast short-circuit when Screen Recording is denied — never enter SCK.
+        guard CGPreflightScreenCaptureAccess() else { return nil }
+        // SCK delivers its reply on the main run loop; an off-main call leaks
+        // the continuation and hangs. Route through the main-actor boundary.
+        guard let content = try? await SCKBoundary.fetchShareableContent() else {
             return nil
         }
         let chromeWindow = content.windows.first {
@@ -586,7 +590,11 @@ public enum ChromeModule {
 
     /// Returns the set of all on-screen Chrome window IDs on the current Space.
     private static func visibleChromeWindowIDs() async -> Set<Int> {
-        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else {
+        // Fast short-circuit when Screen Recording is denied — never enter SCK.
+        guard CGPreflightScreenCaptureAccess() else { return [] }
+        // SCK delivers its reply on the main run loop; an off-main call leaks
+        // the continuation and hangs. Route through the main-actor boundary.
+        guard let content = try? await SCKBoundary.fetchShareableContent() else {
             return []
         }
         let ids = content.windows

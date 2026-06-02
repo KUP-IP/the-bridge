@@ -522,7 +522,11 @@ set -euo pipefail
 # "datasource_update succeeds with API key" test moved into the hasAPIKey
 # branch and renamed to datasource_get. Hermetic base was 1467; WS-C/E adds
 # the BridgeCloudManager suite. Floor recomputed from the post-merge gate run.
-FLOOR="${BRIDGE_TEST_FLOOR:-1501}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1503}"
+# fix/sck-continuation-leak (2026-06-02): +2 SCK off-main-actor
+# continuation-leak regression guards in ScreenModuleTests (screen_capture +
+# chrome_tabs dispatched from a Task.detached must return/throw promptly, not
+# hang). Floor raised 1501 → 1503 to match the added passing tests.
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5
