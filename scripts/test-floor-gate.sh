@@ -634,30 +634,60 @@ swift build -c debug
 LOG="$(mktemp -t bridge-test-floor.XXXXXX)"
 trap 'rm -f "$LOG"' EXIT
 
-# Watchdog: cap the test binary at 25 minutes (local run is ~5 min,
-# CI macos-26 is ~3x slower). If the binary hangs (e.g. a test waiting
-# on a process that won't exit on a headless runner), perl's SIGALRM
-# kills it and the workflow step still surfaces the last test that
-# logged — so future hangs are diagnosable instead of opaque 6h cancels.
-# perl is always present on macOS; no brew install needed.
+# Watchdog: cap the test binary at DEADLINE seconds (default 1500 = 25 min;
+# local run is ~5 min, CI macos-26 is ~3x slower). Override with
+# TEST_WATCHDOG_SECONDS — a short value (e.g. 5) makes the watchdog testable.
 #
-# Bounded retry on the harness teardown flake: the runner emits its summary
-# from a top-level-`await` tail that, on a fully-completed suite, intermittently
-# loses a race with process teardown and drops the final `Results:` line — the
-# binary still exits 0 and every test ran (the per-test ✅ lines are all
-# present). That is NOT a test failure, so re-run up to ATTEMPTS times until the
-# summary is captured. A real hang (watchdog) or a genuine non-zero exit fails
-# immediately with no retry, and the floor/failure checks below are unchanged.
+# This is a REAL EXTERNAL watchdog, not `perl -e 'alarm N; exec'`. On macOS the
+# SIGALRM timer set by alarm() is CLEARED by exec() (the new image starts with no
+# pending alarm), so the old pattern never actually killed a hung binary — it ran
+# until the CI step/job timeout. Instead we now: launch the binary in the
+# background, capture its PID, start a separate killer subshell that SIGKILLs that
+# PID after DEADLINE, and `wait` on the binary. On normal completion we KILL THE
+# KILLER so a finished run leaves no stray `sleep` and the script never blocks on
+# it. On a watchdog kill we FAIL FAST with the last logged test line so the hang
+# is diagnosable instead of an opaque multi-hour cancel.
+DEADLINE="${TEST_WATCHDOG_SECONDS:-1500}"
+#
+# Bounded retry on the harness teardown flake: the runner emits its summary from
+# a tail that, on a fully-completed suite, can intermittently lose a race with
+# process teardown and drop the final `Results:` line — the binary still exits 0
+# and every test ran (the per-test ✅ lines are all present). That is NOT a test
+# failure, so re-run up to ATTEMPTS times until the summary is captured. A real
+# hang (watchdog) or a genuine non-zero exit fails immediately with no retry, and
+# the floor/failure checks below are unchanged.
 ATTEMPTS=3
 LINE=""
 for attempt in $(seq 1 "$ATTEMPTS"); do
   set +e
-  perl -e 'alarm 1500; exec @ARGV' "$BIN" | tee "$LOG"
-  RC=${PIPESTATUS[0]}
+  # Run the binary in the background, tee'ing its combined output to the log so
+  # the timeout path can print the last test line. `$!` is the binary's PID.
+  "$BIN" > >(tee "$LOG") 2>&1 &
+  BIN_PID=$!
+
+  # External killer: SIGKILL the binary if it outlives DEADLINE. Captured PID so
+  # we can cancel it on a clean finish.
+  ( sleep "$DEADLINE"; kill -9 "$BIN_PID" 2>/dev/null ) &
+  KILLER_PID=$!
+
+  # Block until the binary exits (normally, or via the killer's SIGKILL).
+  wait "$BIN_PID"
+  RC=$?
+
+  # Cleanup: cancel + reap the killer so a completed run leaves no stray sleep
+  # and the script doesn't block waiting on it. Kill the killer's `sleep` CHILD
+  # first (while the subshell is still alive so `pkill -P` can resolve it),
+  # otherwise killing only the subshell orphans the `sleep` and it keeps running
+  # for the full DEADLINE. Then kill + reap the subshell itself.
+  pkill -P "$KILLER_PID" 2>/dev/null
+  kill "$KILLER_PID" 2>/dev/null
+  wait "$KILLER_PID" 2>/dev/null
   set -e
 
-  if [ "$RC" -eq 142 ] || [ "$RC" -eq 14 ]; then
-    echo "::error::test-floor-gate: test binary exceeded 1500s watchdog and was killed"
+  # SIGKILL from the watchdog surfaces as 137 (128+9). (128+SIGALRM=142 / 14 are
+  # kept as a defensive fallback in case a future change reintroduces an alarm.)
+  if [ "$RC" -eq 137 ] || [ "$RC" -eq 142 ] || [ "$RC" -eq 14 ]; then
+    echo "::error::test-floor-gate: test binary exceeded ${DEADLINE}s watchdog and was killed"
     echo "--- last 60 lines of test output (so you can see which test hung) ---"
     tail -60 "$LOG" || true
     echo "--- end of test output tail ---"
