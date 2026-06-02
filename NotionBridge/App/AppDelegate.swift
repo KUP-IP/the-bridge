@@ -329,6 +329,30 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    // MARK: - WS-F: bridge-auth:// callback (Bridge Cloud Access)
+
+    /// Handle inbound `bridge-auth://callback?code=…` URLs opened against the
+    /// app's registered CFBundleURLTypes scheme. Delegates the brittle
+    /// parse → WorkOS token-exchange → Keychain-write → Notification-post to
+    /// the unit-tested `CloudAuthCallbackHandler` (lib). The in-flight
+    /// `EnableCloudAccessFlow` observes `.cloudAuthCallbackReceived` to
+    /// advance from `.signingIn` to `.provisioning`.
+    ///
+    /// The live code→token exchange requires the operator's WorkOS tenant
+    /// (PKT-810) + a real client id; until then `URLSessionTokenExchange`
+    /// is wired but no live tenant will mint a token (live-QA gate).
+    public func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.scheme?.lowercased() == "bridge-auth" {
+            cloudAuthCallbackHandler.handle(url)
+        }
+    }
+
+    /// The WS-F callback handler, assembled over the production seams
+    /// (URLSession exchange + Keychain persistence).
+    private lazy var cloudAuthCallbackHandler = CloudAuthCallbackHandler(
+        exchange: URLSessionTokenExchange()
+    )
+
     // MARK: - Public API (V1-QUALITY-C2)
 
     /// Open the Settings window. WS-H (PKT-804): optional `section` deep-links

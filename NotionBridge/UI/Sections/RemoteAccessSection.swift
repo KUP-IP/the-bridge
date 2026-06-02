@@ -38,10 +38,54 @@ public struct RemoteAccessSection: View {
 
     @State private var displayState: DisplayState
     @State private var cloudAccessEnabled: Bool
+    /// WS-F: the Enable-flow state machine. Lazily built on first toggle-ON
+    /// so the static preview / non-interactive paths carry no live deps.
+    @State private var flow: EnableCloudAccessFlow?
 
-    public init(displayState: DisplayState = .disabled) {
+    /// WS-F: factory for the live Enable flow. Injectable so tests / previews
+    /// can supply a mock-backed flow; defaults to `.live()` over the shared
+    /// `BridgeCloudManager`-shaped provisioner.
+    private let makeFlow: @MainActor () -> EnableCloudAccessFlow
+
+    public init(
+        displayState: DisplayState = .disabled,
+        makeFlow: @escaping @MainActor () -> EnableCloudAccessFlow = { RemoteAccessSection.defaultFlow() }
+    ) {
         self._displayState = State(initialValue: displayState)
         self._cloudAccessEnabled = State(initialValue: displayState != .disabled)
+        self.makeFlow = makeFlow
+    }
+
+    /// Build the production Enable flow over a fresh `BridgeCloudManager`.
+    /// The manager runs on `main` (the flow is `@MainActor`); the live
+    /// Worker base URL is resolved by `.live()` (configurable; WS-A gates
+    /// the real network path).
+    ///
+    /// NOTE: WS-C shipped `BridgeCloudManager` with injectable `TunnelProcess`
+    /// / `PasskeyGate` seams but only the in-memory `Fake*` conformers; the
+    /// real cloudflared process + Secure-Enclave passkey conformers land with
+    /// the live Worker (WS-A) / operator tenant (PKT-810). Until then the
+    /// manager is assembled over those seams so the toggle, state machine,
+    /// and `BridgeDefaults` wiring are all live — only the underlying network
+    /// + cloudflared remain gated. The passkey gate is unused on the
+    /// provisioning path (it guards auth-passdown, not provision()).
+    @MainActor
+    public static func defaultFlow() -> EnableCloudAccessFlow {
+        let manager = BridgeCloudManager(
+            tunnel: FakeTunnelProcess(),
+            passkeyGate: FakePasskeyGate(outcome: .approved),
+            node: LocalNodeContext(ownerID: "local", deviceID: deviceIdentifier())
+        )
+        return EnableCloudAccessFlow.live(provisioner: manager)
+    }
+
+    /// A stable-ish device identifier for the local node (hostname-derived).
+    @MainActor
+    private static func deviceIdentifier() -> String {
+        let host = ProcessInfo.processInfo.hostName
+            .replacingOccurrences(of: ".local", with: "")
+            .replacingOccurrences(of: " ", with: "-")
+        return host.isEmpty ? "this-mac" : host
     }
 
     public var body: some View {
@@ -103,14 +147,72 @@ public struct RemoteAccessSection: View {
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .onChange(of: cloudAccessEnabled) { _, on in
-                            // Static slice: reflect intent locally only.
-                            displayState = on ? .connecting : .disabled
+                            handleToggle(on)
                         }
                 }
                 Divider().background(Color.white.opacity(0.08))
                 statusRow
+                if let flow, ProvisioningPresentation.make(for: flow.state).indicator != .none {
+                    ProvisioningProgressView(
+                        state: flow.state,
+                        mcpURL: connectedMCPURL,
+                        onRetry: { flow.start() }
+                    )
+                }
             }
         }
+        // Mirror the flow's terminal transitions back onto the toggle +
+        // status dot (DoD: success → green/.connected; failure → revert).
+        .onChange(of: flowStateKey) { _, _ in syncFromFlow() }
+    }
+
+    // MARK: - Toggle wiring (WS-F)
+
+    /// Toggle ON → start the Enable flow; toggle OFF → cancel any in-flight
+    /// run and return to disabled.
+    private func handleToggle(_ on: Bool) {
+        if on {
+            let f = flow ?? makeFlow()
+            flow = f
+            displayState = .connecting
+            f.start()
+        } else {
+            flow?.cancel()
+            displayState = .disabled
+        }
+    }
+
+    /// A hashable projection of the flow state so `.onChange` fires on every
+    /// transition (the flow itself isn't Equatable as a whole).
+    private var flowStateKey: String {
+        guard let flow else { return "nil" }
+        return String(describing: flow.state)
+    }
+
+    /// Reconcile the local display state + toggle from the flow's state.
+    private func syncFromFlow() {
+        guard let flow else { return }
+        switch flow.state {
+        case .idle:
+            displayState = .disabled
+        case .checkingAccount, .signingIn, .provisioning:
+            displayState = .connecting
+        case .connected:
+            displayState = .online
+        case .failed:
+            // Flow already reverted BridgeDefaults.cloudAccessEnabled = false;
+            // snap the toggle + dot back so the UI matches.
+            displayState = .offline
+            if cloudAccessEnabled { cloudAccessEnabled = false }
+        }
+    }
+
+    /// The connected MCP URL surfaced on success, from the persisted tunnel
+    /// hostname (BridgeDefaults), if any.
+    private var connectedMCPURL: String? {
+        guard let host = UserDefaults.standard.string(forKey: BridgeDefaults.cloudTunnelHostname),
+              !host.isEmpty else { return nil }
+        return "https://\(host)/mcp"
     }
 
     private var statusRow: some View {

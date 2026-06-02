@@ -667,6 +667,15 @@ await runSkillsCacheTests()
 // no-raw-credential invariant) + Remote Access settings section/sidebar.
 await runBridgeCloudManagerTests()
 
+// WS-F (Bridge Cloud Access · Enable flow): the EnableCloudAccessFlow
+// @Observable state machine (idle→checkingAccount→signingIn→provisioning→
+// connected|failed), WorkOS sign-in URL builder + bridge-auth:// callback
+// parse/exchange/persist/notify, 120s auth + 30s provision timeouts, toggle
+// revert on failure, and the ProvisioningProgressView state mapping — all
+// against mocks (no NSWorkspace / Keychain prompt / cloudflared / live
+// WorkOS). Live end-to-end QA is gated on PKT-810 + WS-A.
+await runEnableCloudAccessFlowTests()
+
 // ============================================================
 // MARK: - Summary
 // ============================================================

@@ -27,4 +27,16 @@ public extension Notification.Name {
     /// final step. Observers (AppDelegate) bring attention to the menu
     /// bar so the user lands in the Dashboard popover, not raw Settings.
     static let onboardingDidComplete = Notification.Name("com.notionbridge.onboardingDidComplete")
+
+    /// WS-F: posted by `AppDelegate.application(_:open:options:)` after a
+    /// `bridge-auth://callback` URL is handled — the auth code has been
+    /// exchanged for a WorkOS token and persisted to the Keychain. The
+    /// in-flight `EnableCloudAccessFlow` observes this to advance from
+    /// `.signingIn` to `.provisioning`. The `userInfo` carries no secret
+    /// material — only a `success: Bool` under `cloudAuthSuccessKey`.
+    static let cloudAuthCallbackReceived = Notification.Name("com.notionbridge.cloudAuthCallbackReceived")
 }
+
+/// `userInfo` key on `.cloudAuthCallbackReceived` carrying whether the code
+/// exchange succeeded (`Bool`). Never carries the token itself.
+public let cloudAuthSuccessKey = "success"

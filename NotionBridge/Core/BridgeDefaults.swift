@@ -93,4 +93,16 @@ public enum BridgeDefaults {
 
     /// Whether the user has accepted legal terms. Bool.
     public static let hasAcceptedLegalTerms = "hasAcceptedLegalTerms"
+
+    // MARK: - Bridge Cloud Access (WS-F)
+
+    /// Master ON/OFF for Bridge Cloud Access. Bool. Written by the Remote
+    /// Access toggle; the Enable flow reverts it to `false` on `.failed`.
+    /// ABSENT ⇒ OFF.
+    public static let cloudAccessEnabled = "com.notionbridge.cloudAccessEnabled"
+
+    /// The cloudflared tunnel hostname surfaced after a successful provision
+    /// (`.connected`). String. Written by the Enable flow on success; read by
+    /// RemoteAccessView to populate the MCP URL row. ABSENT ⇒ no URL yet.
+    public static let cloudTunnelHostname = "com.notionbridge.cloudTunnelHostname"
 }

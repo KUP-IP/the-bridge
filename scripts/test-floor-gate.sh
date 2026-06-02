@@ -561,14 +561,26 @@ set -euo pipefail
 # v3.7-rc integration (2026-06-02): layered the review-batch (standing_orders
 # +14, v3.7·C +0, reminders +17) and WS-F (+21) onto the VERIFIED test-infra
 # base (1503: SCK continuation-leak guards + real watchdog + TestRunner harness
-# fix). Floor reconciled from the base + SUM of per-branch test deltas:
-# 1503 + 14 + 0 + 17 + 21 = 1555. Reconciled tool count 172 + 4 (standing_orders)
-# + 6 (reminders) = 182; family count 19 + 1 + 1 = 21. The review-batch's own
+# fix). The per-branch-delta SUM (1503 + 14 + 0 + 17 + 21 = 1555) was the
+# PREDICTED arithmetic; the ACTUAL integrated green, measured 5/5 deterministic
+# on the watchdog-protected gate after WS-F merged, is 1557 passed / 0 failed.
+# Per the order-inversion rule we set FLOOR to the MEASURED integrated count
+# (1557), not the predicted 1555 — the +2 is harness-delta drift (the documented
+# per-branch counts undercount nested/loop-driven test() blocks in the trio's
+# files; e.g. RemindersModuleTests' 17 = 6 top-level + 6 nested + 5 CRUD).
+# Raising to the measured green is required so the gate cannot later let 2 real
+# tests be silently dropped. Reconciled tool count 172 + 4 (standing_orders) + 6
+# (reminders) = 182 (WS-F is UI/flow, adds no MCP tools — Version.swift
+# unchanged; the strict BridgeModuleRegistry/MCPToolFactory == 182 assertions
+# pass green); family count 19 + 1 + 1 = 21. The review-batch's own
 # `perl -e 'alarm'` watchdog rewrite was REJECTED — it regresses the base's real
 # external-killer watchdog (alarm() is cleared by exec() on macOS, so it never
 # kills a hung binary). The base watchdog/retry block below is kept verbatim.
-# Measured on the integration gate run, 0 failures.
-FLOOR="${BRIDGE_TEST_FLOOR:-1555}"
+# WS-F's main.swift test-registration call was hand-ported into the @main
+# TestRunner (runEnableCloudAccessFlowTests) — it did NOT auto-merge across the
+# main.swift→TestRunner.swift rename, so the test file would otherwise have
+# compiled but never run. Measured 1557/0 on every one of 5 gate runs.
+FLOOR="${BRIDGE_TEST_FLOOR:-1557}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5
