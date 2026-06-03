@@ -11,14 +11,17 @@ import Foundation
 public enum AppVersion {
     /// Marketing version (CFBundleShortVersionString equivalent).
     /// Format: MAJOR.MINOR.PATCH (Semantic Versioning).
-    public static let marketing = "3.7.0"
+    public static let marketing = "3.7.1"
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
     /// v3.7 WS-D (PKT-921): 43 → 44 — heartbeat wiring + cloud-gated
     /// `bridge_status` MCP tool + tools/list cloud conditional.
     /// v3.7.0 release: 44 → 45 — marketing 3.6.1 → 3.7.0; Info.plist CFBundleVersion reconciled to 45.
-    public static let build = "45"
+    /// v3.7.1 release (PKT-933): 45 → 46 — Remote Access "coming soon" guard +
+    ///   toggle re-entrancy fix (so the published build carries the guard that
+    ///   the 3.7.0 DMG predates).
+    public static let build = "46"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }
