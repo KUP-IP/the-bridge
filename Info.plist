@@ -41,12 +41,16 @@
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>The Bridge needs Automation access to control apps you explicitly request, like Messages and System Events.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>The Bridge needs Calendar access to read and create events for the scheduling tasks you ask it to run.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>The Bridge needs Contacts access to search and resolve contacts for messaging and workflow tasks you request.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 KUP Solutions LLC. All rights reserved.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>The Bridge needs Reminders access to list, create, complete, and delete reminders for the workflow tasks you ask it to run.</string>
 	<key>SUFeedURL</key>
 	<string>https://raw.githubusercontent.com/KUP-IP/the-bridge/main/appcast.xml</string>
 	<key>SUPublicEDKey</key>
