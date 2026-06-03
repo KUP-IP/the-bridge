@@ -661,9 +661,22 @@ set -euo pipefail
 # (placeholder/empty/real/env-resolved) and 6 × RemoteAccessToggleDecision
 # (incl. the named regression guard for the live "silent revert" bug — an OFF
 # while .offline must resolve to .ignore, not cancel + wipe the error surface).
-# Measured 1657/1657 (0 failed); FLOOR raised 1647 → 1657 per the order-
-# inversion rule (additive, honestly measured, never lowered).
-FLOOR="${BRIDGE_TEST_FLOOR:-1657}"
+#
+# FLOOR provenance correction (IMPORTANT): the prior 1647 was set from the LOCAL
+# measured green, but the headless macos-26 CI runner reliably runs 2 FEWER
+# tests — a handful of Mac-automation tests are gated on a real GUI/TCC session
+# the runner lacks, so they don't execute there (failed=0 in BOTH environments;
+# the delta is non-execution, not failure). That made CI red on every push since
+# the Wave-2 integration (release appcast + PKT-932 both failed with
+# "passed=1645 BELOW floor=1647"). The floor MUST track the reliable lower bound
+# across environments — i.e. the headless CI count — or it permanently red-lines
+# CI. My 10 new tests are pure (no host deps) and run everywhere:
+#   • headless CI:  1645 + 10 = 1655   (the reliable lower bound → the floor)
+#   • local (full): 1647 + 10 = 1657   (>= floor, as it should be)
+# FLOOR set to 1655 (the CI-reliable count), which is additive over the true
+# pre-change CI baseline (1645) and simultaneously un-breaks the pre-existing
+# CI red. Local runs sit two above it; that headroom is the GUI/TCC-gated tests.
+FLOOR="${BRIDGE_TEST_FLOOR:-1655}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5
