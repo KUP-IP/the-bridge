@@ -79,6 +79,15 @@ jobs:
       - name: Install DMG tooling
         run: brew install create-dmg
 
+      - name: Install DMG-background deps (Pillow)
+        # scripts/generate_dmg_background.py (make dmg → dmg-background) imports
+        # PIL/Pillow to render the DMG window background. Not on the runner image
+        # by default; try a plain install first, fall back to --break-system-
+        # packages for PEP-668 externally-managed (Homebrew) Pythons.
+        run: |
+          python3 -m pip install --upgrade Pillow \
+            || python3 -m pip install --break-system-packages --upgrade Pillow
+
       - name: Import Apple certificate into temporary keychain
         env:
           APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
