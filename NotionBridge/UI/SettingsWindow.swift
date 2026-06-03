@@ -69,16 +69,24 @@ public final class SettingsWindowController {
         let window = NSWindow(contentViewController: hostingController)
         window.title = "The Bridge Settings"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: 720, height: 900))
-        window.minSize = NSSize(width: 640, height: 720)
-        window.maxSize = NSSize(width: 900, height: 1100)
+        // v3.7.2: the square-ish default the operator settled on — frame ≈
+        // 1080×908 (content 1080×880; a standard non-full-size titlebar adds
+        // ~28pt). Replaces the old tall "match macOS System Settings" 720×900.
+        // Set the resize bounds FIRST so the content size below isn't clamped
+        // by the prior 900-wide ceiling (that cap was the latent bug — it would
+        // have squeezed a fresh build back to 900 wide).
+        window.minSize = NSSize(width: 760, height: 600)
+        window.maxSize = NSSize(width: 1600, height: 1300)
+        window.setContentSize(NSSize(width: 1080, height: 880))
         window.toolbarStyle = .unified
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.setFrameAutosaveName("NotionBridgeSettings.v2")
-        if window.frame.size == .zero || window.frame.origin == .zero {
-            window.center()
-        }
+        // NO frame autosave (by design): open at the preferred square on EVERY
+        // launch and on first install, centered on the active screen. A stale
+        // autosaved frame — or a window-manager (Magnet) snap — must never
+        // override the default. The window stays drag-resizable for the
+        // session; it simply resets to the square next launch.
+        window.center()
         window.isReleasedWhenClosed = false
 
         self.window = window
