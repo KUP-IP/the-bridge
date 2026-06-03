@@ -676,7 +676,7 @@ set -euo pipefail
 # FLOOR set to 1655 (the CI-reliable count), which is additive over the true
 # pre-change CI baseline (1645) and simultaneously un-breaks the pre-existing
 # CI red. Local runs sit two above it; that headroom is the GUI/TCC-gated tests.
-FLOOR="${BRIDGE_TEST_FLOOR:-1655}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1656}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

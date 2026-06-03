@@ -84,7 +84,9 @@ final class MockRemindersStore: RemindersStoring, @unchecked Sendable {
             listTitle: listTitle(listId),
             completed: false,
             notes: draft.notes,
-            priority: draft.priority ?? 0
+            priority: draft.priority ?? 0,
+            url: (draft.url?.isEmpty == false) ? draft.url : nil,
+            location: (draft.location?.isEmpty == false) ? draft.location : nil
         )
         items[id] = item
         return item
@@ -98,6 +100,8 @@ final class MockRemindersStore: RemindersStoring, @unchecked Sendable {
         else if let d = draft.due, !d.isEmpty { item.due = d }
         if let n = draft.notes { item.notes = n }
         if let p = draft.priority { item.priority = p }
+        if let u = draft.url { item.url = u.isEmpty ? nil : u }
+        if let loc = draft.location { item.location = loc.isEmpty ? nil : loc }
         if let l = draft.listId {
             guard lists_.contains(where: { $0.id == l }) else {
                 throw RemindersModuleError.listNotFound(l)
@@ -253,6 +257,35 @@ func runRemindersModuleTests() async {
             "id": .string(id), "due": .string("")
         ]))
         try expect(objField(objField(updated, "reminder")!, "due") == .null, "due not cleared")
+    }
+
+    await test("reminders_create/update set + clear url and location (v3.7.2 fields)") {
+        let router = await makeRouter(MockRemindersStore())
+        let created = try await callHandler(router, "reminders_create", .object([
+            "title": .string("Pick up package"),
+            "url": .string("https://example.com/track/123"),
+            "location": .string("Front desk")
+        ]))
+        guard case .string(let id)? = objField(created, "id") else { throw TestError.assertion("no id") }
+        let rec = objField(created, "reminder")!
+        try expect(objField(rec, "url") == .string("https://example.com/track/123"), "url not set on create")
+        try expect(objField(rec, "location") == .string("Front desk"), "location not set on create")
+        // update both to new values
+        let updated = try await callHandler(router, "reminders_update", .object([
+            "id": .string(id),
+            "url": .string("https://example.com/track/456"),
+            "location": .string("Mailroom")
+        ]))
+        let urec = objField(updated, "reminder")!
+        try expect(objField(urec, "url") == .string("https://example.com/track/456"), "url not updated")
+        try expect(objField(urec, "location") == .string("Mailroom"), "location not updated")
+        // clear both via empty string
+        let cleared = try await callHandler(router, "reminders_update", .object([
+            "id": .string(id), "url": .string(""), "location": .string("")
+        ]))
+        let crec = objField(cleared, "reminder")!
+        try expect(objField(crec, "url") == nil, "url not cleared")
+        try expect(objField(crec, "location") == nil, "location not cleared")
     }
 
     // MARK: completion idempotency

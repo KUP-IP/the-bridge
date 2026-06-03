@@ -71,6 +71,8 @@ public struct ReminderItem: Sendable, Equatable {
     public var completed: Bool
     public var notes: String?
     public var priority: Int    // EKReminder.priority (0 = none, 1 = high … 9 = low)
+    public var url: String?      // EKCalendarItem.url (absolute string)
+    public var location: String? // EKCalendarItem.location (free text)
 
     public init(
         id: String,
@@ -80,7 +82,9 @@ public struct ReminderItem: Sendable, Equatable {
         listTitle: String,
         completed: Bool,
         notes: String?,
-        priority: Int
+        priority: Int,
+        url: String? = nil,
+        location: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -90,6 +94,8 @@ public struct ReminderItem: Sendable, Equatable {
         self.completed = completed
         self.notes = notes
         self.priority = priority
+        self.url = url
+        self.location = location
     }
 }
 
@@ -117,6 +123,10 @@ public struct ReminderDraft: Sendable {
     public var listId: String?
     public var notes: String?
     public var priority: Int?
+    /// EKCalendarItem.url. On update, empty string clears it.
+    public var url: String?
+    /// EKCalendarItem.location (free text). On update, empty string clears it.
+    public var location: String?
 
     public init(
         title: String? = nil,
@@ -124,7 +134,9 @@ public struct ReminderDraft: Sendable {
         clearDue: Bool = false,
         listId: String? = nil,
         notes: String? = nil,
-        priority: Int? = nil
+        priority: Int? = nil,
+        url: String? = nil,
+        location: String? = nil
     ) {
         self.title = title
         self.due = due
@@ -132,6 +144,8 @@ public struct ReminderDraft: Sendable {
         self.listId = listId
         self.notes = notes
         self.priority = priority
+        self.url = url
+        self.location = location
     }
 }
 
@@ -254,7 +268,9 @@ public final class EventKitRemindersStore: RemindersStoring, @unchecked Sendable
             listTitle: r.calendar?.title ?? "",
             completed: r.isCompleted,
             notes: r.notes,
-            priority: r.priority
+            priority: r.priority,
+            url: r.url?.absoluteString,
+            location: r.location
         )
     }
 
@@ -331,6 +347,8 @@ public final class EventKitRemindersStore: RemindersStoring, @unchecked Sendable
         }
         if let notes = draft.notes { reminder.notes = notes }
         if let priority = draft.priority { reminder.priority = priority }
+        if let url = draft.url, !url.isEmpty { reminder.url = URL(string: url) }
+        if let location = draft.location, !location.isEmpty { reminder.location = location }
         try store.save(reminder, commit: true)
         return toItem(reminder)
     }
@@ -353,6 +371,8 @@ public final class EventKitRemindersStore: RemindersStoring, @unchecked Sendable
         }
         if let notes = draft.notes { reminder.notes = notes }
         if let priority = draft.priority { reminder.priority = priority }
+        if let url = draft.url { reminder.url = url.isEmpty ? nil : URL(string: url) }
+        if let location = draft.location { reminder.location = location.isEmpty ? nil : location }
         if let listId = draft.listId {
             reminder.calendar = try resolveCalendar(listId)
         }
@@ -446,7 +466,7 @@ public enum RemindersModule {
             name: "reminders_create",
             module: moduleName,
             tier: .notify,
-            description: "Create a reminder. Requires title; optional due (ISO-8601), listId, notes, priority (0 none, 1 high … 9 low). Returns the new reminder id + record.",
+            description: "Create a reminder. Requires title; optional due (ISO-8601), listId, notes, priority (0 none, 1 high … 9 low), url (rich link), location (free text). Returns the new reminder id + record.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -454,7 +474,9 @@ public enum RemindersModule {
                     "due": .object(["type": .string("string"), "description": .string("Due date ISO-8601 (optional)")]),
                     "listId": .object(["type": .string("string"), "description": .string("Target list identifier (default: the default Reminders list)")]),
                     "notes": .object(["type": .string("string"), "description": .string("Freeform notes (optional)")]),
-                    "priority": .object(["type": .string("integer"), "description": .string("EKReminder priority 0–9 (0 none, 1 high, 5 medium, 9 low)")])
+                    "priority": .object(["type": .string("integer"), "description": .string("EKReminder priority 0–9 (0 none, 1 high, 5 medium, 9 low)")]),
+                    "url": .object(["type": .string("string"), "description": .string("Attached URL / rich link (optional)")]),
+                    "location": .object(["type": .string("string"), "description": .string("Location text shown on the reminder (optional)")])
                 ]),
                 "required": .array([.string("title")])
             ]),
@@ -468,7 +490,9 @@ public enum RemindersModule {
                     due: stringArg(args, "due"),
                     listId: stringArg(args, "listId"),
                     notes: stringArg(args, "notes"),
-                    priority: intArg(args, "priority")
+                    priority: intArg(args, "priority"),
+                    url: stringArg(args, "url"),
+                    location: stringArg(args, "location")
                 )
                 let item = try await store.create(draft)
                 return .object([
@@ -483,7 +507,7 @@ public enum RemindersModule {
             name: "reminders_update",
             module: moduleName,
             tier: .notify,
-            description: "Update a reminder by id. Any of title, due, notes, priority, listId. Pass due as empty string to clear the due date. Returns the updated record.",
+            description: "Update a reminder by id. Any of title, due, notes, priority, listId, url, location. Pass due/url/location as empty string to clear them. Returns the updated record.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -492,7 +516,9 @@ public enum RemindersModule {
                     "due": .object(["type": .string("string"), "description": .string("New due date ISO-8601; empty string clears the due date")]),
                     "listId": .object(["type": .string("string"), "description": .string("Move to a different list")]),
                     "notes": .object(["type": .string("string"), "description": .string("New notes")]),
-                    "priority": .object(["type": .string("integer"), "description": .string("New priority 0–9")])
+                    "priority": .object(["type": .string("integer"), "description": .string("New priority 0–9")]),
+                    "url": .object(["type": .string("string"), "description": .string("New URL; empty string clears it")]),
+                    "location": .object(["type": .string("string"), "description": .string("New location text; empty string clears it")])
                 ]),
                 "required": .array([.string("id")])
             ]),
@@ -508,7 +534,9 @@ public enum RemindersModule {
                     clearDue: dueRaw == "",
                     listId: stringArg(args, "listId"),
                     notes: stringArg(args, "notes"),
-                    priority: intArg(args, "priority")
+                    priority: intArg(args, "priority"),
+                    url: stringArg(args, "url"),
+                    location: stringArg(args, "location")
                 )
                 let item = try await store.update(id: id, draft)
                 return .object([
@@ -596,6 +624,8 @@ public enum RemindersModule {
         ]
         if let due = item.due { entry["due"] = .string(due) } else { entry["due"] = .null }
         if let notes = item.notes { entry["notes"] = .string(notes) }
+        if let url = item.url { entry["url"] = .string(url) }
+        if let location = item.location { entry["location"] = .string(location) }
         return .object(entry)
     }
 
