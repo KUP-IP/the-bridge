@@ -50,6 +50,17 @@ public struct WorkOSConfig: Sendable, Equatable {
         self.redirectURI = redirectURI
     }
 
+    /// Whether this config carries a real, operator-provisioned client id —
+    /// i.e. NOT the documented placeholder and not empty. The Remote Access
+    /// Enable flow is only offered when the cloud tenant is actually
+    /// provisioned (PKT-810). Until then, opening the WorkOS sign-in page can
+    /// only dead-end on WorkOS's "Invalid client ID" error (the placeholder
+    /// client id is rejected on sight), so the toggle shows a "coming soon"
+    /// state instead of launching the broken sign-in.
+    public var isConfigured: Bool {
+        !clientID.isEmpty && clientID != Self.placeholder.clientID
+    }
+
     /// Documented placeholder for an un-provisioned build / tests.
     public static let placeholder = WorkOSConfig(
         baseURL: "https://api.workos.com",

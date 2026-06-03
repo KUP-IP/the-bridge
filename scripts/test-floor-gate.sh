@@ -655,7 +655,15 @@ set -euo pipefail
 # numbers. Note: the naive per-branch sum (1607 +18 calendar +12 WS-D +11 WS-G =
 # 1648) over-counts by one against the merged suite; the honest measured green is
 # 1647/1647 (0 failed), so the floor is set to that, not the arithmetic estimate.
-FLOOR="${BRIDGE_TEST_FLOOR:-1647}"
+#
+# PKT-933 (2026-06-02): Remote Access "coming soon" guard + toggle re-entrancy
+# fix. +10 tests in EnableCloudAccessFlowTests: 4 × WorkOSConfig.isConfigured
+# (placeholder/empty/real/env-resolved) and 6 × RemoteAccessToggleDecision
+# (incl. the named regression guard for the live "silent revert" bug — an OFF
+# while .offline must resolve to .ignore, not cancel + wipe the error surface).
+# Measured 1657/1657 (0 failed); FLOOR raised 1647 → 1657 per the order-
+# inversion rule (additive, honestly measured, never lowered).
+FLOOR="${BRIDGE_TEST_FLOOR:-1657}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5
