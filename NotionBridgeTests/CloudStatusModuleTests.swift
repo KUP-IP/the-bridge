@@ -82,9 +82,19 @@ func runCloudStatusModuleTests() async {
         _ = await collector.waitForCount(1, timeoutMs: 2000)
         await heartbeat.stop()
         try expect(!(await heartbeat.isRunning), "heartbeat should not be running after stop()")
+        // A tick that was already past its cancellation check when stop() landed
+        // may still deliver its record asynchronously — the onTick closure here
+        // spawns a DETACHED `Task { await collector.record(...) }`, so the boundary
+        // tick's record can complete just after stop() returns. Let that settle
+        // BEFORE sampling the baseline, so this asserts "no NEW ticks once the loop
+        // is cancelled" rather than racing the boundary tick's record-Task. stop()
+        // cancels promptly (verified above via isRunning), so no fresh ticks can
+        // occur during the settle — only the single in-flight record may land.
+        try await Task.sleep(for: .milliseconds(80))
         let afterStop = await collector.count
-        // Give the (now-cancelled) loop ample time to NOT tick again.
-        try await Task.sleep(for: .milliseconds(120))
+        // Over a multi-interval window (8× the 20ms interval) the cancelled loop
+        // must not tick again.
+        try await Task.sleep(for: .milliseconds(160))
         let later = await collector.count
         try expect(later == afterStop, "no ticks may fire after stop(): \(afterStop) → \(later)")
     }
