@@ -4,6 +4,16 @@
 # - APPLE_ID: Apple ID email for notarytool
 # - APPLE_ID_PASSWORD: App-specific password for notarytool
 # - APPLE_TEAM_ID: Apple Team ID (VP24Z9CS22)
+# - SPARKLE_ED_PRIVATE_KEY: Sparkle EdDSA (ed25519) private key — the single-line
+#     base64 string exported with `generate_keys -x key.txt` from the machine
+#     whose PUBLIC key is embedded in Info.plist (SUPublicEDKey). CI signs the
+#     appcast with this; ed25519 is deterministic, so the CI signature is
+#     byte-identical to a local `make dmg`. WITHOUT this secret the workflow
+#     still publishes the DMG but skips appcast regeneration (warns loudly).
+#
+# Branch-protection note: the "Commit appcast to main" step pushes appcast.xml
+# back to `main` (the Sparkle SUFeedURL is the raw main appcast.xml). The
+# Actions bot must be allowed to push to main (commit carries [skip ci]).
 
 name: Release
 
@@ -11,7 +21,12 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Release tag to use for DMG URLs"
+        description: "Release tag for DMG URLs / dry-run (e.g. v3.7.2)"
+        required: false
+      dry_run:
+        description: "Build + sign + notarize + verify appcast, but DO NOT publish the release or commit the appcast"
+        type: boolean
+        default: false
         required: false
   push:
     tags:
@@ -102,27 +117,93 @@ jobs:
             --password "$APPLE_ID_PASSWORD" \
             --team-id "$APPLE_TEAM_ID"
 
-      - name: Build notarized DMG
+      - name: Prepare Sparkle signing key
+        id: sparkle_key
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: |
-          make dmg \
-            SIGNING_ID="$SIGNING_IDENTITY" \
-            NOTARIZE_PROFILE="$NOTARIZE_PROFILE" \
-            RELEASE_TAG="$RELEASE_TAG" \
-            GENERATE_APPCAST=0
+          if [ -z "${SPARKLE_ED_PRIVATE_KEY:-}" ]; then
+            echo "::warning::SPARKLE_ED_PRIVATE_KEY secret is not set — CI will publish the DMG but will NOT regenerate or commit the Sparkle appcast (users won't be offered the update until appcast.xml is updated manually). Add the secret to enable the canonical release path. Export it locally with: .build/artifacts/sparkle/Sparkle/bin/generate_keys -x key.txt (the file holds the single-line base64 private key)."
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+          else
+            ED_KEY_FILE="$RUNNER_TEMP/sparkle_ed_private_key"
+            printf '%s' "$SPARKLE_ED_PRIVATE_KEY" > "$ED_KEY_FILE"
+            chmod 600 "$ED_KEY_FILE"
+            echo "ED_KEY_FILE=$ED_KEY_FILE" >> "$GITHUB_ENV"
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Upload DMG artifact
+      - name: Build notarized DMG (+ signed appcast when key present)
+        run: |
+          if [ "${{ steps.sparkle_key.outputs.has_key }}" = "true" ]; then
+            make dmg \
+              SIGNING_ID="$SIGNING_IDENTITY" \
+              NOTARIZE_PROFILE="$NOTARIZE_PROFILE" \
+              RELEASE_TAG="$RELEASE_TAG" \
+              GENERATE_APPCAST=1 \
+              SPARKLE_ED_KEY_FILE="$ED_KEY_FILE"
+          else
+            make dmg \
+              SIGNING_ID="$SIGNING_IDENTITY" \
+              NOTARIZE_PROFILE="$NOTARIZE_PROFILE" \
+              RELEASE_TAG="$RELEASE_TAG" \
+              GENERATE_APPCAST=0
+          fi
+
+      - name: Verify appcast matches the built DMG
+        if: ${{ steps.sparkle_key.outputs.has_key == 'true' }}
+        run: |
+          DMG=".build/the-bridge-v${VERSION}.dmg"
+          test -f "$DMG" || { echo "::error::DMG not found at $DMG"; exit 1; }
+          # 1) enclosure URL points at THIS tag's DMG
+          EXPECTED_URL="https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/the-bridge-v${VERSION}.dmg"
+          grep -qF "$EXPECTED_URL" appcast.xml || { echo "::error::appcast enclosure URL does not contain $EXPECTED_URL"; exit 1; }
+          # 2) length matches the DMG on disk
+          ACTUAL_LEN=$(stat -f%z "$DMG")
+          APPCAST_LEN=$(grep -o 'length="[0-9]*"' appcast.xml | tail -1 | grep -o '[0-9]*')
+          [ "$ACTUAL_LEN" = "$APPCAST_LEN" ] || { echo "::error::appcast length $APPCAST_LEN != DMG $ACTUAL_LEN"; exit 1; }
+          # 3) edSignature equals a fresh signature of the DMG (ed25519 is deterministic)
+          SIGN=".build/artifacts/sparkle/Sparkle/bin/sign_update"
+          EXPECTED_SIG=$("$SIGN" -p --ed-key-file "$ED_KEY_FILE" "$DMG")
+          ACTUAL_SIG=$(grep -o 'sparkle:edSignature="[^"]*"' appcast.xml | tail -1 | sed -E 's/^sparkle:edSignature="//; s/"$//')
+          { [ -n "$EXPECTED_SIG" ] && [ "$EXPECTED_SIG" = "$ACTUAL_SIG" ]; } || { echo "::error::appcast edSignature does not match the built DMG"; exit 1; }
+          echo "✅ appcast verified — URL + length ($ACTUAL_LEN) + edSignature all match the-bridge-v${VERSION}.dmg"
+
+      - name: Upload build artifacts (DMG + appcast)
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: notion-bridge-v${{ env.VERSION }}.dmg
-          path: .build/notion-bridge-v${{ env.VERSION }}.dmg
+          name: the-bridge-v${{ env.VERSION }}
+          path: |
+            .build/the-bridge-v${{ env.VERSION }}.dmg
+            appcast.xml
+          if-no-files-found: warn
 
       - name: Publish GitHub release asset
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.event.inputs.dry_run != 'true' }}
         uses: softprops/action-gh-release@v2
         with:
-          files: .build/notion-bridge-v${{ env.VERSION }}.dmg
+          files: .build/the-bridge-v${{ env.VERSION }}.dmg
 
-      - name: Cleanup temporary keychain
+      - name: Commit appcast to main
+        if: ${{ steps.sparkle_key.outputs.has_key == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.event.inputs.dry_run != 'true' }}
+        run: |
+          cp appcast.xml "$RUNNER_TEMP/appcast.xml"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -f -B main FETCH_HEAD
+          cp "$RUNNER_TEMP/appcast.xml" appcast.xml
+          if git diff --quiet -- appcast.xml; then
+            echo "appcast.xml already up to date on main — nothing to commit"
+          else
+            git add appcast.xml
+            git commit -m "release(${RELEASE_TAG}): publish Sparkle appcast for ${RELEASE_TAG} [skip ci]"
+            git push origin main
+            echo "✅ appcast.xml committed to main for ${RELEASE_TAG}"
+          fi
+
+      - name: Cleanup temporary keychain + signing key
         if: ${{ always() }}
         run: |
           if [ -n "${KEYCHAIN_PATH:-}" ]; then
@@ -130,4 +211,7 @@ jobs:
           fi
           if [ -n "${CERT_PATH:-}" ]; then
             rm -f "$CERT_PATH"
+          fi
+          if [ -n "${ED_KEY_FILE:-}" ]; then
+            rm -f "$ED_KEY_FILE"
           fi

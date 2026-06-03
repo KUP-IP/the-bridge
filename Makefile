@@ -38,6 +38,16 @@ APPCAST_DOWNLOAD_URL_PREFIX ?= https://github.com/KUP-IP/the-bridge/releases/dow
 SIGNING_ID     ?= Developer ID Application: Isaiah Peters (VP24Z9CS22)
 NOTARIZE_PROFILE ?= notarytool-profile
 GENERATE_APPCAST ?= 1
+# Optional path to an exported Sparkle EdDSA private-key file. When EMPTY
+# (local default) generate_appcast reads the signing key from the login
+# Keychain. When SET, it is passed to generate_appcast via --ed-key-file so the
+# appcast can be signed headlessly in CI (the runner has no Keychain key) — the
+# key file is written from the SPARKLE_ED_PRIVATE_KEY repo secret. EdDSA
+# (ed25519) signing is deterministic, so the file-based path produces a
+# byte-identical signature to the Keychain path for the same DMG. Use '-' to
+# read the key from stdin. Export the key locally with:
+#   .build/artifacts/sparkle/Sparkle/bin/generate_keys -x key.txt
+SPARKLE_ED_KEY_FILE ?=
 
 INFO_PLIST      = Info.plist
 RESOURCES_DIR   = NotionBridge/App/Resources
@@ -248,6 +258,7 @@ appcast:
 	@mkdir -p "$(APPCAST_ARCHIVES_DIR)"
 	@cp "$(DMG_PATH)" "$(APPCAST_ARCHIVES_DIR)/"
 	@"$(SPARKLE_TOOLS_DIR)/generate_appcast" \
+		$(if $(SPARKLE_ED_KEY_FILE),--ed-key-file "$(SPARKLE_ED_KEY_FILE)",) \
 		--download-url-prefix "$(APPCAST_DOWNLOAD_URL_PREFIX)" \
 		--link "$(APPCAST_LINK)" \
 		-o "$(APPCAST_PATH)" \
@@ -293,7 +304,7 @@ dmg: notarize dmg-background
 	@echo "🔍 Verifying DMG..."
 	spctl --assess --type open --context context:primary-signature --verbose "$(DMG_PATH)"
 	@if [ "$(GENERATE_APPCAST)" = "1" ]; then \
-		$(MAKE) appcast RELEASE_TAG="$(RELEASE_TAG)" APPCAST_PATH="$(APPCAST_PATH)" APPCAST_DOWNLOAD_URL_PREFIX="$(APPCAST_DOWNLOAD_URL_PREFIX)" APPCAST_LINK="$(APPCAST_LINK)"; \
+		$(MAKE) appcast RELEASE_TAG="$(RELEASE_TAG)" APPCAST_PATH="$(APPCAST_PATH)" APPCAST_DOWNLOAD_URL_PREFIX="$(APPCAST_DOWNLOAD_URL_PREFIX)" APPCAST_LINK="$(APPCAST_LINK)" SPARKLE_ED_KEY_FILE="$(SPARKLE_ED_KEY_FILE)"; \
 	fi
 	@echo "✅ DMG: $(DMG_PATH)"
 
