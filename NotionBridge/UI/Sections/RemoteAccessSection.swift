@@ -15,6 +15,60 @@
 import SwiftUI
 import AppKit
 
+/// Pure, headless-testable resolution of what a Remote Access toggle change
+/// should DO — factored out of the SwiftUI view so every branch is unit-
+/// asserted without a render (the same pattern as `ProvisioningPresentation`
+/// / `FirstRunCloudAccessGate`).
+///
+/// Two behaviours this encodes that the live UI got wrong before:
+///   • `.comingSoon` — when the cloud tenant isn't configured (placeholder
+///     WorkOS client id; PKT-810 not yet live) toggling ON must NOT launch the
+///     sign-in flow (which can only dead-end on WorkOS's "Invalid client ID"
+///     page). It keeps the toggle OFF and surfaces a "coming soon" state.
+///   • `.ignore` for an OFF request while already `.offline` — a `.failed` run
+///     reverts the toggle programmatically (`cloudAccessEnabled = false`); that
+///     reverting write re-enters the toggle's `onChange` and must NOT be
+///     treated as a user cancel — doing so tore down the flow and wiped the
+///     on-screen error (`.failed` → `.idle` → "Disabled") before the user
+///     could read it. That was the "silent revert" observed live.
+public enum RemoteAccessToggleDecision: Sendable, Equatable {
+    /// Cloud sign-in isn't configured yet — keep OFF, show "coming soon".
+    case comingSoon
+    /// Begin (or retry) the Enable flow.
+    case startFlow
+    /// Online + user turned it OFF → confirm before tearing the tunnel down.
+    case confirmDisable
+    /// Mid-flow OFF (not yet online) → cancel the in-flight run.
+    case cancelFlow
+    /// No-op: already online and asked ON again, or a programmatic
+    /// failure-revert OFF that must leave the error surface intact.
+    case ignore
+
+    /// Resolve the action for a toggle change.
+    /// - Parameters:
+    ///   - requestedOn: the new toggle value the user (or a programmatic write)
+    ///     set.
+    ///   - configured: whether the cloud tenant is provisioned
+    ///     (`WorkOSConfig.isConfigured`).
+    ///   - state: the current display state.
+    public static func resolve(
+        requestedOn: Bool,
+        configured: Bool,
+        state: RemoteAccessSection.DisplayState
+    ) -> RemoteAccessToggleDecision {
+        if requestedOn {
+            if !configured { return .comingSoon }
+            return state == .online ? .ignore : .startFlow
+        } else {
+            switch state {
+            case .online:  return .confirmDisable
+            case .offline: return .ignore   // failure already reverted us
+            default:       return .cancelFlow
+            }
+        }
+    }
+}
+
 public struct RemoteAccessSection: View {
     /// Mirrors the WS-C `CloudConnectionState` machine for display. Static
     /// in this slice (defaults to `.disabled`); a later slice binds it to a
@@ -55,6 +109,12 @@ public struct RemoteAccessSection: View {
     /// Backing store for the `hasSeenCloudAccessFirstRun` one-time gate.
     private let defaults: UserDefaults
 
+    /// Whether the cloud tenant is provisioned (`WorkOSConfig.isConfigured`).
+    /// When false the Enable toggle is disabled + shows "Coming soon" rather
+    /// than launching a sign-in flow that can only error on WorkOS's "Invalid
+    /// client ID" page (the placeholder client id; PKT-810 not yet live).
+    private let cloudConfigured: Bool
+
     /// WS-F: factory for the live Enable flow. Injectable so tests / previews
     /// can supply a mock-backed flow; defaults to `.live()` over the shared
     /// `BridgeCloudManager`-shaped provisioner.
@@ -63,11 +123,13 @@ public struct RemoteAccessSection: View {
     public init(
         displayState: DisplayState = .disabled,
         defaults: UserDefaults = .standard,
+        cloudConfigured: Bool = WorkOSConfig.resolved().isConfigured,
         makeFlow: @escaping @MainActor () -> EnableCloudAccessFlow = { RemoteAccessSection.defaultFlow() }
     ) {
         self._displayState = State(initialValue: displayState)
         self._cloudAccessEnabled = State(initialValue: displayState != .disabled)
         self.defaults = defaults
+        self.cloudConfigured = cloudConfigured
         self.makeFlow = makeFlow
     }
 
@@ -173,7 +235,9 @@ public struct RemoteAccessSection: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Enable Remote Access")
                             .font(.system(size: 13, weight: .medium))
-                        Text("Starts a cloudflared tunnel so cloud agents can delegate work to this Mac.")
+                        Text(cloudConfigured
+                             ? "Starts a cloudflared tunnel so cloud agents can delegate work to this Mac."
+                             : "Cloud sign-in isn't set up on this build yet — remote access is coming soon.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -182,6 +246,8 @@ public struct RemoteAccessSection: View {
                     Toggle("", isOn: $cloudAccessEnabled)
                         .labelsHidden()
                         .toggleStyle(.switch)
+                        .disabled(!cloudConfigured)
+                        .help(cloudConfigured ? "" : "Remote Access isn't available on this build yet.")
                         .onChange(of: cloudAccessEnabled) { _, on in
                             handleToggle(on)
                         }
@@ -205,27 +271,37 @@ public struct RemoteAccessSection: View {
 
     // MARK: - Toggle wiring (WS-F)
 
-    /// Toggle ON → start the Enable flow. Toggle OFF: if cloud access is
-    /// currently online (a live connection), intercept with the WS-G Disable
-    /// confirmation (the toggle visually flips OFF but no teardown happens
-    /// until the user confirms); otherwise (mid-flow / not yet online) just
-    /// cancel the in-flight run.
+    /// Toggle changed → resolve the intent through the pure
+    /// `RemoteAccessToggleDecision` and act on it:
+    ///   • `.comingSoon`     — cloud sign-in isn't configured; snap the toggle
+    ///       back OFF and leave the "Coming soon" state. Never opens a browser.
+    ///   • `.startFlow`      — begin (or, via the toggle, retry) the Enable flow.
+    ///   • `.confirmDisable` — online + OFF → WS-G teardown confirmation (the
+    ///       toggle visually flips OFF but nothing tears down until confirmed).
+    ///   • `.cancelFlow`     — mid-flow OFF → cancel the in-flight run.
+    ///   • `.ignore`         — no-op. Covers two cases: already online + asked
+    ///       ON again, and the programmatic failure-revert OFF (which must
+    ///       leave the `.offline` error + Retry surface intact — re-entering a
+    ///       cancel here is exactly what silently wiped the error before).
     private func handleToggle(_ on: Bool) {
-        if on {
-            // Already online (e.g. the toggle was just reverted by a cancelled
-            // Disable) → the connection is live; do NOT restart provisioning.
-            guard displayState != .online else { return }
+        switch RemoteAccessToggleDecision.resolve(
+            requestedOn: on, configured: cloudConfigured, state: displayState
+        ) {
+        case .comingSoon:
+            if cloudAccessEnabled { cloudAccessEnabled = false }
+        case .startFlow:
             didCopyMCPURL = false
             let f = flow ?? makeFlow()
             flow = f
             displayState = .connecting
             f.start()
-        } else if displayState == .online {
-            // Guard the teardown behind a confirmation (DoD).
+        case .confirmDisable:
             showDisableConfirm = true
-        } else {
+        case .cancelFlow:
             flow?.cancel()
             displayState = .disabled
+        case .ignore:
+            break
         }
     }
 
@@ -357,11 +433,11 @@ public struct RemoteAccessSection: View {
     private var statusRow: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(displayState.dotColor)
+                .fill(cloudConfigured ? displayState.dotColor : Color.secondary)
                 .frame(width: 8, height: 8)
-            Text(displayState.rawValue)
+            Text(cloudConfigured ? displayState.rawValue : "Coming soon")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(displayState.dotColor)
+                .foregroundStyle(cloudConfigured ? displayState.dotColor : .secondary)
             Spacer()
             Text("Tunnel: cloudflared")
                 .font(.system(size: 11))

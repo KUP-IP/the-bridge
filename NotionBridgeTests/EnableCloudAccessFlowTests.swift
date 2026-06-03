@@ -560,6 +560,70 @@ func runEnableCloudAccessFlowTests() async {
         let state = await mgr.state
         try expect(state == .online, "startTunnel() with a healthy fake tunnel → .online, got \(state)")
     }
+
+    // MARK: - WorkOSConfig.isConfigured (PKT-933 coming-soon gate)
+
+    await test("PKT-933 isConfigured: placeholder client id is NOT configured") {
+        try expect(!WorkOSConfig.placeholder.isConfigured,
+                   "the documented placeholder must report not-configured")
+    }
+
+    await test("PKT-933 isConfigured: empty client id is NOT configured") {
+        let empty = WorkOSConfig(baseURL: "https://api.workos.com",
+                                 clientID: "", redirectURI: "bridge-auth://callback")
+        try expect(!empty.isConfigured, "empty client id must report not-configured")
+    }
+
+    await test("PKT-933 isConfigured: a real client id IS configured") {
+        let real = WorkOSConfig(baseURL: "https://api.workos.com",
+                                clientID: "client_live_abc123", redirectURI: "bridge-auth://callback")
+        try expect(real.isConfigured, "a real client id must report configured")
+    }
+
+    await test("PKT-933 isConfigured: resolved() — empty env not configured, env client id configured") {
+        try expect(!WorkOSConfig.resolved(environment: [:]).isConfigured,
+                   "un-provisioned build (placeholder) must be not-configured")
+        try expect(WorkOSConfig.resolved(environment: ["WORKOS_CLIENT_ID": "client_live_x"]).isConfigured,
+                   "env-provided client id must be configured")
+    }
+
+    // MARK: - RemoteAccessToggleDecision (PKT-933 coming-soon + re-entrancy fix)
+
+    await test("PKT-933 toggle: ON while not configured → .comingSoon (never starts flow)") {
+        let d = RemoteAccessToggleDecision.resolve(requestedOn: true, configured: false, state: .disabled)
+        try expect(d == .comingSoon, "unconfigured ON must resolve to .comingSoon, got \(d)")
+    }
+
+    await test("PKT-933 toggle: ON while configured + disabled/offline → .startFlow") {
+        try expect(RemoteAccessToggleDecision.resolve(requestedOn: true, configured: true, state: .disabled) == .startFlow,
+                   "configured ON from .disabled should start the flow")
+        try expect(RemoteAccessToggleDecision.resolve(requestedOn: true, configured: true, state: .offline) == .startFlow,
+                   "configured ON from .offline (Retry via toggle) should start the flow")
+    }
+
+    await test("PKT-933 toggle: ON while already online → .ignore (no restart)") {
+        try expect(RemoteAccessToggleDecision.resolve(requestedOn: true, configured: true, state: .online) == .ignore,
+                   "ON while online must not restart provisioning")
+    }
+
+    await test("PKT-933 toggle: OFF while online → .confirmDisable") {
+        try expect(RemoteAccessToggleDecision.resolve(requestedOn: false, configured: true, state: .online) == .confirmDisable,
+                   "OFF while online must confirm before teardown")
+    }
+
+    await test("PKT-933 toggle: OFF while offline → .ignore (failure-revert must NOT wipe the error)") {
+        // Regression guard for the live "silent revert" bug: a .failed run
+        // programmatically writes cloudAccessEnabled=false, which re-enters the
+        // toggle onChange. Treating that as a user cancel tore the flow down to
+        // .idle and erased the on-screen error (+ Retry) before render.
+        try expect(RemoteAccessToggleDecision.resolve(requestedOn: false, configured: true, state: .offline) == .ignore,
+                   "OFF while offline (failure-revert) must be ignored, not cancel the flow")
+    }
+
+    await test("PKT-933 toggle: OFF mid-flow (connecting) → .cancelFlow") {
+        try expect(RemoteAccessToggleDecision.resolve(requestedOn: false, configured: true, state: .connecting) == .cancelFlow,
+                   "OFF mid-flow should cancel the in-flight run")
+    }
 }
 
 /// Thread-safe one-shot box for capturing a notification payload from a
