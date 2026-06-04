@@ -148,6 +148,11 @@ public final class StandingOrdersStore: @unchecked Sendable {
             let now = Date()
             let hash = Self.shortHash(markdown)
             try writeMetadata(updatedAt: now, hash: hash)
+            // Standing Orders changed → fan out a resources/updated notification
+            // to subscribed MCP sessions. Decoupled, best-effort no-op when no
+            // SSE transport is running (stdio-only / tests). The composed
+            // `bridge://standing-orders` body is what changed.
+            BridgeResources.notifyResourceChanged(uri: BridgeResources.standingOrdersURI)
             return Snapshot(
                 markdown: markdown,
                 hash: hash,

@@ -202,23 +202,13 @@ public actor ServerManager {
 
         // 4. Build MCP Server — version from Bundle (single source of truth)
         let appVersion = AppVersion.resolved
-        let routingInstructions = SkillsModule.buildRoutingInstructions()
 
-        // PKT-9 v3.5: prepend user-authored Standing Orders to the routing
-        // index so every MCP client receives the full operating preamble
-        // in `InitializeResult.instructions`. Best-effort: if the store
-        // read fails for any reason we fall back to routing-instructions-
-        // only so initialize still succeeds.
-        let composedInstructions: String = {
-            do {
-                let snapshot = try StandingOrdersStore.shared.read()
-                let orders = snapshot.markdown.trimmingCharacters(in: .whitespacesAndNewlines)
-                if orders.isEmpty { return routingInstructions }
-                return orders + "\n\n---\n\n" + routingInstructions
-            } catch {
-                return routingInstructions
-            }
-        }()
+        // PKT-9 v3.5 (now SSOT): the composed handshake payload (Standing
+        // Orders + routing index) comes from StandingOrdersDelivery so this
+        // path and the SSETransport legacy path serve byte-identical bytes
+        // — the same composition that backs the bridge:// resources. The
+        // best-effort store-read fallback lives inside the SSOT.
+        let composedInstructions = StandingOrdersDelivery.composition().instructionsMarkdown
 
         let server = Server(
             // PKT-1 v3.5: serverInfo.name announces the new brand to clients.
@@ -228,7 +218,12 @@ public actor ServerManager {
             name: "The Bridge",
             version: appVersion,
             instructions: composedInstructions,
-            capabilities: .init(tools: .init())
+            // Advertise resources (subscribe + listChanged) alongside tools so
+            // clients discover the bridge:// resource surface at handshake.
+            capabilities: .init(
+                resources: .init(subscribe: true, listChanged: true),
+                tools: .init()
+            )
         )
         self.server = server
 
@@ -267,6 +262,22 @@ public actor ServerManager {
             if !isError { await MainActor.run { onToolCall() } }
             return .init(content: [.text(.init(text))], isError: isError)
         }
+
+        // 6b. Wire MCP resource handlers (stdio path). The bytes come from the
+        // SAME StandingOrdersDelivery SSOT the SSE transport serves, so both
+        // paths resolve byte-identical resource content. stdio is a single
+        // connection, so resources/subscribe + resources/unsubscribe are
+        // accepted (Empty result) and `notifications/resources/updated` is
+        // delivered directly over this connection via `server.notify`. The
+        // per-session subscriber set lives on SSEServer (multi-session).
+        await server.withMethodHandler(ListResources.self) { _ in
+            ListResources.Result(resources: BridgeResources.list)
+        }
+        await server.withMethodHandler(ReadResource.self) { params in
+            try BridgeResources.read(uri: params.uri, clientName: nil)
+        }
+        await server.withMethodHandler(ResourceSubscribe.self) { _ in Empty() }
+        await server.withMethodHandler(ResourceUnsubscribe.self) { _ in Empty() }
 
         // 7. SSE server was created before module registration so session diagnostics can be injected
 

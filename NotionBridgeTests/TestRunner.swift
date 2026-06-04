@@ -713,6 +713,10 @@ await runPathMigrationTests()
 // PKT-9 (v3.5): Standing Orders + Routing Index.
 await runStandingOrdersTests()
 
+// MCP resource layer: StandingOrdersDelivery SSOT (composition determinism +
+// content-hash stability) and the shared BridgeResources URI→bytes resolution.
+await runStandingOrdersDeliveryTests()
+
 // PKT-6 (v3.5): CommandStore (markdown-per-command + index.json).
 await runCommandStoreTests()
 

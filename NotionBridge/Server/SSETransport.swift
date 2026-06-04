@@ -169,6 +169,15 @@ public actor SSEServer {
     private var totalSessionsEvicted = 0
     private var totalSessionsClosed = 0
 
+    /// Session IDs (Streamable-HTTP + legacy SSE) that have issued a
+    /// `resources/subscribe`. Actor-isolated — every mutation/read happens
+    /// inside the `SSEServer` actor (the SDK resource handlers, the legacy
+    /// RPC switch, session teardown, and `broadcastResourcesUpdated` are all
+    /// actor-isolated), so this needs no separate lock; it mirrors the role
+    /// of `LegacySSEBridge.clientNames` but stays inside the actor boundary
+    /// the way `sessions` does. Cleared per-session on disconnect/eviction.
+    private var resourceSubscribers: Set<String> = []
+
     public nonisolated let endpoint: String = "/mcp"
 
     /// PKT-336: Thread-safe bridge for legacy SSE connections (no actor boundary for channels).
@@ -244,6 +253,15 @@ public actor SSEServer {
         let bridge = self.legacy
         let endpointPath = self.endpoint
 
+        // Install the resources-updated broadcaster so a Standing Orders write
+        // fans out `notifications/resources/updated` to subscribed sessions.
+        // Decoupled hook (see StandingOrdersDelivery): the pure file store
+        // calls `BridgeResources.notifyResourceChanged(uri:)`, which routes
+        // here on a detached Task that hops into the actor's broadcast.
+        BridgeResources.setResourcesUpdatedBroadcaster { [weak self] uri in
+            Task { await self?.broadcastResourcesUpdated(uri: uri) }
+        }
+
         // PKT-366 F13: Capture disconnect callback for NIO handler
         let onDisconnect: @Sendable (String) async -> Void = { [weak self] name in
             await self?.notifyClientDisconnected(name)
@@ -268,8 +286,8 @@ public actor SSEServer {
             }
         }
 
-        let rpcHandler: @Sendable (Data) async -> Data? = { [weak self] data in
-            await self?.processLegacyRPC(data)
+        let rpcHandler: @Sendable (Data, String?) async -> Data? = { [weak self] data, legacySessionID in
+            await self?.processLegacyRPC(data, sessionID: legacySessionID)
         }
 
         let httpRequestHandler: @Sendable (HTTPRequest) async -> HTTPResponse = { [weak self] request in
@@ -624,18 +642,48 @@ public actor SSEServer {
         )
 
         let appVersion = AppVersion.resolved
-        let routingInstructions = SkillsModule.buildRoutingInstructions()
+        // SSOT: the Streamable-HTTP session's `initialize.instructions` now
+        // comes from StandingOrdersDelivery — byte-identical to the stdio
+        // (ServerManager) path and the legacy SSE path, and the same
+        // composition that backs the bridge:// resources.
+        let composedInstructions = StandingOrdersDelivery.composition(clientName: clientName).instructionsMarkdown
         let server = Server(
             name: "NotionBridgeSSE",
             version: appVersion,
-            instructions: routingInstructions,
-            capabilities: .init(tools: .init())
+            instructions: composedInstructions,
+            // Advertise resources (subscribe + listChanged) alongside tools.
+            capabilities: .init(
+                resources: .init(subscribe: true, listChanged: true),
+                tools: .init()
+            )
         )
 
         let router = self.router
         let onToolCall = self.onToolCall
         let toolAllowlist = self.toolAllowlist
-        
+
+        // MCP resource handlers (Streamable-HTTP path). Bytes come from the
+        // same StandingOrdersDelivery SSOT the stdio + legacy paths serve.
+        // Subscription tracking + `notifications/resources/updated` delivery
+        // for this transport is owned by the actor's `resourceSubscribers`
+        // set, keyed by sessionID (see `broadcastResourcesUpdated`).
+        let resourceClientName = clientName
+        await server.withMethodHandler(ListResources.self) { _ in
+            ListResources.Result(resources: BridgeResources.list)
+        }
+        await server.withMethodHandler(ReadResource.self) { params in
+            try BridgeResources.read(uri: params.uri, clientName: resourceClientName)
+        }
+        let subscribeSessionID = sessionID
+        await server.withMethodHandler(ResourceSubscribe.self) { [weak self] _ in
+            await self?.addResourceSubscriber(sessionID: subscribeSessionID)
+            return Empty()
+        }
+        await server.withMethodHandler(ResourceUnsubscribe.self) { [weak self] _ in
+            await self?.removeResourceSubscriber(sessionID: subscribeSessionID)
+            return Empty()
+        }
+
         await server.withMethodHandler(ListTools.self) { _ in
             let disabledNames = CredentialsFeature.mergedDisabledToolNames()
             var registrations = await router.enabledRegistrations(disabledNames: disabledNames)
@@ -697,7 +745,7 @@ public actor SSEServer {
 
     // MARK: - Legacy SSE JSON-RPC Processing (PKT-336)
 
-    func processLegacyRPC(_ body: Data) async -> Data? {
+    func processLegacyRPC(_ body: Data, sessionID: String? = nil) async -> Data? {
         guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
               let method = json["method"] as? String else {
             return buildRPCError(id: nil, code: -32700, message: "Parse error")
@@ -718,23 +766,19 @@ public actor SSEServer {
             }
 
             let legacyVersion = AppVersion.resolved
-            let routingInstructions = SkillsModule.buildRoutingInstructions()
-            // PKT-9 v3.5: prepend Standing Orders. Same best-effort posture
-            // as ServerManager — legacy initialize must succeed even when
-            // the on-disk store is missing or unreadable.
-            let composedInstructions: String = {
-                do {
-                    let snapshot = try StandingOrdersStore.shared.read()
-                    let orders = snapshot.markdown.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if orders.isEmpty { return routingInstructions }
-                    return orders + "\n\n---\n\n" + routingInstructions
-                } catch {
-                    return routingInstructions
-                }
-            }()
+            // SSOT: legacy initialize instructions come from
+            // StandingOrdersDelivery — byte-identical to the stdio
+            // (ServerManager) and Streamable-HTTP paths, and the same
+            // composition that backs the bridge:// resources. The
+            // best-effort store-read fallback lives inside the SSOT.
+            let composedInstructions = StandingOrdersDelivery.composition().instructionsMarkdown
             return buildRPCResponse(id: requestId, result: [
                 "protocolVersion": BridgeConstants.mcpProtocolVersion,
-                "capabilities": ["tools": [:] as [String: Any]] as [String: Any],
+                // Advertise resources (subscribe + listChanged) alongside tools.
+                "capabilities": [
+                    "tools": [:] as [String: Any],
+                    "resources": ["subscribe": true, "listChanged": true] as [String: Any],
+                ] as [String: Any],
                 "serverInfo": ["name": "The Bridge", "version": legacyVersion] as [String: Any],  // PKT-1 v3.5: brand rename
                 "instructions": composedInstructions
             ] as [String: Any])
@@ -793,6 +837,46 @@ public actor SSEServer {
         case "ping":
             return buildRPCResponse(id: requestId, result: [:] as [String: Any])
 
+        case "resources/list":
+            // SSOT: same two entries the Streamable-HTTP / stdio paths advertise.
+            return buildRPCResponse(id: requestId, result: [
+                "resources": BridgeResources.listAsDictionaries
+            ] as [String: Any])
+
+        case "resources/read":
+            let params = json["params"] as? [String: Any] ?? [:]
+            guard let uri = params["uri"] as? String else {
+                return buildRPCError(id: requestId, code: -32602, message: "Missing 'uri' parameter")
+            }
+            // Bytes resolve from the SAME StandingOrdersDelivery SSOT as every
+            // other transport. clientName is not resolvable on the legacy path
+            // (it is the future-overlay hook and ignored for content anyway).
+            do {
+                let markdown = try BridgeResources.markdown(for: uri, clientName: nil)
+                return buildRPCResponse(id: requestId, result: [
+                    "contents": [[
+                        "uri": uri,
+                        "mimeType": "text/markdown",
+                        "text": markdown,
+                    ] as [String: Any]]
+                ] as [String: Any])
+            } catch {
+                return buildRPCError(id: requestId, code: -32602, message: "Unknown resource URI: \(uri)")
+            }
+
+        case "resources/subscribe":
+            let params = json["params"] as? [String: Any] ?? [:]
+            guard params["uri"] is String else {
+                return buildRPCError(id: requestId, code: -32602, message: "Missing 'uri' parameter")
+            }
+            // Track this legacy session so broadcastResourcesUpdated reaches it.
+            if let sessionID { addResourceSubscriber(sessionID: sessionID) }
+            return buildRPCResponse(id: requestId, result: [:] as [String: Any])
+
+        case "resources/unsubscribe":
+            if let sessionID { removeResourceSubscriber(sessionID: sessionID) }
+            return buildRPCResponse(id: requestId, result: [:] as [String: Any])
+
         default:
             return buildRPCError(id: requestId, code: -32601, message: "Method not found: \(method)")
         }
@@ -811,6 +895,62 @@ public actor SSEServer {
         ]
         if let id = id { resp["id"] = id }
         return try? JSONSerialization.data(withJSONObject: resp)
+    }
+
+    // MARK: - MCP Resource Subscriptions (resources/subscribe + updated)
+
+    /// Track a session that issued `resources/subscribe`. Idempotent.
+    /// Called from the Streamable-HTTP SDK handler and the legacy RPC switch.
+    func addResourceSubscriber(sessionID: String) {
+        resourceSubscribers.insert(sessionID)
+    }
+
+    /// Stop tracking a session (explicit `resources/unsubscribe` or teardown).
+    func removeResourceSubscriber(sessionID: String) {
+        resourceSubscribers.remove(sessionID)
+    }
+
+    /// Whether a session is currently subscribed (test/diagnostic).
+    public func isResourceSubscriber(sessionID: String) -> Bool {
+        resourceSubscribers.contains(sessionID)
+    }
+
+    /// Number of currently-subscribed sessions (test/diagnostic).
+    public var resourceSubscriberCount: Int { resourceSubscribers.count }
+
+    /// Send `notifications/resources/updated` for `uri` to every subscribed
+    /// session. For Streamable-HTTP sessions the notification is delivered via
+    /// the session's SDK `Server.notify` (routed to the standalone GET SSE
+    /// stream, or stored for replay if the client has no GET stream open). For
+    /// legacy SSE sessions it is written to the session's event stream as a
+    /// JSON-RPC notification. Best-effort: a closed/missing channel just drops
+    /// the event. Stale subscribers are pruned on session teardown, not here,
+    /// so iteration over the set stays read-only.
+    public func broadcastResourcesUpdated(uri: String) async {
+        guard !resourceSubscribers.isEmpty else { return }
+
+        // Streamable-HTTP subscribers: notify via their per-session SDK Server.
+        let httpNotification = ResourceUpdatedNotification.message(.init(uri: uri))
+        for sessionID in resourceSubscribers {
+            if let session = sessions[sessionID] {
+                try? await session.server.notify(httpNotification)
+            }
+        }
+
+        // Legacy SSE subscribers (any subscriber that is not a known HTTP
+        // session): emit a raw JSON-RPC notification on the session's event
+        // stream. `sendEvent` drops silently if the channel is gone.
+        let legacyNotification: [String: Any] = [
+            "jsonrpc": "2.0",
+            "method": ResourceUpdatedNotification.name,
+            "params": ["uri": uri],
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: legacyNotification),
+           let json = String(data: data, encoding: .utf8) {
+            for sessionID in resourceSubscribers where sessions[sessionID] == nil {
+                legacy.sendEvent(sessionID: sessionID, event: "message", data: json)
+            }
+        }
     }
 
     // MARK: - Session Cleanup
@@ -907,6 +1047,10 @@ public actor SSEServer {
     ) async {
         guard let session = sessions.removeValue(forKey: id) else { return }
 
+        // Drop any resource subscription this session held so a torn-down
+        // session never lingers in the broadcast set.
+        resourceSubscribers.remove(id)
+
         if incrementClosed { totalSessionsClosed += 1 }
         if incrementExpired { totalSessionsExpired += 1 }
         if incrementEvicted { totalSessionsEvicted += 1 }
@@ -944,7 +1088,7 @@ private final class SSEHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
 
     private let legacyBridge: LegacySSEBridge
     private let endpoint: String
-    private let rpcHandler: @Sendable (Data) async -> Data?
+    private let rpcHandler: @Sendable (Data, String?) async -> Data?
     private let httpRequestHandler: @Sendable (HTTPRequest) async -> HTTPResponse
     private let healthHandler: @Sendable () async -> Data
     private let jobsCallbackHandler: @Sendable (String) async -> Data  // PKT-340: POST /jobs/{id}/run
@@ -961,7 +1105,7 @@ private final class SSEHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
     init(
         legacyBridge: LegacySSEBridge,
         endpoint: String,
-        rpcHandler: @escaping @Sendable (Data) async -> Data?,
+        rpcHandler: @escaping @Sendable (Data, String?) async -> Data?,
         httpRequestHandler: @escaping @Sendable (HTTPRequest) async -> HTTPResponse,
         healthHandler: @escaping @Sendable () async -> Data,
         jobsCallbackHandler: @escaping @Sendable (String) async -> Data = { _ in Data() },
@@ -1179,7 +1323,7 @@ private final class SSEHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
             legacyBridge.setClientName(sessionID: sid, name: clientName)
         }
 
-        if let responseData = await rpcHandler(bodyData),
+        if let responseData = await rpcHandler(bodyData, sessionID),
            let responseString = String(data: responseData, encoding: .utf8) {
             legacyBridge.sendEvent(sessionID: sessionID, event: "message", data: responseString)
         }

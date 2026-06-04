@@ -678,7 +678,16 @@ set -euo pipefail
 # CI red. Local runs sit two above it; that headroom is the GUI/TCC-gated tests.
 # v3.7.2 (2026-06-03): reminders url+location round-trip test (+1 → 1656).
 # v3.7.2 (2026-06-04): reminders recurrence+alarms round-trip test (+1 → 1657).
-FLOOR="${BRIDGE_TEST_FLOOR:-1657}"
+# MCP resource layer (2026-06-04): StandingOrdersDelivery SSOT + the bridge://
+# resource surface. Added StandingOrdersDeliveryTests.swift with 11 harness
+# test() blocks — delivery composition determinism + SHA256 content-hash
+# stability (+change tracking) + orders-prepend/routing-embed + empty-orders
+# fallback + chars/4 token estimate + clientName-hook no-op, plus the shared
+# BridgeResources URI→bytes resolution (typed list, dict projection,
+# read-resolves-to-SSOT-bytes byte-identical to instructions, unknown-URI
+# throw). All file-I/O hermetic (withTempHome), no GUI/TCC gate, so they run in
+# CI and local alike: 1657 + 11 = 1668.
+FLOOR="${BRIDGE_TEST_FLOOR:-1668}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5
