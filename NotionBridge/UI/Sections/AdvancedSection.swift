@@ -213,8 +213,8 @@ public struct AdvancedSection: View {
                 .foregroundStyle(BridgeTokens.fg4)
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
     }
 
     private func adIconButton(_ systemImage: String, help: String, action: @escaping () -> Void) -> some View {
@@ -384,8 +384,8 @@ public struct AdvancedSection: View {
                         .font(.system(size: 12))
                         .foregroundStyle(BridgeTokens.fg3)
                         .frame(width: 27, height: 27)
-                        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
-                        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                        .background(BridgeTokens.chipFill, in: RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
                 }
                 .buttonStyle(.plain)
                 .help("Reveal in Finder")
@@ -400,15 +400,15 @@ public struct AdvancedSection: View {
     private func monoChip(_ value: String, truncateMiddle: Bool = false) -> some View {
         Text(value)
             .font(.system(size: 12, design: .monospaced))
-            .foregroundStyle(Color.white.opacity(0.86))
+            .foregroundStyle(BridgeTokens.fg2)
             .lineLimit(1)
             .truncationMode(truncateMiddle ? .middle : .tail)
             .textSelection(.enabled)
             .padding(.horizontal, 11)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.black.opacity(0.24), in: RoundedRectangle(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.white.opacity(0.07), lineWidth: 0.5))
+            .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
     }
 
     private func copyButton(_ value: String) -> some View {
@@ -424,8 +424,8 @@ public struct AdvancedSection: View {
                 .font(.system(size: 12))
                 .foregroundStyle(copiedKey == value ? BridgeTokens.ok : BridgeTokens.fg3)
                 .frame(width: 27, height: 27)
-                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                .background(BridgeTokens.chipFill, in: RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
         .help("Copy")
@@ -509,8 +509,8 @@ public struct AdvancedSection: View {
             case .danger:  return BridgeTokens.badText
             }
         }()
-        let fill: Color = style == .neutral ? Color.white.opacity(0.03) : tint.opacity(0.07)
-        let stroke: Color = style == .neutral ? Color.white.opacity(0.10) : tint.opacity(0.22)
+        let fill: Color = style == .neutral ? BridgeTokens.chipFill : tint.opacity(0.07)
+        let stroke: Color = style == .neutral ? BridgeTokens.hairline : tint.opacity(0.22)
 
         VStack(alignment: .leading, spacing: 6) {
             Text(title)

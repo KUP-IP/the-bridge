@@ -109,7 +109,7 @@ public struct ProvisioningProgressView: View {
                 if p.showsURL, let url = mcpURL, !url.isEmpty {
                     Text(url)
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BridgeTokens.fg3)
                         .textSelection(.enabled)
                 }
             }

@@ -86,7 +86,7 @@ struct JobGlassRow: View {
         VStack(spacing: 0) {
             rowHeader
             if isExpanded {
-                Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5).padding(.top, 10)
+                Rectangle().fill(BridgeTokens.hairline).frame(height: 0.5).padding(.top, 10)
                 JobDetailView(job: job, onChanged: onChanged)
                     .padding(.top, 6)
             }
@@ -127,9 +127,9 @@ struct JobGlassRow: View {
     private var iconTile: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.white.opacity(0.05))
+                .fill(BridgeTokens.chipFill)
                 .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                    .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
             Image(systemName: jobGlyph)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(tone.iconTint)
@@ -481,8 +481,8 @@ struct JobDetailView: View {
                 .scrollContentBackground(.hidden)
                 .frame(minHeight: 140)
                 .padding(8)
-                .background(Color.black.opacity(0.26), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                .background(BridgeTokens.wellFillDeep, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
                 .onChange(of: editedActionsJSON) { _, newValue in validateActions(newValue) }
             if let err = actionsError {
                 Text(err).font(.caption).foregroundStyle(BridgeTokens.bad)

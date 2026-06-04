@@ -55,7 +55,7 @@ private struct ModuleGroupToolRow: View {
             // dim when off (design `.tl-glyph.on` / `.off`).
             Circle()
                 .fill(isEnabled ? BridgeTokens.ok
-                                : Color.white.opacity(0.18))
+                                : BridgeTokens.fg5)
                 .frame(width: 7, height: 7)
                 .shadow(color: isEnabled ? BridgeTokens.ok.opacity(0.6) : .clear,
                         radius: 2.5)
@@ -63,11 +63,11 @@ private struct ModuleGroupToolRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(toolName)
                     .font(.system(size: 12.5, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.95))
+                    .foregroundStyle(BridgeTokens.fg1)
                 if !description.isEmpty {
                     Text(description)
                         .font(.system(size: 11.5))
-                        .foregroundStyle(Color.white.opacity(0.5))
+                        .foregroundStyle(BridgeTokens.fg4)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -192,7 +192,7 @@ public struct ModuleGroupCard: View {
                     if !group.dependencies.isEmpty {
                         depChipRow
                     }
-                    Divider().background(Color.white.opacity(0.06))
+                    Divider().background(BridgeTokens.hairlineFaint)
                     if let dep = unmetDependency, group.masterState != .off {
                         warnBanner(for: dep)
                     }
@@ -236,12 +236,12 @@ public struct ModuleGroupCard: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(group.displayName)
                     .font(.system(size: 14.5, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(0.95))
+                    .foregroundStyle(BridgeTokens.fg1)
                 HStack(spacing: 6) {
                     countBadge
                     Text(group.subtitle)
                         .font(.system(size: 11.5))
-                        .foregroundStyle(Color.white.opacity(0.5))
+                        .foregroundStyle(BridgeTokens.fg4)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -300,7 +300,7 @@ public struct ModuleGroupCard: View {
             .fill(accent.opacity(0.12))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+                    .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
             )
             .overlay(
                 // top rim highlight — matches the design's inset sheen.
@@ -333,9 +333,9 @@ public struct ModuleGroupCard: View {
             fg = BridgeTokens.okText
         case .off:
             label = "0 of \(group.total) active"
-            bg = Color.white.opacity(0.06)
-            stroke = Color.white.opacity(0.10)
-            fg = Color.white.opacity(0.65)
+            bg = BridgeTokens.chipFill
+            stroke = BridgeTokens.hairline
+            fg = BridgeTokens.fg3
         case .partial:
             label = "\(group.enabledCount) of \(group.total) active"
             bg = BridgeTokens.warn.opacity(0.14)
@@ -355,7 +355,7 @@ public struct ModuleGroupCard: View {
     private var chevron: some View {
         Image(systemName: "chevron.down")
             .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(Color.white.opacity(0.42))
+            .foregroundStyle(BridgeTokens.fg4)
             .rotationEffect(.degrees(isExpanded ? 0 : -90))
     }
 
@@ -363,7 +363,7 @@ public struct ModuleGroupCard: View {
         HStack(spacing: 6) {
             Text("depends on")
                 .font(.system(size: 11))
-                .foregroundStyle(Color.white.opacity(0.46))
+                .foregroundStyle(BridgeTokens.fg4)
             ForEach(group.dependencies, id: \.self) { dep in
                 BridgeDepLink(
                     dep.label,
@@ -508,8 +508,8 @@ public struct ModuleGroupList: View {
         let valueColor: Color = {
             switch emphasis {
             case .on:      return BridgeTokens.okText
-            case .off:     return Color.white.opacity(0.45)
-            case .neutral: return Color.white
+            case .off:     return BridgeTokens.fg4
+            case .neutral: return BridgeTokens.fg1
             }
         }()
         return VStack(spacing: 3) {
@@ -522,8 +522,8 @@ public struct ModuleGroupList: View {
                 .foregroundStyle(BridgeTokens.fg4)
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
     }
 
     // MARK: Mutators

@@ -170,7 +170,7 @@ struct OnboardingView: View {
 
             // Navigation foot rail (.ob-foot)
             Rectangle()
-                .fill(Color.white.opacity(0.08))
+                .fill(BridgeTokens.hairline)
                 .frame(height: 0.5)
             navigationButtons
                 .padding(.horizontal, 18)
@@ -182,7 +182,7 @@ struct OnboardingView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
+                .strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5)
         )
         .overlay(
             // top rim highlight (.ob inset 0 1px 0 rgba(255,255,255,.12))
@@ -220,7 +220,7 @@ struct OnboardingView: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        .fill(Color.white.opacity(0.08))
+                        .fill(BridgeTokens.chipFill)
                         .frame(height: 4)
                     RoundedRectangle(cornerRadius: 2, style: .continuous)
                         .fill(
@@ -310,7 +310,7 @@ struct OnboardingView: View {
         .frame(width: 78, height: 78)
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.20), lineWidth: 1)
+                .strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 1)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -439,9 +439,9 @@ struct OnboardingView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
-            .background(Color.black.opacity(0.20), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
             .padding(.top, 20)
 
             // Full document links
@@ -691,9 +691,9 @@ struct OnboardingView: View {
                 .foregroundStyle(BridgeTokens.fg2)
                 .padding(9)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.black.opacity(0.30), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .background(BridgeTokens.wellFillDeep, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5))
+                    .strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
 
             HStack {
                 Spacer()
@@ -714,12 +714,12 @@ struct OnboardingView: View {
         }
         .padding(14)
         .background(
-            (recommended ? BridgeTokens.accent.opacity(0.10) : Color.black.opacity(0.20)),
+            (recommended ? BridgeTokens.accent.opacity(0.10) : BridgeTokens.wellFill),
             in: RoundedRectangle(cornerRadius: 11, style: .continuous)
         )
         .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
             .strokeBorder(
-                recommended ? BridgeTokens.accent.opacity(0.40) : Color.white.opacity(0.10),
+                recommended ? BridgeTokens.accent.opacity(0.40) : BridgeTokens.hairline,
                 lineWidth: recommended ? 1 : 0.5))
     }
 

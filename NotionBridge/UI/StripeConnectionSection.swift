@@ -21,7 +21,7 @@ struct StripeConnectionSection: View {
                         .scaleEffect(0.7)
                     Text("Loading…")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BridgeTokens.fg3)
                 }
             } else if let connection, connection.status != .notConfigured {
                 connectedView(connection)
@@ -57,7 +57,7 @@ struct StripeConnectionSection: View {
                             .fill(Color(red: 0.463, green: 0.333, blue: 0.922).opacity(0.18))
                             .frame(width: 36, height: 36)
                             .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                                .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
                         Image(systemName: "creditcard.fill")
                             .font(.system(size: 16, weight: .medium))
                             .foregroundStyle(Color(red: 0.616, green: 0.553, blue: 1.0)) // #9d8dff
@@ -166,10 +166,10 @@ struct StripeConnectionSection: View {
         HStack(spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(Color.white.opacity(0.05))
+                    .fill(BridgeTokens.chipFill)
                     .frame(width: 36, height: 36)
                     .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+                        .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
                 Image(systemName: "creditcard")
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(BridgeTokens.fg4)
@@ -254,7 +254,7 @@ struct StripeConnectionSection: View {
         case .connected: return BridgeTokens.ok
         case .warning: return BridgeTokens.warn
         case .disconnected: return BridgeTokens.bad
-        case .notConfigured: return .gray
+        case .notConfigured: return BridgeTokens.fg4
         case .checking: return BridgeTokens.warn
         case .invalid: return BridgeTokens.bad
         }

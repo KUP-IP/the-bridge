@@ -118,7 +118,7 @@ public struct BridgeCardLabel: View {
         Text(text.uppercased())
             .font(.system(size: 11, weight: .semibold))
             .tracking(1.2)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(BridgeTokens.fg3)
     }
 }
 
@@ -191,7 +191,7 @@ public struct PartialToggle: View {
                 Capsule()
                     .fill(track)
                     .frame(width: 40, height: 24)
-                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
+                    .overlay(Capsule().strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
                 Circle()
                     .fill(LinearGradient(colors: [.white, Color(white: 0.84)], startPoint: .top, endPoint: .bottom))
                     .frame(width: 18, height: 18)
@@ -214,7 +214,7 @@ public struct PartialToggle: View {
         switch state {
         case .off:
             return LinearGradient(
-                colors: [Color.white.opacity(0.08), Color.white.opacity(0.04)],
+                colors: [BridgeTokens.chipFill, BridgeTokens.chipFill],
                 startPoint: .top, endPoint: .bottom)
         case .partial:
             return LinearGradient(
@@ -247,6 +247,13 @@ public struct BridgeGlassBubble<Content: View>: View {
     private let content: Content?
     private let size: CGFloat
 
+    // System-tethered (v3.7.6): the white specular dome + white rim assume a
+    // dark base and VANISH on titanium, leaving a flat invisible slot. On LIGHT
+    // we swap to a subtle near-white sheen over a faint neutral tint plus a
+    // darker rim so the bubble still reads as a RAISED glass dome; DARK is
+    // byte-for-byte unchanged.
+    @Environment(\.colorScheme) private var colorScheme
+
     public init(size: CGFloat = 52, @ViewBuilder content: () -> Content) {
         self.content = content()
         self.size = size
@@ -259,17 +266,28 @@ public struct BridgeGlassBubble<Content: View>: View {
     }
 
     public var body: some View {
-        ZStack {
+        let isDark = colorScheme == .dark
+        // Specular dome (hotspot → falloff). DARK: white .42→.10→.02 (unchanged).
+        // LIGHT: a softer white sheen that fades to clear over the neutral tint.
+        let domeColors: [Color] = isDark
+            ? [Color.white.opacity(0.42), Color.white.opacity(0.10), Color.white.opacity(0.02)]
+            : [Color.white.opacity(0.70), Color.white.opacity(0.22), Color.white.opacity(0.0)]
+        // Surface tint under the sheen. DARK: white@.06 (unchanged). LIGHT: a
+        // faint neutral well so the dome sits on a cooler, slightly-recessed base.
+        let surfaceTint = isDark ? Color.white.opacity(0.06) : BridgeTokens.chipFill
+        // Rim. DARK: white@.18 (unchanged). LIGHT: a darker hairline edge.
+        let rim = isDark ? Color.white.opacity(0.18) : BridgeTokens.hairlineStrong
+        return ZStack {
             Circle()
                 .fill(
                     RadialGradient(
-                        colors: [Color.white.opacity(0.42), Color.white.opacity(0.10), Color.white.opacity(0.02)],
+                        colors: domeColors,
                         center: UnitPoint(x: 0.3, y: 0.18),
                         startRadius: 0, endRadius: size * 0.9
                     )
                 )
-                .overlay(Circle().fill(Color.white.opacity(0.06)))
-            Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                .overlay(Circle().fill(surfaceTint))
+            Circle().strokeBorder(rim, lineWidth: 1)
             content
         }
         .frame(width: size, height: size)

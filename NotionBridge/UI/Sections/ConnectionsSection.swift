@@ -121,8 +121,8 @@ public struct ConnectionsSection: View {
                 .foregroundStyle(BridgeTokens.fg4)
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
     }
 
     private func iconButton(_ systemImage: String, help: String, action: @escaping () -> Void) -> some View {
@@ -216,12 +216,12 @@ public struct ConnectionsSection: View {
         .padding(.horizontal, 12).padding(.vertical, 11)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            Color.black.opacity(0.20),
+            BridgeTokens.wellFill,
             in: RoundedRectangle(cornerRadius: 10, style: .continuous)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+                .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
         )
     }
 
@@ -280,8 +280,8 @@ public struct ConnectionsSection: View {
                         connection: notionConnection,
                         name: "Notion",
                         glyph: "circle.grid.2x2.fill",
-                        glyphColor: Color.white,
-                        tileTint: Color.white.opacity(0.06),
+                        glyphColor: BridgeTokens.fg1,
+                        tileTint: BridgeTokens.chipFill,
                         fallbackSub: "Not configured · add a workspace token",
                         anchor: "notion"
                     )
@@ -318,7 +318,7 @@ public struct ConnectionsSection: View {
                         .fill(tileTint)
                         .frame(width: 38, height: 38)
                         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                            .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
                     Image(systemName: glyph)
                         .font(.system(size: 17, weight: .medium))
                         .foregroundStyle(glyphColor)
@@ -340,7 +340,7 @@ public struct ConnectionsSection: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 3)
 
-            Rectangle().fill(Color.white.opacity(0.07)).frame(height: 0.5)
+            Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5)
                 .padding(.top, 9)
 
             HStack(spacing: 6) {
@@ -372,7 +372,7 @@ public struct ConnectionsSection: View {
     private func tileBackground(for status: BridgeConnectionStatus) -> Color {
         switch status {
         case .disconnected, .invalid: return BridgeTokens.bad.opacity(0.05)
-        default: return Color.black.opacity(0.18)
+        default: return BridgeTokens.wellFill
         }
     }
 
@@ -380,7 +380,7 @@ public struct ConnectionsSection: View {
         switch status {
         case .disconnected, .invalid: return BridgeTokens.bad.opacity(0.30)
         case .warning: return BridgeTokens.warn.opacity(0.22)
-        default: return Color.white.opacity(0.08)
+        default: return BridgeTokens.hairlineFaint
         }
     }
 
@@ -443,7 +443,7 @@ public struct ConnectionsSection: View {
                     ForEach(Array(statusBar.connectedClients.enumerated()), id: \.element.name) { index, client in
                         clientRow(client)
                         if index < statusBar.connectedClients.count - 1 {
-                            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
+                            Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5)
                         }
                     }
                 }
@@ -455,10 +455,10 @@ public struct ConnectionsSection: View {
         HStack(spacing: 11) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.white.opacity(0.05))
+                    .fill(BridgeTokens.chipFill)
                     .frame(width: 30, height: 30)
                     .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+                        .strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
                 Image(systemName: "bolt.horizontal.circle")
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(BridgeTokens.accentLink)
@@ -511,7 +511,7 @@ public struct ConnectionsSection: View {
                         .foregroundStyle(BridgeTokens.warnText)
                         .padding(.top, 1)
                 }
-                Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
+                Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5)
                 HStack(spacing: 10) {
                     Button {
                         (NSApp.delegate as? AppDelegate)?.checkForUpdates()

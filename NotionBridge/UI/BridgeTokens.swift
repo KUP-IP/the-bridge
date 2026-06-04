@@ -174,6 +174,32 @@ public enum BridgeTokens {
         light: { srgb(0.471, 0.482, 0.502) }    // ~#787B80 neutral titanium tint
     )
 
+    // MARK: - Chrome (adaptive hairlines, dividers, selection/hover/well fills)
+    //
+    // Completes the light-mode migration: borders, dividers, selection
+    // highlights and inset "wells" were hardcoded `Color.white.opacity(x)` /
+    // `Color.black.opacity(x)` and so vanished or punched dark holes on the
+    // titanium ground. Each token's DARK branch reproduces the prior literal
+    // byte-for-byte (dark is regression-free); the LIGHT branch mirrors it onto
+    // titanium (a subtle DARK edge/fill instead of a white one).
+
+    /// Hairline borders + dividers (card edges, column rules, separators).
+    public static let hairline       = adaptive(dark: { whiteAlpha(0.10) }, light: { blackAlpha(0.10) })
+    /// Stronger hairline — prominent borders / selected outlines.
+    public static let hairlineStrong = adaptive(dark: { whiteAlpha(0.16) }, light: { blackAlpha(0.16) })
+    /// Faint hairline — subtle inner rules where 0.10 is too much.
+    public static let hairlineFaint  = adaptive(dark: { whiteAlpha(0.06) }, light: { blackAlpha(0.07) })
+    /// Selected-row / active fill — the VISIBLE selection state.
+    public static let selectionFill  = adaptive(dark: { whiteAlpha(0.12) }, light: { blackAlpha(0.075) })
+    /// Hover fill — subtle row hover feedback.
+    public static let hoverFill      = adaptive(dark: { whiteAlpha(0.05) }, light: { blackAlpha(0.045) })
+    /// Inset "well" background (sunken panels: editors, stat tiles, rows).
+    public static let wellFill       = adaptive(dark: { blackAlpha(0.22) }, light: { blackAlpha(0.05) })
+    /// Deeper inset well (where the prior value was black@0.26).
+    public static let wellFillDeep   = adaptive(dark: { blackAlpha(0.26) }, light: { blackAlpha(0.06) })
+    /// Chip / pill neutral fill (small translucent backings).
+    public static let chipFill       = adaptive(dark: { whiteAlpha(0.08) }, light: { blackAlpha(0.06) })
+
     // MARK: - Radii (macOS-soft)
 
     public enum Radius {

@@ -100,15 +100,15 @@ public struct PermissionView: View {
             ZStack(alignment: .topTrailing) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(Color.white.opacity(0.05))
+                        .fill(BridgeTokens.chipFill)
                         .frame(width: 34, height: 34)
                         .overlay(
                             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+                                .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
                         )
                     Image(systemName: rowIcon(for: grant))
                         .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(Color.white.opacity(0.80))
+                        .foregroundStyle(BridgeTokens.fg2)
                 }
                 let dot = isChecking ? BridgeTokens.warn : statusColor(status)
                 Circle()
@@ -201,7 +201,7 @@ public struct PermissionView: View {
 
         Text("Upcoming capabilities")
             .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(BridgeTokens.fg3)
 
         ForEach(upcomingCapabilities) { capability in
             HStack(spacing: 8) {
@@ -218,7 +218,7 @@ public struct PermissionView: View {
                      ? "Enabled \u{2014} wiring pending"
                      : "Not requested (feature disabled)")
                     .font(.caption)
-                    .foregroundStyle(capability.enabled ? BridgeTokens.accent : .secondary)
+                    .foregroundStyle(capability.enabled ? BridgeTokens.accent : BridgeTokens.fg3)
             }
         }
     }
@@ -277,7 +277,7 @@ public struct PermissionView: View {
 
             Text("\(targets): TCC database shows granted but runtime probe fails. This happens when macOS stores a stale code signature (csreq) from a previous build.")
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(BridgeTokens.fg3)
                 .multilineTextAlignment(.center)
 
             Text("⚠️ This will reset ALL automation permissions. You will be prompted to re-authorize each app.")
@@ -504,7 +504,7 @@ struct AutoPermissionsStepView: View {
 
             Text("Tap “Re-check Status” or “Grant All” to verify permission state. Until then, indicators may not reflect what System Settings shows. Grant All triggers Contacts, Notifications, and Automation prompts up front.")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(BridgeTokens.fg3)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
 
@@ -566,7 +566,7 @@ struct AutoPermissionsStepView: View {
 
             Text(permissionManager.remediation(for: grant))
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(BridgeTokens.fg3)
 
             if needsRemediation(status: status) {
                 Button("Open \(grant.displayName) Settings") {
@@ -712,7 +712,7 @@ struct ManualPermissionsStepView: View {
 
             Text("These permissions must be enabled manually in System Settings. Use each deep link, grant access, then return and re-check. The Permissions tab can stay stale until you restart after a TCC reset.")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(BridgeTokens.fg3)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
 
@@ -756,7 +756,7 @@ struct ManualPermissionsStepView: View {
 
             Text(manualInstruction(for: grant))
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(BridgeTokens.fg3)
 
             Button("Open \(grant.displayName) Settings") {
                 guard let url = grant.systemSettingsURL else { return }

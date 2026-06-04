@@ -56,7 +56,7 @@ public struct FirstRunCloudAccessModal: View {
                     .font(.system(size: 18, weight: .semibold))
                 Text("Three quick steps to add this Mac as a tool in Claude.ai.")
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BridgeTokens.fg3)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -85,11 +85,11 @@ public struct FirstRunCloudAccessModal: View {
         HStack(alignment: .center, spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
+                    .fill(BridgeTokens.chipFill)
                     .frame(width: 34, height: 34)
                     .overlay(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+                            .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
                     )
                 Image(systemName: step.symbol)
                     .font(.system(size: 15, weight: .medium))

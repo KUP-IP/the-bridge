@@ -123,8 +123,8 @@ public struct CredentialsSection: View {
                 .foregroundStyle(BridgeTokens.fg4)
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
     }
 
     /// Hero "+" action — jumps to the CRUD pane where adds actually happen.
@@ -214,7 +214,7 @@ public struct CredentialsSection: View {
                         credentialRow(entry)
                         if idx < stored.count - 1 {
                             Rectangle()
-                                .fill(Color.white.opacity(0.08))
+                                .fill(BridgeTokens.hairlineFaint)
                                 .frame(height: 0.5)
                                 .padding(.vertical, 1)
                         }
@@ -296,10 +296,10 @@ public struct CredentialsSection: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(danger ? BridgeTokens.badText : BridgeTokens.fg3)
                 .frame(width: 28, height: 28)
-                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
+                .background(BridgeTokens.hoverFill, in: RoundedRectangle(cornerRadius: 7))
                 .overlay(
                     RoundedRectangle(cornerRadius: 7)
-                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                        .strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5)
                 )
         }
         .buttonStyle(.plain)
@@ -321,16 +321,16 @@ public struct CredentialsSection: View {
         }()
         ZStack {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Color.white.opacity(0.05))
+                .fill(BridgeTokens.chipFill)
                 .frame(width: 36, height: 36)
                 .overlay(
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+                        .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .inset(by: 0.5)
-                        .stroke(Color.white.opacity(0.14), lineWidth: 0.5)
+                        .stroke(BridgeTokens.hairlineStrong, lineWidth: 0.5)
                         .mask(LinearGradient(colors: [.white, .clear], startPoint: .top, endPoint: .center))
                 )
             Image(systemName: system)
@@ -371,7 +371,7 @@ public struct CredentialsSection: View {
                         set: { UserDefaults.standard.set($0, forKey: CredentialsFeature.userDefaultsKey) }
                     )
                 )
-                Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5).padding(.vertical, 1)
+                Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5).padding(.vertical, 1)
                 NavigateRow(
                     title: "Manage stored entries",
                     subtitle: "Open the CRUD pane to add or remove API keys, passwords, and cards.",

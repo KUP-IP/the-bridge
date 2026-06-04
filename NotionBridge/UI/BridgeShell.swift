@@ -165,11 +165,11 @@ public struct BridgeSectionNav: View {
         .frame(width: 188)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(
-            LinearGradient(colors: [Color.white.opacity(0.06), Color.white.opacity(0.01)],
+            LinearGradient(colors: [BridgeTokens.hairlineFaint, BridgeTokens.hairlineFaint.opacity(0)],
                            startPoint: .top, endPoint: .bottom)
         )
         .overlay(alignment: .trailing) {
-            Rectangle().fill(Color.white.opacity(0.10)).frame(width: 0.5)
+            Rectangle().fill(BridgeTokens.hairline).frame(width: 0.5)
         }
         // Restore the keyboard navigation NavigationSplitView's List gave us
         // for free: Up/Down arrows move `selection` to the previous/next
@@ -208,10 +208,10 @@ struct BridgeSectionNavItem: View {
             HStack(spacing: 10) {
                 icon
                     .frame(width: 18, height: 18)
-                    .foregroundStyle(.white.opacity(isSelected ? 0.95 : 0.72))
+                    .foregroundStyle(isSelected ? BridgeTokens.fg1 : BridgeTokens.fg4)
                 Text(section.rawValue)
                     .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(isSelected ? 0.98 : 0.86))
+                    .foregroundStyle(isSelected ? BridgeTokens.fg1 : BridgeTokens.fg3)
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
@@ -222,7 +222,7 @@ struct BridgeSectionNavItem: View {
             .overlay {
                 if isSelected {
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+                        .strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5)
                 }
             }
             .contentShape(Rectangle())
@@ -245,10 +245,9 @@ struct BridgeSectionNavItem: View {
 
     @ViewBuilder private var background: some View {
         if isSelected {
-            LinearGradient(colors: [Color.white.opacity(0.12), Color.white.opacity(0.04)],
-                           startPoint: .top, endPoint: .bottom)
+            BridgeTokens.accent.opacity(0.14)
         } else if hovering {
-            Color.white.opacity(0.05)
+            BridgeTokens.hoverFill
         } else {
             Color.clear
         }
@@ -266,16 +265,16 @@ public struct BridgeTitleBar: View {
     public var body: some View {
         ZStack {
             HStack(spacing: 6) {
-                Text("The Bridge").foregroundStyle(.white.opacity(0.42))
-                Text("›").foregroundStyle(.white.opacity(0.30))
-                Text(title).foregroundStyle(.white.opacity(0.78))
+                Text("The Bridge").foregroundStyle(BridgeTokens.fg4)
+                Text("›").foregroundStyle(BridgeTokens.fg5)
+                Text(title).foregroundStyle(BridgeTokens.fg2)
             }
             .font(.system(size: 13, weight: .semibold))
         }
         .frame(maxWidth: .infinity)
         .frame(height: 44)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color.white.opacity(0.10)).frame(height: 0.5)
+            Rectangle().fill(BridgeTokens.hairline).frame(height: 0.5)
         }
     }
 }
@@ -287,18 +286,18 @@ public struct BridgeFootBar: View {
 
     public var body: some View {
         HStack(spacing: 6) {
-            Text("The Bridge").foregroundStyle(.white.opacity(0.40))
+            Text("The Bridge").foregroundStyle(BridgeTokens.fg4)
             Spacer(minLength: 0)
-            Text(version).foregroundStyle(.white.opacity(0.46))
+            Text(version).foregroundStyle(BridgeTokens.fg4)
             Circle().fill(BridgeTokens.ok).frame(width: 7, height: 7)
                 .shadow(color: BridgeTokens.ok.opacity(0.55), radius: 3)
         }
         .font(.system(size: 11))
         .padding(.horizontal, 14)
         .frame(height: 30)
-        .background(Color.black.opacity(0.10))
+        .background(BridgeTokens.chipFill)
         .overlay(alignment: .top) {
-            Rectangle().fill(Color.white.opacity(0.10)).frame(height: 0.5)
+            Rectangle().fill(BridgeTokens.hairline).frame(height: 0.5)
         }
     }
 }

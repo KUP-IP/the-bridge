@@ -36,7 +36,7 @@ public struct CommandsEditorView: View {
             HStack(spacing: 0) {
                 masterColumn
                     .frame(width: 236)
-                Rectangle().fill(Color.white.opacity(0.10)).frame(width: 0.5)
+                Rectangle().fill(BridgeTokens.hairline).frame(width: 0.5)
                 detailColumn
                     .frame(maxWidth: .infinity)
             }
@@ -74,8 +74,8 @@ public struct CommandsEditorView: View {
                 }
                 .padding(.horizontal, 10)
                 .frame(height: 30)
-                .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
 
                 Button {
                     createNew()
@@ -106,7 +106,7 @@ public struct CommandsEditorView: View {
                 .padding(.bottom, 8)
             }
 
-            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
+            Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5)
             HStack {
                 Text("\(commands.count) commands · \(favoriteCount) favorites")
                     .font(.system(size: 11))
@@ -137,8 +137,8 @@ public struct CommandsEditorView: View {
                         .foregroundStyle(BridgeTokens.fg3)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
-                        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+                        .background(BridgeTokens.chipFill, in: RoundedRectangle(cornerRadius: 5))
+                        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
                 }
             }
             .padding(.horizontal, 10)
@@ -147,7 +147,7 @@ public struct CommandsEditorView: View {
                         in: RoundedRectangle(cornerRadius: 9))
             .overlay(
                 RoundedRectangle(cornerRadius: 9)
-                    .strokeBorder(selectedSlug == c.slug ? Color.white.opacity(0.16) : Color.clear, lineWidth: 0.5)
+                    .strokeBorder(selectedSlug == c.slug ? BridgeTokens.hairlineStrong : Color.clear, lineWidth: 0.5)
             )
             .contentShape(Rectangle())
         }
@@ -265,7 +265,7 @@ public struct CommandsEditorView: View {
                                 .frame(width: 18, height: 18)
                                 .overlay(
                                     Circle().strokeBorder(
-                                        c.color == col ? Color.white : Color.white.opacity(0.12),
+                                        c.color == col ? Color.white : BridgeTokens.hairline,
                                         lineWidth: c.color == col ? 2 : 0.5)
                                 )
                         }
@@ -292,8 +292,8 @@ public struct CommandsEditorView: View {
                             .font(.system(size: 12))
                             .foregroundStyle(BridgeTokens.fg3)
                             .frame(width: 26, height: 26)
-                            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
-                            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5))
+                            .background(BridgeTokens.hoverFill, in: RoundedRectangle(cornerRadius: 7))
+                            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5))
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -328,7 +328,7 @@ public struct CommandsEditorView: View {
                 .background(slotBackground(isMine: isMine), in: RoundedRectangle(cornerRadius: 9))
                 .overlay(
                     RoundedRectangle(cornerRadius: 9)
-                        .strokeBorder(isMine ? BridgeTokens.accent.opacity(0.6) : Color.white.opacity(0.10),
+                        .strokeBorder(isMine ? BridgeTokens.accent.opacity(0.6) : BridgeTokens.hairline,
                                       lineWidth: isMine ? 1 : 0.5)
                 )
                 .contentShape(Rectangle())
@@ -343,7 +343,7 @@ public struct CommandsEditorView: View {
                 colors: [BridgeTokens.accent.opacity(0.5), BridgeTokens.accent.opacity(0.3)],
                 startPoint: .top, endPoint: .bottom))
         }
-        return AnyShapeStyle(Color.black.opacity(0.2))
+        return AnyShapeStyle(BridgeTokens.wellFill)
     }
 
     private func bodyCard(_ c: CommandStore.Command) -> some View {
@@ -364,8 +364,8 @@ public struct CommandsEditorView: View {
                 .scrollContentBackground(.hidden)
                 .padding(10)
                 .frame(minHeight: 150)
-                .background(Color.black.opacity(0.26), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                .background(BridgeTokens.wellFillDeep, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
                 if let msg = saveMessage {
                     Text(msg)
                         .font(.system(size: 11))
@@ -410,7 +410,7 @@ public struct CommandsEditorView: View {
                     .padding(.horizontal, 18)
                     .frame(maxWidth: .infinity)
                     .background(trayCanvas, in: RoundedRectangle(cornerRadius: 18))
-                    .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(BridgeTokens.hairline, lineWidth: 1))
                 }
             }
         }
@@ -458,8 +458,8 @@ public struct CommandsEditorView: View {
     ) -> some View {
         ZStack {
             Circle()
-                .fill(Color.white.opacity(0.05))
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5))
+                .fill(BridgeTokens.chipFill)
+                .overlay(Circle().strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5))
             switch icon {
             case .emoji(let s):
                 Text(s).font(.system(size: glyph))

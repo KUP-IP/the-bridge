@@ -30,7 +30,7 @@ public struct ConnectionsManagementView: View {
                         .scaleEffect(0.7)
                     Text("Loading workspace connections…")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BridgeTokens.fg3)
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.vertical, 8)
@@ -38,10 +38,10 @@ public struct ConnectionsManagementView: View {
                 VStack(spacing: 6) {
                     Image(systemName: "network.slash")
                         .font(.title3)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BridgeTokens.fg3)
                     Text("No workspace connections configured")
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BridgeTokens.fg3)
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.vertical, 12)
@@ -94,7 +94,7 @@ public struct ConnectionsManagementView: View {
                             .scaleEffect(0.6)
                         Text("Validating…")
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(BridgeTokens.fg3)
                     }
                 }
 
@@ -159,10 +159,10 @@ public struct ConnectionsManagementView: View {
         HStack(spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
+                    .fill(BridgeTokens.chipFill)
                     .frame(width: 36, height: 36)
                     .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                        .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
                 Image(systemName: "circle.grid.2x2.fill")
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(BridgeTokens.fg1)
@@ -251,7 +251,7 @@ public struct ConnectionsManagementView: View {
         label: String,
         value: String,
         icon: String? = nil,
-        iconColor: Color = .secondary,
+        iconColor: Color = BridgeTokens.fg3,
         monospaced: Bool = false
     ) -> some View {
         HStack(alignment: .top) {
@@ -440,7 +440,7 @@ public struct ConnectionsManagementView: View {
         case .disconnected:
             return BridgeTokens.bad
         case .notConfigured:
-            return .gray
+            return BridgeTokens.fg4
         case .checking:
             return BridgeTokens.warn
         case .invalid:

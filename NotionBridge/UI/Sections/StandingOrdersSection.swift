@@ -99,8 +99,8 @@ public struct StandingOrdersSection: View {
                 .foregroundStyle(BridgeTokens.fg4)
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
     }
 
     private func soIconButton(_ systemImage: String, help: String, action: @escaping () -> Void) -> some View {
@@ -122,7 +122,7 @@ public struct StandingOrdersSection: View {
             HStack(spacing: 0) {
                 editorColumn
                     .padding(.trailing, 14)
-                Rectangle().fill(Color.white.opacity(0.10)).frame(width: 0.5)
+                Rectangle().fill(BridgeTokens.hairline).frame(width: 0.5)
                 previewColumn
                     .padding(.leading, 14)
             }
@@ -137,8 +137,8 @@ public struct StandingOrdersSection: View {
                 .font(.system(size: 12, design: .monospaced))
                 .scrollContentBackground(.hidden)
                 .padding(10)
-                .background(Color.black.opacity(0.26), in: RoundedRectangle(cornerRadius: 9))
-                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                .background(BridgeTokens.wellFillDeep, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
                 .frame(maxHeight: .infinity)
             HStack(spacing: 8) {
                 Button("Save") { Task { await save() } }
@@ -182,8 +182,8 @@ public struct StandingOrdersSection: View {
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(BridgeTokens.fg3)
                 .padding(.horizontal, 8).padding(.vertical, 2)
-                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                .background(BridgeTokens.chipFill, in: RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
         }
     }
 
@@ -195,7 +195,7 @@ public struct StandingOrdersSection: View {
                 .font(.system(size: 11)).foregroundStyle(BridgeTokens.fg3)
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.08))
+                    Capsule().fill(BridgeTokens.chipFill)
                     Capsule()
                         .fill(LinearGradient(colors: [BridgeTokens.ok, BridgeTokens.gold],
                                              startPoint: .leading, endPoint: .trailing))
@@ -239,13 +239,13 @@ public struct StandingOrdersSection: View {
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(BridgeTokens.fg3)
                         .padding(.horizontal, 9).padding(.vertical, 3)
-                        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
-                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
+                        .background(BridgeTokens.chipFill, in: RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
                 }
                 .buttonStyle(.plain)
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
-            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
+            Rectangle().fill(BridgeTokens.hairline).frame(height: 0.5)
 
             if side == .editor {
                 TextEditor(text: $draft)
@@ -262,7 +262,7 @@ public struct StandingOrdersSection: View {
             }
         }
         .background(BridgeTokens.bgRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5))
         .shadow(color: .black.opacity(0.7), radius: 50, y: 24)
     }
 
@@ -306,7 +306,7 @@ public struct StandingOrdersSection: View {
                 }
 
                 if !events.isEmpty {
-                    Divider().overlay(Color.white.opacity(0.08))
+                    Divider().overlay(BridgeTokens.hairline)
                     debugTimeline(events)
                 }
             }
@@ -340,8 +340,8 @@ public struct StandingOrdersSection: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(11)
-        .background(Color.black.opacity(0.20), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
     }
 
     /// Freshness dot: emerald when the last read served the CURRENT composition
@@ -358,7 +358,7 @@ public struct StandingOrdersSection: View {
         Circle()
             .fill(color)
             .frame(width: 8, height: 8)
-            .overlay(Circle().strokeBorder(Color.white.opacity(0.15), lineWidth: 0.5))
+            .overlay(Circle().strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5))
             .help(freshnessHelp(isFresh))
     }
 
@@ -415,7 +415,7 @@ public struct StandingOrdersSection: View {
                     }
                 }
                 .padding(10)
-                .background(Color.black.opacity(0.18), in: RoundedRectangle(cornerRadius: 8))
+                .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 8))
             }
         }
     }
@@ -475,10 +475,10 @@ public struct StandingOrdersSection: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(13)
                             .background(
-                                selectedTemplate == t ? BridgeTokens.accent.opacity(0.07) : Color.black.opacity(0.20),
+                                selectedTemplate == t ? BridgeTokens.accent.opacity(0.07) : BridgeTokens.wellFill,
                                 in: RoundedRectangle(cornerRadius: 10))
                             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(
-                                selectedTemplate == t ? BridgeTokens.accent.opacity(0.45) : Color.white.opacity(0.10),
+                                selectedTemplate == t ? BridgeTokens.accent.opacity(0.45) : BridgeTokens.hairline,
                                 lineWidth: 0.5))
                         }
                         .buttonStyle(.plain)
@@ -604,25 +604,25 @@ struct SOMarkdownView: View {
     @ViewBuilder private func row(_ block: Block) -> some View {
         switch block {
         case .h1(let t):
-            Text(inline(t)).font(.system(size: 19, weight: .semibold)).foregroundStyle(.white)
+            Text(inline(t)).font(.system(size: 19, weight: .semibold)).foregroundStyle(BridgeTokens.fg1)
                 .padding(.bottom, 1)
         case .h2(let t):
             VStack(alignment: .leading, spacing: 8) {
-                Rectangle().fill(Color.white.opacity(0.10)).frame(height: 0.5).padding(.top, 4)
-                Text(inline(t)).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                Rectangle().fill(BridgeTokens.hairline).frame(height: 0.5).padding(.top, 4)
+                Text(inline(t)).font(.system(size: 14, weight: .semibold)).foregroundStyle(BridgeTokens.fg1)
             }
         case .bullet(let t):
             HStack(alignment: .top, spacing: 8) {
-                Text("•").foregroundStyle(BridgeTokens.accentLink.opacity(0.7))
-                Text(inline(t)).foregroundStyle(.white.opacity(0.78))
+                Text("•").foregroundStyle(BridgeTokens.infoText.opacity(0.8))
+                Text(inline(t)).foregroundStyle(BridgeTokens.fg2)
             }.font(.system(size: 12.5))
         case .numbered(let n, let t):
             HStack(alignment: .top, spacing: 8) {
-                Text("\(n).").foregroundStyle(BridgeTokens.accentLink.opacity(0.7)).monospacedDigit()
-                Text(inline(t)).foregroundStyle(.white.opacity(0.78))
+                Text("\(n).").foregroundStyle(BridgeTokens.infoText.opacity(0.8)).monospacedDigit()
+                Text(inline(t)).foregroundStyle(BridgeTokens.fg2)
             }.font(.system(size: 12.5))
         case .paragraph(let t):
-            Text(inline(t)).font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.78))
+            Text(inline(t)).font(.system(size: 12.5)).foregroundStyle(BridgeTokens.fg2)
                 .fixedSize(horizontal: false, vertical: true)
         case .spacer:
             Spacer().frame(height: 2)

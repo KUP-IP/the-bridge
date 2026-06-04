@@ -762,7 +762,7 @@ public struct CommandBridgeRootView: View {
                 .buttonStyle(.plain)
                 Text("\(row.displayKey)")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(0.40))
+                    .foregroundStyle(BridgeTokens.fg4)
                     .monospacedDigit()
             } else {
                 // Position-stable transparent placeholder (per locked design).
@@ -789,7 +789,7 @@ public struct CommandBridgeRootView: View {
         HStack(spacing: 14) {
             Image(systemName: "command.circle")
                 .font(.system(size: 22, weight: .light))
-                .foregroundStyle(Color.white.opacity(0.6))
+                .foregroundStyle(BridgeTokens.fg3)
             QueryField(
                 text: Binding(
                     get: { model.query },
@@ -808,7 +808,7 @@ public struct CommandBridgeRootView: View {
                 Text("⌘")
                     .font(.system(size: 19, weight: .regular))
                     .frame(width: 30, height: 30)
-                    .foregroundStyle(Color.white.opacity(0.34))
+                    .foregroundStyle(BridgeTokens.fg5)
             }
             .buttonStyle(.plain)
             .help("Open Commands settings")
@@ -828,7 +828,7 @@ public struct CommandBridgeRootView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5)
+                .strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5)
         )
         .shadow(color: .black.opacity(0.55), radius: 30, y: 18)
     }
@@ -863,7 +863,7 @@ public struct CommandBridgeRootView: View {
         .frame(width: CommandBridgeController.pillWidth)
         .background(
             ZStack {
-                Color(red: 0.086, green: 0.086, blue: 0.110).opacity(0.32)
+                BridgeTokens.glassWindowTint.opacity(0.32)
                 LinearGradient(
                     colors: [Color.white.opacity(0.12),
                              Color.white.opacity(0.02)],
@@ -874,7 +874,7 @@ public struct CommandBridgeRootView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5)
+                .strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5)
         )
     }
 
@@ -882,7 +882,7 @@ public struct CommandBridgeRootView: View {
         Text(s.uppercased())
             .font(.system(size: 11, weight: .semibold))
             .tracking(1.2)
-            .foregroundStyle(Color.white.opacity(0.34))
+            .foregroundStyle(BridgeTokens.fg5)
             .padding(.horizontal, 12)
             .padding(.top, 8)
             .padding(.bottom, 6)
@@ -891,7 +891,7 @@ public struct CommandBridgeRootView: View {
     private func panelEmptyHint(_ s: String) -> some View {
         Text(s)
             .font(.system(size: 12))
-            .foregroundStyle(Color.white.opacity(0.5))
+            .foregroundStyle(BridgeTokens.fg4)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
     }
@@ -906,26 +906,26 @@ public struct CommandBridgeRootView: View {
             HStack(spacing: 13) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 7)
-                        .fill(Color.white.opacity(0.06))
+                        .fill(BridgeTokens.chipFill)
                     iconView(for: r.icon, color: r.color, size: 15)
                 }
                 .frame(width: 26, height: 26)
                 highlightedName(r.name, query: highlight)
                     .font(.system(size: 15))
-                    .foregroundStyle(Color.white.opacity(0.92))
+                    .foregroundStyle(BridgeTokens.fg1)
                 Spacer(minLength: 4)
                 Text(Self.relativeHint(for: r.lastUsedAt))
                     .font(.system(size: 12))
-                    .foregroundStyle(Color.white.opacity(0.34))
+                    .foregroundStyle(BridgeTokens.fg5)
                 if let slot = r.keySlot {
                     Text("\(slot)")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(0.5))
+                        .foregroundStyle(BridgeTokens.fg4)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(
                             RoundedRectangle(cornerRadius: 5)
-                                .fill(Color.white.opacity(0.08))
+                                .fill(BridgeTokens.chipFill)
                         )
                         .monospacedDigit()
                 }
@@ -952,7 +952,7 @@ public struct CommandBridgeRootView: View {
             let upper = String(name[range.upperBound...])
             (
                 Text(lower)
-                + Text(mid).bold().foregroundColor(.white)
+                + Text(mid).bold().foregroundColor(BridgeTokens.fg1)
                 + Text(upper)
             )
         } else {
@@ -972,7 +972,7 @@ public struct CommandBridgeRootView: View {
                 .font(.system(size: size, weight: .regular))
                 .foregroundStyle(
                     color.flatMap { NotionPalette.color(named: $0.rawValue) }
-                    ?? Color.white.opacity(0.8)
+                    ?? BridgeTokens.fg2
                 )
         }
     }
@@ -1022,7 +1022,13 @@ private struct QueryField: NSViewRepresentable {
         field.delegate = context.coordinator
         field.placeholderString = placeholder
         field.font = NSFont.systemFont(ofSize: 25, weight: .light)
-        field.textColor = .white
+        // v3.7.6: adaptive ink — the query text follows the system appearance
+        // (white on carbon, dark on titanium) instead of a hardcoded white that
+        // would vanish on the light canvas. Mirrors BridgeTokens.fg1.
+        field.textColor = BridgeTokens.adaptiveNSColor(
+            dark:  { BridgeTokens.whiteAlpha(0.95) },
+            light: { BridgeTokens.blackAlpha(0.92) }
+        )
         field.backgroundColor = .clear
         field.drawsBackground = false
         field.isBezeled = false

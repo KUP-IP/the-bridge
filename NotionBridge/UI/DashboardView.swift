@@ -163,7 +163,7 @@ public struct DashboardView: View {
     private var divider: some View {
         // kit.css .pop-divider — 0.5px hairline, margin 2px 8px.
         Rectangle()
-            .fill(Color.white.opacity(0.08))
+            .fill(BridgeTokens.hairline)
             .frame(height: 0.5)
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
@@ -517,7 +517,7 @@ struct PKT879HoverRowStyle: ButtonStyle {
             .modifier(RestForeground(color: restForeground.map { active ? BridgeTokens.fg1 : $0 }))
             .background(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(Color.white.opacity(active ? 0.05 : 0.0))
+                    .fill(active ? BridgeTokens.hoverFill : Color.clear)
             )
             .onHover { hovering in
                 isHovering = hovering
@@ -565,13 +565,13 @@ struct PKT879PillButtonStyle: ButtonStyle {
     }
     private var border: Color {
         switch tone {
-        case .neutral: return Color.white.opacity(0.16)
+        case .neutral: return BridgeTokens.hairlineStrong
         case .danger:  return BridgeTokens.bad.opacity(0.30)
         }
     }
     private func background(pressed: Bool) -> Color {
         switch tone {
-        case .neutral: return Color.white.opacity(pressed ? 0.14 : 0.08)
+        case .neutral: return pressed ? BridgeTokens.selectionFill : BridgeTokens.chipFill
         case .danger:  return BridgeTokens.bad.opacity(pressed ? 0.18 : 0.10)
         }
     }

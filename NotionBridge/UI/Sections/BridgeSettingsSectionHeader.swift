@@ -50,7 +50,7 @@ public struct BridgeSettingsSectionHeader<Accessory: View>: View {
                         .accessibilityAddTraits(.isHeader)
                     Text(subtitle)
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BridgeTokens.fg3)
                 }
                 Spacer()
                 accessory
