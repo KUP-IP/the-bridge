@@ -759,6 +759,12 @@ await runLicenseDispatchGateTests()
 // routing-skills backing (v3.6·5 TODO closure).
 await runSkillsCacheTests()
 
+// routing/specialist-relation (v3.7.4): specialists now sourced from the
+// parent's curated `Specialist` relation property (NotionJSON.extract-
+// SpecialistRelationIDs) instead of the child_page walk; SpecialistFilter
+// kept as a defensive secondary guard.
+await runSpecialistRelationTests()
+
 // WS-C + WS-E (Mac-side cloud access): BridgeCloudManager state machine +
 // NL-3 auth-passdown (capability validation + mandatory passkey gate +
 // no-raw-credential invariant) + Remote Access settings section/sidebar.

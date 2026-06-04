@@ -2487,10 +2487,10 @@ public enum SkillsModule {
             )
         }
 
-        // Enumerate child pages of the parent. `fetchAllSiblingBlocks`
-        // returns every direct child block; we filter on `type:
-        // "child_page"` to get the sub-skill candidates. The child-page
-        // walk is doc-page-filtered inside listNotionChildPages, so
+        // Enumerate the parent's curated specialists. listNotionChildPages
+        // reads the parent's `Specialist` relation property as the primary
+        // source (falling back to a child_page walk only when the relation
+        // is absent), and applies SpecialistFilter as a defensive guard, so
         // `childPages` already holds only curated specialists.
         let childPages = await Self.listNotionChildPages(client: client, pageId: parentPageId)
         let siblingTitles = childPages.map { $0.title }
@@ -2623,23 +2623,88 @@ public enum SkillsModule {
         let properties: [String: Any]
     }
 
-    /// Enumerate direct `child_page` blocks of a parent skill page and
-    /// hydrate their title + url via a single `getPage` per child.
-    /// Failures degrade silently (empty list) — the caller maps that to
-    /// a `specialistNotFound` annotation, never an error envelope.
+    /// Enumerate a parent skill's CURATED specialists and hydrate each to a
+    /// `NotionChildPageRef` (title + url + properties via one `getPage` per
+    /// specialist). Failures degrade silently (empty list) — the caller maps
+    /// that to a `specialistNotFound` annotation, never an error envelope.
     ///
-    /// Implementation note: uses `fetchChildBlocksRaw` (returns `Data`
-    /// which IS Sendable) + manual pagination instead of the actor's
-    /// `fetchAllSiblingBlocks` helper (returns `[[String: Any]]` which
-    /// is NOT Sendable under strict concurrency). Same wire contract.
+    /// routing/specialist-relation (v3.7.4): the PRIMARY source is the
+    /// parent's `Specialist` **relation property** — the operator-curated set
+    /// of related specialist pages — read off the parent's `properties`
+    /// (one `getPage`). This is what stops doc-pages from leaking in and
+    /// surfaces real specialists that live as sibling database rows rather
+    /// than as `child_page` blocks under the parent. Verified live: the
+    /// property is singular `Specialist` (see
+    /// `NotionJSON.specialistRelationPropertyNames`).
+    ///
+    /// Fallback: if there is NO `Specialist` relation (empty / property
+    /// absent), we degrade to the legacy `child_page` walk so older pages
+    /// keep resolving. `SpecialistFilter` runs as a defensive secondary
+    /// guard on BOTH paths (belt + suspenders) so any doc-page that slips
+    /// into the relation is still excluded.
+    ///
+    /// Implementation note: the fallback walk uses `fetchChildBlocksRaw`
+    /// (returns `Data` which IS Sendable) + manual pagination instead of
+    /// the actor's `fetchAllSiblingBlocks` helper (`[[String: Any]]` is NOT
+    /// Sendable under strict concurrency). Same wire contract.
     fileprivate static func listNotionChildPages(
         client: NotionClient,
         pageId: String
     ) async -> [NotionChildPageRef] {
-        var collectedIds: [String] = []
-        var collectedTitles: [String: String] = [:]   // id → block-level title
+        // 1) PRIMARY: the parent's curated `Specialist` relation.
+        var relationIds: [String] = []
+        if let parentData = try? await client.getPage(pageId: pageId),
+           let parentJSON = try? JSONSerialization.jsonObject(with: parentData) as? [String: Any],
+           let props = parentJSON["properties"] as? [String: Any] {
+            relationIds = NotionJSON.extractSpecialistRelationIDs(from: props)
+        }
+
+        let candidateIds: [String]
+        if relationIds.isEmpty {
+            // 2) FALLBACK: no curated relation → walk child_page blocks.
+            candidateIds = await listChildPageBlockIds(client: client, pageId: pageId)
+        } else {
+            candidateIds = relationIds
+        }
+
+        var out: [NotionChildPageRef] = []
+        for cid in candidateIds {
+            var props: [String: Any] = [:]
+            var url = ""
+            var resolvedTitle = ""
+            if let pageData = try? await client.getPage(pageId: cid),
+               let json = try? JSONSerialization.jsonObject(with: pageData) as? [String: Any] {
+                url = json["url"] as? String ?? ""
+                props = json["properties"] as? [String: Any] ?? [:]
+                if !props.isEmpty {
+                    let t = NotionJSON.extractTitle(from: props)
+                    if !t.isEmpty && t != "Untitled" { resolvedTitle = t }
+                }
+            }
+            // Defensive secondary guard: exclude any doc-page (changelogs,
+            // PRDs, §-sections, test matrices, evolution logs, phase/pruning
+            // notes, duplicate stubs) that slipped into the curated relation
+            // or the fallback walk, so the routing surface stays curated.
+            guard SpecialistFilter.isSpecialist(title: resolvedTitle) else { continue }
+            out.append(NotionChildPageRef(
+                pageId: cid,
+                title: resolvedTitle,
+                url: url,
+                properties: props
+            ))
+        }
+        return out
+    }
+
+    /// Bounded `child_page`-block walk (the legacy fallback source for
+    /// `listNotionChildPages`). 50 pages × 100 = 5000-block defensive cap.
+    /// Returns child page ids in document order.
+    fileprivate static func listChildPageBlockIds(
+        client: NotionClient,
+        pageId: String
+    ) async -> [String] {
+        var ids: [String] = []
         var cursor: String? = nil
-        // Bounded pagination — defensive 50-page (≈ 5000 blocks) cap.
         for _ in 0..<50 {
             guard let data = try? await client.fetchChildBlocksRaw(blockId: pageId, startCursor: cursor, pageSize: 100) else {
                 break
@@ -2650,47 +2715,14 @@ public enum SkillsModule {
             }
             for block in results {
                 guard let type = block["type"] as? String, type == "child_page",
-                      let cid = block["id"] as? String else {
-                    continue
-                }
-                collectedIds.append(cid)
-                let blockTitle = (block["child_page"] as? [String: Any])?["title"] as? String ?? ""
-                if !blockTitle.isEmpty { collectedTitles[cid] = blockTitle }
+                      let cid = block["id"] as? String else { continue }
+                ids.append(cid)
             }
             let hasMore = json["has_more"] as? Bool ?? false
             guard hasMore, let next = json["next_cursor"] as? String, !next.isEmpty else { break }
             cursor = next
         }
-
-        var out: [NotionChildPageRef] = []
-        for cid in collectedIds {
-            var props: [String: Any] = [:]
-            var url = ""
-            var resolvedTitle = collectedTitles[cid] ?? ""
-            if let pageData = try? await client.getPage(pageId: cid),
-               let json = try? JSONSerialization.jsonObject(with: pageData) as? [String: Any] {
-                url = json["url"] as? String ?? ""
-                props = json["properties"] as? [String: Any] ?? [:]
-                if !props.isEmpty {
-                    let t = NotionJSON.extractTitle(from: props)
-                    if !t.isEmpty && t != "Untitled" { resolvedTitle = t }
-                }
-            }
-            // Routing-reliability: exclude child doc-pages (changelogs,
-            // PRDs, §-sections, test matrices, evolution logs, phase/
-            // pruning notes, duplicate stubs) so only curated specialists
-            // appear in the routing surface. See SpecialistFilter (and its
-            // TODO naming the curated `Specialist` relation property that
-            // should ultimately replace this child-page walk).
-            guard SpecialistFilter.isSpecialist(title: resolvedTitle) else { continue }
-            out.append(NotionChildPageRef(
-                pageId: cid,
-                title: resolvedTitle,
-                url: url,
-                properties: props
-            ))
-        }
-        return out
+        return ids
     }
 
     /// Inject the PKT-907 envelope keys (`resolvedPath`, `matchConfidence`,

@@ -198,6 +198,65 @@ public enum NotionJSON {
         return richText.compactMap { $0["plain_text"] as? String }.joined()
     }
 
+    /// The Notion relation property a parent skill page uses to enumerate
+    /// its CURATED specialist sub-skills. Verified live (2026-06-04) on the
+    /// Keepr/Skills data source (`b6ff6ea5-3917-4af7-9c36-278dc8bfb21f`):
+    /// the canonical property name is singular **`Specialist`** (a relation).
+    /// `Specialists` (plural) is accepted as a defensive alias so a future
+    /// rename can't silently empty the routing surface.
+    ///
+    /// This is the SSOT for the routing/specialist-relation source — both
+    /// `SkillsCacheWriter.ChildEnumerator.fetchChildren` and
+    /// `SkillsModule.listNotionChildPages` resolve specialists through it.
+    public static let specialistRelationPropertyNames = ["Specialist", "Specialists"]
+
+    /// Extract the related page IDs from a parent page's `Specialist`
+    /// relation property. Pure + deterministic; never throws.
+    ///
+    /// Looks up `properties[name]` for each candidate in
+    /// `specialistRelationPropertyNames` (case-insensitive on the property
+    /// key), confirms it is a `relation`-typed property, and returns the
+    /// `relation[].id` values in declared order. Blank / dash-only / empty
+    /// IDs are dropped; duplicates are collapsed (first occurrence wins).
+    ///
+    /// Returns an empty array when no such property exists or the relation
+    /// is empty — callers MUST treat that as "no relation source" and fall
+    /// back to the child_page walk rather than rendering zero specialists.
+    public static func extractSpecialistRelationIDs(from properties: [String: Any]) -> [String] {
+        // Resolve the property by name. Notion property keys are
+        // case-sensitive on the wire but we match case-insensitively so a
+        // stray casing edit ("specialist") can't break routing.
+        var relationProp: [String: Any]? = nil
+        for wanted in specialistRelationPropertyNames {
+            for (key, value) in properties {
+                guard key.caseInsensitiveCompare(wanted) == .orderedSame,
+                      let prop = value as? [String: Any],
+                      (prop["type"] as? String) == "relation" else { continue }
+                relationProp = prop
+                break
+            }
+            if relationProp != nil { break }
+        }
+        guard let prop = relationProp,
+              let arr = prop["relation"] as? [[String: Any]] else {
+            return []
+        }
+        var seen = Set<String>()
+        var out: [String] = []
+        for entry in arr {
+            guard let raw = entry["id"] as? String else { continue }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            // A relation id may arrive dashed or undashed; normalize for the
+            // dedupe key only, but emit the original (callers normalize again
+            // at the getPage boundary).
+            let key = trimmed.replacingOccurrences(of: "-", with: "").lowercased()
+            guard !key.isEmpty, !seen.contains(key) else { continue }
+            seen.insert(key)
+            out.append(trimmed)
+        }
+        return out
+    }
+
     /// Plain text from a Notion block object (`results[]` item), for common block types with `rich_text` / `caption`.
     public static func extractPlainTextFromBlock(_ block: [String: Any]) -> String {
         let type = block["type"] as? String ?? ""

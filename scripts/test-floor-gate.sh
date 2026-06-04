@@ -724,7 +724,24 @@ set -euo pipefail
 # parent-body; 2 DeliveryLog skillFetched ingest + skillFetchFields parsing).
 # All pure / tmp-HOME-hermetic / injected-hash — run in CI and local alike:
 # 1678 + 16 = 1694.
-FLOOR="${BRIDGE_TEST_FLOOR:-1694}"
+# routing/specialist-relation (2026-06-04, v3.7.4): completed the
+# TODO(routing/specialist-relation) left by the routing-reliability wave.
+# Specialists are now sourced from the parent's CURATED `Specialist` relation
+# property (verified live: singular `Specialist` on the Keepr/Skills data
+# source) rather than the parent's child_page blocks; the child_page walk
+# survives only as a fallback for pages with no relation, and SpecialistFilter
+# is kept as a defensive secondary guard. Source: NotionJSON.specialist-
+# RelationPropertyNames (SSOT name) + extractSpecialistRelationIDs (pure
+# reader); SkillsCacheWriter.ChildEnumerator.fetchChildren + SkillsModule
+# .listNotionChildPages re-pointed relation-first (each with a fallback
+# child_page-id walk). Added SpecialistRelationTests.swift with 9 harness
+# test() blocks (property-name SSOT; relation-id extraction in declared
+# order; plural alias + case-insensitive key; dedup + dash/whitespace
+# tolerance; non-relation prop ignored; absent/empty → [] fallback signal;
+# relation-preferred primary source; the 5 resolved ids classified REAL via
+# the guard; doc-page-in-relation still excluded by the guard). All pure / no
+# network — run in CI and local alike: 1694 + 9 = 1703.
+FLOOR="${BRIDGE_TEST_FLOOR:-1703}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

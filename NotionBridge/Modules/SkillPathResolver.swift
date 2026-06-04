@@ -108,31 +108,27 @@ public enum SkillAnnotation: String, Sendable, Equatable {
 // MARK: - SpecialistFilter
 
 /// Routing-reliability fix (v3.7·routing): the routing index + specialist
-/// enumeration are intended to surface a parent's *curated* specialist
-/// sub-skills, NOT every `child_page` under the parent. Parents in this
-/// workspace also carry doc-pages as children — changelogs, PRDs,
-/// "§…"-prefixed sections, test matrices, evolution logs, phase notes,
-/// pruning notes, and duplicate stubs — and those were leaking into the
-/// routing surface (the audit finding).
+/// enumeration surface a parent's *curated* specialist sub-skills, NOT every
+/// `child_page` under the parent. Parents in this workspace also carry
+/// doc-pages — changelogs, PRDs, "§…"-prefixed sections, test matrices,
+/// evolution logs, phase notes, pruning notes, and duplicate stubs — that
+/// must never appear as routable specialists (the audit finding).
 ///
-/// THE INTENDED SOURCE is the parent's `Specialist` RELATION property
-/// (a Notion relation pointing at the curated specialist pages). That
-/// relation is NOT yet fetched anywhere in the codebase — the child
-/// enumerators walk `child_page` blocks instead. Wiring the relation
-/// requires reading the parent page's `properties` for the relation
-/// property and resolving each related page id, which is a Notion-schema
-/// change beyond what can be resolved from code alone.
-///
-/// TODO(routing/specialist-relation): replace the title-pattern heuristic
-/// below with a read of the parent's curated relation property. The exact
-/// property name to wire is the Notion relation titled **"Specialist"**
-/// (verify the live property name/ID in the Skills/Keepr parent database;
-/// it may be stored as `Specialist` or `Specialists`). Once available,
+/// PRIMARY SOURCE (v3.7.4 — routing/specialist-relation, now WIRED): the
+/// parent's **`Specialist` relation property** (a Notion relation pointing
+/// at the curated specialist pages). Verified live on the Keepr/Skills data
+/// source — the property is singular `Specialist`
+/// (see `NotionJSON.specialistRelationPropertyNames` for the SSOT name +
+/// `extractSpecialistRelationIDs` for the reader). Both
 /// `SkillsCacheWriter.ChildEnumerator.fetchChildren` and
-/// `SkillsModule.listNotionChildPages` should enumerate the relation's
-/// target page ids directly and drop the `child_page` walk entirely. Until
-/// then, this heuristic excludes the doc-page noise so the routing surface
-/// is curated-enough to be trustworthy.
+/// `SkillsModule.listNotionChildPages` now enumerate the relation's target
+/// page ids directly; the `child_page` walk survives only as a fallback for
+/// pages with no curated relation.
+///
+/// THIS FILTER is now the DEFENSIVE SECONDARY GUARD (belt + suspenders): it
+/// runs on both the relation-sourced and fallback-walk candidates, so any
+/// doc-page that slips into the curated relation — or a non-specialist that
+/// the fallback walk picks up — is still excluded from the routing surface.
 public enum SpecialistFilter {
 
     /// Title-pattern predicates that mark a child page as a DOC-PAGE

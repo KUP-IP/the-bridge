@@ -174,26 +174,90 @@ extension SkillsCacheWriter.ParentSource {
 }
 
 extension SkillsCacheWriter.ChildEnumerator {
-    /// Production enumerator backed by a live `NotionClient`. Surfaces
-    /// each child page's `id`, `title`, and a heuristic `summary`
-    /// (description property when present, else empty). Failures degrade
-    /// to "no children" — the cache will surface zero specialists for
-    /// that parent and the routing index renders without the section.
+    /// Production enumerator backed by a live `NotionClient`. Surfaces each
+    /// curated specialist's `id`, `title`, and a one-line `summary` (the
+    /// related page's `Summary`/`Description` rich_text when present, else
+    /// empty). Failures degrade to "no children" — the cache will surface
+    /// zero specialists for that parent and the routing index renders
+    /// without the section.
     public static func live(client: NotionClient) -> SkillsCacheWriter.ChildEnumerator {
         SkillsCacheWriter.ChildEnumerator(listChildren: { parentId in
             await Self.fetchChildren(client: client, parentId: parentId)
         })
     }
 
-    /// Walk `child_page` blocks of `parentId` and hydrate each to a
-    /// `CachedSpecialist`. Mirrors the bounded-pagination contract used
-    /// by `SkillsModule.listNotionChildPages` (50 pages × 100 = 5000
-    /// blocks defensive cap).
+    /// Resolve a parent skill's CURATED specialists and hydrate each to a
+    /// `CachedSpecialist`.
+    ///
+    /// routing/specialist-relation (v3.7.4): the PRIMARY source is now the
+    /// parent's `Specialist` **relation property** (the operator-curated set
+    /// of related specialist pages) — NOT the parent's `child_page` blocks.
+    /// Reading the relation is what stops docs / changelogs / §-sections /
+    /// duplicate stubs from leaking in, and surfaces real specialists that
+    /// live as sibling database rows (never as child pages under the parent).
+    /// Verified live: the property is named singular `Specialist` (see
+    /// `NotionJSON.specialistRelationPropertyNames`).
+    ///
+    /// Fallback: if the parent has NO `Specialist` relation (empty or the
+    /// property is absent — e.g. a file-shaped or legacy page), we degrade to
+    /// the historical `child_page` walk so older pages keep working. Either
+    /// way `SpecialistFilter` runs as a defensive secondary guard (belt +
+    /// suspenders) so any doc-page that slips into the relation is still
+    /// excluded from the routing surface.
     private static func fetchChildren(
         client: NotionClient,
         parentId: String
     ) async -> [CachedSpecialist] {
-        var collectedIds: [(id: String, title: String)] = []
+        // 1) PRIMARY: the parent's curated `Specialist` relation.
+        var relationIds: [String] = []
+        if let parentData = try? await client.getPage(pageId: parentId),
+           let parentJSON = try? JSONSerialization.jsonObject(with: parentData) as? [String: Any],
+           let props = parentJSON["properties"] as? [String: Any] {
+            relationIds = NotionJSON.extractSpecialistRelationIDs(from: props)
+        }
+
+        let candidateIds: [String]
+        if relationIds.isEmpty {
+            // 2) FALLBACK: no curated relation → walk child_page blocks.
+            candidateIds = await fetchChildPageIds(client: client, parentId: parentId)
+        } else {
+            candidateIds = relationIds
+        }
+
+        var out: [CachedSpecialist] = []
+        for cid in candidateIds {
+            var title = ""
+            var summary = ""
+            if let pageData = try? await client.getPage(pageId: cid),
+               let json = try? JSONSerialization.jsonObject(with: pageData) as? [String: Any],
+               let props = json["properties"] as? [String: Any] {
+                let t = NotionJSON.extractTitle(from: props)
+                if !t.isEmpty && t != "Untitled" { title = t }
+                // Best-effort one-line summary: prefer the curated `Summary`
+                // rich_text, then `Description`, then any `description` key.
+                summary = firstRichText(props, keys: ["Summary", "Description", "description"])
+            }
+            // Defensive secondary guard: exclude any doc-page that slipped
+            // into the curated relation (or the fallback walk).
+            guard SpecialistFilter.isSpecialist(title: title) else { continue }
+            out.append(CachedSpecialist(
+                id: cid,
+                title: title,
+                summary: summary,
+                aliases: []
+            ))
+        }
+        return out
+    }
+
+    /// Bounded `child_page`-block walk (the legacy fallback source).
+    /// 50 pages × 100 = 5000-block defensive cap. Returns the child page
+    /// ids in document order.
+    private static func fetchChildPageIds(
+        client: NotionClient,
+        parentId: String
+    ) async -> [String] {
+        var ids: [String] = []
         var cursor: String? = nil
         for _ in 0..<50 {
             guard let data = try? await client.fetchChildBlocksRaw(blockId: parentId, startCursor: cursor, pageSize: 100) else {
@@ -206,46 +270,25 @@ extension SkillsCacheWriter.ChildEnumerator {
             for block in results {
                 guard let type = block["type"] as? String, type == "child_page",
                       let cid = block["id"] as? String else { continue }
-                let title = (block["child_page"] as? [String: Any])?["title"] as? String ?? ""
-                collectedIds.append((id: cid, title: title))
+                ids.append(cid)
             }
             let hasMore = json["has_more"] as? Bool ?? false
             guard hasMore, let next = json["next_cursor"] as? String, !next.isEmpty else { break }
             cursor = next
         }
+        return ids
+    }
 
-        var out: [CachedSpecialist] = []
-        for entry in collectedIds {
-            var title = entry.title
-            var summary = ""
-            if let pageData = try? await client.getPage(pageId: entry.id),
-               let json = try? JSONSerialization.jsonObject(with: pageData) as? [String: Any] {
-                if let props = json["properties"] as? [String: Any] {
-                    let t = NotionJSON.extractTitle(from: props)
-                    if !t.isEmpty && t != "Untitled" { title = t }
-                    // Best-effort one-line description.
-                    if let desc = props["description"] as? [String: Any],
-                       let arr = desc["rich_text"] as? [[String: Any]],
-                       let first = arr.first,
-                       let plain = first["plain_text"] as? String {
-                        summary = plain
-                    }
-                }
-            }
-            // Routing-reliability: skip child doc-pages so the cached
-            // specialist set (which feeds the routing index via
-            // `surfaceSpecialistsInRows`) only carries curated specialists.
-            // Shared with SkillsModule.listNotionChildPages — see
-            // SpecialistFilter's TODO naming the curated `Specialist`
-            // relation property that should replace this child-page walk.
-            guard SpecialistFilter.isSpecialist(title: title) else { continue }
-            out.append(CachedSpecialist(
-                id: entry.id,
-                title: title,
-                summary: summary,
-                aliases: []
-            ))
+    /// First non-empty `rich_text` plain text among `keys`, in order. Used
+    /// to derive a one-line specialist summary from the related page's
+    /// curated properties. Pure; never throws.
+    private static func firstRichText(_ props: [String: Any], keys: [String]) -> String {
+        for k in keys {
+            guard let prop = props[k] as? [String: Any],
+                  let arr = prop["rich_text"] as? [[String: Any]] else { continue }
+            let text = NotionJSON.extractPlainText(from: arr)
+            if !text.isEmpty { return text }
         }
-        return out
+        return ""
     }
 }
