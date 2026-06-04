@@ -380,9 +380,6 @@ public final class CredentialManager: Sendable {
             throw CredentialError.encodingError(error.localizedDescription)
         }
 
-        // Delete existing item first (SecItemAdd fails on duplicate)
-        deleteInternal(service: service, account: account)
-
         guard let passwordData = finalPassword.data(using: .utf8) else {
             throw CredentialError.encodingError("Failed to encode password as UTF-8")
         }
@@ -402,8 +399,30 @@ public final class CredentialManager: Sendable {
             query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
         }
 
+        // Upsert: ADD, and if the item already exists, UPDATE it in place.
+        //
+        // The old path was delete-then-add. When the existing item's ACL /
+        // access-group denies SecItemDelete from this process (an item created by
+        // KeychainManager or by a differently-signed build → errSecMissingEntitlement
+        // / -34018), the delete silently failed, the item survived, and SecItemAdd
+        // then returned errSecDuplicateItem (-25299) — so a rotated secret never
+        // landed. SecItemUpdate rewrites the value in place, preserves the item's
+        // access group + ACL, and needs no delete privilege, so the rotation lands.
         // PKT-933: write into our access group when entitled (no-op otherwise).
-        let status = SecItemAdd(scoped(query) as CFDictionary, nil)
+        var status = SecItemAdd(scoped(query) as CFDictionary, nil)
+        if status == errSecDuplicateItem {
+            let matchQuery: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account
+            ]
+            let attributes: [String: Any] = [
+                kSecValueData as String: passwordData,
+                kSecAttrLabel as String: type.rawValue,
+                kSecAttrComment as String: metadataJSON
+            ]
+            status = SecItemUpdate(scoped(matchQuery) as CFDictionary, attributes as CFDictionary)
+        }
         guard status == errSecSuccess else {
             print("[CredentialManager] ⚠️ Save failed for '\(service)/\(account)': OSStatus \(status)")
             throw CredentialError.keychainError(status)
@@ -648,20 +667,6 @@ public final class CredentialManager: Sendable {
             q[kSecAttrAccessGroup as String] = ag
         }
         return q
-    }
-
-    // MARK: - Private: Internal Delete (no biometric, for save overwrites)
-
-    @discardableResult
-    private func deleteInternal(service: String, account: String) -> Bool {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-        // PKT-933: scope to our access group when entitled (no-op otherwise).
-        let status = SecItemDelete(scoped(query) as CFDictionary)
-        return status == errSecSuccess || status == errSecItemNotFound
     }
 
     // MARK: - PKT-933: Access-group migration sentinel
