@@ -299,6 +299,8 @@ public struct PermissionsSection: View {
         case .contacts:        return "person.crop.circle"
         case .notifications:   return "bell.badge"
         case .automation:      return "gearshape.2"
+        case .reminders:       return "checklist"
+        case .calendar:        return "calendar"
         }
     }
 
@@ -310,6 +312,8 @@ public struct PermissionsSection: View {
         case .contacts:        return "Resolve handles in messages + relationship tools."
         case .notifications:   return "Bridge alerts in the menu bar + Notification Center."
         case .automation:      return "AppleEvents for cross-app automation."
+        case .reminders:       return "List, create, and complete iCloud Reminders."
+        case .calendar:        return "Read and create calendar events."
         }
     }
 
@@ -329,7 +333,7 @@ public struct PermissionsSection: View {
     private func actionLabel(grant: PermissionManager.Grant, status: PermissionManager.GrantStatus) -> String {
         switch grant {
         case .automation, .fullDiskAccess: return "Open Settings"
-        case .contacts, .notifications:    return status == .unknown ? "Allow" : "Open Settings"
+        case .contacts, .notifications, .reminders, .calendar: return status == .unknown ? "Allow" : "Open Settings"
         case .accessibility, .screenRecording: return "Allow"
         }
     }
@@ -363,6 +367,24 @@ public struct PermissionsSection: View {
                 _ = await permissionManager.requestContactsAccess()
                 if permissionManager.status(for: .contacts) != .granted,
                    let url = PermissionManager.Grant.contacts.systemSettingsURL {
+                    NSWorkspace.shared.open(url)
+                }
+                await permissionManager.recheckAllForTruth()
+            }
+        case .reminders:
+            Task {
+                _ = await permissionManager.requestRemindersAccess()
+                if permissionManager.status(for: .reminders) != .granted,
+                   let url = PermissionManager.Grant.reminders.systemSettingsURL {
+                    NSWorkspace.shared.open(url)
+                }
+                await permissionManager.recheckAllForTruth()
+            }
+        case .calendar:
+            Task {
+                _ = await permissionManager.requestCalendarAccess()
+                if permissionManager.status(for: .calendar) != .granted,
+                   let url = PermissionManager.Grant.calendar.systemSettingsURL {
                     NSWorkspace.shared.open(url)
                 }
                 await permissionManager.recheckAllForTruth()

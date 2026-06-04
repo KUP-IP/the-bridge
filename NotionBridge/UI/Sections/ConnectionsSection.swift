@@ -1,8 +1,8 @@
 // ConnectionsSection.swift — Settings → Connections pane.
 // v3.7.2 bundle-2 redesign: near-pixel match to the locked design mockup
 // (design/.../Connections.jsx + connections.css). Orb hero with live server
-// status, transport selector, integration health grid, active-clients list,
-// and Bridge-lifecycle card. Carbon canvas, royal-blue / emerald / gold
+// status, transport status display, integration health grid, active-clients
+// list, and Bridge-lifecycle card. Carbon canvas, royal-blue / emerald / gold
 // accents. Every store call, binding, toggle, and async load is preserved.
 
 import SwiftUI
@@ -20,9 +20,6 @@ public struct ConnectionsSection: View {
     @State private var notionConnection: BridgeConnection?
     @State private var stripeConnection: BridgeConnection?
 
-    /// Presentational transport selection (mirrors the design's radio cards).
-    private enum Transport: String, CaseIterable { case http, sse, stdio }
-    @State private var transport: Transport = .http
     @State private var copiedEndpoint = false
 
     public init(
@@ -151,88 +148,119 @@ public struct ConnectionsSection: View {
         }
     }
 
-    // MARK: - Transport selector
+    // MARK: - Transport status
+    //
+    // NOT a selector. Transport is not a single user-selectable runtime
+    // setting: the one `SSEServer` NIO listener on `ssePort` serves BOTH the
+    // Streamable HTTP `/mcp` endpoint and the legacy SSE `/sse` path
+    // concurrently and unconditionally (see ServerManager.runSSE), while
+    // stdio is a separate, per-client transport that is always active
+    // (ServerManager.run). All three run whenever the server is up — there is
+    // no ConfigManager/BridgeDefaults setting that turns one on instead of
+    // another. So this card is an informational status display of which
+    // transports are ACTIVE, styled like the redesign's tiles but with no
+    // radio/selection affordance to imply a choice that doesn't exist.
 
     private var transportCard: some View {
-        BridgeGlassCard {
+        let running = statusBar.isServerRunning
+        return BridgeGlassCard {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .firstTextBaseline) {
                     BridgeCardLabel("Transport")
                     Spacer()
-                    Text("How clients reach Bridge. Streamable HTTP recommended.")
+                    Text("How clients reach Bridge. All transports run together.")
                         .font(.system(size: 11.5))
                         .foregroundStyle(BridgeTokens.fg4)
                 }
                 HStack(spacing: 8) {
-                    transportTile(.http, name: "Streamable HTTP", endpoint: "127.0.0.1:\(port)/mcp", tone: .ok)
-                    transportTile(.sse, name: "Legacy SSE", endpoint: "127.0.0.1:\(port)/sse", tone: .warn)
-                    transportTile(.stdio, name: "stdio", endpoint: "spawned per-client", tone: .neutral)
+                    transportTile(
+                        name: "Streamable HTTP",
+                        endpoint: "127.0.0.1:\(port)/mcp",
+                        state: running ? .active : .idle
+                    )
+                    transportTile(
+                        name: "Legacy SSE",
+                        endpoint: "127.0.0.1:\(port)/sse",
+                        state: running ? .active : .idle
+                    )
+                    transportTile(
+                        name: "stdio",
+                        endpoint: "spawned per-client",
+                        state: .perClient
+                    )
                 }
             }
         }
     }
 
-    private enum TransportTone { case ok, warn, neutral }
+    /// Live state of a transport surface. `active` = listening now,
+    /// `idle` = server stopped, `perClient` = spawned on demand (no listener).
+    private enum TransportState { case active, idle, perClient }
 
-    private func transportTile(_ id: Transport, name: String, endpoint: String, tone: TransportTone) -> some View {
-        let on = transport == id
-        return Button {
-            transport = id
-        } label: {
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .strokeBorder(on ? BridgeTokens.accentLink : Color.white.opacity(0.30),
-                                      lineWidth: 1.5)
-                        .frame(width: 15, height: 15)
-                    if on {
-                        Circle().fill(BridgeTokens.accentLink).frame(width: 7, height: 7)
-                    }
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(name)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(BridgeTokens.fg1)
-                    Text(endpoint)
-                        .font(.system(size: 10.5, design: .monospaced))
-                        .foregroundStyle(BridgeTokens.fg4)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                Spacer(minLength: 0)
-                transportDot(tone)
+    private func transportTile(name: String, endpoint: String, state: TransportState) -> some View {
+        HStack(spacing: 10) {
+            transportDot(state)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(BridgeTokens.fg1)
+                Text(endpoint)
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(BridgeTokens.fg4)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
-            .padding(.horizontal, 12).padding(.vertical, 11)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                on
-                ? AnyShapeStyle(LinearGradient(
-                    colors: [BridgeTokens.accent.opacity(0.18), BridgeTokens.accent.opacity(0.06)],
-                    startPoint: .top, endPoint: .bottom))
-                : AnyShapeStyle(Color.black.opacity(0.20)),
-                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(on ? BridgeTokens.accent.opacity(0.50) : Color.white.opacity(0.10),
-                                  lineWidth: 0.5)
-            )
+            Spacer(minLength: 0)
+            transportStateLabel(state)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 12).padding(.vertical, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Color.black.opacity(0.20),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+        )
     }
 
     @ViewBuilder
-    private func transportDot(_ tone: TransportTone) -> some View {
-        switch tone {
-        case .ok:
+    private func transportDot(_ state: TransportState) -> some View {
+        switch state {
+        case .active:
             Circle().fill(BridgeTokens.ok).frame(width: 8, height: 8)
                 .shadow(color: BridgeTokens.ok.opacity(0.5), radius: 3)
-        case .warn:
-            Circle().fill(BridgeTokens.warn).frame(width: 8, height: 8)
-                .shadow(color: BridgeTokens.warn.opacity(0.5), radius: 3)
-        case .neutral:
-            EmptyView()
+        case .idle:
+            Circle().fill(BridgeTokens.fg4.opacity(0.6)).frame(width: 8, height: 8)
+        case .perClient:
+            Circle()
+                .strokeBorder(BridgeTokens.fg4.opacity(0.7), lineWidth: 1.5)
+                .frame(width: 8, height: 8)
         }
+    }
+
+    @ViewBuilder
+    private func transportStateLabel(_ state: TransportState) -> some View {
+        switch state {
+        case .active:
+            transportStatePill("Active", color: BridgeTokens.ok)
+        case .idle:
+            transportStatePill("Idle", color: BridgeTokens.fg4)
+        case .perClient:
+            transportStatePill("Per-client", color: BridgeTokens.fg4)
+        }
+    }
+
+    private func transportStatePill(_ text: String, color: Color) -> some View {
+        Text(text.uppercased())
+            .font(.system(size: 9.5, weight: .semibold))
+            .tracking(0.6)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2.5)
+            .background(color.opacity(0.14), in: Capsule())
+            .overlay(Capsule().strokeBorder(color.opacity(0.28), lineWidth: 0.5))
+            .foregroundStyle(color)
     }
 
     // MARK: - Integration health grid

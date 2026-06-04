@@ -91,6 +91,7 @@ private struct ModuleGroupToolRow: View {
 
             Toggle("", isOn: $isEnabled)
                 .toggleStyle(.switch)
+                .tint(BridgeTokens.ok)
                 .controlSize(.mini)
                 .labelsHidden()
         }

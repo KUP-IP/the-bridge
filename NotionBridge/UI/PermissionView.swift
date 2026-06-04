@@ -164,6 +164,8 @@ public struct PermissionView: View {
         case .contacts:        return "person.crop.circle"
         case .notifications:   return "bell.badge"
         case .automation:      return "gearshape.2"
+        case .reminders:       return "checklist"
+        case .calendar:        return "calendar"
         }
     }
 
@@ -319,7 +321,7 @@ public struct PermissionView: View {
         switch grant {
         case .automation, .fullDiskAccess:
             return "Open Settings"
-        case .contacts, .notifications:
+        case .contacts, .notifications, .reminders, .calendar:
             return status == .unknown ? "Allow" : "Open Settings"
         case .accessibility, .screenRecording:
             return "Allow"
@@ -413,6 +415,36 @@ public struct PermissionView: View {
                         NSWorkspace.shared.open(url)
                     }
                 } else if let url = PermissionManager.Grant.contacts.systemSettingsURL {
+                    NSWorkspace.shared.open(url)
+                }
+                await permissionManager.recheckAllForTruth()
+            }
+        case .reminders:
+            let status = permissionManager.status(for: .reminders)
+            Task {
+                if status == .unknown {
+                    _ = await permissionManager.requestRemindersAccess()
+                    let resolvedStatus = permissionManager.status(for: .reminders)
+                    if resolvedStatus != .granted,
+                       let url = PermissionManager.Grant.reminders.systemSettingsURL {
+                        NSWorkspace.shared.open(url)
+                    }
+                } else if let url = PermissionManager.Grant.reminders.systemSettingsURL {
+                    NSWorkspace.shared.open(url)
+                }
+                await permissionManager.recheckAllForTruth()
+            }
+        case .calendar:
+            let status = permissionManager.status(for: .calendar)
+            Task {
+                if status == .unknown {
+                    _ = await permissionManager.requestCalendarAccess()
+                    let resolvedStatus = permissionManager.status(for: .calendar)
+                    if resolvedStatus != .granted,
+                       let url = PermissionManager.Grant.calendar.systemSettingsURL {
+                        NSWorkspace.shared.open(url)
+                    }
+                } else if let url = PermissionManager.Grant.calendar.systemSettingsURL {
                     NSWorkspace.shared.open(url)
                 }
                 await permissionManager.recheckAllForTruth()
@@ -752,7 +784,7 @@ struct ManualPermissionsStepView: View {
             return "System Settings > Privacy & Security > Screen Recording: enable Notion Bridge."
         case .fullDiskAccess:
             return "System Settings > Privacy & Security > Full Disk Access: enable Notion Bridge."
-        case .automation, .notifications, .contacts:
+        case .automation, .notifications, .contacts, .reminders, .calendar:
             return permissionManager.remediation(for: grant)
         }
     }

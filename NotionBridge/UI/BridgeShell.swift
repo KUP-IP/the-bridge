@@ -161,6 +161,29 @@ public struct BridgeSectionNav: View {
         .overlay(alignment: .trailing) {
             Rectangle().fill(Color.white.opacity(0.10)).frame(width: 0.5)
         }
+        // Restore the keyboard navigation NavigationSplitView's List gave us
+        // for free: Up/Down arrows move `selection` to the previous/next
+        // SettingsSection. Clamps at the ends (no wrap); mouse clicking and
+        // the per-item visual states are untouched.
+        .focusable()
+        .onMoveCommand { direction in
+            moveSelection(direction)
+        }
+    }
+
+    private func moveSelection(_ direction: MoveCommandDirection) {
+        let sections = SettingsSection.allCases
+        guard let current = sections.firstIndex(of: selection) else { return }
+        switch direction {
+        case .up:
+            let next = max(sections.startIndex, current - 1)
+            selection = sections[next]
+        case .down:
+            let next = min(sections.index(before: sections.endIndex), current + 1)
+            selection = sections[next]
+        default:
+            break
+        }
     }
 }
 
