@@ -36,8 +36,9 @@ public enum BridgeResources {
     /// Canonical resource URIs.
     public static let standingOrdersURI = "bridge://standing-orders"
     public static let routingSkillsURI = "bridge://routing-skills"
+    public static let memoryURI = "bridge://memory"
 
-    /// The two advertised resources (typed, for the SDK ListResources handler).
+    /// The advertised resources (typed, for the SDK ListResources handler).
     public static var list: [Resource] {
         [
             Resource(
@@ -50,6 +51,12 @@ public enum BridgeResources {
                 name: "Routing Skills",
                 uri: routingSkillsURI,
                 description: "The routing-skills index alone — what is routable via fetch_skill.",
+                mimeType: "text/markdown"
+            ),
+            Resource(
+                name: "Memory",
+                uri: memoryURI,
+                description: "Recent salient memories the agent has stored",
                 mimeType: "text/markdown"
             ),
         ]
@@ -69,6 +76,12 @@ public enum BridgeResources {
                 "uri": routingSkillsURI,
                 "name": "Routing Skills",
                 "description": "The routing-skills index alone — what is routable via fetch_skill.",
+                "mimeType": "text/markdown",
+            ],
+            [
+                "uri": memoryURI,
+                "name": "Memory",
+                "description": "Recent salient memories the agent has stored",
                 "mimeType": "text/markdown",
             ],
         ]
@@ -101,22 +114,46 @@ public enum BridgeResources {
     /// so the resolved bytes are identical. `clientName` is the future-overlay
     /// hook (currently ignored for content). Throws `MCPError.invalidParams`
     /// for an unknown URI.
-    public static func markdown(for uri: String, clientName: String? = nil) throws -> String {
-        let composition = StandingOrdersDelivery.composition(clientName: clientName)
+    ///
+    /// `async` because the `bridge://memory` branch reads the `MemoryStore`
+    /// actor; the other URIs resolve synchronously (their `await`-free bodies
+    /// add no suspension). Both transports' `resources/read` handlers already
+    /// run in async contexts, so this routes through the single SSOT cleanly.
+    public static func markdown(for uri: String, clientName: String? = nil) async throws -> String {
         switch uri {
         case standingOrdersURI:
-            return composition.instructionsMarkdown
+            return StandingOrdersDelivery.composition(clientName: clientName).instructionsMarkdown
         case routingSkillsURI:
-            return composition.routingIndexMarkdown
+            return StandingOrdersDelivery.composition(clientName: clientName).routingIndexMarkdown
+        case memoryURI:
+            return await memoryMarkdown()
         default:
             throw MCPError.invalidParams("Unknown resource URI: \(uri)")
         }
     }
 
     /// Typed `ReadResource.Result` for the SDK ReadResource handler.
-    public static func read(uri: String, clientName: String? = nil) throws -> ReadResource.Result {
-        let body = try markdown(for: uri, clientName: clientName)
+    public static func read(uri: String, clientName: String? = nil) async throws -> ReadResource.Result {
+        let body = try await markdown(for: uri, clientName: clientName)
         return .init(contents: [.text(body, uri: uri, mimeType: "text/markdown")])
+    }
+
+    /// Render the lightweight READABLE memory slice for `bridge://memory`.
+    ///
+    /// Reads `MemoryStore.shared.handshakeSlice(limit: 20)` (pinned + top-
+    /// salience, NON-promoting — a passive surface read must not perturb recall
+    /// counters) and renders it via `StandingOrdersDelivery.renderMemoryMarkdown`.
+    /// Best-effort: a store read failure degrades to the empty-state line so
+    /// `resources/read` still succeeds, mirroring the composition's degrade-to-
+    /// routing-index posture.
+    public static func memoryMarkdown() async -> String {
+        let entries: [MemoryEntry]
+        do {
+            entries = try await MemoryStore.shared.handshakeSlice(limit: 20)
+        } catch {
+            entries = []
+        }
+        return StandingOrdersDelivery.renderMemoryMarkdown(entries)
     }
 }
 
@@ -186,6 +223,16 @@ public enum StandingOrdersDelivery {
             instructions += "\n\n---\n\n" + overlay
         }
 
+        // TODO(memory/handshake-inject): a flag-gated option could append the
+        // memory slice (`BridgeResources.memoryMarkdown()` /
+        // `MemoryStore.shared.handshakeSlice`) to these composed `instructions`
+        // so connecting agents receive recent salient memory at handshake
+        // WITHOUT an explicit `bridge://memory` read. Deliberately NOT done
+        // here: (1) it is a UX decision pending operator input, and (2)
+        // `composition` is sync and must stay byte-deterministic, whereas the
+        // memory read is an async actor call. This wave ships the READABLE
+        // resource only — the memory surface is opt-in via `resources/read`.
+
         return Composition(
             instructionsMarkdown: instructions,
             routingIndexMarkdown: routingIndex,
@@ -208,6 +255,50 @@ public enum StandingOrdersDelivery {
     /// Public so the determinism guard can recompute it independently.
     public static func sha256Hex(_ s: String) -> String {
         SHA256.hash(data: Data(s.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    // MARK: - Memory slice rendering (bridge://memory body)
+
+    /// Render the `bridge://memory` body from a memory slice. PURE (no actor /
+    /// I/O) so it is unit-testable against sample entries — `BridgeResources`
+    /// owns the actor read and hands the rows here.
+    ///
+    /// Shape: entries grouped by `## <scope>` (pinned entries lead, then the
+    /// input order — `handshakeSlice` already sorts pinned-first then by
+    /// salience). Each row is `- [<type>] <text> · <entity?> · used N×`, with
+    /// the `· <entity>` segment omitted when there is no entity and the
+    /// `· used N×` segment omitted when useCount is 0. An empty slice renders a
+    /// single one-line notice.
+    public static func renderMemoryMarkdown(_ entries: [MemoryEntry]) -> String {
+        guard !entries.isEmpty else { return "No memories stored yet." }
+
+        // Stable scope ordering = first appearance in the (already-ranked)
+        // slice, so the highest-salience scope leads. Pinned-first is preserved
+        // because handshakeSlice emits pinned rows ahead of the rest.
+        var scopeOrder: [String] = []
+        var byScope: [String: [MemoryEntry]] = [:]
+        for e in entries {
+            if byScope[e.scope] == nil { scopeOrder.append(e.scope) }
+            byScope[e.scope, default: []].append(e)
+        }
+
+        var sections: [String] = []
+        for scope in scopeOrder {
+            var lines = ["## \(scope)"]
+            for e in byScope[scope] ?? [] {
+                var row = "- [\(e.type.rawValue)] \(e.text)"
+                if let entity = e.entity?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !entity.isEmpty {
+                    row += " · \(entity)"
+                }
+                if e.useCount > 0 {
+                    row += " · used \(e.useCount)×"
+                }
+                lines.append(row)
+            }
+            sections.append(lines.joined(separator: "\n"))
+        }
+        return sections.joined(separator: "\n\n")
     }
 }
 

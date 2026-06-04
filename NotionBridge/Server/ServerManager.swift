@@ -304,7 +304,7 @@ public actor ServerManager {
             ListResources.Result(resources: BridgeResources.list)
         }
         await server.withMethodHandler(ReadResource.self) { params in
-            let result = try BridgeResources.read(uri: params.uri, clientName: nil)
+            let result = try await BridgeResources.read(uri: params.uri, clientName: nil)
             // W2 telemetry: record the resource read we served on the stdio
             // path + the composition hash at serve time, identical to the SSE
             // paths (under the stable synthetic stdio session id).

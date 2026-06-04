@@ -751,7 +751,20 @@ set -euo pipefail
 # registers exactly 2 tools; remember=.notify/recall=.open tiering; handler
 # round-trip; missing-text rejection). All against a temp DB path (never the
 # real config-dir store / shared singleton): 1703 + 18 = 1721.
-FLOOR="${BRIDGE_TEST_FLOOR:-1721}"
+# bridge://memory READABLE resource (Memory-A follow-on): added a 3rd MCP
+# resource to BridgeResources (`bridge://memory`) on BOTH transports via the
+# single SSOT — name "Memory", text/markdown. `markdown(for:)`/`read(uri:)`
+# became `async` to bridge the `MemoryStore` actor read (handshakeSlice(limit:20),
+# non-promoting); a PURE `renderMemoryMarkdown` groups by `## <scope>` with
+# `- [<type>] <text> · <entity?> · used N×` rows (pinned-first via the slice).
+# +4 StandingOrdersDeliveryTests test() blocks (memory resource in BOTH list
+# shapes; empty-state one-liner; grouped-render row shape incl. omitted
+# entity/use segments; temp-store actor read → renderer pinned-first). The two
+# existing "list advertises the two/three resources" + dict-projection tests
+# were UPDATED in place (2→3 count), not added. NOT auto-injected into the
+# handshake instructions (flag-gated TODO left at the composition site):
+# 1721 + 4 = 1725.
+FLOOR="${BRIDGE_TEST_FLOOR:-1725}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

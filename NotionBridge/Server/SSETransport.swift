@@ -689,7 +689,7 @@ public actor SSEServer {
             ListResources.Result(resources: BridgeResources.list)
         }
         await server.withMethodHandler(ReadResource.self) { params in
-            let result = try BridgeResources.read(uri: params.uri, clientName: resourceClientName)
+            let result = try await BridgeResources.read(uri: params.uri, clientName: resourceClientName)
             // W2 telemetry: record the resource read we served + the
             // composition hash at serve time (drives the freshness dot).
             DeliveryLog.shared.recordResourceRead(
@@ -935,7 +935,7 @@ public actor SSEServer {
             // other transport. clientName is not resolvable on the legacy path
             // (it is the future-overlay hook and ignored for content anyway).
             do {
-                let markdown = try BridgeResources.markdown(for: uri, clientName: nil)
+                let markdown = try await BridgeResources.markdown(for: uri, clientName: nil)
                 // W2 telemetry: record the resource read we served + the
                 // composition hash at serve time (identical to the
                 // Streamable-HTTP path; both transports emit the same event).
