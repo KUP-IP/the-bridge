@@ -703,7 +703,28 @@ set -euo pipefail
 # ordering, audit-only reminder events. All main-actor hermetic (injected
 # currentHash, no file I/O / singleton), so they run in CI and local alike:
 # 1668 + 10 = 1678.
-FLOOR="${BRIDGE_TEST_FLOOR:-1678}"
+# Routing reliability (2026-06-04): specialist-relation plumbing fix +
+# fetch_skill(parent,intent) default + result-footer routing hints +
+# confidence→clarify disambiguation + fetch_skill DeliveryLog telemetry +
+# per-client Standing-Orders overlay + continuous-routing protocol preamble.
+# Source: SpecialistFilter (doc-page exclusion shared by SkillsModule
+# .listNotionChildPages + SkillsCacheWriter.ChildEnumerator so the routing
+# index surfaces curated specialists, NOT changelogs/PRDs/§-sections — with a
+# TODO naming the curated `Specialist` relation property to wire next);
+# SkillIntentScorer.decide (.confident/.disambiguate/.none); SkillAnnotation
+# .disambiguate; SkillsModule.routingFooter + envelope `candidates`/
+# `routingFooter`/`disambiguationPrompt`; DeliveryLog .skillFetched kind +
+# recordSkillFetched hop + skillFetchFields, emitted at all three CallTool
+# dispatch sites (stdio + Streamable-HTTP + legacy SSE); ClientOverlayStore +
+# composition(clientName:) overlay append (empty by default → byte-identical).
+# Added RoutingReliabilityTests.swift with 16 harness test() blocks (4
+# SpecialistFilter doc-page-vs-specialist incl. the rephrase/phased
+# false-positive guard; 4 decide classification; 3 ClientOverlayStore get/set
+# + composition append + empty-default no-op; 3 routing-footer shape/nil/
+# parent-body; 2 DeliveryLog skillFetched ingest + skillFetchFields parsing).
+# All pure / tmp-HOME-hermetic / injected-hash — run in CI and local alike:
+# 1678 + 16 = 1694.
+FLOOR="${BRIDGE_TEST_FLOOR:-1694}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

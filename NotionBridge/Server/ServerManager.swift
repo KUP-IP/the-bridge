@@ -274,6 +274,19 @@ public actor ServerManager {
             if let allowlist = toolAllowlist, !allowlist.contains(params.name) {
                 return .init(content: [.text(.init("Error: Tool '\(params.name)' is not allowed in this session"))], isError: true)
             }
+            // Routing-stability telemetry (AUDIT ONLY — never gates dispatch):
+            // record fetch_skill calls {skill name/path, intent} on the stdio
+            // path under the stable synthetic stdio session id, identical to
+            // how the SSE paths record them.
+            if params.name == "fetch_skill" {
+                let (skill, intent) = DeliveryLog.skillFetchFields(from: params.arguments.map { Value.object($0) })
+                DeliveryLog.shared.recordSkillFetched(
+                    sessionID: Self.stdioSessionID,
+                    clientName: "stdio",
+                    skill: skill,
+                    intent: intent
+                )
+            }
             let arguments: Value = params.arguments.map { .object($0) } ?? .object([:])
             let (text, isError) = await router.dispatchFormatted(toolName: params.name, arguments: arguments)
             if !isError { await MainActor.run { onToolCall() } }

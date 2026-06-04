@@ -733,6 +733,18 @@ public actor SSEServer {
                     toolName: params.name
                 )
             }
+            // Routing-stability telemetry (AUDIT ONLY): record fetch_skill
+            // calls {skill name/path, intent} so the routing surface can be
+            // audited for drift / mis-routes.
+            if params.name == "fetch_skill" {
+                let (skill, intent) = DeliveryLog.skillFetchFields(from: params.arguments.map { Value.object($0) })
+                DeliveryLog.shared.recordSkillFetched(
+                    sessionID: resourceSessionID,
+                    clientName: resourceClientName,
+                    skill: skill,
+                    intent: intent
+                )
+            }
             let arguments: Value = params.arguments.map { .object($0) } ?? .object([:])
             let (text, isError) = await router.dispatchFormatted(toolName: params.name, arguments: arguments)
             if !isError { await MainActor.run { onToolCall() } }
@@ -875,6 +887,20 @@ public actor SSEServer {
             }
 
             let args = params["arguments"] as? [String: Any] ?? [:]
+
+            // Routing-stability telemetry (AUDIT ONLY): record fetch_skill
+            // calls {skill name/path, intent}, identical to the
+            // Streamable-HTTP path.
+            if name == "fetch_skill", let sessionID {
+                let skill = (args["name"] as? String) ?? ""
+                let rawIntent = (args["intent"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                DeliveryLog.shared.recordSkillFetched(
+                    sessionID: sessionID,
+                    clientName: legacy.clientName(sessionID: sessionID),
+                    skill: skill,
+                    intent: (rawIntent?.isEmpty == false) ? rawIntent : nil
+                )
+            }
 
             let argsValue: Value
             if let d = try? JSONSerialization.data(withJSONObject: args),

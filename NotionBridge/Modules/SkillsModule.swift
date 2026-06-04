@@ -68,6 +68,17 @@ public enum SkillsModule {
     /// field (both transports). Dense by design — it ships in every
     /// session's context. Tells an agent how to read/trust the tool surface.
     public static let dispatchContract = """
+    Routing protocol: route CONTINUOUSLY, per sub-task — don't fetch one \
+    skill and coast. For each new sub-task, watch for a domain trigger, then \
+    call fetch_skill(parent, intent: '<this sub-task>') and act on the \
+    specialist it returns. When the sub-task changes, re-route with a fresh \
+    intent. If fetch_skill returns a `disambiguate` annotation, pick from its \
+    `candidates` (fetch_skill('parent/<name>')) rather than guessing; a \
+    `routingFooter` names the sibling specialists you can switch to.
+    Capture disambiguation: when something should be DONE for the user, use \
+    reminders_create (a real Apple/iCloud reminder the user will see); when \
+    something should be KNOWN by the agent for later, use the memory/remember \
+    path (an agent-side note). "Do" → reminders_create; "know" → memory.
     Tool contract: parameter keys are camelCase (snake_case only for raw \
     Notion-API value passthroughs). Each tool's description carries \
     "When to use" / "Not for" / "Related" guidance — read it before \
@@ -142,18 +153,30 @@ public enum SkillsModule {
             module: moduleName,
             tier: .open,
             description: """
-            Fetch one skill page's full body. Two ways to address a specialist sub-skill:
+            Fetch one skill page's full body, OR route into a domain's specialist.
 
-              1. Path syntax: name="project-keepr/update" → resolves the "update" \
+            RECOMMENDED DEFAULT — call with the parent name + the current intent for \
+            EACH new sub-task: name="project-keepr", intent="triage stale projects". \
+            The server ranks the parent's curated specialists and returns the best \
+            match. Re-call with the SAME parent and a fresh `intent` whenever the \
+            sub-task changes — that continuous per-sub-task routing is how you stay on \
+            the right specialist instead of drifting on a stale one.
+
+            Two ways to address a specialist sub-skill:
+
+              1. Intent ranking (preferred): name + intent → best-matching specialist \
+            (score ≥ 0.4). If the top two are too close to call, or nothing clears the \
+            bar, the envelope carries a `disambiguate` annotation with a `candidates` \
+            list — pick one and re-fetch with `parent/<that-name>` rather than guessing.
+              2. Path syntax: name="project-keepr/update" → resolves the "update" \
             child page (Notion) or specialists/update.md (file source). Depth > 1 is \
             rejected with a depth-guard annotation (parent body still returned).
-              2. Intent ranking: name="project-keepr", intent="triage stale projects" \
-            → ranks the parent's specialists and returns the best match (score ≥ 0.4); \
-            otherwise returns the parent body with a low-confidence annotation.
 
-            An unresolvable specialist name never errors — the envelope carries the \
-            parent body plus a `specialist-not-found` annotation. Use `name` alone \
-            for the parent body (pre-PKT-907 behavior, unchanged).
+            Every specialist/parent body returns a footer naming the sibling \
+            specialists and how to re-route to them. An unresolvable specialist name \
+            never errors — the envelope carries the parent body plus a \
+            `specialist-not-found` annotation. Use `name` alone for the bare parent \
+            body when you genuinely want the index page itself.
             """,
             inputSchema: .object([
                 "type": .string("object"),
@@ -164,7 +187,7 @@ public enum SkillsModule {
                     ]),
                     "intent": .object([
                         "type": .string("string"),
-                        "description": .string("Optional natural-language intent. When provided, ranks the named parent's specialists and returns the best match (score ≥ 0.4); otherwise falls back to the parent body with a low-confidence annotation.")
+                        "description": .string("RECOMMENDED. The current sub-task in natural language (e.g. 'triage stale projects'). Ranks the named parent's curated specialists and returns the best match (score ≥ 0.4). Ambiguous or sub-threshold → a `disambiguate` annotation + `candidates` list instead of a silent parent fallback. Re-send with a fresh intent for each new sub-task in the domain.")
                     ]),
                     "includeNested": .object([
                         "type": .string("boolean"),
@@ -2253,6 +2276,23 @@ public enum SkillsModule {
         let annotation: SkillAnnotation?
         let matchScore: Double?
         let matchReason: String?
+        /// Routing-reliability (confidence → clarify): when the annotation
+        /// is `.disambiguate`, the close candidates the agent should pick
+        /// between (path + title + score + reason). Empty otherwise.
+        var disambiguationCandidates: [DispatchCandidate] = []
+        /// Routing-footer: every specialist title under this parent (the
+        /// curated, doc-page-filtered set) so the envelope footer can name
+        /// the siblings and how to re-route to them. Empty for the
+        /// bare-parent fast path (no enumeration was done).
+        var siblingTitles: [String] = []
+    }
+
+    /// One candidate row for a disambiguation surface.
+    fileprivate struct DispatchCandidate: Sendable, Equatable {
+        let title: String
+        let path: String
+        let score: Double
+        let reason: String
     }
 
     /// PKT-907 W1: file-source path/intent dispatch.
@@ -2265,6 +2305,13 @@ public enum SkillsModule {
     ) async -> Value {
         let parentName = parent.name
 
+        // Routing-reliability: enumerate the curated specialist titles once
+        // up front so every return path can carry the sibling footer. The
+        // file resolver already lists only `specialists/` files + curated
+        // frontmatter entries (no doc-page leakage on the file source).
+        let allSpecialists = SkillSpecialistFileResolver.listAll(parent: parent)
+        let siblingTitles = allSpecialists.map { $0.name }
+
         // Depth guard wins over everything else.
         if parsedPath.depthExceeded {
             let parentEnvelope = await Self.buildFileSkillResult(parent)
@@ -2274,7 +2321,8 @@ public enum SkillsModule {
                 annotation: .depthGuard,
                 resolvedPath: nil,
                 score: nil,
-                reason: nil
+                reason: nil,
+                siblingTitles: siblingTitles
             )
         }
 
@@ -2296,7 +2344,9 @@ public enum SkillsModule {
                     annotation: nil,
                     resolvedPath: "\(parentName)/\(resolved.name)",
                     score: 1.0,
-                    reason: "exact path"
+                    reason: "exact path",
+                    currentSpecialistTitle: resolved.name,
+                    siblingTitles: siblingTitles
                 )
             }
             // Path looked valid but no such child file → parent + annotation.
@@ -2307,14 +2357,14 @@ public enum SkillsModule {
                 annotation: .specialistNotFound,
                 resolvedPath: nil,
                 score: nil,
-                reason: nil
+                reason: nil,
+                siblingTitles: siblingTitles
             )
         }
 
-        // Intent ranking.
+        // Intent ranking → confident / disambiguate / none.
         if let intent = intent {
-            let specialists = SkillSpecialistFileResolver.listAll(parent: parent)
-            let candidates: [SkillIntentCandidate] = specialists.map { s in
+            let candidates: [SkillIntentCandidate] = allSpecialists.map { s in
                 var aliases: [String] = []
                 if case .array(let arr) = s.frontmatter["aliases"] { aliases = arr }
                 let summary: String = {
@@ -2323,46 +2373,85 @@ public enum SkillsModule {
                 }()
                 return SkillIntentCandidate(name: s.name, aliases: aliases, summary: summary)
             }
-            if let best = SkillIntentScorer.bestMatch(intent: intent, candidates: candidates),
-               let resolved = specialists.first(where: { $0.name.lowercased() == best.candidate.name.lowercased() }) {
-                let pseudo = ParsedSkill(
-                    name: resolved.name,
-                    path: resolved.path,
-                    isUserSource: parent.isUserSource,
-                    frontmatter: resolved.frontmatter,
-                    body: resolved.body,
-                    displayPath: parent.displayPath + "/specialists/\(resolved.name)"
-                )
-                let env = await Self.buildFileSkillResult(pseudo)
-                NSLog("[fetch_skill] intent=\"%@\" parent=%@ → %@/%@ score=%.2f (%@)",
-                      intent, parentName, parentName, resolved.name, best.score, best.reason)
+            switch SkillIntentScorer.decide(intent: intent, candidates: candidates) {
+            case .confident(let best):
+                if let resolved = allSpecialists.first(where: { $0.name.lowercased() == best.candidate.name.lowercased() }) {
+                    let pseudo = ParsedSkill(
+                        name: resolved.name,
+                        path: resolved.path,
+                        isUserSource: parent.isUserSource,
+                        frontmatter: resolved.frontmatter,
+                        body: resolved.body,
+                        displayPath: parent.displayPath + "/specialists/\(resolved.name)"
+                    )
+                    let env = await Self.buildFileSkillResult(pseudo)
+                    NSLog("[fetch_skill] intent=\"%@\" parent=%@ → %@/%@ score=%.2f (%@)",
+                          intent, parentName, parentName, resolved.name, best.score, best.reason)
+                    return Self.annotateFileEnvelope(
+                        env,
+                        parentName: parentName,
+                        annotation: nil,
+                        resolvedPath: "\(parentName)/\(resolved.name)",
+                        score: best.score,
+                        reason: best.reason,
+                        currentSpecialistTitle: resolved.name,
+                        siblingTitles: siblingTitles
+                    )
+                }
+                // Defensive fall-through (classified but didn't re-resolve).
+                let parentEnvelope = await Self.buildFileSkillResult(parent)
                 return Self.annotateFileEnvelope(
-                    env,
+                    parentEnvelope, parentName: parentName, annotation: .lowConfidence,
+                    resolvedPath: nil, score: best.score, reason: best.reason,
+                    siblingTitles: siblingTitles
+                )
+            case .disambiguate(let close):
+                NSLog("[fetch_skill] intent=\"%@\" parent=%@ → disambiguate (%d candidates, top=%.2f)",
+                      intent, parentName, close.count, close.first?.score ?? 0)
+                let parentEnvelope = await Self.buildFileSkillResult(parent)
+                let cands = close.map {
+                    DispatchCandidate(title: $0.candidate.name,
+                                      path: "\(parentName)/\($0.candidate.name)",
+                                      score: $0.score, reason: $0.reason)
+                }
+                return Self.annotateFileEnvelope(
+                    parentEnvelope,
                     parentName: parentName,
-                    annotation: nil,
-                    resolvedPath: "\(parentName)/\(resolved.name)",
-                    score: best.score,
-                    reason: best.reason
+                    annotation: .disambiguate,
+                    resolvedPath: nil,
+                    score: close.first?.score,
+                    reason: close.first?.reason,
+                    candidates: cands,
+                    siblingTitles: siblingTitles
+                )
+            case .none:
+                NSLog("[fetch_skill] intent=\"%@\" parent=%@ → no candidate scored",
+                      intent, parentName)
+                let parentEnvelope = await Self.buildFileSkillResult(parent)
+                return Self.annotateFileEnvelope(
+                    parentEnvelope,
+                    parentName: parentName,
+                    annotation: .lowConfidence,
+                    resolvedPath: nil,
+                    score: nil,
+                    reason: nil,
+                    siblingTitles: siblingTitles
                 )
             }
-            // Low confidence → parent + annotation. Surface top score
-            // when one existed so the caller can diagnose.
-            let ranked = SkillIntentScorer.rank(intent: intent, candidates: candidates)
-            let parentEnvelope = await Self.buildFileSkillResult(parent)
-            NSLog("[fetch_skill] intent=\"%@\" parent=%@ → no candidate ≥ 0.4 (top=%.2f)",
-                  intent, parentName, ranked.first?.score ?? 0)
-            return Self.annotateFileEnvelope(
-                parentEnvelope,
-                parentName: parentName,
-                annotation: .lowConfidence,
-                resolvedPath: nil,
-                score: ranked.first?.score,
-                reason: ranked.first?.reason
-            )
         }
 
-        // Bare parent name — pre-PKT-907 path.
-        return await Self.buildFileSkillResult(parent)
+        // Bare parent name — pre-PKT-907 path. Still attach a footer so the
+        // agent sees the routable specialists from the parent body.
+        let parentEnvelope = await Self.buildFileSkillResult(parent)
+        return Self.annotateFileEnvelope(
+            parentEnvelope,
+            parentName: parentName,
+            annotation: nil,
+            resolvedPath: nil,
+            score: nil,
+            reason: nil,
+            siblingTitles: siblingTitles
+        )
     }
 
     /// PKT-907 W1+W2: Notion-source path/intent dispatch. Returns a
@@ -2400,8 +2489,11 @@ public enum SkillsModule {
 
         // Enumerate child pages of the parent. `fetchAllSiblingBlocks`
         // returns every direct child block; we filter on `type:
-        // "child_page"` to get the sub-skill candidates.
+        // "child_page"` to get the sub-skill candidates. The child-page
+        // walk is doc-page-filtered inside listNotionChildPages, so
+        // `childPages` already holds only curated specialists.
         let childPages = await Self.listNotionChildPages(client: client, pageId: parentPageId)
+        let siblingTitles = childPages.map { $0.title }
 
         if let childName = parsedPath.child {
             let needle = childName.lowercased()
@@ -2418,7 +2510,8 @@ public enum SkillsModule {
                     resolvedPath: "\(parentName)/\(exact.title)",
                     annotation: nil,
                     matchScore: 1.0,
-                    matchReason: "exact path"
+                    matchReason: "exact path",
+                    siblingTitles: siblingTitles
                 )
             }
             if let partial = childPages.first(where: { $0.title.lowercased().contains(needle) || needle.contains($0.title.lowercased()) }) {
@@ -2432,7 +2525,8 @@ public enum SkillsModule {
                     resolvedPath: "\(parentName)/\(partial.title)",
                     annotation: nil,
                     matchScore: 0.7,
-                    matchReason: "partial title"
+                    matchReason: "partial title",
+                    siblingTitles: siblingTitles
                 )
             }
             // Unresolvable child → parent + annotation.
@@ -2441,42 +2535,71 @@ public enum SkillsModule {
                 resolvedPath: nil,
                 annotation: .specialistNotFound,
                 matchScore: nil,
-                matchReason: nil
+                matchReason: nil,
+                siblingTitles: siblingTitles
             )
         }
 
-        // Intent path — score against child page titles.
+        // Intent path — score against child page titles, then classify into
+        // confident / disambiguate / none (routing-reliability item 4).
         if let intent = intent {
             let candidates = childPages.map { cp in
                 SkillIntentCandidate(name: cp.title, aliases: [], summary: "")
             }
-            if let best = SkillIntentScorer.bestMatch(intent: intent, candidates: candidates),
-               let resolved = childPages.first(where: { $0.title.lowercased() == best.candidate.name.lowercased() }) {
-                NSLog("[fetch_skill] intent=\"%@\" parent=%@ → %@/%@ score=%.2f (%@)",
-                      intent, parentName, parentName, resolved.title, best.score, best.reason)
+            switch SkillIntentScorer.decide(intent: intent, candidates: candidates) {
+            case .confident(let best):
+                if let resolved = childPages.first(where: { $0.title.lowercased() == best.candidate.name.lowercased() }) {
+                    NSLog("[fetch_skill] intent=\"%@\" parent=%@ → %@/%@ score=%.2f (%@)",
+                          intent, parentName, parentName, resolved.title, best.score, best.reason)
+                    return SpecialistDispatch(
+                        resolvedSpecialist: SpecialistDispatch.ResolvedNotion(
+                            title: resolved.title,
+                            url: resolved.url,
+                            pageId: resolved.pageId,
+                            properties: resolved.properties
+                        ),
+                        resolvedPath: "\(parentName)/\(resolved.title)",
+                        annotation: nil,
+                        matchScore: best.score,
+                        matchReason: best.reason,
+                        siblingTitles: siblingTitles
+                    )
+                }
+                // Defensive: classified confident but title didn't re-resolve.
                 return SpecialistDispatch(
-                    resolvedSpecialist: SpecialistDispatch.ResolvedNotion(
-                        title: resolved.title,
-                        url: resolved.url,
-                        pageId: resolved.pageId,
-                        properties: resolved.properties
-                    ),
-                    resolvedPath: "\(parentName)/\(resolved.title)",
-                    annotation: nil,
-                    matchScore: best.score,
-                    matchReason: best.reason
+                    resolvedSpecialist: nil, resolvedPath: nil,
+                    annotation: .lowConfidence, matchScore: best.score,
+                    matchReason: best.reason, siblingTitles: siblingTitles
+                )
+            case .disambiguate(let close):
+                NSLog("[fetch_skill] intent=\"%@\" parent=%@ → disambiguate (%d candidates, top=%.2f)",
+                      intent, parentName, close.count, close.first?.score ?? 0)
+                let cands = close.map {
+                    DispatchCandidate(title: $0.candidate.name,
+                                      path: "\(parentName)/\($0.candidate.name)",
+                                      score: $0.score, reason: $0.reason)
+                }
+                return SpecialistDispatch(
+                    resolvedSpecialist: nil,
+                    resolvedPath: nil,
+                    annotation: .disambiguate,
+                    matchScore: close.first?.score,
+                    matchReason: close.first?.reason,
+                    disambiguationCandidates: cands,
+                    siblingTitles: siblingTitles
+                )
+            case .none:
+                NSLog("[fetch_skill] intent=\"%@\" parent=%@ → no candidate scored",
+                      intent, parentName)
+                return SpecialistDispatch(
+                    resolvedSpecialist: nil,
+                    resolvedPath: nil,
+                    annotation: .lowConfidence,
+                    matchScore: nil,
+                    matchReason: nil,
+                    siblingTitles: siblingTitles
                 )
             }
-            let ranked = SkillIntentScorer.rank(intent: intent, candidates: candidates)
-            NSLog("[fetch_skill] intent=\"%@\" parent=%@ → no candidate ≥ 0.4 (top=%.2f)",
-                  intent, parentName, ranked.first?.score ?? 0)
-            return SpecialistDispatch(
-                resolvedSpecialist: nil,
-                resolvedPath: nil,
-                annotation: .lowConfidence,
-                matchScore: ranked.first?.score,
-                matchReason: ranked.first?.reason
-            )
         }
 
         // Should not reach (early-exited above when both nil).
@@ -2485,7 +2608,8 @@ public enum SkillsModule {
             resolvedPath: nil,
             annotation: nil,
             matchScore: nil,
-            matchReason: nil
+            matchReason: nil,
+            siblingTitles: siblingTitles
         )
     }
 
@@ -2552,6 +2676,13 @@ public enum SkillsModule {
                     if !t.isEmpty && t != "Untitled" { resolvedTitle = t }
                 }
             }
+            // Routing-reliability: exclude child doc-pages (changelogs,
+            // PRDs, §-sections, test matrices, evolution logs, phase/
+            // pruning notes, duplicate stubs) so only curated specialists
+            // appear in the routing surface. See SpecialistFilter (and its
+            // TODO naming the curated `Specialist` relation property that
+            // should ultimately replace this child-page walk).
+            guard SpecialistFilter.isSpecialist(title: resolvedTitle) else { continue }
             out.append(NotionChildPageRef(
                 pageId: cid,
                 title: resolvedTitle,
@@ -2585,7 +2716,68 @@ public enum SkillsModule {
             // need to know that they got the parent body and why.
             dict["parentName"] = .string(parentName)
         }
+        // Routing-reliability item 4: structured disambiguation candidates.
+        if !dispatch.disambiguationCandidates.isEmpty {
+            dict["candidates"] = .array(dispatch.disambiguationCandidates.map { c in
+                .object([
+                    "title": .string(c.title),
+                    "path": .string(c.path),
+                    "score": .double(c.score),
+                    "reason": .string(c.reason)
+                ])
+            })
+            dict["disambiguationPrompt"] = .string(
+                "Multiple specialists could fit. Re-fetch one by path: " +
+                dispatch.disambiguationCandidates.map { "fetch_skill('\($0.path)')" }.joined(separator: " or ") +
+                " — or send a sharper intent."
+            )
+        }
+        // Routing-reliability item 3: sibling-specialists routing footer.
+        let resolvedTitle = dispatch.resolvedSpecialist?.title
+        if let footer = Self.routingFooter(
+            parentName: parentName,
+            currentSpecialistTitle: resolvedTitle,
+            siblingTitles: dispatch.siblingTitles
+        ) {
+            dict["routingFooter"] = .string(footer)
+        }
         return .object(dict)
+    }
+
+    /// Routing-reliability item 3: build a short footer naming the OTHER
+    /// specialists under this parent + how to re-route. Returns nil when
+    /// there are no other specialists to route to (so a single-specialist
+    /// parent or the bare-parent fast path adds no footer noise).
+    ///
+    /// Pure + nonisolated: touches only its string arguments.
+    fileprivate nonisolated static func routingFooter(
+        parentName: String,
+        currentSpecialistTitle: String?,
+        siblingTitles: [String]
+    ) -> String? {
+        let current = currentSpecialistTitle?.lowercased()
+        let others = siblingTitles.filter { $0.lowercased() != current }
+        guard !others.isEmpty else { return nil }
+        let list = others.map { "\(parentName)/\($0)" }.joined(separator: ", ")
+        return "Other \(parentName) specialists: \(list). " +
+               "For a different sub-task, fetch_skill('\(parentName)', intent: '<that sub-task>') " +
+               "or fetch one directly by path."
+    }
+
+    /// Public, network-free entry point mirroring the private `routingFooter`
+    /// so the routing-reliability test suite can assert footer shape without
+    /// driving a live Notion fetch. Same logic, same nil-when-no-siblings
+    /// contract.
+    public nonisolated static func routingFooterForTesting(
+        parentName: String,
+        currentSpecialistTitle: String?,
+        siblingTitles: [String]
+    ) -> String? {
+        routingFooter(
+            parentName: parentName,
+            currentSpecialistTitle: currentSpecialistTitle,
+            siblingTitles: siblingTitles
+        )
     }
 
     /// File-source annotation helper. Same envelope keys as the Notion
@@ -2596,7 +2788,10 @@ public enum SkillsModule {
         annotation: SkillAnnotation?,
         resolvedPath: String?,
         score: Double?,
-        reason: String?
+        reason: String?,
+        candidates: [DispatchCandidate] = [],
+        currentSpecialistTitle: String? = nil,
+        siblingTitles: [String] = []
     ) -> Value {
         guard case .object(var dict) = envelope else { return envelope }
         if let rp = resolvedPath { dict["resolvedPath"] = .string(rp) }
@@ -2605,6 +2800,30 @@ public enum SkillsModule {
         if let a = annotation {
             dict["annotation"] = .string(a.rawValue)
             dict["parentName"] = .string(parentName)
+        }
+        // Routing-reliability item 4: disambiguation candidates.
+        if !candidates.isEmpty {
+            dict["candidates"] = .array(candidates.map { c in
+                .object([
+                    "title": .string(c.title),
+                    "path": .string(c.path),
+                    "score": .double(c.score),
+                    "reason": .string(c.reason)
+                ])
+            })
+            dict["disambiguationPrompt"] = .string(
+                "Multiple specialists could fit. Re-fetch one by path: " +
+                candidates.map { "fetch_skill('\($0.path)')" }.joined(separator: " or ") +
+                " — or send a sharper intent."
+            )
+        }
+        // Routing-reliability item 3: sibling-specialists routing footer.
+        if let footer = Self.routingFooter(
+            parentName: parentName,
+            currentSpecialistTitle: currentSpecialistTitle,
+            siblingTitles: siblingTitles
+        ) {
+            dict["routingFooter"] = .string(footer)
         }
         return .object(dict)
     }

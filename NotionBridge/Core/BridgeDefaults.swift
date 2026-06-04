@@ -70,6 +70,15 @@ public enum BridgeDefaults {
         return raw > 0 ? raw : 24
     }
 
+    /// Per-client Standing Orders overlays. Data (JSON-encoded
+    /// `[String /* client name */ : String /* addendum markdown */]`).
+    /// An optional operator-authored addendum appended to the composed
+    /// handshake instructions when a client of that name connects. ABSENT
+    /// or empty ⇒ no overlay (the default for every install — composition
+    /// is byte-identical to the pre-overlay payload). Written/read by
+    /// `ClientOverlayStore`.
+    public static let standingOrdersClientOverlays = "com.notionbridge.standingOrdersClientOverlays"
+
     // MARK: - Commands Palette (cmd-ux)
 
     /// Master on/off for the Commands palette (global-hotkey command box).

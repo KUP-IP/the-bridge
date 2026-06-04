@@ -24,6 +24,7 @@
 
 import Foundation
 import Observation
+import MCP  // `Value` — used by skillFetchFields to parse fetch_skill arguments
 
 /// What a recorded delivery event represents.
 public enum DeliveryEventKind: String, Sendable, Equatable, CaseIterable {
@@ -33,6 +34,10 @@ public enum DeliveryEventKind: String, Sendable, Equatable, CaseIterable {
     case resourceRead
     /// A `reminders_*` tool call (audit-only — never influences anything).
     case reminderToolCall
+    /// A `fetch_skill` call (audit-only routing-stability signal). Records
+    /// the skill name/path that was fetched and the intent (when supplied)
+    /// so the routing surface can be audited for drift / mis-routes.
+    case skillFetched
 }
 
 /// One immutable telemetry event. `Sendable` so it can be built off-main and
@@ -51,6 +56,10 @@ public struct DeliveryEvent: Sendable, Equatable, Identifiable {
     /// `handshakeDelivered` (what we shipped) and `resourceRead` (what we
     /// served). nil for `reminderToolCall`.
     public let contentHash: String?
+    /// Present for `skillFetched` (the natural-language intent passed to
+    /// `fetch_skill`, when one was supplied). nil for every other kind and
+    /// for an intent-less skill fetch.
+    public let intent: String?
     public let at: Date
 
     public init(
@@ -61,6 +70,7 @@ public struct DeliveryEvent: Sendable, Equatable, Identifiable {
         uri: String? = nil,
         tokenCount: Int? = nil,
         contentHash: String? = nil,
+        intent: String? = nil,
         at: Date = Date()
     ) {
         self.id = id
@@ -70,6 +80,7 @@ public struct DeliveryEvent: Sendable, Equatable, Identifiable {
         self.uri = uri
         self.tokenCount = tokenCount
         self.contentHash = contentHash
+        self.intent = intent
         self.at = at
     }
 }
@@ -248,6 +259,48 @@ public final class DeliveryLog {
             at: at
         )
         Task { @MainActor in DeliveryLog.shared.ingest(event) }
+    }
+
+    /// Record a `fetch_skill` call. AUDIT ONLY — a routing-stability signal,
+    /// never gates or alters dispatch. `skill` is the requested name/path
+    /// (e.g. "project-keepr" or "project-keepr/update"); `intent` is the
+    /// natural-language intent when one was supplied (nil otherwise).
+    public nonisolated func recordSkillFetched(
+        sessionID: String,
+        clientName: String?,
+        skill: String,
+        intent: String?,
+        at: Date = Date()
+    ) {
+        let event = DeliveryEvent(
+            sessionID: sessionID,
+            clientName: clientName,
+            kind: .skillFetched,
+            uri: skill,
+            intent: intent,
+            at: at
+        )
+        Task { @MainActor in DeliveryLog.shared.ingest(event) }
+    }
+
+    /// Extract the `(skill, intent?)` pair from a `fetch_skill` arguments
+    /// value for the routing-stability audit. `skill` is the `name` string
+    /// (empty when absent); `intent` is the trimmed `intent` string when
+    /// non-empty, else nil. Pure + nonisolated — touches only its argument.
+    public nonisolated static func skillFetchFields(from arguments: Value?) -> (skill: String, intent: String?) {
+        guard case .object(let dict)? = arguments else { return ("", nil) }
+        let skill: String = {
+            if case .string(let s)? = dict["name"] { return s }
+            return ""
+        }()
+        let intent: String? = {
+            if case .string(let s)? = dict["intent"] {
+                let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                return t.isEmpty ? nil : t
+            }
+            return nil
+        }()
+        return (skill, intent)
     }
 
     // MARK: - Read accessors (UI + tests)

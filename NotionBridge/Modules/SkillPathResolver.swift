@@ -96,6 +96,124 @@ public enum SkillAnnotation: String, Sendable, Equatable {
     case specialistNotFound = "specialist-not-found"
     case depthGuard = "depth-guard"
     case lowConfidence = "low-confidence"
+    /// Intent ranking produced two top candidates within the
+    /// disambiguation band (their scores are within
+    /// `SkillIntentScorer.disambiguationMargin` of each other, OR the top
+    /// score is below the confidence threshold). The caller surfaces the
+    /// candidate list and asks which to fetch, instead of silently
+    /// returning the parent body.
+    case disambiguate = "disambiguate"
+}
+
+// MARK: - SpecialistFilter
+
+/// Routing-reliability fix (v3.7·routing): the routing index + specialist
+/// enumeration are intended to surface a parent's *curated* specialist
+/// sub-skills, NOT every `child_page` under the parent. Parents in this
+/// workspace also carry doc-pages as children — changelogs, PRDs,
+/// "§…"-prefixed sections, test matrices, evolution logs, phase notes,
+/// pruning notes, and duplicate stubs — and those were leaking into the
+/// routing surface (the audit finding).
+///
+/// THE INTENDED SOURCE is the parent's `Specialist` RELATION property
+/// (a Notion relation pointing at the curated specialist pages). That
+/// relation is NOT yet fetched anywhere in the codebase — the child
+/// enumerators walk `child_page` blocks instead. Wiring the relation
+/// requires reading the parent page's `properties` for the relation
+/// property and resolving each related page id, which is a Notion-schema
+/// change beyond what can be resolved from code alone.
+///
+/// TODO(routing/specialist-relation): replace the title-pattern heuristic
+/// below with a read of the parent's curated relation property. The exact
+/// property name to wire is the Notion relation titled **"Specialist"**
+/// (verify the live property name/ID in the Skills/Keepr parent database;
+/// it may be stored as `Specialist` or `Specialists`). Once available,
+/// `SkillsCacheWriter.ChildEnumerator.fetchChildren` and
+/// `SkillsModule.listNotionChildPages` should enumerate the relation's
+/// target page ids directly and drop the `child_page` walk entirely. Until
+/// then, this heuristic excludes the doc-page noise so the routing surface
+/// is curated-enough to be trustworthy.
+public enum SpecialistFilter {
+
+    /// Title-pattern predicates that mark a child page as a DOC-PAGE
+    /// (changelog / PRD / section / matrix / log / phase / pruning /
+    /// duplicate stub) rather than a curated specialist. A child whose
+    /// title matches ANY of these is excluded from the specialist surface.
+    ///
+    /// Patterns (case-insensitive, anchored where the packet specified):
+    ///   • `^§`                — section pages ("§ 3.2 Foo")
+    ///   • `Changelog`         — changelogs / change logs
+    ///   • `PRD`               — product requirement docs
+    ///   • `Test Matrix`       — test matrices
+    ///   • `Evolution Log`     — evolution / history logs
+    ///   • `Phase \d`          — "Phase 1", "Phase 2", … planning pages
+    ///   • `Pruning`           — pruning notes
+    /// Plus a few defensive doc-noise siblings the audit observed:
+    ///   • `^Archive`, `(duplicate)`/`(dup)`/`(stub)` suffixes, `Scratch`,
+    ///     `Notes`-only pages, `Backlog`, `Roadmap`, `Decision Log`.
+    public static func isDocPage(title rawTitle: String) -> Bool {
+        let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return true } // an untitled child is not a curated specialist
+        let lower = title.lowercased()
+
+        // Anchored: section marker.
+        if title.hasPrefix("§") { return true }
+        // Anchored: archive container pages.
+        if lower.hasPrefix("archive") { return true }
+
+        // Substring doc-markers.
+        let substringMarkers = [
+            "changelog", "change log",
+            "prd",
+            "test matrix",
+            "evolution log",
+            "pruning",
+            "decision log",
+            "roadmap",
+            "backlog"
+        ]
+        for m in substringMarkers where lower.contains(m) {
+            return true
+        }
+
+        // Duplicate / stub suffix markers.
+        let suffixMarkers = ["(duplicate)", "(dup)", "(stub)", "(wip)", "(draft)"]
+        for m in suffixMarkers where lower.contains(m) {
+            return true
+        }
+
+        // `Phase \d` — "Phase 1", "Phase 2.5", etc.
+        if matchesPhasePattern(lower) { return true }
+
+        return false
+    }
+
+    /// Convenience inverse: true when the child title is a plausible
+    /// CURATED SPECIALIST (i.e. not a doc-page).
+    public static func isSpecialist(title: String) -> Bool {
+        !isDocPage(title: title)
+    }
+
+    /// Pure scan for a `phase <digit>` token (case-insensitive; the input
+    /// is already lowercased by the caller). Matches "phase 1", "phase  2",
+    /// "phase 3.2"; does NOT match "rephrase" or "phased" alone.
+    private static func matchesPhasePattern(_ lower: String) -> Bool {
+        guard let range = lower.range(of: "phase") else { return false }
+        // Require a word boundary before "phase" (start or non-letter).
+        if range.lowerBound != lower.startIndex {
+            let before = lower[lower.index(before: range.lowerBound)]
+            if before.isLetter { return false }
+        }
+        // Scan past "phase" + whitespace, expect a digit.
+        var idx = range.upperBound
+        var sawSpace = false
+        while idx < lower.endIndex, lower[idx] == " " {
+            sawSpace = true
+            idx = lower.index(after: idx)
+        }
+        guard sawSpace, idx < lower.endIndex else { return false }
+        return lower[idx].isNumber
+    }
 }
 
 // MARK: - SkillIntentScorer
@@ -199,6 +317,61 @@ public enum SkillIntentScorer {
         let ranked = rank(intent: intent, candidates: candidates)
         guard let top = ranked.first, top.score >= confidenceThreshold else { return nil }
         return top
+    }
+
+    /// Margin within which the top two candidates are considered "too
+    /// close to call". When the #1 and #2 scores differ by ≤ this, the
+    /// dispatcher returns a DISAMBIGUATION instead of silently picking #1.
+    public static let disambiguationMargin: Double = 0.1
+
+    /// Routing-reliability (confidence → clarify). Decide what the
+    /// dispatcher should do for an intent rank.
+    ///
+    ///   • `.confident(score)`     — top clears the threshold AND is not in
+    ///                               the disambiguation band → fetch it.
+    ///   • `.disambiguate(top)`    — either the top is below threshold but
+    ///                               there ARE candidates, or the top two
+    ///                               are within `disambiguationMargin` of
+    ///                               each other → ask the caller to pick.
+    ///   • `.none`                 — no candidate scored at all (no signal).
+    ///
+    /// This makes a low-confidence result ACTIONABLE: rather than returning
+    /// the bare parent body (which the agent then has to interpret), the
+    /// caller lists the close candidates and asks which to fetch.
+    public enum IntentDecision: Sendable, Equatable {
+        case confident(SkillIntentScore)
+        case disambiguate([SkillIntentScore])
+        case none
+    }
+
+    /// Classify an intent rank into the `IntentDecision` the dispatcher
+    /// acts on. `maxCandidates` caps how many close candidates the
+    /// disambiguation surface lists.
+    public static func decide(
+        intent: String,
+        candidates: [SkillIntentCandidate],
+        maxCandidates: Int = 3
+    ) -> IntentDecision {
+        let ranked = rank(intent: intent, candidates: candidates)
+        guard let top = ranked.first else { return .none }
+
+        // Are the top two within the disambiguation band?
+        let ambiguousPair: Bool = {
+            guard ranked.count >= 2 else { return false }
+            return (top.score - ranked[1].score) <= disambiguationMargin
+        }()
+
+        // Confident path: clears threshold AND is a clear winner.
+        if top.score >= confidenceThreshold && !ambiguousPair {
+            return .confident(top)
+        }
+
+        // Otherwise clarify. Surface the close band: every candidate within
+        // `disambiguationMargin` of the top, capped, but always at least the
+        // top one (so a single sub-threshold candidate still gets listed).
+        let band = ranked.filter { (top.score - $0.score) <= disambiguationMargin }
+        let surfaced = Array((band.isEmpty ? [top] : band).prefix(max(1, maxCandidates)))
+        return .disambiguate(surfaced)
     }
 
     // MARK: tokenization

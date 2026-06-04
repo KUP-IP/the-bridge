@@ -232,6 +232,13 @@ extension SkillsCacheWriter.ChildEnumerator {
                     }
                 }
             }
+            // Routing-reliability: skip child doc-pages so the cached
+            // specialist set (which feeds the routing index via
+            // `surfaceSpecialistsInRows`) only carries curated specialists.
+            // Shared with SkillsModule.listNotionChildPages — see
+            // SpecialistFilter's TODO naming the curated `Specialist`
+            // relation property that should replace this child-page walk.
+            guard SpecialistFilter.isSpecialist(title: title) else { continue }
             out.append(CachedSpecialist(
                 id: entry.id,
                 title: title,

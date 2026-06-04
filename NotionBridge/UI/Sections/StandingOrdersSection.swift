@@ -425,6 +425,7 @@ public struct StandingOrdersSection: View {
         case .handshakeDelivered: return "delivered"
         case .resourceRead: return "fetched"
         case .reminderToolCall: return "reminder"
+        case .skillFetched: return "skill"
         }
     }
 
@@ -433,6 +434,7 @@ public struct StandingOrdersSection: View {
         case .handshakeDelivered: return BridgeTokens.infoText
         case .resourceRead: return BridgeTokens.okText
         case .reminderToolCall: return BridgeTokens.warnText
+        case .skillFetched: return BridgeTokens.infoText
         }
     }
 

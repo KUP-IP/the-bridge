@@ -147,8 +147,14 @@ public enum StandingOrdersDelivery {
         }
     }
 
-    /// Build the composition. `clientName` is a future-overlay hook and is
-    /// IGNORED for content today (see file header). Both transports call this.
+    /// Build the composition.
+    ///
+    /// `clientName` selects the per-client overlay (item 6): an optional
+    /// operator-authored addendum, persisted by client name, that is
+    /// appended to the composed instructions when that client connects.
+    /// EMPTY BY DEFAULT — with no overlay set for the client (the default
+    /// for every install), the composed bytes are byte-identical to the
+    /// pre-overlay payload, so existing sessions see no change.
     ///
     /// Best-effort posture preserved from the prior inline compose: if the
     /// on-disk Standing Orders store is missing or unreadable, the payload
@@ -159,7 +165,7 @@ public enum StandingOrdersDelivery {
         // PKT-9 v3.5 (now SSOT): prepend user-authored Standing Orders to the
         // routing index. Best-effort — a read failure degrades to routing-only,
         // exactly as the two inline composes did before this refactor.
-        let instructions: String = {
+        var instructions: String = {
             do {
                 let snapshot = try StandingOrdersStore.shared.read()
                 let orders = snapshot.markdown.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -169,6 +175,16 @@ public enum StandingOrdersDelivery {
                 return routingIndex
             }
         }()
+
+        // Item 6: per-client overlay. Append the operator-authored addendum
+        // for THIS client, if one is set. No-op (byte-identical) when the
+        // client is nil or has no overlay — the default for every install.
+        if let name = clientName,
+           let overlay = ClientOverlayStore.shared.overlay(forClient: name)?
+               .trimmingCharacters(in: .whitespacesAndNewlines),
+           !overlay.isEmpty {
+            instructions += "\n\n---\n\n" + overlay
+        }
 
         return Composition(
             instructionsMarkdown: instructions,
@@ -192,5 +208,81 @@ public enum StandingOrdersDelivery {
     /// Public so the determinism guard can recompute it independently.
     public static func sha256Hex(_ s: String) -> String {
         SHA256.hash(data: Data(s.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+// MARK: - ClientOverlayStore (item 6: per-client overlay hook)
+
+/// A small persisted store of optional per-client Standing-Orders addenda.
+/// Keyed by client name (the `clientInfo.name` from the MCP initialize
+/// handshake), each value is markdown appended to the composed instructions
+/// when that client connects. EMPTY BY DEFAULT — no overlay is set on a
+/// fresh install, so `composition(clientName:)` is byte-identical to its
+/// pre-overlay output until an operator sets one.
+///
+/// Storage: one JSON dict in `UserDefaults` under
+/// `BridgeDefaults.standingOrdersClientOverlays`. Lookup + writes are
+/// case-insensitive on the client name (normalized to lowercased+trimmed)
+/// so "Claude Code" and "claude code" resolve to the same overlay.
+///
+/// `@unchecked Sendable`: the only state is the process-global
+/// `UserDefaults.standard` (itself thread-safe); the type holds no mutable
+/// stored properties of its own. Mirrors the `StandingOrdersStore`
+/// `@unchecked Sendable` posture.
+public final class ClientOverlayStore: @unchecked Sendable {
+    public static let shared = ClientOverlayStore()
+
+    private let defaultsKey = BridgeDefaults.standingOrdersClientOverlays
+    private let defaults: UserDefaults
+
+    public init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    /// Normalize a client name to its lookup key (trimmed + lowercased).
+    private func key(_ clientName: String) -> String {
+        clientName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    /// Read the full overlay map (normalized keys → addendum markdown).
+    private func readAll() -> [String: String] {
+        guard let data = defaults.data(forKey: defaultsKey),
+              let map = try? JSONDecoder().decode([String: String].self, from: data) else {
+            return [:]
+        }
+        return map
+    }
+
+    private func writeAll(_ map: [String: String]) {
+        guard let data = try? JSONEncoder().encode(map) else { return }
+        defaults.set(data, forKey: defaultsKey)
+    }
+
+    /// The overlay addendum for `clientName`, or nil when none is set / the
+    /// name is empty. Case-insensitive on the client name.
+    public func overlay(forClient clientName: String) -> String? {
+        let k = key(clientName)
+        guard !k.isEmpty else { return nil }
+        return readAll()[k]
+    }
+
+    /// Set (or, with nil/empty, clear) the overlay for `clientName`.
+    /// Case-insensitive on the client name. A nil or whitespace-only
+    /// `overlay` removes the entry so it reverts to the empty default.
+    public func setOverlay(_ overlay: String?, forClient clientName: String) {
+        let k = key(clientName)
+        guard !k.isEmpty else { return }
+        var map = readAll()
+        if let overlay, !overlay.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            map[k] = overlay
+        } else {
+            map.removeValue(forKey: k)
+        }
+        writeAll(map)
+    }
+
+    /// Test/diagnostic reset — clears every overlay.
+    public func resetForTesting() {
+        defaults.removeObject(forKey: defaultsKey)
     }
 }
