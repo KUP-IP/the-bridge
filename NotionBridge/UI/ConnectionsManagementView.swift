@@ -156,57 +156,69 @@ public struct ConnectionsManagementView: View {
     }
 
     private func connectionRow(_ connection: BridgeConnection) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: connection.status.systemImage)
-                .font(.system(size: 10))
-                .foregroundStyle(statusColor(connection.status))
-                .help(connection.status.label)
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+                    .frame(width: 36, height: 36)
+                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                Image(systemName: "circle.grid.2x2.fill")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(BridgeTokens.fg1)
+            }
+            .help(connection.status.label)
 
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
+                HStack(spacing: 6) {
                     Text(connection.name)
-                        .font(.callout)
-                        .fontWeight(connection.isPrimary ? .semibold : .regular)
+                        .font(.system(size: 14, weight: connection.isPrimary ? .semibold : .medium))
+                        .foregroundStyle(BridgeTokens.fg1)
 
                     if connection.isPrimary {
                         Text("PRIMARY")
                             .font(.system(size: 8, weight: .bold, design: .rounded))
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
-                            .background(BridgeTokens.accent.opacity(0.12))
-                            .foregroundStyle(BridgeTokens.accent)
+                            .background(BridgeTokens.accent.opacity(0.14))
+                            .foregroundStyle(BridgeTokens.accentLink)
                             .clipShape(RoundedRectangle(cornerRadius: 3))
                     }
                 }
 
                 HStack(spacing: 6) {
-                    Image(systemName: "doc.text")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                     Text(connection.provider.displayName)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 12))
+                        .foregroundStyle(BridgeTokens.fg4)
                     if let maskedCredential = connection.maskedCredential, !maskedCredential.isEmpty {
-                        Text("·")
-                            .foregroundStyle(.quaternary)
+                        Text("·").foregroundStyle(BridgeTokens.fg5)
                         Text(maskedCredential)
-                            .font(.system(.caption2, design: .monospaced))
-                            .foregroundStyle(.tertiary)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(BridgeTokens.fg4)
                     }
                 }
             }
 
             Spacer()
 
-            Text(connection.status.label)
-                .font(.caption2)
-                .foregroundStyle(statusColor(connection.status))
+            statusChip(connection.status)
 
             Image(systemName: expandedConnectionId == connection.id ? "chevron.up" : "chevron.down")
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(BridgeTokens.fg4)
         }
         .padding(.vertical, 6)
+    }
+
+    private func statusChip(_ status: BridgeConnectionStatus) -> some View {
+        let color = statusColor(status)
+        return Text(status.label)
+            .font(.system(size: 11, weight: .semibold))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.16), in: Capsule())
+            .overlay(Capsule().strokeBorder(color.opacity(0.30), lineWidth: 0.5))
+            .foregroundStyle(color)
     }
 
     private func connectionDetail(_ connection: BridgeConnection) -> some View {
@@ -244,8 +256,8 @@ public struct ConnectionsManagementView: View {
     ) -> some View {
         HStack(alignment: .top) {
             Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 12))
+                .foregroundStyle(BridgeTokens.fg4)
                 .frame(width: 60, alignment: .leading)
             if let icon {
                 Image(systemName: icon)
@@ -253,8 +265,8 @@ public struct ConnectionsManagementView: View {
                     .foregroundStyle(iconColor)
             }
             Text(value)
-                .font(monospaced ? .system(.caption, design: .monospaced) : .caption)
-                .foregroundStyle(.primary)
+                .font(monospaced ? .system(size: 12, design: .monospaced) : .system(size: 12))
+                .foregroundStyle(BridgeTokens.fg2)
         }
     }
 

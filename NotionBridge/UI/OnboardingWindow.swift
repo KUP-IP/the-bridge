@@ -135,13 +135,12 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // PKT-879: progress + step caption inside the glass head
+            // PKT-879: progress + step caption inside the glass head (.ob-head)
             progressHeader
                 .padding(.top, 16)
-                .padding(.horizontal, 22)
-                .padding(.bottom, 8)
+                .padding(.horizontal, 20)
 
-            // Step content — PKT-357 F6: no implicit animation on step transitions
+            // Step content — PKT-357 F6: no implicit animation on step transitions (.ob-body)
             ScrollView {
                 Group {
                     switch currentStep {
@@ -161,25 +160,54 @@ struct OnboardingView: View {
                         testConnectionStep
                     }
                 }
-                .padding(.horizontal, 28)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 34)
+                .padding(.top, 20)
+                .padding(.bottom, 14)
                 .frame(maxWidth: .infinity)
             }
             .frame(maxHeight: .infinity)
 
-            // Navigation buttons in the foot rail
-            Divider()
-                .background(Color.white.opacity(0.08))
+            // Navigation foot rail (.ob-foot)
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 0.5)
             navigationButtons
-                .padding(.horizontal, 22)
-                .padding(.vertical, 14)
+                .padding(.horizontal, 18)
+                .padding(.top, 14)
+                .padding(.bottom, 18)
         }
         .frame(width: PKT879Onboarding.windowWidth, height: PKT879Onboarding.windowHeight)
+        .background(obShellBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5)
+        )
+        .overlay(
+            // top rim highlight (.ob inset 0 1px 0 rgba(255,255,255,.12))
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .inset(by: 0.5)
+                .stroke(LinearGradient(colors: [Color.white.opacity(0.12), .clear],
+                                       startPoint: .top, endPoint: .center), lineWidth: 0.5)
+                .allowsHitTesting(false)
+        )
+        .shadow(color: .black.opacity(0.6), radius: 50, y: 30)
         .onChange(of: currentStep) { _, newValue in
             UserDefaults.standard.set(newValue.rawValue, forKey: OnboardingResumeKey.stepRaw)
         }
         .onAppear {
             hasAcceptedLegal = UserDefaults.standard.bool(forKey: BridgeDefaults.hasAcceptedLegalTerms)
+        }
+    }
+
+    /// The `.ob` card surface — white-alpha glass gradient over raised carbon.
+    private var obShellBackground: some View {
+        ZStack {
+            BridgeTokens.bgCarbon2
+            LinearGradient(
+                colors: [Color.white.opacity(0.07), Color.white.opacity(0.02), Color.white.opacity(0.012)],
+                startPoint: .top, endPoint: .bottom
+            )
         }
     }
 
@@ -209,16 +237,17 @@ struct OnboardingView: View {
             .frame(height: 4)
 
             HStack {
-                Text("Step \(currentStep.rawValue + 1) of \(OnboardingStep.allCases.count)")
+                Text("Step \(currentStep.rawValue + 1) of \(OnboardingStep.allCases.count)".uppercased())
                     .font(.system(size: 11, weight: .semibold))
                     .tracking(1.1)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BridgeTokens.fg4)
                 Spacer()
-                Text(stepCaption)
+                Text(stepCaption.uppercased())
                     .font(.system(size: 11, weight: .semibold))
                     .tracking(1.1)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BridgeTokens.fg4)
             }
+            .padding(.top, 1)
         }
     }
 
@@ -259,111 +288,204 @@ struct OnboardingView: View {
         loadResumeStep().rawValue >= OnboardingStep.manualPermissions.rawValue
     }
 
+    // MARK: - Shared step primitives (matches onboarding.css .ob-hero / .ob-title / .ob-sub / .ob-kp)
+
+    /// 78×78 glass hero tile holding an SF Symbol — accent tint by default,
+    /// gold variant for the credential step. Mirrors `.ob-hero`.
+    private func obHero(_ systemName: String, tone: HeroTone = .accent) -> some View {
+        let tint = tone == .gold ? BridgeTokens.gold : BridgeTokens.accent
+        let glyph = tone == .gold ? BridgeTokens.gold : BridgeTokens.accentLink
+        return ZStack {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(tint.opacity(0.18))
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(
+                    RadialGradient(
+                        colors: [Color.white.opacity(0.30), Color.white.opacity(0.06), .clear],
+                        center: UnitPoint(x: 0.3, y: 0.18), startRadius: 2, endRadius: 70
+                    )
+                )
+        }
+        .frame(width: 78, height: 78)
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.20), lineWidth: 1)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .inset(by: 0.5)
+                .stroke(LinearGradient(colors: [Color.white.opacity(0.40), .clear],
+                                       startPoint: .top, endPoint: .center), lineWidth: 0.5)
+                .allowsHitTesting(false)
+        )
+        .shadow(color: .black.opacity(0.4), radius: 11, y: 8)
+        .overlay(
+            Image(systemName: systemName)
+                .font(.system(size: 32, weight: .medium))
+                .foregroundStyle(glyph)
+        )
+    }
+
+    private enum HeroTone { case accent, gold }
+
+    /// `.ob-title` — 23pt semibold display title.
+    private func obTitle(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 23, weight: .semibold))
+            .tracking(-0.4)
+            .foregroundStyle(BridgeTokens.fg1)
+            .multilineTextAlignment(.center)
+            .opacity(1)
+    }
+
+    /// `.ob-sub` — 13.5pt secondary subtitle.
+    private func obSub(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 13.5))
+            .foregroundStyle(BridgeTokens.fg3)
+            .multilineTextAlignment(.center)
+            .lineSpacing(2)
+            .frame(maxWidth: 390)
+    }
+
+    /// `.ob-kp` — numbered/glyph bullet + key-point text row.
+    private func obPointRow(bullet: String, mono: Bool = false, @ViewBuilder text: () -> some View) -> some View {
+        HStack(alignment: .top, spacing: 11) {
+            Text(bullet)
+                .font(.system(size: mono ? 13 : 12, weight: .semibold))
+                .foregroundStyle(BridgeTokens.accentLink)
+                .frame(width: 24, height: 24)
+                .background(BridgeTokens.accent.opacity(0.22), in: Circle())
+            text()
+                .font(.system(size: 12.5))
+                .foregroundStyle(BridgeTokens.fg2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// `.ob-flabel` — uppercase field label.
+    private func obFieldLabel(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(.system(size: 11, weight: .semibold))
+            .tracking(1.1)
+            .foregroundStyle(BridgeTokens.fg4)
+    }
+
     // MARK: - Welcome Step (PKT-357: F6, F7, F8)
 
     private var welcomeStep: some View {
-        VStack(spacing: 16) {
-            // PKT-357 F7: Larger brand icon for visual impact
-            Image(systemName: "bridge.fill")
-                .font(.system(size: 56))
-                .foregroundStyle(BridgeTokens.accent)
+        VStack(spacing: 0) {
+            obHero("bridge.fill")
+                .padding(.top, 8)
 
-            // PKT-357 F6: Explicit opacity to prevent animation fade-in
-            Text("Welcome to Notion Bridge")
-                .font(.title)
-                .fontWeight(.semibold)
-                .opacity(1)
+            obTitle("Welcome to The Bridge")
+                .padding(.top, 18)
 
             // PKT-357 F8: Power language — direct, confident, concise
-            Text("Your Mac, fully connected to Notion AI. Manage files, execute commands, control apps, and automate workflows through a secure local MCP server. Every action requires your explicit permission.")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 16)
+            obSub("One local MCP server for every AI client. Your Mac, fully connected — files, commands, apps, and workflows, all behind your explicit permission.")
+                .padding(.top, 14)
 
+            VStack(spacing: 0) {
+                obPointRow(bullet: "1") {
+                    Text("**Local-first.** Tokens stay on your Mac — zero servers, zero telemetry.")
+                }
+                .padding(.vertical, 8)
+                obPointRow(bullet: "2") {
+                    Text("**One surface.** The same tools in every client you connect.")
+                }
+                .padding(.vertical, 8)
+                obPointRow(bullet: "3") {
+                    Text("**In control.** Destructive calls need your confirmation.")
+                }
+                .padding(.vertical, 8)
+            }
+            .padding(.top, 14)
         }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Legal Acceptance Step (PKT-491)
 
     private var legalAcceptanceStep: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "doc.text.fill")
-                .font(.system(size: 40))
-                .foregroundStyle(BridgeTokens.accent)
+        VStack(spacing: 0) {
+            obHero("doc.text.fill")
+                .padding(.top, 8)
 
-            Text("Privacy & Terms")
-                .font(.title2)
-                .fontWeight(.semibold)
+            obTitle("Privacy & Terms")
+                .padding(.top, 18)
 
-            Text("Before we set up permissions, please review how NotionBridge handles your data.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 8)
+            obSub("Before we set up permissions, here's how The Bridge handles your data.")
+                .padding(.top, 14)
 
-            // Key points summary
-            VStack(alignment: .leading, spacing: 10) {
+            // Key points summary — carbon inset card
+            VStack(alignment: .leading, spacing: 12) {
                 legalBullet(
                     icon: "lock.shield.fill",
-                    color: .green,
+                    color: BridgeTokens.ok,
                     text: "All data stays on your Mac — zero servers, zero telemetry"
                 )
                 legalBullet(
                     icon: "network.slash",
-                    color: .blue,
+                    color: BridgeTokens.accentLink,
                     text: "No data transmitted to us — outbound connections only to services you configure (Notion, Stripe, Cloudflare)"
                 )
                 legalBullet(
                     icon: "hand.raised.fill",
-                    color: .orange,
+                    color: BridgeTokens.warn,
                     text: "You control all permissions — deny or revoke any macOS grant at any time"
                 )
             }
-            .padding(12)
-            .background(Color.gray.opacity(0.05))
-            .cornerRadius(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .background(Color.black.opacity(0.20), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+            .padding(.top, 20)
 
             // Full document links
-            HStack(spacing: 16) {
+            HStack(spacing: 18) {
                 Link(destination: URL(string: "https://kup.solutions/privacy")!) {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.up.right.square")
                         Text("Privacy Policy")
                     }
-                    .font(.caption)
+                    .font(.system(size: 12, weight: .medium))
                 }
                 Link(destination: URL(string: "https://kup.solutions/terms")!) {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.up.right.square")
                         Text("Terms of Service")
                     }
-                    .font(.caption)
+                    .font(.system(size: 12, weight: .medium))
                 }
             }
-            .foregroundStyle(BridgeTokens.accent)
+            .foregroundStyle(BridgeTokens.accentLink)
+            .padding(.top, 16)
 
             // Acceptance checkbox
-            HStack(alignment: .top, spacing: 8) {
-                Toggle(isOn: $hasAcceptedLegal) {
-                    Text("I have read and agree to the **Privacy Policy** and **Terms of Service**")
-                        .font(.callout)
-                        .multilineTextAlignment(.leading)
-                }
-                .toggleStyle(.checkbox)
+            Toggle(isOn: $hasAcceptedLegal) {
+                Text("I have read and agree to the **Privacy Policy** and **Terms of Service**")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(BridgeTokens.fg2)
+                    .multilineTextAlignment(.leading)
             }
-            .padding(.top, 4)
+            .toggleStyle(.checkbox)
+            .tint(BridgeTokens.accent)
+            .padding(.top, 16)
         }
+        .frame(maxWidth: .infinity)
     }
 
     private func legalBullet(icon: String, color: Color, text: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 11) {
             Image(systemName: icon)
+                .font(.system(size: 13))
                 .foregroundStyle(color)
                 .frame(width: 20)
             Text(text)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 12))
+                .foregroundStyle(BridgeTokens.fg3)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -371,23 +493,29 @@ struct OnboardingView: View {
     // MARK: - Workspace Setup Step
 
     private var workspaceSetupStep: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "key.fill")
-                .font(.system(size: 40))
-                .foregroundStyle(BridgeTokens.accent)
+        VStack(spacing: 0) {
+            obHero("key.fill", tone: .gold)
+                .padding(.top, 8)
 
-            Text("Connect a Service")
-                .font(.title2)
-                .fontWeight(.semibold)
+            obTitle("Connect a workspace")
+                .padding(.top, 18)
 
-            Text("Add your Notion API token to get started. You can add more connections later in Settings.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 8)
+            obSub("Paste a secret. It's stored in your Keychain — never sent anywhere. Add more connections later in Settings.")
+                .padding(.top, 14)
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    obFieldLabel("Workspace")
+                    TextField(selectedProvider.namePlaceholder, text: $workspaceName)
+                        .textFieldStyle(.roundedBorder)
+                }
 
+                VStack(alignment: .leading, spacing: 6) {
+                    obFieldLabel("Integration token")
+                    SecureField(selectedProvider.tokenPlaceholder, text: $workspaceToken)
+                        .textContentType(.none)
+                        .textFieldStyle(.roundedBorder)
+                }
 
                 if let helpURL = selectedProvider.helpURL {
                     Link(destination: helpURL) {
@@ -395,67 +523,39 @@ struct OnboardingView: View {
                             Image(systemName: "arrow.up.right.square")
                             Text(selectedProvider.helpLabel)
                         }
-                        .font(.caption)
-                        .foregroundStyle(BridgeTokens.accent)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(BridgeTokens.accentLink)
                     }
                 }
-
-                TextField(selectedProvider.namePlaceholder, text: $workspaceName)
-                    .textFieldStyle(.roundedBorder)
-
-                SecureField(selectedProvider.tokenPlaceholder, text: $workspaceToken)
-                .textContentType(.none)
-                    .textFieldStyle(.roundedBorder)
             }
-            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 20)
 
             if let workspaceError {
-                Text(workspaceError)
-                    .font(.caption)
-                    .foregroundStyle(BridgeTokens.bad)
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(BridgeTokens.bad)
+                    Text(workspaceError)
+                        .font(.system(size: 12))
+                        .foregroundStyle(BridgeTokens.badText)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 12)
             }
 
             if workspaceSaved {
-                HStack(spacing: 4) {
+                HStack(spacing: 6) {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(BridgeTokens.ok)
-                    Text("Workspace connected!")
-                        .font(.caption)
-                        .foregroundStyle(BridgeTokens.ok)
+                    Text("Workspace connected.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(BridgeTokens.okText)
                 }
-            }
-
-            HStack(spacing: 16) {
-                if !workspaceSaved {
-                    Button("Save & Continue") {
-                        Task { await saveWorkspaceConnection() }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(BridgeTokens.accent)
-                    .disabled(
-                        workspaceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        || workspaceToken.isEmpty
-                        || isSavingWorkspace
-                    )
-                }
-
-                if workspaceSaved {
-                    Button("Continue") {
-                        currentStep = OnboardingStep(rawValue: currentStep.rawValue + 1) ?? .testConnection
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(BridgeTokens.accent)
-                    .font(.callout)
-                } else {
-                    Button("Skip for now") {
-                        currentStep = OnboardingStep(rawValue: currentStep.rawValue + 1) ?? .testConnection
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .font(.callout)
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 12)
             }
         }
+        .frame(maxWidth: .infinity)
     }
 
     private func saveWorkspaceConnection() async {
@@ -509,22 +609,19 @@ struct OnboardingView: View {
     // MARK: - Connection Step (D3)
 
     private var connectionStep: some View {
-        VStack(spacing: 16) {
-            Text("Connect to Notion Bridge")
-                .font(.title2)
-                .fontWeight(.semibold)
+        VStack(spacing: 0) {
+            obTitle("Point a client at Bridge")
+                .padding(.top, 10)
 
-            Text("Copy the connection config and paste it into your AI client\u{2019}s MCP settings.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+            obSub("Paste an endpoint into your AI client\u{2019}s MCP settings.")
+                .padding(.top, 14)
 
             VStack(spacing: 12) {
                 // Card 1 — Streamable HTTP (Recommended)
                 transportConfigCard(
                     transport: "Streamable HTTP",
                     badge: "Recommended",
-                    badgeColor: .green,
+                    recommended: true,
                     helperText: "Works with Cursor, Claude Code, and most modern MCP clients. Paste into your client\u{2019}s MCP server configuration.",
                     config: """
                     {
@@ -541,8 +638,8 @@ struct OnboardingView: View {
                 DisclosureGroup(isExpanded: $showLegacySSE) {
                     transportConfigCard(
                         transport: "Legacy SSE",
-                        badge: nil,
-                        badgeColor: .clear,
+                        badge: "Legacy",
+                        recommended: false,
                         helperText: "For Claude Desktop and clients that use Server-Sent Events. Use this if Streamable HTTP doesn\u{2019}t work with your client.",
                         config: """
                         {
@@ -557,142 +654,178 @@ struct OnboardingView: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "antenna.radiowaves.left.and.right")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(BridgeTokens.fg3)
                         Text("Legacy SSE Transport")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(BridgeTokens.fg3)
                     }
                 }
+                .tint(BridgeTokens.accentLink)
             }
+            .padding(.top, 18)
         }
+        .frame(maxWidth: .infinity)
     }
 
-    // D3: Transport-oriented config card (replaces client-named clientConfigCard)
-    private func transportConfigCard(transport: String, badge: String?, badgeColor: Color, helperText: String, config: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Text(transport)
-                    .font(.callout)
-                    .fontWeight(.medium)
+    // D3: Transport-oriented config card (matches .ob-tcard / .ob-tcard.rec)
+    private func transportConfigCard(transport: String, badge: String?, recommended: Bool, helperText: String, config: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
                 if let badge = badge {
-                    Text(badge)
-                        .font(.caption2)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(badgeColor)
-                        .cornerRadius(4)
+                    BridgeBadge(badge, tone: recommended ? .info : .neutral)
                 }
+                Text(transport)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(BridgeTokens.fg1)
                 Spacer()
-                Button("Copy Config") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(config, forType: .string)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
             }
 
             Text(helperText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 11.5))
+                .foregroundStyle(BridgeTokens.fg3)
+                .fixedSize(horizontal: false, vertical: true)
 
             Text(config)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .padding(8)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(BridgeTokens.fg2)
+                .padding(9)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(6)
+                .background(Color.black.opacity(0.30), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5))
+
+            HStack {
+                Spacer()
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(config, forType: .string)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "doc.on.doc")
+                        Text("Copy")
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(BridgeTokens.accent)
+            }
         }
-        .padding(12)
-        .background(Color.gray.opacity(0.05))
-        .cornerRadius(8)
+        .padding(14)
+        .background(
+            (recommended ? BridgeTokens.accent.opacity(0.10) : Color.black.opacity(0.20)),
+            in: RoundedRectangle(cornerRadius: 11, style: .continuous)
+        )
+        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+            .strokeBorder(
+                recommended ? BridgeTokens.accent.opacity(0.40) : Color.white.opacity(0.10),
+                lineWidth: recommended ? 1 : 0.5))
     }
 
     // MARK: - Test Connection Step (PKT-357 F9: Cleaned up idle text)
 
     private var testConnectionStep: some View {
-        VStack(spacing: 20) {
-            // Status icon
-            Group {
-                switch healthCheckStatus {
-                case .idle:
-                    Image(systemName: "network")
-                        .font(.system(size: 48))
-                        .foregroundStyle(.gray)
-                case .checking:
-                    ProgressView()
-                        .scaleEffect(1.5)
-                        .frame(height: 48)
-                case .success:
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 48))
-                        .foregroundStyle(BridgeTokens.ok)
-                case .failed:
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 48))
-                        .foregroundStyle(BridgeTokens.warn)
-                }
-            }
+        VStack(spacing: 0) {
+            // Status medallion — 96px glass circle (matches .ob-check)
+            healthMedallion
+                .padding(.top, 8)
 
-            Text("Test Connection")
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            Text("Make sure Notion Bridge is running and your client can reach it.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 16)
+            obTitle(healthCheckStatus.isSuccess ? "Bridge is up" : "Test the connection")
+                .padding(.top, 18)
 
             // Health check result — PKT-357 F9: Removed misleading "options" text
             Group {
                 switch healthCheckStatus {
                 case .idle:
-                    Text("Verify that the MCP server is running and reachable.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    obSub("Verify that the MCP server is running and reachable from your client.")
                 case .checking:
-                    Text("Checking health endpoint...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    obSub("Checking health endpoint\u{2026}")
                 case .success:
-                    Text("Notion Bridge is running and responding! You\u{2019}re all set.")
-                        .font(.caption)
-                        .foregroundStyle(BridgeTokens.ok)
+                    obSub("The Bridge is running and responding. You\u{2019}re ready.")
                 case .failed(let reason):
                     Text("Connection check failed: \(reason)")
-                        .font(.caption)
-                        .foregroundStyle(BridgeTokens.warn)
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(BridgeTokens.warnText)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 390)
                 }
             }
-
-            Button {
-                runHealthCheck()
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "bolt.fill")
-                    Text(healthCheckButtonLabel)
-                }
-                .frame(minWidth: 160)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(healthCheckStatus.isSuccess ? BridgeTokens.ok : BridgeTokens.accent)
-            .disabled(healthCheckStatus.isChecking)
+            .padding(.top, 14)
 
             if healthCheckStatus.isSuccess {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(spacing: 0) {
                     // PKT-879: final step tips lead with the Dashboard (the
                     // menu-bar popover) as the user's landing surface.
-                    tipRow(icon: "menubar.arrow.up.rectangle",
-                           text: "The menu bar icon opens the Dashboard \u{2014} status, clients, settings")
-                    tipRow(icon: "command",
-                           text: "Press \u{2318}\u{2325}\u{2303}C to open the Command Bridge")
-                    tipRow(icon: "shield.checkered",
-                           text: "Destructive actions require approval via notification")
+                    tipRow(bullet: "▦",
+                           text: "The menu bar icon opens the **Dashboard** — status, clients, settings.")
+                    .padding(.vertical, 8)
+                    tipRow(bullet: "⌘",
+                           text: "Press **⌃ ⌥ ⌘ C** to open the **Command Bridge**.")
+                    .padding(.vertical, 8)
+                    tipRow(bullet: "↗",
+                           text: "Destructive actions require approval via notification.")
+                    .padding(.vertical, 8)
                 }
-                .padding(.top, 4)
+                .padding(.top, 16)
+            } else {
+                Button {
+                    runHealthCheck()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "bolt.fill")
+                        Text(healthCheckButtonLabel)
+                    }
+                    .frame(minWidth: 160)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(BridgeTokens.accent)
+                .controlSize(.large)
+                .disabled(healthCheckStatus.isChecking)
+                .padding(.top, 20)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// 96pt glass medallion holding the health-check status glyph (matches `.ob-check`).
+    @ViewBuilder private var healthMedallion: some View {
+        let success = healthCheckStatus.isSuccess
+        let tint: Color = {
+            switch healthCheckStatus {
+            case .success: return BridgeTokens.ok
+            case .failed:  return BridgeTokens.warn
+            default:       return BridgeTokens.accent
+            }
+        }()
+        ZStack {
+            Circle().fill(tint.opacity(0.22))
+            Circle().fill(
+                RadialGradient(
+                    colors: [Color.white.opacity(0.36), Color.white.opacity(0.06), .clear],
+                    center: UnitPoint(x: 0.3, y: 0.18), startRadius: 2, endRadius: 80
+                )
+            )
+        }
+        .frame(width: 96, height: 96)
+        .overlay(Circle().strokeBorder(tint.opacity(0.45), lineWidth: 1.5))
+        .shadow(color: success ? BridgeTokens.ok.opacity(0.30) : .black.opacity(0.4),
+                radius: success ? 18 : 12, y: success ? 0 : 8)
+        .overlay {
+            switch healthCheckStatus {
+            case .checking:
+                ProgressView().scaleEffect(1.3)
+            case .success:
+                Image(systemName: "checkmark")
+                    .font(.system(size: 38, weight: .bold))
+                    .foregroundStyle(BridgeTokens.okText)
+            case .failed:
+                Image(systemName: "exclamationmark")
+                    .font(.system(size: 40, weight: .bold))
+                    .foregroundStyle(BridgeTokens.warnText)
+            case .idle:
+                Image(systemName: "network")
+                    .font(.system(size: 38, weight: .medium))
+                    .foregroundStyle(BridgeTokens.accentLink)
             }
         }
     }
@@ -730,59 +863,98 @@ struct OnboardingView: View {
         }
     }
 
-    private func tipRow(icon: String, text: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .foregroundStyle(BridgeTokens.accent)
-                .frame(width: 20)
+    private func tipRow(bullet: String, text: LocalizedStringKey) -> some View {
+        HStack(alignment: .top, spacing: 11) {
+            Text(bullet)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(BridgeTokens.accentLink)
+                .frame(width: 24, height: 24)
+                .background(BridgeTokens.accent.opacity(0.22), in: Circle())
             Text(text)
-                .font(.callout)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 12.5))
+                .foregroundStyle(BridgeTokens.fg2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     // MARK: - Navigation (PKT-357 F6: Removed withAnimation to prevent header fade)
 
     private var navigationButtons: some View {
-        HStack {
+        HStack(spacing: 8) {
             if currentStep != .welcome {
-                Button("Back") {
+                footSecondaryButton("Back") {
                     // PKT-357 F6: No animation — prevents welcome header opacity fade
                     currentStep = OnboardingStep(rawValue: currentStep.rawValue - 1) ?? .welcome
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+            }
+
+            // Workspace step exposes a "Skip for now" secondary (matches design).
+            if currentStep == .workspaceSetup, !workspaceSaved {
+                footSecondaryButton("Skip for now") {
+                    currentStep = OnboardingStep(rawValue: currentStep.rawValue + 1) ?? .testConnection
+                }
             }
 
             Spacer()
 
-            if currentStep == .workspaceSetup {
-                // Workspace step has its own Save & Skip buttons
-                EmptyView()
-            } else if currentStep == .testConnection {
-                // PKT-879: explicit "lands user in the Dashboard" CTA.
-                Button("Open Bridge") {
-                    onComplete()
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(BridgeTokens.accent)
-            } else {
-                Button("Continue") {
-                    // PKT-491: Record legal acceptance when advancing past legal step
-                    if currentStep == .legalAcceptance {
-                        UserDefaults.standard.set(true, forKey: BridgeDefaults.hasAcceptedLegalTerms)
-                        UserDefaults.standard.set(Date().ISO8601Format(), forKey: "legalAcceptanceDate")
-                        print("[Onboarding] Legal terms accepted at \(Date().ISO8601Format())")
-                    }
-                    // PKT-357 F6: No animation — prevents welcome header opacity fade
+            primaryNavButton
+        }
+    }
+
+    /// The accent primary CTA — label + action vary per step. Binding logic
+    /// (legal acceptance, workspace save/advance, completion) preserved verbatim.
+    @ViewBuilder private var primaryNavButton: some View {
+        switch currentStep {
+        case .workspaceSetup:
+            if workspaceSaved {
+                footPrimaryButton("Continue") {
                     currentStep = OnboardingStep(rawValue: currentStep.rawValue + 1) ?? .testConnection
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(BridgeTokens.accent)
+            } else {
+                footPrimaryButton(
+                    isSavingWorkspace ? "Saving\u{2026}" : "Save & Continue",
+                    disabled: workspaceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || workspaceToken.isEmpty
+                        || isSavingWorkspace
+                ) {
+                    Task { await saveWorkspaceConnection() }
+                }
+            }
+        case .testConnection:
+            // PKT-879: explicit "lands user in the Dashboard" CTA.
+            footPrimaryButton("Open Bridge") { onComplete() }
+        default:
+            footPrimaryButton(
+                currentStep == .welcome ? "Get started" : "Continue",
                 // PKT-491: Gate Continue on legal acceptance
-                .disabled(currentStep == .legalAcceptance && !hasAcceptedLegal)
+                disabled: currentStep == .legalAcceptance && !hasAcceptedLegal
+            ) {
+                // PKT-491: Record legal acceptance when advancing past legal step
+                if currentStep == .legalAcceptance {
+                    UserDefaults.standard.set(true, forKey: BridgeDefaults.hasAcceptedLegalTerms)
+                    UserDefaults.standard.set(Date().ISO8601Format(), forKey: "legalAcceptanceDate")
+                    print("[Onboarding] Legal terms accepted at \(Date().ISO8601Format())")
+                }
+                // PKT-357 F6: No animation — prevents welcome header opacity fade
+                currentStep = OnboardingStep(rawValue: currentStep.rawValue + 1) ?? .testConnection
             }
         }
+    }
+
+    private func footPrimaryButton(_ title: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(BridgeTokens.accent)
+            .disabled(disabled)
+    }
+
+    private func footSecondaryButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.plain)
+            .controlSize(.large)
+            .foregroundStyle(BridgeTokens.fg3)
     }
 }
 

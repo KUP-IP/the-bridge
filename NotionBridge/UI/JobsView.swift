@@ -1,439 +1,290 @@
-// JobsView.swift — Settings > Jobs panel (v1.9.4)
-// NotionBridge · UI
+// JobsView.swift — Settings > Jobs · shared row / detail / sheet components.
+// NotionBridge · UI · v3.7.3 redesign
 //
-// v1.9.4 redesign: vertical stacked layout matching macOS System Settings.
-// HSplitView master/detail replaced with ScrollView/LazyVStack + inline row expansion.
-// Segmented filter (All/Active/Paused), footer toolbar for bulk actions,
-// +New job sheet, adaptive collapse via ViewThatFits, count chip with correct pluralization.
+// v3.7.3 redesign: the Jobs page is now owned end-to-end by JobsSection (the
+// locked Liquid-Glass mockup — hero stat tiles, failing-job alert banner,
+// glass scheduled-job rows, expandable run-log). This file no longer renders
+// the page chrome; it hosts the reusable pieces JobsSection composes:
+//   • JobGlassRow      — one scheduled-job row (icon tile, name, schedule,
+//                        next-run, status dot/badge, pause/resume + run icons)
+//   • JobDetailView    — the inline-expand editor (name/schedule/actions/options
+//                        + Run/Duplicate/Pause/Delete/Save) — bindings verbatim
+//   • NewJobSheet      — +New job sheet (create)
+//   • ImportSheet      — paste/load a jobs export
 //
-// Previous: v1.10.0 restored sidebar section after v1.8.5 audit removal.
+// EVERY store binding and action is preserved verbatim from the prior
+// JobsView/JobCard implementation — only the presentation moved to glass.
+// The public `JobsView` shim renders JobsSection so any stray caller still
+// resolves to the redesigned page.
 
 import SwiftUI
 import AppKit
 
-// MARK: - Root view
+// MARK: - Public shim
 
+/// Back-compat entry point. The Jobs page is rendered by ``JobsSection``;
+/// this thin wrapper keeps `JobsView()` resolving to the redesigned page.
 public struct JobsView: View {
-    @State private var jobs: [JobRecord] = []
-    @State private var isLoading = true
-    @State private var errorMessage: String?
-    @State private var expandedJobId: String?
-    @State private var searchText: String = ""
-    @State private var sortOption: SortOption = .nameAsc
-    @State private var statusFilter: StatusFilter = .all
-    @State private var showImportSheet = false
-    @State private var showNewJobSheet = false
-    @State private var importJSONText = ""
-    @State private var bulkInProgress = false
-    @State private var bulkMessage: String?
-
-    enum SortOption: String, CaseIterable, Identifiable {
-        case nameAsc = "Name (A–Z)"
-        case nameDesc = "Name (Z–A)"
-        case updatedDesc = "Recently updated"
-        case statusActive = "Active first"
-        var id: String { rawValue }
-    }
-
-    enum StatusFilter: String, CaseIterable, Identifiable {
-        case all = "All"
-        case active = "Active"
-        case paused = "Paused"
-        var id: String { rawValue }
-    }
-
     public init() {}
-
-    public var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header.padding(.horizontal, 16).padding(.top, 14)
-            filterBar.padding(.horizontal, 16).padding(.top, 10)
-            searchAndSort.padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 10)
-            Divider()
-            content
-            Divider()
-            footerToolbar.padding(.horizontal, 16).padding(.vertical, 10)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .task { await reload() }
-        .onReceive(NotificationCenter.default.publisher(for: .jobsDidChange)) { _ in
-            Task { await reload() }
-        }
-        .sheet(isPresented: $showImportSheet) {
-            ImportSheet(jsonText: $importJSONText, onCancel: {
-                showImportSheet = false
-                importJSONText = ""
-            }, onImport: { text in
-                Task {
-                    await doImport(json: text)
-                    showImportSheet = false
-                    importJSONText = ""
-                }
-            })
-        }
-        .sheet(isPresented: $showNewJobSheet) {
-            NewJobSheet(onCancel: { showNewJobSheet = false },
-                        onCreate: { await reload(); showNewJobSheet = false })
-        }
-    }
-
-    // MARK: Header
-
-    private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Scheduled Jobs").font(.title2.bold())
-                Text("Background automations triggered by launchd.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button {
-                showNewJobSheet = true
-            } label: {
-                Label("New", systemImage: "plus.circle.fill")
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
-        }
-    }
-
-    private var filterBar: some View {
-        Picker("Filter", selection: $statusFilter) {
-            ForEach(StatusFilter.allCases) { Text($0.rawValue).tag($0) }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-    }
-
-    private var searchAndSort: some View {
-        HStack(spacing: 8) {
-            searchField
-            Picker("Sort", selection: $sortOption) {
-                ForEach(SortOption.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.menu)
-            .frame(maxWidth: 200)
-        }
-    }
-
-    private var searchField: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("Search jobs", text: $searchText)
-                .textFieldStyle(.plain)
-        }
-        .padding(.horizontal, 8).padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.1)))
-    }
-
-    // MARK: Content
-
-    @ViewBuilder
-    private var content: some View {
-        if isLoading {
-            ProgressView("Loading jobs…").frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let err = errorMessage {
-            VStack(spacing: 8) {
-                Image(systemName: "exclamationmark.triangle").font(.largeTitle).foregroundStyle(BridgeTokens.warn)
-                Text(err).font(.callout).foregroundStyle(.secondary)
-                Button("Retry") { Task { await reload() } }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if filteredJobs.isEmpty {
-            emptyState
-        } else {
-            ScrollView {
-                // PKT-934 W1: card-stack spacing aligned to the
-                // BridgeSpacing grid (sm) so the Jobs and Tools card pages
-                // share one tier; was an off-grid literal 10.
-                LazyVStack(spacing: BridgeSpacing.sm) {
-                    ForEach(filteredJobs, id: \.id) { job in
-                        JobCard(
-                            job: job,
-                            isExpanded: expandedJobId == job.id,
-                            onToggle: {
-                                withAnimation(.easeInOut(duration: 0.18)) {
-                                    expandedJobId = (expandedJobId == job.id ? nil : job.id)
-                                }
-                            },
-                            onChanged: { Task { await reload() } }
-                        )
-                    }
-                }
-                .padding(BridgeSpacing.md)
-            }
-        }
-    }
-
-    private var emptyState: some View {
-        // PKT-934 W2: empty-state spacing aligned to the BridgeSpacing grid
-        // (sm between stack items, xs between the action buttons); copy
-        // tightened. Two CTAs are retained, so the shared single-CTA
-        // BridgeEmptyState component is intentionally not used here.
-        VStack(spacing: BridgeSpacing.sm) {
-            Image(systemName: "clock.badge.checkmark")
-                .font(.system(size: 42))
-                .foregroundStyle(.tertiary)
-            Text("No scheduled jobs yet").font(.headline)
-            Text("Tap **New** to create a job, or import a job export file.")
-                .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            HStack(spacing: BridgeSpacing.xs) {
-                Button("New Job") { showNewJobSheet = true }.buttonStyle(.borderedProminent)
-                Button("Import…") { showImportSheet = true }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    // MARK: Footer toolbar
-
-    private var footerToolbar: some View {
-        HStack(spacing: 10) {
-            Text(countChip).font(.caption).foregroundStyle(.secondary)
-            Spacer()
-            Button { Task { await pauseAll() } } label: { Label("Pause All", systemImage: "pause.circle") }
-                .disabled(bulkInProgress || jobs.filter { $0.status == .active }.isEmpty)
-                .controlSize(.small)
-            Button { Task { await resumeAll() } } label: { Label("Resume All", systemImage: "play.circle") }
-                .disabled(bulkInProgress || jobs.filter { $0.status == .paused }.isEmpty)
-                .controlSize(.small)
-            Button { Task { await exportAll() } } label: { Label("Export", systemImage: "square.and.arrow.up") }
-                .disabled(jobs.isEmpty)
-                .controlSize(.small)
-            Button { showImportSheet = true } label: { Label("Import", systemImage: "square.and.arrow.down") }
-                .controlSize(.small)
-            if let msg = bulkMessage {
-                // PKT-934 W2: bulk-action failures surface as a consistent
-                // warning pill (shared BridgeBadge), not bare grey text, so
-                // the error treatment matches the rest of the app; success
-                // notices stay as quiet secondary text.
-                if msg.localizedCaseInsensitiveContains("failed") {
-                    BridgeBadge(msg, systemImage: "exclamationmark.triangle.fill", tone: .warning)
-                } else {
-                    Text(msg).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-        }
-    }
-
-    private var countChip: String {
-        let n = jobs.count
-        let active = jobs.filter { $0.status == .active }.count
-        let jobLabel = n == 1 ? "job" : "jobs"
-        return "\(n) \(jobLabel) · \(active) active"
-    }
-
-    // MARK: Derived
-
-    private var filteredJobs: [JobRecord] {
-        var base = jobs
-        switch statusFilter {
-        case .all: break
-        case .active: base = base.filter { $0.status == .active }
-        case .paused: base = base.filter { $0.status == .paused }
-        }
-        if !searchText.trimmingCharacters(in: .whitespaces).isEmpty {
-            let q = searchText.lowercased()
-            base = base.filter {
-                $0.name.lowercased().contains(q) ||
-                $0.schedule.lowercased().contains(q) ||
-                $0.id.lowercased().contains(q)
-            }
-        }
-        switch sortOption {
-        case .nameAsc: return base.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        case .nameDesc: return base.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
-        case .updatedDesc: return base.sorted { $0.updatedAt > $1.updatedAt }
-        case .statusActive: return base.sorted {
-            ($0.status == .active ? 0 : 1, $0.name) < ($1.status == .active ? 0 : 1, $1.name)
-        }
-        }
-    }
-
-    // MARK: Actions
-
-    private func reload() async {
-        isLoading = true
-        defer { isLoading = false }
-        do {
-            let all = try await JobStore.shared.listAll(statusFilter: nil)
-            await MainActor.run {
-                self.jobs = all
-                self.errorMessage = nil
-                if let sel = self.expandedJobId, !all.contains(where: { $0.id == sel }) {
-                    self.expandedJobId = nil
-                }
-            }
-        } catch {
-            await MainActor.run { self.errorMessage = "\(error)" }
-        }
-    }
-
-    private func pauseAll() async {
-        bulkInProgress = true; defer { bulkInProgress = false }
-        do {
-            _ = try await JobsManager.shared.pauseAllTool(args: .object([:]))
-            await reload()
-            await MainActor.run { bulkMessage = "Paused all active jobs." }
-        } catch {
-            await MainActor.run { bulkMessage = "Pause all failed: \(error)" }
-        }
-    }
-
-    private func resumeAll() async {
-        bulkInProgress = true; defer { bulkInProgress = false }
-        do {
-            _ = try await JobsManager.shared.resumeAllTool(args: .object([:]))
-            await reload()
-            await MainActor.run { bulkMessage = "Resumed all paused jobs." }
-        } catch {
-            await MainActor.run { bulkMessage = "Resume all failed: \(error)" }
-        }
-    }
-
-    private func exportAll() async {
-        do {
-            let result = try await JobsManager.shared.exportJobsTool(args: .object([:]))
-            guard case .object(let o) = result, case .string(let json)? = o["json"] else { return }
-            let panel = NSSavePanel()
-            panel.title = "Export Jobs"
-            panel.nameFieldStringValue = "notion-bridge-jobs.json"
-            panel.allowedContentTypes = [.json]
-            if panel.runModal() == .OK, let url = panel.url {
-                try json.data(using: .utf8)?.write(to: url)
-                await MainActor.run { bulkMessage = "Exported \(self.jobs.count) jobs." }
-            }
-        } catch {
-            await MainActor.run { bulkMessage = "Export failed: \(error)" }
-        }
-    }
-
-    private func doImport(json: String) async {
-        do {
-            _ = try await JobsManager.shared.importJobsTool(args: .object(["json": .string(json)]))
-            await reload()
-            await MainActor.run { bulkMessage = "Import complete." }
-        } catch {
-            await MainActor.run { bulkMessage = "Import failed: \(error)" }
-        }
-    }
+    public var body: some View { JobsSection() }
 }
 
-// MARK: - JobCard (inline-expand row)
+// MARK: - Scheduled-job row (glass)
 
-private struct JobCard: View {
+/// One scheduled-job row in the "Scheduled jobs" card — mirrors `.jb-row`
+/// from the locked mockup: an accent icon tile, name + mono cron + tool
+/// detail, an optional inline failing-credential banner, a right-aligned
+/// next-run column, a status badge, and pause/resume + run icon-buttons.
+/// Tapping the body toggles the inline detail editor.
+struct JobGlassRow: View {
     let job: JobRecord
+    /// Most-recent execution for this job, if any — drives the failing banner
+    /// + run-now ("retry") affordance. Derived by JobsSection from the store.
+    let lastExecution: ExecutionRecord?
     let isExpanded: Bool
     let onToggle: () -> Void
     let onChanged: () -> Void
+
+    @State private var busy = false
+
+    private var isFailing: Bool {
+        job.status == .active && lastExecution?.status == .failure
+    }
+
+    private var tone: Tone {
+        if isFailing { return .bad }
+        return job.status == .active ? .ok : .warn
+    }
+
+    private enum Tone { case ok, warn, bad
+        var dot: Color {
+            switch self { case .ok: return BridgeTokens.ok
+                          case .warn: return BridgeTokens.warn
+                          case .bad: return BridgeTokens.bad }
+        }
+        var badge: String {
+            switch self { case .ok: return "Active"; case .warn: return "Paused"; case .bad: return "Failing" }
+        }
+        var badgeBG: Color {
+            switch self { case .ok: return BridgeTokens.ok.opacity(0.16)
+                          case .warn: return BridgeTokens.warn.opacity(0.16)
+                          case .bad: return BridgeTokens.bad.opacity(0.14) }
+        }
+        var badgeFG: Color {
+            switch self { case .ok: return BridgeTokens.okText
+                          case .warn: return BridgeTokens.warnText
+                          case .bad: return BridgeTokens.badText }
+        }
+        var iconTint: Color {
+            switch self { case .ok: return BridgeTokens.okText
+                          case .warn: return BridgeTokens.warnText
+                          case .bad: return BridgeTokens.badText }
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            JobCardHeader(job: job, isExpanded: isExpanded, onToggle: onToggle, onChanged: onChanged)
+            rowHeader
             if isExpanded {
-                Divider()
+                Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5).padding(.top, 10)
                 JobDetailView(job: job, onChanged: onChanged)
+                    .padding(.top, 6)
             }
         }
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.secondary.opacity(0.06)))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.secondary.opacity(0.15), lineWidth: 0.5))
     }
-}
 
-private struct JobCardHeader: View {
-    let job: JobRecord
-    let isExpanded: Bool
-    let onToggle: () -> Void
-    let onChanged: () -> Void
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 8, height: 8)
+    private var rowHeader: some View {
+        HStack(alignment: .top, spacing: 11) {
+            iconTile
             VStack(alignment: .leading, spacing: 3) {
-                Text(job.name).font(.body.weight(.medium)).lineLimit(1)
-                Text((CronHumanizer.describe(job.schedule) ?? job.schedule))
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                HStack(spacing: 6) {
-                    Text("\(job.actionChain.count) action\(job.actionChain.count == 1 ? "" : "s")")
-                    if let primary = job.actionChain.first {
-                        Text("·").foregroundStyle(.tertiary)
-                        Text(primary.tool).monospaced()
-                    }
-                    // PKT-934 W2: surface a last-updated relative timestamp
-                    // in the app-wide compact format (just now / Xm / Xh /
-                    // Xd ago) — matches DashboardView.relativeTime and
-                    // SettingsWindow.relativeTimestamp.
-                    Text("·").foregroundStyle(.tertiary)
-                    Text("updated \(Self.relativeTime(from: job.updatedAt))")
-                    if job.skipOnBattery {
-                        Text("·").foregroundStyle(.tertiary)
-                        Image(systemName: "battery.25percent")
-                    }
-                }
-                .font(.caption2).foregroundStyle(.tertiary)
-                .lineLimit(1)
+                Text(job.name)
+                    .font(.system(size: 13.5, weight: .medium))
+                    .foregroundStyle(BridgeTokens.fg1)
+                    .lineLimit(1)
+                subline
+                if isFailing { failingBanner }
             }
-            Spacer()
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 6) {
+                Text(nextRunText)
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(BridgeTokens.fg3)
+                    .monospacedDigit()
+                statusBadge
+            }
+            actions
+            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(BridgeTokens.fg5)
+                .frame(width: 16)
+                .padding(.top, 4)
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture { onToggle() }
+    }
+
+    private var iconTile: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.white.opacity(0.05))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+            Image(systemName: jobGlyph)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(tone.iconTint)
+        }
+        .frame(width: 30, height: 30)
+        .padding(.top, 1)
+    }
+
+    private var subline: some View {
+        HStack(spacing: 5) {
+            Text(job.schedule)
+                .font(.system(size: 11.5, design: .monospaced))
+                .foregroundStyle(BridgeTokens.fg2)
+            Text("·").foregroundStyle(BridgeTokens.fg5)
+            Text(detailText)
+                .font(.system(size: 11.5))
+                .foregroundStyle(BridgeTokens.fg4)
+                .lineLimit(1)
+        }
+    }
+
+    private var failingBanner: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(BridgeTokens.badText)
+            Text(lastExecution?.errorMessage ?? "Last run failed — check the job log.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(BridgeTokens.badText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 11).padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(BridgeTokens.bad.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.bad.opacity(0.26), lineWidth: 0.5))
+        .padding(.top, 6)
+    }
+
+    private var statusBadge: some View {
+        Text(tone.badge)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(tone.badgeFG)
+            .padding(.horizontal, 9).padding(.vertical, 3)
+            .background(tone.badgeBG, in: Capsule())
+            .overlay(Capsule().strokeBorder(tone.dot.opacity(0.30), lineWidth: 0.5))
+    }
+
+    private var actions: some View {
+        HStack(spacing: 3) {
+            if job.status == .active {
+                iconButton("pause.fill", help: "Pause") { await pause() }
+            } else {
+                iconButton("play.fill", help: "Resume") { await resume() }
+            }
+            iconButton("arrow.clockwise", help: "Run now") { await runNow() }
             Menu {
-                Button { Task { _ = try? await JobsManager.shared.runNowTool(args: .object(["id": .string(job.id)])); onChanged() } }
-                    label: { Label("Run Now", systemImage: "play.fill") }
-                Button { Task { _ = try? await JobsManager.shared.duplicateJobTool(args: .object(["id": .string(job.id)])); onChanged() } }
-                    label: { Label("Duplicate", systemImage: "plus.square.on.square") }
+                Button { Task { await runNow() } } label: { Label("Run Now", systemImage: "play.fill") }
+                Button {
+                    Task {
+                        _ = try? await JobsManager.shared.duplicateJobTool(args: .object(["id": .string(job.id)]))
+                        onChanged()
+                    }
+                } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
                 Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(job.id, forType: .string)
                 } label: { Label("Copy ID", systemImage: "doc.on.doc") }
                 Divider()
-                if job.status == .active {
-                    Button { Task { _ = try? await JobsManager.shared.pauseJob(args: .object(["id": .string(job.id)])); onChanged() } }
-                        label: { Label("Pause", systemImage: "pause.fill") }
-                } else {
-                    Button { Task { _ = try? await JobsManager.shared.resumeJob(args: .object(["id": .string(job.id)])); onChanged() } }
-                        label: { Label("Resume", systemImage: "play.fill") }
-                }
-                Divider()
                 Button(role: .destructive) {
-                    Task { _ = try? await JobsManager.shared.deleteJob(args: .object(["id": .string(job.id)])); onChanged() }
+                    Task {
+                        _ = try? await JobsManager.shared.deleteJob(args: .object(["id": .string(job.id)]))
+                        onChanged()
+                    }
                 } label: { Label("Delete", systemImage: "trash") }
             } label: {
-                Image(systemName: "ellipsis.circle")
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(BridgeTokens.fg3)
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .fixedSize()
-
-            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                .foregroundStyle(.tertiary)
-                .font(.caption)
         }
-        .padding(12)
-        .contentShape(Rectangle())
-        .onTapGesture { onToggle() }
+        .padding(.top, 1)
     }
 
-    private var statusColor: Color {
-        switch job.status {
-        case .active: return BridgeTokens.ok
-        case .paused: return BridgeTokens.warn
+    private func iconButton(_ systemImage: String, help: String, action: @escaping () async -> Void) -> some View {
+        Button {
+            guard !busy else { return }
+            Task { busy = true; await action(); busy = false }
+        } label: {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(BridgeTokens.fg3)
+                .frame(width: 26, height: 26)
+                .background(Color.white.opacity(0.001))
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .help(help)
+        .disabled(busy)
     }
 
-    /// PKT-934 W2: compact relative timestamp — same format as
-    /// DashboardView.relativeTime / SettingsWindow.relativeTimestamp so
-    /// timestamps read identically across the app.
-    static func relativeTime(from date: Date) -> String {
-        let interval = Date().timeIntervalSince(date)
-        if interval < 60 { return "just now" }
-        else if interval < 3600 { return "\(Int(interval / 60))m ago" }
-        else if interval < 86400 { return "\(Int(interval / 3600))h ago" }
-        else { return "\(Int(interval / 86400))d ago" }
+    // MARK: row actions (bindings preserved)
+
+    private func pause() async {
+        _ = try? await JobsManager.shared.pauseJob(args: .object(["id": .string(job.id)]))
+        onChanged()
+    }
+    private func resume() async {
+        _ = try? await JobsManager.shared.resumeJob(args: .object(["id": .string(job.id)]))
+        onChanged()
+    }
+    private func runNow() async {
+        _ = try? await JobsManager.shared.runNowTool(args: .object(["id": .string(job.id)]))
+        onChanged()
+    }
+
+    // MARK: derived text
+
+    private var detailText: String {
+        if let primary = job.actionChain.first {
+            let extra = job.actionChain.count > 1 ? " +\(job.actionChain.count - 1)" : ""
+            return primary.tool + extra
+        }
+        return CronHumanizer.describe(job.schedule) ?? "no actions"
+    }
+
+    /// Compact, human next-run hint. Paused jobs read "paused"; failing jobs
+    /// read "retrying…"; otherwise the humanized cadence (or raw schedule).
+    private var nextRunText: String {
+        if job.status == .paused { return "paused" }
+        if isFailing { return "retrying…" }
+        return CronHumanizer.describe(job.schedule) ?? "scheduled"
+    }
+
+    /// A stable per-job SF Symbol so rows are visually distinguishable, keyed
+    /// off the primary tool family. Purely cosmetic.
+    private var jobGlyph: String {
+        let tool = job.actionChain.first?.tool.lowercased() ?? ""
+        if tool.contains("stripe") || tool.contains("invoice") || tool.contains("payment") { return "creditcard" }
+        if tool.contains("notion") { return "doc.text" }
+        if tool.contains("credential") || tool.contains("token") { return "key" }
+        if tool.contains("strava") || tool.contains("fetch") || tool.contains("http") { return "arrow.triangle.2.circlepath" }
+        if tool.contains("shell") || tool.contains("script") || tool.contains("exec") { return "terminal" }
+        if tool.contains("mail") || tool.contains("message") { return "envelope" }
+        return "bolt"
     }
 }
 
 // MARK: - New Job sheet
 
-private struct NewJobSheet: View {
+struct NewJobSheet: View {
     let onCancel: () -> Void
     let onCreate: () async -> Void
 
@@ -537,9 +388,10 @@ private struct NewJobSheet: View {
         }
     }
 }
-// MARK: - JobDetailView
 
-private struct JobDetailView: View {
+// MARK: - JobDetailView (inline-expand editor)
+
+struct JobDetailView: View {
     let job: JobRecord
     let onChanged: () -> Void
 
@@ -562,38 +414,29 @@ private struct JobDetailView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                headerBlock
-                Divider()
-                scheduleBlock
-                Divider()
-                actionsBlock
-                Divider()
-                optionsBlock
-                Divider()
-                footerActions
-                if let msg = saveMessage {
-                    Text(msg).font(.caption).foregroundStyle(.secondary)
-                }
+        VStack(alignment: .leading, spacing: 12) {
+            headerBlock
+            scheduleBlock
+            actionsBlock
+            optionsBlock
+            footerActions
+            if let msg = saveMessage {
+                Text(msg).font(.caption).foregroundStyle(BridgeTokens.fg3)
             }
-            .padding(16)
         }
+        .padding(.horizontal, 2)
     }
+
+    private func blockLabel(_ text: String) -> some View { BridgeCardLabel(text) }
 
     private var headerBlock: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                TextField("Job name", text: $editedName).textFieldStyle(.roundedBorder)
-                Circle()
-                    .fill(job.status == .active ? BridgeTokens.ok : BridgeTokens.warn)
-                    .frame(width: 10, height: 10)
-                Text(job.status.rawValue.capitalized).font(.caption).foregroundStyle(.secondary)
-            }
+            TextField("Job name", text: $editedName)
+                .textFieldStyle(.roundedBorder)
             HStack(spacing: 8) {
                 Label(job.id, systemImage: "number")
                     .font(.caption.monospaced())
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(BridgeTokens.fg4)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Button {
@@ -604,9 +447,7 @@ private struct JobDetailView: View {
                 .buttonStyle(.borderless)
                 .help("Copy job id")
 
-                Button {
-                    revealLog()
-                } label: { Label("Reveal Log", systemImage: "doc.text.magnifyingglass") }
+                Button { revealLog() } label: { Label("Reveal Log", systemImage: "doc.text.magnifyingglass") }
                 .buttonStyle(.borderless)
             }
         }
@@ -614,17 +455,16 @@ private struct JobDetailView: View {
 
     private var scheduleBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Schedule").font(.headline)
+            blockLabel("Schedule")
             TextField("* * * * *", text: $editedSchedule)
                 .textFieldStyle(.roundedBorder)
                 .font(.body.monospaced())
-                .onChange(of: editedSchedule) { _, newValue in
-                    validateSchedule(newValue)
-                }
+                .onChange(of: editedSchedule) { _, newValue in validateSchedule(newValue) }
             if let err = scheduleError {
                 Text(err).font(.caption).foregroundStyle(BridgeTokens.bad)
             } else {
-                Text((CronHumanizer.describe(editedSchedule) ?? editedSchedule)).font(.caption).foregroundStyle(.secondary)
+                Text((CronHumanizer.describe(editedSchedule) ?? editedSchedule))
+                    .font(.caption).foregroundStyle(BridgeTokens.fg3)
             }
         }
     }
@@ -632,17 +472,18 @@ private struct JobDetailView: View {
     private var actionsBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Action Chain").font(.headline)
+                blockLabel("Action Chain")
                 Spacer()
-                Text("JSON").font(.caption).foregroundStyle(.tertiary)
+                Text("JSON").font(.caption).foregroundStyle(BridgeTokens.fg5)
             }
             TextEditor(text: $editedActionsJSON)
                 .font(.body.monospaced())
-                .frame(minHeight: 160)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
-                .onChange(of: editedActionsJSON) { _, newValue in
-                    validateActions(newValue)
-                }
+                .scrollContentBackground(.hidden)
+                .frame(minHeight: 140)
+                .padding(8)
+                .background(Color.black.opacity(0.26), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                .onChange(of: editedActionsJSON) { _, newValue in validateActions(newValue) }
             if let err = actionsError {
                 Text(err).font(.caption).foregroundStyle(BridgeTokens.bad)
             }
@@ -650,45 +491,30 @@ private struct JobDetailView: View {
     }
 
     private var optionsBlock: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             Toggle("Skip when on battery", isOn: $editedSkipBattery)
             Text("launchd will defer the job if the Mac is running on battery power.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(BridgeTokens.fg4)
         }
     }
 
     private var footerActions: some View {
         HStack(spacing: 8) {
-            Button {
-                Task { await runNow() }
-            } label: { Label("Run Now", systemImage: "play.fill") }
-            .disabled(running)
-
-            Button {
-                Task { await duplicate() }
-            } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
-
+            Button { Task { await runNow() } } label: { Label("Run Now", systemImage: "play.fill") }
+                .disabled(running)
+            Button { Task { await duplicate() } } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
             if job.status == .active {
-                Button {
-                    Task { await pause() }
-                } label: { Label("Pause", systemImage: "pause.fill") }
+                Button { Task { await pause() } } label: { Label("Pause", systemImage: "pause.fill") }
             } else {
-                Button {
-                    Task { await resume() }
-                } label: { Label("Resume", systemImage: "play.fill") }
+                Button { Task { await resume() } } label: { Label("Resume", systemImage: "play.fill") }
             }
-
             Spacer()
-
-            Button(role: .destructive) {
-                Task { await delete() }
-            } label: { Label("Delete", systemImage: "trash") }
-
-            Button {
-                Task { await saveChanges() }
-            } label: { Label("Save Changes", systemImage: "checkmark.circle.fill") }
-            .keyboardShortcut(.defaultAction)
-            .disabled(scheduleError != nil || actionsError != nil || !hasChanges)
+            Button(role: .destructive) { Task { await delete() } } label: { Label("Delete", systemImage: "trash") }
+            Button { Task { await saveChanges() } } label: { Label("Save Changes", systemImage: "checkmark.circle.fill") }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .tint(BridgeTokens.accent)
+                .disabled(scheduleError != nil || actionsError != nil || !hasChanges)
         }
     }
 
@@ -702,28 +528,17 @@ private struct JobDetailView: View {
     // MARK: Validation
 
     private func validateSchedule(_ s: String) {
-        do {
-            _ = try CronParser.parse(s)
-            scheduleError = nil
-        } catch {
-            scheduleError = "\(error)"
-        }
+        do { _ = try CronParser.parse(s); scheduleError = nil }
+        catch { scheduleError = "\(error)" }
     }
 
     private func validateActions(_ s: String) {
-        guard let data = s.data(using: .utf8) else {
-            actionsError = "Invalid UTF-8"
-            return
-        }
-        do {
-            _ = try JSONDecoder().decode([ActionStep].self, from: data)
-            actionsError = nil
-        } catch {
-            actionsError = "Parse error: \(error.localizedDescription)"
-        }
+        guard let data = s.data(using: .utf8) else { actionsError = "Invalid UTF-8"; return }
+        do { _ = try JSONDecoder().decode([ActionStep].self, from: data); actionsError = nil }
+        catch { actionsError = "Parse error: \(error.localizedDescription)" }
     }
 
-    // MARK: Mutations
+    // MARK: Mutations (bindings preserved)
 
     private func saveChanges() async {
         guard let actionsData = editedActionsJSON.data(using: .utf8) else { return }
@@ -734,7 +549,6 @@ private struct JobDetailView: View {
             await MainActor.run { actionsError = "\(error)" }
             return
         }
-        // Re-encode as MCP Value array for the update tool.
         var mcpActions: [MCP.Value] = []
         for step in parsed {
             var argsObj: [String: MCP.Value] = [:]
@@ -828,7 +642,7 @@ private struct JobDetailView: View {
 
 // MARK: - Import sheet
 
-private struct ImportSheet: View {
+struct ImportSheet: View {
     @Binding var jsonText: String
     var onCancel: () -> Void
     var onImport: (String) -> Void

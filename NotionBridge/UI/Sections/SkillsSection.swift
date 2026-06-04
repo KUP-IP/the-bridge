@@ -1,7 +1,11 @@
 // SkillsSection.swift — Settings → Skills pane.
 // PKT-3 v3.5: Skills promoted to its own top-level Settings section
-// (previously nested inside Commands). Wraps the existing SkillsView
-// CRUD with a Liquid-Glass-themed header so it slots into the new shell.
+// (previously nested inside Commands).
+// v3.7.2 bundle-2 redesign: carbon-canvas scaffold + hero (bow&arrow orb,
+// stat tiles, quick actions) over the twin master–detail SkillsView, mirroring
+// the approved Standing Orders redesign. The cache card keeps its real
+// SkillsCacheWriter logic verbatim; only the chrome was restyled to
+// BridgeTokens. No bindings changed.
 
 import SwiftUI
 
@@ -26,7 +30,6 @@ public struct SkillsSection: View {
                         skillsManager: skillsManager,
                         fetchSkillDisabled: fetchSkillDisabled
                     )
-                    .padding(.vertical, 4)
                 }
             }
             .padding(18)
@@ -35,30 +38,82 @@ public struct SkillsSection: View {
         .background(Color.clear)
     }
 
+    // MARK: - Hero
+
+    private var hero: some View {
+        BridgeGlassCard {
+            HStack(spacing: 16) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(BridgeTokens.accent.opacity(0.22))
+                        .frame(width: 50, height: 50)
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(BridgeTokens.accent.opacity(0.45), lineWidth: 1))
+                    BridgeVectorIcon(.skills)
+                        .foregroundStyle(BridgeTokens.accentLink)
+                        .frame(width: 24, height: 24)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Skills")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(BridgeTokens.fg1)
+                    Text("Routing skills are surfaced to MCP clients in the Standing Orders index. Toggle, edit, or fetch from Notion.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(BridgeTokens.fg3)
+                }
+                Spacer(minLength: 8)
+                HStack(spacing: 10) {
+                    statTile(value: "\(skillsManager.skills.count)", label: "skills", color: BridgeTokens.gold)
+                    statTile(value: "\(routingCount)", label: "routing", color: BridgeTokens.ok)
+                }
+            }
+        }
+    }
+
+    private var routingCount: Int {
+        skillsManager.skills.filter { $0.enabled && $0.routingDiscoverable }.count
+    }
+
+    private func statTile(value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                .foregroundStyle(color)
+            Text(label.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(0.8)
+                .foregroundStyle(BridgeTokens.fg4)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+    }
+
+    // MARK: - Cache card
+
     /// v3.7·1: Operator-action card that refreshes the on-disk Notion
     /// skills cache. The cache feeds the routing index + Standing Orders
     /// composer; the first-load refresh runs automatically in
-    /// `SkillsManager`, this button is the manual override for when an
-    /// operator added a new child page in Notion and wants the routing
-    /// hints to reflect it without waiting for the TTL.
+    /// `SkillsManager`, this button is the manual override.
     private var cacheCard: some View {
         BridgeGlassCard {
             HStack(spacing: 14) {
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Color(red: 0.66, green: 0.78, blue: 1.0))
+                    .foregroundStyle(BridgeTokens.accentLink)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Skill cache")
                         .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(BridgeTokens.fg1)
                     Text("Re-enumerates every Notion-source routing skill's child pages.")
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BridgeTokens.fg3)
                 }
                 Spacer()
                 if let msg = cacheMessage {
                     Text(msg)
                         .font(.caption)
-                        .foregroundStyle(cacheIsError ? BridgeTokens.bad : .secondary)
+                        .foregroundStyle(cacheIsError ? BridgeTokens.bad : BridgeTokens.fg3)
                 }
                 Button {
                     Task { await refreshCache() }
@@ -98,28 +153,5 @@ public struct SkillsSection: View {
         )
         cacheMessage = "Refreshed \(count) parent\(count == 1 ? "" : "s")"
         cacheIsError = false
-    }
-
-    private var hero: some View {
-        BridgeGlassCard {
-            HStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(NotionPalette.blue.opacity(0.18))
-                        .frame(width: 44, height: 44)
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(Color(red: 0.66, green: 0.78, blue: 1.0))
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Skills")
-                        .font(.system(size: 18, weight: .semibold))
-                    Text("Routing skills are surfaced to MCP clients in the Standing Orders index. Toggle, edit, or fetch from Notion.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-        }
     }
 }

@@ -1,9 +1,9 @@
-// ConnectionsSection.swift — Liquid Glass reskin of Settings → Connections.
-// PKT-876 v3.6.1. Per design/connections.html:
-//   - Glass-hero header with server status pill
-//   - Integrated tools (Notion + Stripe) as glass rows
-//   - Active clients
-//   - Bridge lifecycle (Launch at login, etc.)
+// ConnectionsSection.swift — Settings → Connections pane.
+// v3.7.2 bundle-2 redesign: near-pixel match to the locked design mockup
+// (design/.../Connections.jsx + connections.css). Orb hero with live server
+// status, transport selector, integration health grid, active-clients list,
+// and Bridge-lifecycle card. Carbon canvas, royal-blue / emerald / gold
+// accents. Every store call, binding, toggle, and async load is preserved.
 
 import SwiftUI
 import ServiceManagement
@@ -20,6 +20,11 @@ public struct ConnectionsSection: View {
     @State private var notionConnection: BridgeConnection?
     @State private var stripeConnection: BridgeConnection?
 
+    /// Presentational transport selection (mirrors the design's radio cards).
+    private enum Transport: String, CaseIterable { case http, sse, stdio }
+    @State private var transport: Transport = .http
+    @State private var copiedEndpoint = false
+
     public init(
         statusBar: StatusBarController,
         permissionManager: PermissionManager,
@@ -34,143 +39,358 @@ public struct ConnectionsSection: View {
         self._isApplyingLaunchAtLoginChange = isApplyingLaunchAtLoginChange
     }
 
+    private var port: Int { ConfigManager.shared.ssePort }
+    private var endpoint: String { "127.0.0.1:\(port)/mcp" }
+
     public var body: some View {
         ScrollView {
             VStack(spacing: 14) {
-                header
-                integratedToolsCard
+                hero
+                transportCard
+                integrationsCard
                 activeClientsCard
                 lifecycleCard
             }
-            .padding(18)
+            .padding(20)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
         .task { await loadConnections() }
     }
 
-    // MARK: - Header (shared component)
+    // MARK: - Hero (server status orb)
 
-    private var header: some View {
-        let spec = BridgeSettingsHeaderPreset.spec(for: .connections)
-        return BridgeSettingsSectionHeader(
-            title: spec.title,
-            subtitle: spec.subtitle,
-            systemImage: spec.systemImage,
-            tint: spec.tint
-        ) {
-            serverStatusPill
-        }
-    }
-
-    private var serverStatusPill: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(statusBar.isServerRunning ? BridgeTokens.ok : BridgeTokens.bad)
-                .frame(width: 8, height: 8)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(statusBar.isServerRunning ? "Server running" : "Server stopped")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(statusBar.isServerRunning ? BridgeTokens.ok : BridgeTokens.bad)
-                Text("uptime \(statusBar.uptimeString)")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+    private var hero: some View {
+        let running = statusBar.isServerRunning
+        let orbColor = running ? BridgeTokens.ok : BridgeTokens.bad
+        return BridgeGlassCard {
+            HStack(spacing: 16) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(orbColor.opacity(0.20))
+                        .frame(width: 50, height: 50)
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(orbColor.opacity(0.42), lineWidth: 1))
+                    Image(systemName: "point.3.connected.trianglepath.dotted")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(running ? BridgeTokens.okText : BridgeTokens.badText)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(running ? "Server running" : "Server stopped")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(BridgeTokens.fg1)
+                    heroSubtitle
+                }
+                Spacer(minLength: 8)
+                HStack(spacing: 10) {
+                    statTile(value: "\(statusBar.connectedClients.count)", label: "clients", color: BridgeTokens.ok)
+                    statTile(value: statusBar.totalToolCalls.formatted(), label: "calls today", color: BridgeTokens.gold)
+                }
+                HStack(spacing: 4) {
+                    iconButton("arrow.clockwise", help: "Restart Bridge") { NSApp.restartBridge() }
+                    iconButton(copiedEndpoint ? "checkmark" : "doc.on.doc", help: "Copy endpoint") { copyEndpoint() }
+                }
             }
         }
     }
 
-    // MARK: - Integrated tools
+    private var heroSubtitle: some View {
+        let running = statusBar.isServerRunning
+        return HStack(spacing: 0) {
+            Text(running
+                 ? "Local Streamable HTTP · uptime \(statusBar.uptimeString) · "
+                 : "MCP transport idle · ")
+                .font(.system(size: 12.5))
+                .foregroundStyle(BridgeTokens.fg3)
+            Button {
+                SettingsNavigation.shared.go(.advanced, anchor: "ports")
+            } label: {
+                Text("configure ports")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(BridgeTokens.accentLink)
+            }
+            .buttonStyle(.plain)
+        }
+    }
 
-    private var integratedToolsCard: some View {
+    private func statTile(value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                .foregroundStyle(color)
+            Text(label.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(0.8)
+                .foregroundStyle(BridgeTokens.fg4)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+    }
+
+    private func iconButton(_ systemImage: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14))
+                .foregroundStyle(BridgeTokens.fg3)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    private func copyEndpoint() {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString("http://\(endpoint)", forType: .string)
+        copiedEndpoint = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_400_000_000)
+            copiedEndpoint = false
+        }
+    }
+
+    // MARK: - Transport selector
+
+    private var transportCard: some View {
         BridgeGlassCard {
-            VStack(alignment: .leading, spacing: 10) {
-                BridgeCardLabel("Integrated tools")
-                connectionRow(
-                    icon: "network",
-                    iconColor: Color.white.opacity(0.85),
-                    name: "Notion",
-                    subtitle: connectionSubtitle(notionConnection, fallback: "Not configured"),
-                    status: notionConnection?.status ?? .notConfigured,
-                    manageAnchor: "notion"
-                )
-                Divider().background(Color.white.opacity(0.08))
-                connectionRow(
-                    icon: "creditcard",
-                    iconColor: Color(red: 0.62, green: 0.55, blue: 0.92),
-                    name: "Stripe",
-                    subtitle: connectionSubtitle(stripeConnection, fallback: "Not configured"),
-                    status: stripeConnection?.status ?? .notConfigured,
-                    manageAnchor: "stripe"
-                )
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    BridgeCardLabel("Transport")
+                    Spacer()
+                    Text("How clients reach Bridge. Streamable HTTP recommended.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(BridgeTokens.fg4)
+                }
+                HStack(spacing: 8) {
+                    transportTile(.http, name: "Streamable HTTP", endpoint: "127.0.0.1:\(port)/mcp", tone: .ok)
+                    transportTile(.sse, name: "Legacy SSE", endpoint: "127.0.0.1:\(port)/sse", tone: .warn)
+                    transportTile(.stdio, name: "stdio", endpoint: "spawned per-client", tone: .neutral)
+                }
             }
         }
     }
 
-    private func connectionSubtitle(_ conn: BridgeConnection?, fallback: String) -> String {
+    private enum TransportTone { case ok, warn, neutral }
+
+    private func transportTile(_ id: Transport, name: String, endpoint: String, tone: TransportTone) -> some View {
+        let on = transport == id
+        return Button {
+            transport = id
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .strokeBorder(on ? BridgeTokens.accentLink : Color.white.opacity(0.30),
+                                      lineWidth: 1.5)
+                        .frame(width: 15, height: 15)
+                    if on {
+                        Circle().fill(BridgeTokens.accentLink).frame(width: 7, height: 7)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(BridgeTokens.fg1)
+                    Text(endpoint)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(BridgeTokens.fg4)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                Spacer(minLength: 0)
+                transportDot(tone)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                on
+                ? AnyShapeStyle(LinearGradient(
+                    colors: [BridgeTokens.accent.opacity(0.18), BridgeTokens.accent.opacity(0.06)],
+                    startPoint: .top, endPoint: .bottom))
+                : AnyShapeStyle(Color.black.opacity(0.20)),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(on ? BridgeTokens.accent.opacity(0.50) : Color.white.opacity(0.10),
+                                  lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func transportDot(_ tone: TransportTone) -> some View {
+        switch tone {
+        case .ok:
+            Circle().fill(BridgeTokens.ok).frame(width: 8, height: 8)
+                .shadow(color: BridgeTokens.ok.opacity(0.5), radius: 3)
+        case .warn:
+            Circle().fill(BridgeTokens.warn).frame(width: 8, height: 8)
+                .shadow(color: BridgeTokens.warn.opacity(0.5), radius: 3)
+        case .neutral:
+            EmptyView()
+        }
+    }
+
+    // MARK: - Integration health grid
+
+    private var integrationsCard: some View {
+        BridgeGlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    BridgeCardLabel("Integrated tools")
+                    Spacer()
+                    BridgeDepLink("Manage credentials") {
+                        SettingsNavigation.shared.go(.credentials, anchor: nil)
+                    }
+                }
+                HStack(alignment: .top, spacing: 10) {
+                    integrationTile(
+                        connection: notionConnection,
+                        name: "Notion",
+                        glyph: "circle.grid.2x2.fill",
+                        glyphColor: Color.white,
+                        tileTint: Color.white.opacity(0.06),
+                        fallbackSub: "Not configured · add a workspace token",
+                        anchor: "notion"
+                    )
+                    integrationTile(
+                        connection: stripeConnection,
+                        name: "Stripe",
+                        glyph: "creditcard.fill",
+                        glyphColor: Color(red: 0.616, green: 0.553, blue: 1.0), // #9d8dff
+                        tileTint: Color(red: 0.463, green: 0.333, blue: 0.922).opacity(0.18),
+                        fallbackSub: "Not configured · add an API key",
+                        anchor: "stripe"
+                    )
+                }
+            }
+        }
+    }
+
+    private func integrationTile(
+        connection: BridgeConnection?,
+        name: String,
+        glyph: String,
+        glyphColor: Color,
+        tileTint: Color,
+        fallbackSub: String,
+        anchor: String
+    ) -> some View {
+        let status = connection?.status ?? .notConfigured
+        let (badgeText, badgeColor) = badgeStyle(for: status)
+        let sub = integrationSubtitle(connection, fallback: fallbackSub)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(tileTint)
+                        .frame(width: 38, height: 38)
+                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                    Image(systemName: glyph)
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(glyphColor)
+                }
+                Spacer()
+                statusBadge(badgeText, color: badgeColor)
+            }
+            .padding(.bottom, 10)
+
+            Text(name)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(BridgeTokens.fg1)
+            Text(sub)
+                .font(.system(size: 11.5))
+                .foregroundStyle(BridgeTokens.fg3)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .frame(minHeight: 32, alignment: .top)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 3)
+
+            Rectangle().fill(Color.white.opacity(0.07)).frame(height: 0.5)
+                .padding(.top, 9)
+
+            HStack(spacing: 6) {
+                Text(toolsLabel(for: connection))
+                    .font(.system(size: 11))
+                    .foregroundStyle(BridgeTokens.fg3)
+                Spacer()
+                Button {
+                    SettingsNavigation.shared.go(.credentials, anchor: anchor)
+                } label: {
+                    HStack(spacing: 3) {
+                        Text("Manage")
+                        Text("↗").opacity(0.7)
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(BridgeTokens.accentLink)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.top, 9)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 13)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tileBackground(for: status), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+            .strokeBorder(tileBorder(for: status), lineWidth: 0.5))
+    }
+
+    private func tileBackground(for status: BridgeConnectionStatus) -> Color {
+        switch status {
+        case .disconnected, .invalid: return BridgeTokens.bad.opacity(0.05)
+        default: return Color.black.opacity(0.18)
+        }
+    }
+
+    private func tileBorder(for status: BridgeConnectionStatus) -> Color {
+        switch status {
+        case .disconnected, .invalid: return BridgeTokens.bad.opacity(0.30)
+        case .warning: return BridgeTokens.warn.opacity(0.22)
+        default: return Color.white.opacity(0.08)
+        }
+    }
+
+    private func toolsLabel(for connection: BridgeConnection?) -> String {
+        guard let connection, !connection.capabilities.isEmpty else {
+            return connection?.status == .notConfigured || connection == nil ? "unavailable" : "ready"
+        }
+        let n = connection.capabilities.count
+        return "\(n) tool\(n == 1 ? "" : "s")"
+    }
+
+    private func integrationSubtitle(_ conn: BridgeConnection?, fallback: String) -> String {
         guard let conn else { return fallback }
-        if let masked = conn.maskedCredential {
-            return masked
+        if let summary = conn.summary, !summary.isEmpty { return summary }
+        if let masked = conn.maskedCredential, !masked.isEmpty {
+            return conn.isPrimary ? "Primary · \(masked)" : masked
         }
         return conn.id
     }
 
-    @ViewBuilder
-    private func connectionRow(
-        icon: String,
-        iconColor: Color,
-        name: String,
-        subtitle: String,
-        status: BridgeConnectionStatus,
-        manageAnchor: String
-    ) -> some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
-                    .frame(width: 34, height: 34)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
-                    )
-                Image(systemName: icon)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(iconColor)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name)
-                    .font(.system(size: 14, weight: .medium))
-                Text(subtitle)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            Spacer()
-            statusBadge(status)
-            BridgeDepLink("Manage credential") {
-                SettingsNavigation.shared.go(.credentials, anchor: manageAnchor)
-            }
+    private func badgeStyle(for status: BridgeConnectionStatus) -> (String, Color) {
+        switch status {
+        case .connected:     return ("Connected", BridgeTokens.ok)
+        case .warning:       return ("Attention", BridgeTokens.warn)
+        case .disconnected:  return ("Disconnected", BridgeTokens.bad)
+        case .invalid:       return ("Invalid", BridgeTokens.bad)
+        case .notConfigured: return ("Not configured", BridgeTokens.fg4)
+        case .checking:      return ("Checking\u{2026}", BridgeTokens.fg4)
         }
     }
 
-    @ViewBuilder
-    private func statusBadge(_ status: BridgeConnectionStatus) -> some View {
-        let (text, color): (String, Color) = {
-            switch status {
-            case .connected: return ("Connected", BridgeTokens.ok)
-            case .warning: return ("Warning", BridgeTokens.warn)
-            case .disconnected: return ("Disconnected", BridgeTokens.bad)
-            case .invalid: return ("Invalid", BridgeTokens.bad)
-            case .notConfigured: return ("Not configured", Color.secondary)
-            case .checking: return ("Checking\u{2026}", Color.secondary)
-            }
-        }()
+    private func statusBadge(_ text: String, color: Color) -> some View {
         Text(text)
             .font(.system(size: 11, weight: .semibold))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.18), in: Capsule())
-            .overlay(Capsule().strokeBorder(color.opacity(0.28), lineWidth: 0.5))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.16), in: Capsule())
+            .overlay(Capsule().strokeBorder(color.opacity(0.30), lineWidth: 0.5))
             .foregroundStyle(color)
     }
 
@@ -182,50 +402,57 @@ public struct ConnectionsSection: View {
                 HStack {
                     BridgeCardLabel("Active clients")
                     Spacer()
-                    Text("\(statusBar.connectedClients.count) connected \u{00B7} \(statusBar.activeToolCount) tools")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                    Text("\(statusBar.connectedClients.count) connected · \(statusBar.activeToolCount) tools exposed")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(BridgeTokens.fg4)
                 }
                 if statusBar.connectedClients.isEmpty {
                     Text("No clients connected")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(BridgeTokens.fg4)
                         .padding(.vertical, 6)
                 } else {
-                    ForEach(statusBar.connectedClients, id: \.name) { client in
+                    ForEach(Array(statusBar.connectedClients.enumerated()), id: \.element.name) { index, client in
                         clientRow(client)
+                        if index < statusBar.connectedClients.count - 1 {
+                            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
+                        }
                     }
                 }
             }
         }
     }
 
-    @ViewBuilder
     private func clientRow(_ client: ConnectedClient) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 11) {
             ZStack {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color.white.opacity(0.05))
-                    .frame(width: 26, height: 26)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
-                    )
-                Image(systemName: "circle.dotted")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Color(red: 0.62, green: 0.55, blue: 0.92))
+                    .frame(width: 30, height: 30)
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+                Image(systemName: "bolt.horizontal.circle")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(BridgeTokens.accentLink)
             }
-            Text(client.name)
-                .font(.system(size: 13))
+            Text(clientName(client))
+                .font(.system(size: 13.5))
+                .foregroundStyle(BridgeTokens.fg2)
             Spacer()
             Text(relativeTimestamp(from: client.connectedAt))
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 11.5))
+                .foregroundStyle(BridgeTokens.fg4)
             Circle()
                 .fill(BridgeTokens.ok)
-                .frame(width: 7, height: 7)
+                .frame(width: 8, height: 8)
+                .shadow(color: BridgeTokens.ok.opacity(0.5), radius: 3)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 7)
+    }
+
+    private func clientName(_ client: ConnectedClient) -> String {
+        let v = client.version.trimmingCharacters(in: .whitespaces)
+        return v.isEmpty ? client.name : "\(client.name) · \(v)"
     }
 
     private func relativeTimestamp(from date: Date) -> String {
@@ -240,11 +467,11 @@ public struct ConnectionsSection: View {
 
     private var lifecycleCard: some View {
         BridgeGlassCard {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 BridgeCardLabel("Bridge lifecycle")
                 lifecycleToggleRow(
                     title: "Launch at login",
-                    subtitle: "Registers Bridge with macOS via SMAppService.",
+                    subtitle: "Registers Bridge with macOS via SMAppService. Approve in System Settings → Login Items if blocked.",
                     isOn: $launchAtLogin
                 )
                 .onChange(of: launchAtLogin) { _, enabled in
@@ -252,11 +479,11 @@ public struct ConnectionsSection: View {
                 }
                 if let err = launchAtLoginError {
                     Text(err)
-                        .font(.caption)
-                        .foregroundStyle(BridgeTokens.warn)
-                        .padding(.top, 2)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(BridgeTokens.warnText)
+                        .padding(.top, 1)
                 }
-                Divider().background(Color.white.opacity(0.08))
+                Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
                 HStack(spacing: 10) {
                     Button {
                         (NSApp.delegate as? AppDelegate)?.checkForUpdates()
@@ -264,6 +491,7 @@ public struct ConnectionsSection: View {
                         Label("Check for Updates", systemImage: "arrow.down.circle")
                     }
                     .buttonStyle(.borderedProminent)
+                    .tint(BridgeTokens.accent)
                     Button {
                         NSApp.restartBridge()
                     } label: {
@@ -276,17 +504,22 @@ public struct ConnectionsSection: View {
         }
     }
 
-    @ViewBuilder
     private func lifecycleToggleRow(title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 13, weight: .medium))
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(title)
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(BridgeTokens.fg1)
+                Text(subtitle)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(BridgeTokens.fg4)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
             Toggle("", isOn: isOn)
                 .labelsHidden()
                 .toggleStyle(.switch)
+                .tint(BridgeTokens.ok)
         }
     }
 

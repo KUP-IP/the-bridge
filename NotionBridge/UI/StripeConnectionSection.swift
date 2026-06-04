@@ -51,30 +51,36 @@ struct StripeConnectionSection: View {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
             } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: conn.status.systemImage)
-                        .font(.system(size: 10))
-                        .foregroundStyle(statusColor(conn.status))
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(Color(red: 0.463, green: 0.333, blue: 0.922).opacity(0.18))
+                            .frame(width: 36, height: 36)
+                            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                        Image(systemName: "creditcard.fill")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Color(red: 0.616, green: 0.553, blue: 1.0)) // #9d8dff
+                    }
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(conn.name)
-                            .font(.callout)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(BridgeTokens.fg1)
                         if let masked = conn.maskedCredential {
                             Text(masked)
-                                .font(.system(.caption2, design: .monospaced))
-                                .foregroundStyle(.tertiary)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(BridgeTokens.fg4)
                         }
                     }
 
                     Spacer()
 
-                    Text(conn.status.label)
-                        .font(.caption2)
-                        .foregroundStyle(statusColor(conn.status))
+                    statusChip(conn.status)
 
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
                         .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(BridgeTokens.fg4)
                 }
                 .padding(.vertical, 4)
                 .contentShape(Rectangle())
@@ -86,6 +92,17 @@ struct StripeConnectionSection: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+    }
+
+    private func statusChip(_ status: BridgeConnectionStatus) -> some View {
+        let color = statusColor(status)
+        return Text(status.label)
+            .font(.system(size: 11, weight: .semibold))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.16), in: Capsule())
+            .overlay(Capsule().strokeBorder(color.opacity(0.30), lineWidth: 0.5))
+            .foregroundStyle(color)
     }
 
     @ViewBuilder
@@ -134,34 +151,47 @@ struct StripeConnectionSection: View {
     private func detailRow(_ label: String, _ value: String, monospaced: Bool = false) -> some View {
         HStack(alignment: .top) {
             Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 12))
+                .foregroundStyle(BridgeTokens.fg4)
                 .frame(width: 60, alignment: .leading)
             Text(value)
-                .font(monospaced ? .system(.caption, design: .monospaced) : .caption)
+                .font(monospaced ? .system(size: 12, design: .monospaced) : .system(size: 12))
+                .foregroundStyle(BridgeTokens.fg2)
         }
     }
 
     // MARK: - Empty
 
     private var emptyView: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "circle.dashed")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text("Not configured")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.white.opacity(0.05))
+                    .frame(width: 36, height: 36)
+                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+                Image(systemName: "creditcard")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(BridgeTokens.fg4)
             }
-
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Stripe")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(BridgeTokens.fg1)
+                Text("Not configured · add an API key")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(BridgeTokens.fg4)
+            }
+            Spacer()
             Button {
                 showConnectSheet = true
             } label: {
-                Label("Connect Stripe", systemImage: "plus.circle")
-                    .font(.callout)
+                Label("Connect", systemImage: "plus")
+                    .font(.system(size: 12, weight: .medium))
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.borderedProminent)
+            .tint(BridgeTokens.accent)
+            .controlSize(.small)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)

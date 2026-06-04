@@ -65,7 +65,8 @@ public struct DashboardView: View {
             actionsRow
         }
         .frame(width: PKT879Dashboard.popoverWidth)
-        .padding(.vertical, 6)
+        // Edge insets come from .pop-head (top 14) and .pop-actions (bottom 12)
+        // per kit.css; no extra outer vertical padding so the spec stays exact.
         .preferredColorScheme(.dark) // v3.7.2: carbon glass is dark-only
         .task {
             await permissionManager.checkAllAsync()
@@ -108,26 +109,31 @@ public struct DashboardView: View {
     // MARK: - Header
 
     private var headerSection: some View {
+        // kit.css .pop-head — padding 14 14 10, 22px mark, display title,
+        // muted version line, and a tight (3pt) quick-links cluster.
         HStack(spacing: 10) {
             Image(systemName: "bridge.fill")
                 .font(.system(size: 18))
-                .foregroundStyle(.primary.opacity(0.85))
+                .foregroundStyle(BridgeTokens.fg1)
                 .frame(width: 22, height: 22)
             VStack(alignment: .leading, spacing: 1) {
                 Text("The Bridge")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(BridgeTokens.fg1)
                 Text(versionLine)
                     .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BridgeTokens.fg4)
             }
-            Spacer()
-            quickLink(.commands,        systemImage: "command", help: "Open Commands")
-            quickLink(.tools,           systemImage: "hammer",  help: "Open Tools")
-            quickLink(.connections,     systemImage: "gearshape", help: "Open Settings (\u{2318},)")
+            Spacer(minLength: 8)
+            HStack(spacing: 3) {
+                quickLink(.commands,    systemImage: "command",   help: "Command Bridge")
+                quickLink(.tools,       systemImage: "wrench.and.screwdriver", help: "Open Tools")
+                quickLink(.connections, systemImage: "gearshape", help: "Open Settings (\u{2318},)")
+            }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
     }
 
     private var versionLine: String {
@@ -138,55 +144,60 @@ public struct DashboardView: View {
     }
 
     private func quickLink(_ section: SettingsSection, systemImage: String, help: String) -> some View {
+        // kit.css .ql — 28×28, radius 7, fg .6 at rest brightening on hover.
         Button {
             onOpenSettings(section)
         } label: {
             Image(systemName: systemImage)
                 .symbolRenderingMode(.monochrome)
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
                 .frame(width: 28, height: 28)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PKT879HoverRowStyle(cornerRadius: 7, restForeground: BridgeTokens.fg3))
         .help(help)
         .accessibilityLabel(help)
     }
 
     private var divider: some View {
+        // kit.css .pop-divider — 0.5px hairline, margin 2px 8px.
         Rectangle()
             .fill(Color.white.opacity(0.08))
             .frame(height: 0.5)
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
     }
 
     // MARK: - Server Status Row (primary)
 
     private var statusRow: some View {
+        // kit.css .status-row — margin 0 6px, padding 8px 10px, radius 8,
+        // emerald pulse dot, .92 label, .5 sub, .34 chevron.
         Button {
             onOpenSettings(.connections)
         } label: {
             HStack(spacing: 10) {
-                StatusPulseDot(color: statusBar.isServerRunning ? BridgeTokens.ok : .red,
+                StatusPulseDot(color: statusBar.isServerRunning ? BridgeTokens.ok : BridgeTokens.bad,
                                radius: PKT879Dashboard.statusDotSize)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(statusBar.isServerRunning ? "Server running" : "Server stopped")
                         .font(.system(size: 12.5))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(BridgeTokens.fg1)
                     Text(statusSubtitle)
                         .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BridgeTokens.fg3)
                 }
-                Spacer()
+                Spacer(minLength: 8)
                 Text("\u{2197}")
                     .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(BridgeTokens.fg5)
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(PKT879HoverRowStyle())
+        .padding(.horizontal, 6)
         .accessibilityLabel("Server " + (statusBar.isServerRunning ? "running" : "stopped") + ". Open Connections.")
     }
 
@@ -200,7 +211,8 @@ public struct DashboardView: View {
     // MARK: - Connected Clients
 
     private var clientsSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        // kit.css "CONNECTED CLIENTS · N" cap + .pclient rows (dot · name · time).
+        VStack(alignment: .leading, spacing: 0) {
             captionRow(
                 title: "Connected clients \u{00B7} \(statusBar.connectedClients.count)",
                 actionTitle: "View all",
@@ -208,46 +220,56 @@ public struct DashboardView: View {
             )
             if statusBar.connectedClients.isEmpty {
                 Text("No clients connected")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 4)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(BridgeTokens.fg4)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 6)
             } else {
                 ForEach(statusBar.connectedClients.prefix(4), id: \.name) { client in
                     clientRow(client)
                 }
             }
         }
-        .padding(.bottom, 4)
     }
 
     private func clientRow(_ client: ConnectedClient) -> some View {
-        HStack(spacing: 10) {
-            StatusPulseDot(color: .green, radius: 6)
-            Text("\(client.name) \(client.version)")
-                .font(.system(size: 12))
-                .foregroundStyle(.primary)
+        // .pclient — padding 6×10, margin 0 8, radius 6. Dot reads idle
+        // (gray) once a client has been quiet > 30m, else emerald.
+        let idle = Date().timeIntervalSince(client.connectedAt) > 1800
+        return HStack(spacing: 10) {
+            StatusPulseDot(color: idle ? BridgeTokens.fg5 : BridgeTokens.ok, radius: 9)
+            Text(clientLabel(client))
+                .font(.system(size: 12.5))
+                .foregroundStyle(BridgeTokens.fg2)
                 .lineLimit(1)
-            Spacer()
+            Spacer(minLength: 8)
             Text(relativeTime(from: client.connectedAt))
                 .font(.system(size: 10.5))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(BridgeTokens.fg4)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 10)   // .pclient inner padding
+        .padding(.horizontal, 8)    // .pclient margin 0 8px
+    }
+
+    /// "Name · version" with the version omitted when empty (web clients).
+    private func clientLabel(_ client: ConnectedClient) -> String {
+        let v = client.version.trimmingCharacters(in: .whitespaces)
+        return v.isEmpty ? client.name : "\(client.name) \u{00B7} \(v)"
     }
 
     // MARK: - Permissions (two-col grid)
 
     private var permissionsSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        // kit.css "PERMISSIONS · X/Y" cap + .perm-grid (2 cols, gap 2×8,
+        // padding 4×8) of small-dot permission cells.
+        VStack(alignment: .leading, spacing: 0) {
             captionRow(
                 title: "Permissions \u{00B7} \(grantedCount)/\(PermissionManager.Grant.v1Cases.count)",
                 actionTitle: "Review",
                 action: { onOpenSettings(.permissions) }
             )
 
-            // PKT-879: Two-column grid (LazyVGrid mirrors mock spec).
             LazyVGrid(
                 columns: [
                     GridItem(.flexible(), spacing: 8),
@@ -260,8 +282,8 @@ public struct DashboardView: View {
                     permissionCell(grant: grant)
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.bottom, 4)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
         }
     }
 
@@ -278,10 +300,9 @@ public struct DashboardView: View {
             SettingsNavigation.shared.anchor = grant.rawValue
         } label: {
             HStack(spacing: 6) {
-                StatusPulseDot(color: dotColor(status), radius: 5)
+                StatusPulseDot(color: dotColor(status), radius: 7)
                 Text(grant.displayName)
                     .font(.system(size: 11.5))
-                    .foregroundStyle(.primary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
@@ -289,7 +310,7 @@ public struct DashboardView: View {
             .padding(.vertical, 5)
             .contentShape(Rectangle())
         }
-        .buttonStyle(PKT879HoverRowStyle(cornerRadius: 5))
+        .buttonStyle(PKT879HoverRowStyle(cornerRadius: 5, restForeground: BridgeTokens.fg2))
         .help(permissionManager.statusLabel(for: grant))
         .accessibilityLabel("\(grant.displayName), \(permissionManager.statusLabel(for: grant)). Open Permissions.")
     }
@@ -305,7 +326,9 @@ public struct DashboardView: View {
     // MARK: - Stats Row
 
     private var statsRow: some View {
-        HStack(spacing: 0) {
+        // kit.css .stat-row — three stats (value in fg1 over a muted label),
+        // padding 6 12 10, gap 14.
+        HStack(spacing: 14) {
             statButton(value: "\(statusBar.activeToolCount)", label: "tools active",
                        section: .tools)
             statButton(value: "\(statusBar.totalToolCalls)", label: "calls today",
@@ -313,8 +336,9 @@ public struct DashboardView: View {
             statButton(value: "\(skillsCount)", label: "skills",
                        section: .skills)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
+        .padding(.bottom, 10)
     }
 
     /// Skills count for the stats row. Derived from `SkillsManager`'s
@@ -325,20 +349,20 @@ public struct DashboardView: View {
     }
 
     private func statButton(value: String, label: String, section: SettingsSection) -> some View {
+        // .stat — value (fg1, 13.5/semibold) stacked over a .62 label.
         Button {
             onOpenSettings(section)
         } label: {
             VStack(alignment: .leading, spacing: 1) {
                 Text(value)
                     .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(BridgeTokens.fg1)
                 Text(label)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(BridgeTokens.fg3)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
+            .padding(6)
             .contentShape(Rectangle())
         }
         .buttonStyle(PKT879HoverRowStyle(cornerRadius: 6))
@@ -348,6 +372,8 @@ public struct DashboardView: View {
     // MARK: - Actions
 
     private var actionsRow: some View {
+        // kit.css .pop-actions — two 30pt buttons, gap 6, padding 8 10 12.
+        // Quit carries the red-tinted danger tone.
         HStack(spacing: 6) {
             Button("Restart Bridge") {
                 NSApp.restartBridge()
@@ -360,27 +386,29 @@ public struct DashboardView: View {
             .buttonStyle(PKT879PillButtonStyle(tone: .danger))
         }
         .padding(.horizontal, 10)
-        .padding(.top, 6)
-        .padding(.bottom, 8)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
     }
 
     // MARK: - Caption row
 
     private func captionRow(title: String, actionTitle: String, action: @escaping () -> Void) -> some View {
-        HStack {
+        // kit.css .cap — uppercase 10.5/600 caption, .10em tracking, fg .40,
+        // with a right-aligned accent-link action. Padding 6 14 4.
+        HStack(spacing: 6) {
             Text(title.uppercased())
                 .font(.system(size: 10.5, weight: .semibold))
-                .tracking(1.1)
-                .foregroundStyle(.secondary)
-            Spacer()
+                .tracking(1.05)
+                .foregroundStyle(BridgeTokens.fg4)
+            Spacer(minLength: 6)
             Button(actionTitle, action: action)
                 .buttonStyle(.plain)
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(BridgeTokens.accentLink)
         }
         .padding(.horizontal, 14)
-        .padding(.top, 4)
-        .padding(.bottom, 2)
+        .padding(.top, 6)
+        .padding(.bottom, 4)
     }
 
     // MARK: - Helpers
@@ -476,17 +504,32 @@ public struct StatusPulseDot: View {
 /// Liquid Glass mock (white opacity 0.05 on hover, transparent at rest).
 struct PKT879HoverRowStyle: ButtonStyle {
     var cornerRadius: CGFloat = 8
+    /// Optional rest-state foreground. When set, the label tints to this
+    /// color at rest and brightens to fg1 on hover — mirroring the kit's
+    /// `.ql:hover`/`.perm-cell:hover { color:#fff }` lift.
+    var restForeground: Color? = nil
     @State private var isHovering = false
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        let active = isHovering || configuration.isPressed
+        return configuration.label
+            .modifier(RestForeground(color: restForeground.map { active ? BridgeTokens.fg1 : $0 }))
             .background(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(Color.white.opacity(isHovering || configuration.isPressed ? 0.06 : 0.0))
+                    .fill(Color.white.opacity(active ? 0.05 : 0.0))
             )
             .onHover { hovering in
                 isHovering = hovering
             }
+    }
+
+    /// Applies a foreground tint only when a rest color is configured, so
+    /// rows that set their own per-element colors are left untouched.
+    private struct RestForeground: ViewModifier {
+        let color: Color?
+        func body(content: Content) -> some View {
+            if let color { content.foregroundStyle(color) } else { content }
+        }
     }
 }
 

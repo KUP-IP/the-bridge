@@ -85,58 +85,86 @@ public struct PermissionView: View {
 
     // MARK: - Row
 
-    /// PKT-362 D1: Grant name, status dot, label, and action — no extra description copy.
-    /// PKT-362 D3: Yellow "Checking…" indicator when grantCheckingState is active.
+    /// v3.7.2 redesign: LED-badged glass icon tile + grant name + status badge +
+    /// action, matching design/permissions.css `.pm-grant`/`.pm-gled`.
+    /// PKT-362 D1: name + status only, no DisclosureGroup verbosity.
+    /// PKT-362 D3: amber LED + "Checking…" while grantCheckingState is active.
     private func permissionRow(
         grant: PermissionManager.Grant,
         status: PermissionManager.GrantStatus
     ) -> some View {
         let isChecking = permissionManager.grantCheckingState[grant] ?? false
 
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                // D3: Yellow circle during check, normal status color otherwise
+        return HStack(spacing: 12) {
+            // LED-badged glass icon tile (.pm-gicon + .pm-gled)
+            ZStack(alignment: .topTrailing) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color.white.opacity(0.05))
+                        .frame(width: 34, height: 34)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+                        )
+                    Image(systemName: rowIcon(for: grant))
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.80))
+                }
+                let dot = isChecking ? BridgeTokens.warn : statusColor(status)
                 Circle()
-                    .fill(isChecking ? BridgeTokens.warn : statusColor(status))
-                    .frame(width: 8, height: 8)
+                    .fill(dot)
+                    .frame(width: 9, height: 9)
+                    .overlay(Circle().strokeBorder(BridgeTokens.bgCarbon2, lineWidth: 2))
+                    .shadow(color: dot.opacity(0.7), radius: 3)
+                    .offset(x: 3, y: -3)
+            }
+            .frame(width: 34, height: 34)
 
-                Text(grant.displayName)
-                    .font(.callout)
+            Text(grant.displayName)
+                .font(.callout)
 
-                Spacer()
+            Spacer()
 
-                // D3: "Checking…" label during animated recheck
-                if isChecking {
-                    Text("Checking\u{2026}")
-                        .font(.caption)
-                        .foregroundStyle(BridgeTokens.warn)
-                } else if recentlyGranted.contains(grant) {
-                    Text("\u{2713} Granted")
-                        .font(.caption)
-                        .foregroundStyle(BridgeTokens.ok)
-                } else {
-                    Text(permissionManager.statusLabel(for: grant))
-                        .font(.caption)
-                        .foregroundStyle(status == .granted ? BridgeTokens.ok : BridgeTokens.warn)
-                }
-
-                // D1: Action button only for non-granted, non-checking states
-                if status != .granted && !isChecking {
-                    Button(actionButtonTitle(for: grant, status: status)) {
-                        permLog.notice("Button tapped for grant: \(grant.displayName)")
-                        openSystemSettings(for: grant)
-                    }
-                    .buttonStyle(.plain)
+            // D3: "Checking…" label during animated recheck
+            if isChecking {
+                Text("Checking\u{2026}")
                     .font(.caption)
-                    .foregroundStyle(BridgeTokens.accent)
-                }
+                    .foregroundStyle(BridgeTokens.warn)
+            } else if recentlyGranted.contains(grant) {
+                Text("\u{2713} Granted")
+                    .font(.caption)
+                    .foregroundStyle(BridgeTokens.ok)
+            } else {
+                Text(permissionManager.statusLabel(for: grant))
+                    .font(.caption)
+                    .foregroundStyle(status == .granted ? BridgeTokens.ok : BridgeTokens.warn)
             }
 
-            // D1: DisclosureGroup REMOVED — probe/evidence data available via
-            // Diagnostics export in Advanced settings or debugDetail(for:) API.
+            // D1: Action button only for non-granted, non-checking states
+            if status != .granted && !isChecking {
+                Button(actionButtonTitle(for: grant, status: status)) {
+                    permLog.notice("Button tapped for grant: \(grant.displayName)")
+                    openSystemSettings(for: grant)
+                }
+                .buttonStyle(.plain)
+                .font(.caption)
+                .foregroundStyle(BridgeTokens.accent)
+            }
         }
         // D3: Animate row transitions (checking ↔ result) with 0.3s fade
         .animation(.easeInOut(duration: 0.3), value: isChecking)
+    }
+
+    /// SF Symbol per TCC grant for the row's glass icon tile.
+    private func rowIcon(for grant: PermissionManager.Grant) -> String {
+        switch grant {
+        case .accessibility:   return "accessibility"
+        case .screenRecording: return "rectangle.dashed.badge.record"
+        case .fullDiskAccess:  return "internaldrive"
+        case .contacts:        return "person.crop.circle"
+        case .notifications:   return "bell.badge"
+        case .automation:      return "gearshape.2"
+        }
     }
 
     // MARK: - PKT-798 (WS-C) Upcoming Capability Gates

@@ -132,7 +132,7 @@ struct CredentialsView: View {
                         BridgeEmptyState(
                             systemImage: "key.horizontal",
                             title: "No Bridge credentials yet",
-                            body: "Add an API key, password, or tokenized card below to store it in the macOS Keychain with biometric protection. Only credentials created here appear in this list — existing Keychain items from other apps are intentionally hidden."
+                            body: "Add an API key, password, or tokenized card below to store it securely. Only credentials created here appear in this list — items from other apps are intentionally hidden."
                         )
                     }
                 }
@@ -208,7 +208,7 @@ struct CredentialsView: View {
                         }
                     }
 
-                    Text("Stored in macOS Keychain with biometric protection.")
+                    Text("New items are encrypted and protected with biometric auth.")
                         .font(.caption2)
                         .foregroundStyle(BridgeColors.muted)
                 }

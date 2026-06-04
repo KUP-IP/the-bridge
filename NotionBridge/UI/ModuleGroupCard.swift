@@ -36,15 +36,29 @@ extension TripleStateLike {
 private struct ModuleGroupToolRow: View {
     let toolName: String
     let description: String
+    /// Registered security tier ("open" / "notify" / "request"). Drives the
+    /// "confirm" tier pill the design shows for tools that prompt before
+    /// running. `nil`/"open" renders no pill.
+    let tier: String?
     @Binding var isEnabled: Bool
+
+    /// The design's `.tl-pill.confirm` — anything past the plain `open`
+    /// tier confirms / notifies before dispatch.
+    private var isConfirmTier: Bool {
+        guard let tier else { return false }
+        return tier != "open"
+    }
 
     var body: some View {
         HStack(spacing: 11) {
-            // Status glyph — small filled dot, green when on, dim when off.
+            // Status glyph — 7px filled dot with an emerald glow when on,
+            // dim when off (design `.tl-glyph.on` / `.off`).
             Circle()
                 .fill(isEnabled ? BridgeTokens.ok
                                 : Color.white.opacity(0.18))
                 .frame(width: 7, height: 7)
+                .shadow(color: isEnabled ? BridgeTokens.ok.opacity(0.6) : .clear,
+                        radius: 2.5)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(toolName)
@@ -60,19 +74,46 @@ private struct ModuleGroupToolRow: View {
             }
             Spacer(minLength: 8)
 
+            // Tier / state pill (design `.tl-meta`): a "confirm" pill for
+            // notify/request-tier tools, an "off" pill when disabled.
+            if isConfirmTier {
+                toolPill("confirm",
+                         bg: BridgeTokens.warn.opacity(0.16),
+                         stroke: BridgeTokens.warn.opacity(0.30),
+                         fg: BridgeTokens.warnText)
+            }
+            if !isEnabled {
+                toolPill("off",
+                         bg: BridgeTokens.bad.opacity(0.10),
+                         stroke: BridgeTokens.bad.opacity(0.20),
+                         fg: BridgeTokens.badText)
+            }
+
             Toggle("", isOn: $isEnabled)
                 .toggleStyle(.switch)
                 .controlSize(.mini)
                 .labelsHidden()
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
+        .opacity(isEnabled ? 1.0 : 0.52)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(Color.white.opacity(0.0001))  // hit-test only
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(toolName) — \(isEnabled ? "enabled" : "disabled")")
+    }
+
+    private func toolPill(_ label: String, bg: Color, stroke: Color, fg: Color) -> some View {
+        Text(label.uppercased())
+            .font(.system(size: 10, weight: .semibold))
+            .tracking(0.4)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(bg, in: Capsule())
+            .overlay(Capsule().strokeBorder(stroke, lineWidth: 0.5))
+            .foregroundStyle(fg)
     }
 }
 
@@ -85,6 +126,7 @@ private struct ModuleGroupToolRow: View {
 public struct ModuleGroupCard: View {
     public let group: ModuleGroup
     public let toolDescriptions: [String: String]
+    public let toolTiers: [String: String]
     public let onPerToolChange: (String, Bool) -> Void
     public let onMasterChange: (Bool) -> Void
     public let onDepLinkTapped: (ModuleGroupDependency) -> Void
@@ -100,12 +142,14 @@ public struct ModuleGroupCard: View {
     public init(
         group: ModuleGroup,
         toolDescriptions: [String: String],
+        toolTiers: [String: String] = [:],
         onPerToolChange: @escaping (String, Bool) -> Void,
         onMasterChange: @escaping (Bool) -> Void,
         onDepLinkTapped: @escaping (ModuleGroupDependency) -> Void
     ) {
         self.group = group
         self.toolDescriptions = toolDescriptions
+        self.toolTiers = toolTiers
         self.onPerToolChange = onPerToolChange
         self.onMasterChange = onMasterChange
         self.onDepLinkTapped = onDepLinkTapped
@@ -132,6 +176,13 @@ public struct ModuleGroupCard: View {
         UserDefaults.standard.set(dict, forKey: BridgeDefaults.moduleGroupExpanded)
     }
 
+    /// A `.bad`-severity dependency means a required permission/credential is
+    /// missing — surface the design's amber `.tl-warn` banner so the operator
+    /// knows the enabled tools won't function until it's granted.
+    private var unmetDependency: ModuleGroupDependency? {
+        group.dependencies.first { $0.severity == .bad }
+    }
+
     public var body: some View {
         BridgeGlassCard(cornerRadius: 12, padding: 0) {
             VStack(alignment: .leading, spacing: 0) {
@@ -141,6 +192,9 @@ public struct ModuleGroupCard: View {
                         depChipRow
                     }
                     Divider().background(Color.white.opacity(0.06))
+                    if let dep = unmetDependency, group.masterState != .off {
+                        warnBanner(for: dep)
+                    }
                     toolList
                 }
             }
@@ -148,6 +202,29 @@ public struct ModuleGroupCard: View {
         .opacity(group.masterState == .off ? 0.62 : 1.0)
         .animation(.easeInOut(duration: 0.18), value: isExpanded)
         .animation(.easeInOut(duration: 0.15), value: group.masterState)
+    }
+
+    private func warnBanner(for dep: ModuleGroupDependency) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: "info.circle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(BridgeTokens.warnText)
+            (Text("Tools are enabled but won't function until you grant ")
+                + Text("\(dep.label).").foregroundColor(BridgeTokens.warnText))
+                .font(.system(size: 11.5))
+                .foregroundStyle(BridgeTokens.warnText.opacity(0.92))
+            Spacer(minLength: 0)
+            BridgeDepLink(dep.label,
+                          variant: .info,
+                          action: { onDepLinkTapped(dep) })
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 9)
+        .background(BridgeTokens.warn.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .strokeBorder(BridgeTokens.warn.opacity(0.26), lineWidth: 0.5))
+        .padding(.horizontal, 10)
+        .padding(.top, 8)
     }
 
     // MARK: Subviews
@@ -201,17 +278,43 @@ public struct ModuleGroupCard: View {
         .accessibilityAddTraits(.isButton)
     }
 
+    /// Per-group accent — the design's `acc-*` icon-tile tint. Drawn ONLY
+    /// from the canonical BridgeTokens (no raw colours); each module maps to
+    /// the nearest signal/accent token so the registry reads as a colour-
+    /// coded surface, matching the locked mock's hue-per-source treatment.
+    private var accent: Color {
+        switch group.id {
+        case .file, .git, .gh, .snippets, .lsp:                 return BridgeTokens.okText
+        case .notion, .contacts, .connections, .http, .devserver: return BridgeTokens.accentLink
+        case .messages, .reminders, .calendar, .notes:          return BridgeTokens.warnText
+        case .screen, .applescript, .shell, .synthetic, .bgProcess: return BridgeTokens.badText
+        case .chrome, .accessibility, .clipboard, .system:      return BridgeTokens.accentLink
+        case .stripe, .payment, .credential:                    return BridgeTokens.gold
+        case .skills, .jobs:                                    return BridgeTokens.gold
+        }
+    }
+
     private var iconSquare: some View {
         RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(Color.white.opacity(0.06))
+            .fill(accent.opacity(0.12))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
             )
             .overlay(
+                // top rim highlight — matches the design's inset sheen.
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .inset(by: 0.5)
+                    .stroke(
+                        LinearGradient(colors: [Color.white.opacity(0.18), .clear],
+                                       startPoint: .top, endPoint: .bottom),
+                        lineWidth: 0.5)
+                    .allowsHitTesting(false)
+            )
+            .overlay(
                 Image(systemName: group.systemImage)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(0.85))
+                    .foregroundStyle(accent)
             )
             .frame(width: 30, height: 30)
     }
@@ -275,11 +378,12 @@ public struct ModuleGroupCard: View {
 
     @ViewBuilder
     private var toolList: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 1) {
             ForEach(group.tools, id: \.self) { toolName in
                 ModuleGroupToolRow(
                     toolName: toolName,
                     description: toolDescriptions[toolName] ?? "",
+                    tier: toolTiers[toolName],
                     isEnabled: Binding(
                         get: { !group.disabledNames.contains(toolName) },
                         set: { onPerToolChange(toolName, $0) }
@@ -288,7 +392,8 @@ public struct ModuleGroupCard: View {
             }
         }
         .padding(.horizontal, 6)
-        .padding(.vertical, 4)
+        .padding(.top, 4)
+        .padding(.bottom, 6)
     }
 }
 
@@ -316,6 +421,11 @@ public struct ModuleGroupList: View {
         Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0.description) })
     }
 
+    /// Tool name → security tier lookup, feeding the per-row "confirm" pill.
+    private var tiers: [String: String] {
+        Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0.tier) })
+    }
+
     private var groups: [ModuleGroup] {
         ModuleGroupDerivation.deriveGroups(
             registeredToolNames: tools.map(\.name),
@@ -334,6 +444,7 @@ public struct ModuleGroupList: View {
                     ModuleGroupCard(
                         group: group,
                         toolDescriptions: descriptions,
+                        toolTiers: tiers,
                         onPerToolChange: { toolName, enabled in
                             setEnabled(toolName, enabled)
                         },
@@ -360,20 +471,33 @@ public struct ModuleGroupList: View {
         let total = tools.count
         let active = total - disabledTools.intersection(tools.map(\.name)).count
         let disabled = total - active
-        return BridgeGlassCard(cornerRadius: 12, padding: 13) {
-            HStack(alignment: .center, spacing: 18) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Tool registry")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(0.95))
-                    Text("\(groups.count) modules · MCP v1.0 · grouped by source")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(Color.white.opacity(0.55))
+        return BridgeGlassCard(cornerRadius: 12, padding: 16) {
+            HStack(spacing: 16) {
+                // Orb — mirrors the StandingOrders hero icon tile.
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(BridgeTokens.accent.opacity(0.22))
+                        .frame(width: 50, height: 50)
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(BridgeTokens.accent.opacity(0.45), lineWidth: 1))
+                    Image(systemName: "hammer.fill")
+                        .font(.system(size: 21, weight: .semibold))
+                        .foregroundStyle(BridgeTokens.accentLink)
                 }
-                Spacer(minLength: 0)
-                heroStat(value: total, label: "total", emphasis: .neutral)
-                heroStat(value: active, label: "active", emphasis: .on)
-                heroStat(value: disabled, label: "disabled", emphasis: .off)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Tool registry")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(BridgeTokens.fg1)
+                    Text("\(groups.count) modules · MCP v1.0 · grouped by source. Toggle a module or an individual tool.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(BridgeTokens.fg3)
+                }
+                Spacer(minLength: 8)
+                HStack(spacing: 10) {
+                    heroStat(value: total, label: "total", emphasis: .neutral)
+                    heroStat(value: active, label: "active", emphasis: .on)
+                    heroStat(value: disabled, label: "disabled", emphasis: .off)
+                }
             }
         }
     }
@@ -387,15 +511,18 @@ public struct ModuleGroupList: View {
             case .neutral: return Color.white
             }
         }()
-        return VStack(alignment: .center, spacing: 0) {
+        return VStack(spacing: 3) {
             Text("\(value)")
-                .font(.system(size: 18, weight: .semibold))
-                .monospacedDigit()
+                .font(.system(size: 18, weight: .semibold, design: .monospaced))
                 .foregroundStyle(valueColor)
-            Text(label)
-                .font(.system(size: 12))
-                .foregroundStyle(Color.white.opacity(0.62))
+            Text(label.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(0.8)
+                .foregroundStyle(BridgeTokens.fg4)
         }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
     }
 
     // MARK: Mutators
