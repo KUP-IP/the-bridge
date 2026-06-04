@@ -77,7 +77,8 @@ public final class CommandBridgePanel: NSPanel {
         backgroundColor = .clear
         isOpaque = false
         hasShadow = false   // shadows are baked into BridgeGlass surfaces
-        appearance = NSAppearance(named: .darkAqua) // v3.7.2: carbon glass is dark-only
+        // v3.7.6: system-tethered appearance — leave `appearance` UNSET so the
+        // palette follows the system (its hosted SwiftUI glass adapts live).
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
     }
 

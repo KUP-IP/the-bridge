@@ -53,7 +53,7 @@ public final class OnboardingWindowController {
 
         let hostingController = NSHostingController(
             rootView: ZStack { BridgeStage(); onboardingView }
-                .preferredColorScheme(.dark)
+            // v3.7.6: system-tethered appearance — no forced color scheme.
         )
 
         let window = NSWindow(contentViewController: hostingController)
@@ -64,9 +64,10 @@ public final class OnboardingWindowController {
         window.center()
         window.isReleasedWhenClosed = false
         window.level = .floating
-        // v3.7.2 resurface: carbon stage is dark-only.
-        window.appearance = NSAppearance(named: .darkAqua)
-        window.backgroundColor = NSColor(red: 0.043, green: 0.047, blue: 0.055, alpha: 1)
+        // v3.7.6: system-tethered appearance — leave window.appearance UNSET so
+        // the wizard follows the system and live-adapts; the dynamic canvas
+        // backing tracks the appearance (no white resize flash).
+        window.backgroundColor = BridgeTokens.canvasNSColor
 
         self.window = window
         window.makeKeyAndOrderFront(nil)

@@ -67,7 +67,8 @@ public struct DashboardView: View {
         .frame(width: PKT879Dashboard.popoverWidth)
         // Edge insets come from .pop-head (top 14) and .pop-actions (bottom 12)
         // per kit.css; no extra outer vertical padding so the spec stays exact.
-        .preferredColorScheme(.dark) // v3.7.2: carbon glass is dark-only
+        // v3.7.6: appearance is system-tethered (no forced color scheme) — the
+        // adaptive BridgeTokens follow Light/Dark live.
         .task {
             await permissionManager.checkAllAsync()
             await refreshLicenseStatus()

@@ -86,11 +86,11 @@ public final class SettingsWindowController {
         // autosaved frame — or a window-manager (Magnet) snap — must never
         // override the default. The window stays drag-resizable for the
         // session; it simply resets to the square next launch.
-        // v3.7.2 resurface: the carbon Liquid-Glass stage is dark-only, so pin
-        // the window to dark appearance regardless of the system setting, and
-        // paint a carbon backing so a resize never flashes system white.
-        window.appearance = NSAppearance(named: .darkAqua)
-        window.backgroundColor = NSColor(red: 0.043, green: 0.047, blue: 0.055, alpha: 1) // #0B0C0E
+        // v3.7.6: system-tethered appearance — leave window.appearance UNSET so
+        // the window follows the system (Light→titanium, Dark→carbon) and live-
+        // adapts. Paint the dynamic canvas backing so a resize never flashes
+        // system white and the chrome tracks the appearance too.
+        window.backgroundColor = BridgeTokens.canvasNSColor
         window.center()
         window.isReleasedWhenClosed = false
 
@@ -224,7 +224,7 @@ public struct SettingsView: View {
             }
         }
         .frame(minWidth: 760, minHeight: 600)
-        .preferredColorScheme(.dark)
+        // v3.7.6: system-tethered appearance — no forced color scheme.
     }
 
     @ViewBuilder
