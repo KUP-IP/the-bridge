@@ -47,8 +47,8 @@ private enum RemoteAccessStatus {
 
     var dotColor: Color {
         switch self {
-        case .active: return .green
-        case .misconfigured: return .yellow
+        case .active: return BridgeTokens.ok
+        case .misconfigured: return BridgeTokens.warn
         case .notConfigured: return .gray
         }
     }
@@ -129,15 +129,17 @@ public struct ConnectionSetupView: View {
             Circle()
                 .fill(remoteStatus.dotColor)
                 .frame(width: 8, height: 8)
+                .shadow(color: remoteStatus.dotColor.opacity(0.5), radius: 3)
             Text("Remote Access")
-                .font(.callout)
+                .font(.system(size: 13.5))
+                .foregroundStyle(BridgeTokens.fg1)
             Spacer()
             Text(remoteStatus == .active ? activeProvider.rawValue : remoteStatus.label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 11.5))
+                .foregroundStyle(BridgeTokens.fg4)
             Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(BridgeTokens.fg4)
                 .accessibilityHidden(true)
         }
         .contentShape(Rectangle())
@@ -201,14 +203,14 @@ public struct ConnectionSetupView: View {
             if let error = urlValidationError {
                 Text(error)
                     .font(.caption2)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(BridgeTokens.bad)
             }
 
             // Save confirmation
             if showSaveConfirmation {
                 Text("Saved")
                     .font(.caption2)
-                    .foregroundStyle(.green)
+                    .foregroundStyle(BridgeTokens.ok)
                     .transition(.opacity)
             }
         }
@@ -219,8 +221,9 @@ public struct ConnectionSetupView: View {
     private var mcpBearerSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("BEARER TOKEN")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(1.0)
+                .foregroundStyle(BridgeTokens.fg4)
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 SecureField("Bearer token", text: $mcpBearerToken)
                     .textContentType(.none)
@@ -256,7 +259,7 @@ public struct ConnectionSetupView: View {
             if showBearerWarning {
                 Text("Active clients disconnected — reconnect with the new token.")
                     .font(.caption2)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(BridgeTokens.warn)
                     .transition(.opacity)
             }
         }
@@ -351,25 +354,48 @@ public struct ConnectionSetupView: View {
     // MARK: - Provider Row
 
     private func providerRow(_ provider: TunnelProvider) -> some View {
-        Button {
+        let on = activeProvider == provider
+        return Button {
             selectedProvider = provider.rawValue
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: activeProvider == provider ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(activeProvider == provider ? .blue : .secondary)
-                    .font(.callout)
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .strokeBorder(on ? BridgeTokens.accentLink : Color.white.opacity(0.30),
+                                      lineWidth: 1.5)
+                        .frame(width: 15, height: 15)
+                    if on {
+                        Circle().fill(BridgeTokens.accentLink).frame(width: 7, height: 7)
+                    }
+                }
                 Image(systemName: provider.icon)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BridgeTokens.fg4)
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(provider.rawValue)
-                        .font(.callout)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(BridgeTokens.fg1)
                     Text(provider.displayDescription)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .font(.system(size: 11))
+                        .foregroundStyle(BridgeTokens.fg4)
                 }
                 Spacer()
             }
+            .padding(.horizontal, 11).padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                on
+                ? AnyShapeStyle(LinearGradient(
+                    colors: [BridgeTokens.accent.opacity(0.18), BridgeTokens.accent.opacity(0.06)],
+                    startPoint: .top, endPoint: .bottom))
+                : AnyShapeStyle(Color.black.opacity(0.20)),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(on ? BridgeTokens.accent.opacity(0.50) : Color.white.opacity(0.10),
+                                  lineWidth: 0.5)
+            )
         }
         .buttonStyle(.plain)
     }

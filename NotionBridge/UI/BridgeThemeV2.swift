@@ -67,7 +67,7 @@ public struct BridgeGlassCard<Content: View>: View {
                         ],
                         startPoint: .top, endPoint: .bottom
                     )
-                    Color(red: 0.08, green: 0.08, blue: 0.094).opacity(0.20)
+                    BridgeTokens.glassCardTint.opacity(0.20)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             )
@@ -135,20 +135,20 @@ public struct BridgeDepLink: View {
 
     private var background: Color {
         switch variant {
-        case .info: return Color.blue.opacity(0.10)
-        case .bad:  return Color.red.opacity(0.10)
+        case .info: return BridgeTokens.accent.opacity(0.10)
+        case .bad:  return BridgeTokens.bad.opacity(0.10)
         }
     }
     private var border: Color {
         switch variant {
-        case .info: return Color.blue.opacity(0.20)
-        case .bad:  return Color.red.opacity(0.28)
+        case .info: return BridgeTokens.accent.opacity(0.20)
+        case .bad:  return BridgeTokens.bad.opacity(0.28)
         }
     }
     private var foreground: Color {
         switch variant {
-        case .info: return Color(red: 0.66, green: 0.78, blue: 1.0)
-        case .bad:  return Color(red: 1.0, green: 0.61, blue: 0.61)
+        case .info: return BridgeTokens.infoText
+        case .bad:  return BridgeTokens.badText
         }
     }
 }
@@ -199,11 +199,11 @@ public struct PartialToggle: View {
                 startPoint: .top, endPoint: .bottom)
         case .partial:
             return LinearGradient(
-                colors: [Color.orange.opacity(0.55), Color.orange.opacity(0.40)],
+                colors: [BridgeTokens.warn.opacity(0.55), BridgeTokens.warn.opacity(0.40)],
                 startPoint: .top, endPoint: .bottom)
         case .on:
             return LinearGradient(
-                colors: [Color.green.opacity(0.65), Color.green.opacity(0.55)],
+                colors: [BridgeTokens.ok.opacity(0.65), BridgeTokens.ok.opacity(0.55)],
                 startPoint: .top, endPoint: .bottom)
         }
     }

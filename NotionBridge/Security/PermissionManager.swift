@@ -35,6 +35,7 @@ import Foundation
 import Observation
 import AppKit
 import Contacts
+@preconcurrency import EventKit
 import UserNotifications
 
 /// Detects TCC (Transparency, Consent, and Control) grant status
@@ -64,6 +65,8 @@ public final class PermissionManager {
         case automation
         case notifications
         case contacts
+        case reminders
+        case calendar
 
         public var id: String { rawValue }
 
@@ -77,7 +80,7 @@ public final class PermissionManager {
             switch self {
             case .contacts, .notifications, .automation:
                 return true
-            case .accessibility, .screenRecording, .fullDiskAccess:
+            case .accessibility, .screenRecording, .fullDiskAccess, .reminders, .calendar:
                 return false
             }
         }
@@ -105,6 +108,8 @@ public final class PermissionManager {
             case .automation: return "Automation"
             case .notifications: return "Notifications"
             case .contacts: return "Contacts"
+            case .reminders: return "Reminders"
+            case .calendar: return "Calendar"
             }
         }
 
@@ -123,6 +128,10 @@ public final class PermissionManager {
                 return URL(string: "x-apple.systempreferences:com.apple.preference.notifications")
             case .contacts:
                 return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Contacts")
+            case .reminders:
+                return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders")
+            case .calendar:
+                return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")
             }
         }
     }
@@ -216,6 +225,8 @@ public final class PermissionManager {
     public private(set) var automationStatus: GrantStatus = .unknown
     public private(set) var contactsStatus: GrantStatus = .unknown
     public private(set) var notificationStatus: GrantStatus = .unknown
+    public private(set) var remindersStatus: GrantStatus = .unknown
+    public private(set) var calendarStatus: GrantStatus = .unknown
 
     /// Per-target Automation grant results. Key = bundleID.
     public private(set) var automationTargetGrants: [String: Bool] = [:]
@@ -244,6 +255,8 @@ public final class PermissionManager {
     public private(set) var automationEvidence: GrantEvidence?
     public private(set) var contactsEvidence: GrantEvidence?
     public private(set) var notificationEvidence: GrantEvidence?
+    public private(set) var remindersEvidence: GrantEvidence?
+    public private(set) var calendarEvidence: GrantEvidence?
 
     /// One-shot per process: requestAuthorization when status is still notDetermined (syncs System Settings–only grants).
     private var notificationAuthorizationSyncAttempted = false
@@ -279,6 +292,8 @@ public final class PermissionManager {
         case .automation: return automationStatus
         case .notifications: return notificationStatus
         case .contacts: return contactsStatus
+        case .reminders: return remindersStatus
+        case .calendar: return calendarStatus
         }
     }
 
@@ -299,6 +314,8 @@ public final class PermissionManager {
         checkFullDiskAccess()
         await checkAutomation()
         checkContacts()
+        checkReminders()
+        checkCalendar()
         lastCheckedAt = Date()
     }
 
@@ -327,6 +344,8 @@ public final class PermissionManager {
         checkFullDiskAccess()
         await checkAutomation()
         checkContacts()
+        checkReminders()
+        checkCalendar()
         await checkNotifications()
         lastCheckedAt = Date()
     }
@@ -726,6 +745,96 @@ public final class PermissionManager {
         }
     }
 
+    /// Reminders: EKEventStore.authorizationStatus(for: .reminder) — direct API.
+    /// Mirrors EventKitRemindersStore: `.authorized`/`.fullAccess` map to .granted;
+    /// `.denied`/`.restricted` to .denied; `.notDetermined` to .unknown. EventKit's
+    /// `.writeOnly` does not apply to reminders in practice — fail-closed to .denied.
+    public func checkReminders() {
+        let authStatus = EKEventStore.authorizationStatus(for: .reminder)
+        switch authStatus {
+        case .authorized, .fullAccess:
+            remindersStatus = .granted
+        case .denied, .restricted, .writeOnly:
+            remindersStatus = .denied
+        case .notDetermined:
+            remindersStatus = .unknown
+        @unknown default:
+            remindersStatus = .unknown
+        }
+        remindersEvidence = .init(
+            source: "EKEventStore.authorizationStatus(for: .reminder)",
+            observed: "status=\(authStatus.rawValue)",
+            detail: "Reminders access is read directly from the EventKit authorization API.",
+            checkedAt: Date()
+        )
+    }
+
+    /// Reminders: Request access — triggers the macOS system prompt when
+    /// `.notDetermined`, then rechecks. Mirrors EventKitRemindersStore.ensureAccess().
+    @discardableResult
+    public func requestRemindersAccess() async -> Bool {
+        await MainActor.run {
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        }
+        if EKEventStore.authorizationStatus(for: .reminder) == .notDetermined {
+            let store = EKEventStore()
+            if #available(macOS 14.0, *) {
+                _ = try? await store.requestFullAccessToReminders()
+            } else {
+                _ = await withCheckedContinuation { cont in
+                    store.requestAccess(to: .reminder) { ok, _ in cont.resume(returning: ok) }
+                }
+            }
+        }
+        checkReminders()
+        return remindersStatus == .granted
+    }
+
+    /// Calendar: EKEventStore.authorizationStatus(for: .event) — direct API.
+    /// Mirrors EventKitCalendarStore: `.authorized`/`.fullAccess` map to .granted;
+    /// `.denied`/`.restricted` to .denied; `.notDetermined` to .unknown. EventKit's
+    /// `.writeOnly` grant cannot read events back — fail-closed to .denied for the UI.
+    public func checkCalendar() {
+        let authStatus = EKEventStore.authorizationStatus(for: .event)
+        switch authStatus {
+        case .authorized, .fullAccess:
+            calendarStatus = .granted
+        case .denied, .restricted, .writeOnly:
+            calendarStatus = .denied
+        case .notDetermined:
+            calendarStatus = .unknown
+        @unknown default:
+            calendarStatus = .unknown
+        }
+        calendarEvidence = .init(
+            source: "EKEventStore.authorizationStatus(for: .event)",
+            observed: "status=\(authStatus.rawValue)",
+            detail: "Calendar access is read directly from the EventKit authorization API.",
+            checkedAt: Date()
+        )
+    }
+
+    /// Calendar: Request access — triggers the macOS system prompt when
+    /// `.notDetermined`, then rechecks. Mirrors EventKitCalendarStore.ensureAccess().
+    @discardableResult
+    public func requestCalendarAccess() async -> Bool {
+        await MainActor.run {
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        }
+        if EKEventStore.authorizationStatus(for: .event) == .notDetermined {
+            let store = EKEventStore()
+            if #available(macOS 14.0, *) {
+                _ = try? await store.requestFullAccessToEvents()
+            } else {
+                _ = await withCheckedContinuation { cont in
+                    store.requestAccess(to: .event) { ok, _ in cont.resume(returning: ok) }
+                }
+            }
+        }
+        checkCalendar()
+        return calendarStatus == .granted
+    }
+
     /// Notifications: UNUserNotificationCenter — async API.
     /// Unlike synchronous TCC checks, notification status requires async.
     /// Called from recheckAllForTruth() and animatedRecheckAll().
@@ -868,6 +977,16 @@ public final class PermissionManager {
                 return "Click Allow to trigger the macOS Contacts prompt. If macOS does not resolve the state, Notion Bridge should open Contacts settings automatically."
             }
             return "Open System Settings > Privacy & Security > Contacts and enable Notion Bridge. Contacts privacy access is separate from Automation access for Contacts.app."
+        case .reminders:
+            if remindersStatus == .unknown {
+                return "Click Allow to trigger the macOS Reminders prompt. If macOS does not resolve the state, open System Settings > Privacy & Security > Reminders and enable Notion Bridge."
+            }
+            return "Open System Settings > Privacy & Security > Reminders and enable Notion Bridge."
+        case .calendar:
+            if calendarStatus == .unknown {
+                return "Click Allow to trigger the macOS Calendar prompt. If macOS does not resolve the state, open System Settings > Privacy & Security > Calendars and enable Notion Bridge."
+            }
+            return "Open System Settings > Privacy & Security > Calendars and enable Notion Bridge."
         }
     }
 
@@ -894,6 +1013,8 @@ public final class PermissionManager {
         case .automation: return automationEvidence
         case .notifications: return notificationEvidence
         case .contacts: return contactsEvidence
+        case .reminders: return remindersEvidence
+        case .calendar: return calendarEvidence
         }
     }
 

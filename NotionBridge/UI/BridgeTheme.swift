@@ -16,11 +16,17 @@ enum BridgeColors {
     /// Secondary text color — medium contrast, used for supporting text
     static let secondary = Color.secondary
 
-    /// Success indicator — server running, connected status
-    static let success = Color.green
+    /// Success indicator — server running, connected status (emerald #13B87A)
+    static let success = BridgeTokens.ok
 
-    /// Error indicator — server stopped, disconnected status
-    static let error = Color.red
+    /// Warning indicator — partial, expiring, needs attention (amber #E9A93A)
+    static let warning = BridgeTokens.warn
+
+    /// Error indicator — server stopped, disconnected status (red #C23A3A)
+    static let error = BridgeTokens.bad
+
+    /// Interactive accent — primary buttons, selection, links (royal blue #2A48C0)
+    static let accent = BridgeTokens.accent
 
     /// Muted text color — tertiary info, timestamps, subtle labels
     static let muted = Color(nsColor: .tertiaryLabelColor)
@@ -106,17 +112,17 @@ struct BridgeBadge: View {
         var background: Color {
             switch self {
             case .neutral: return Color.secondary.opacity(0.10)
-            case .info:    return Color.blue.opacity(0.12)
-            case .success: return Color.green.opacity(0.12)
-            case .warning: return Color.orange.opacity(0.14)
+            case .info:    return BridgeTokens.accent.opacity(0.12)
+            case .success: return BridgeTokens.ok.opacity(0.12)
+            case .warning: return BridgeTokens.warn.opacity(0.14)
             }
         }
         var foreground: Color {
             switch self {
             case .neutral: return Color.secondary
-            case .info:    return Color.blue
-            case .success: return Color.green
-            case .warning: return Color.orange
+            case .info:    return BridgeTokens.infoText
+            case .success: return BridgeTokens.okText
+            case .warning: return BridgeTokens.warnText
             }
         }
     }

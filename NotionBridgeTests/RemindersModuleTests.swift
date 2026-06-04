@@ -22,6 +22,43 @@ final class MockRemindersStore: RemindersStoring, @unchecked Sendable {
     private(set) var items: [String: ReminderItem] = [:]
     private var seq = 0
 
+    /// Mirrors EventKitRemindersStore.serializeRule's compact format so the
+    /// round-trip tests assert the same shape headless, e.g.
+    /// "weekly;interval:1", "daily;interval:2;count:5".
+    private func ruleString(_ draft: ReminderDraft) -> String? {
+        guard let freq = draft.recurrenceFreq, !freq.isEmpty else { return nil }
+        var parts = ["\(freq.lowercased());interval:\(max(1, draft.recurrenceInterval ?? 1))"]
+        if let count = draft.recurrenceCount, count > 0 {
+            parts.append("count:\(count)")
+        } else if let until = draft.recurrenceEndDate, !until.isEmpty {
+            parts.append("until:\(until)")
+        }
+        return parts.joined(separator: ";")
+    }
+
+    /// Mirrors EventKitRemindersStore.buildAlarms + serializeAlarms: convert
+    /// the draft alarms into read-back AlarmItems (with synthetic ids).
+    private func alarmItems(_ drafts: [AlarmDraft]?) -> [AlarmItem]? {
+        guard let drafts, !drafts.isEmpty else { return nil }
+        return drafts.enumerated().compactMap { idx, d in
+            switch d.type.lowercased() {
+            case "relative":
+                return AlarmItem(id: "alarm-\(idx)", type: "relative",
+                                 triggerMinutesBefore: d.triggerMinutesBefore ?? 0)
+            case "absolute":
+                guard let iso = d.triggerAbsoluteDate else { return nil }
+                return AlarmItem(id: "alarm-\(idx)", type: "absolute", triggerAbsoluteDate: iso)
+            case "geofence":
+                guard let lat = d.latitude, let lon = d.longitude else { return nil }
+                return AlarmItem(id: "alarm-\(idx)", type: "geofence",
+                                 latitude: lat, longitude: lon, radius: d.radius,
+                                 proximity: d.proximity?.lowercased())
+            default:
+                return nil
+            }
+        }
+    }
+
     init(authStatus: RemindersAuthStatus = .authorized, lists: [ReminderList]? = nil) {
         self.authStatus = authStatus
         self.lists_ = lists ?? [
@@ -86,7 +123,9 @@ final class MockRemindersStore: RemindersStoring, @unchecked Sendable {
             notes: draft.notes,
             priority: draft.priority ?? 0,
             url: (draft.url?.isEmpty == false) ? draft.url : nil,
-            location: (draft.location?.isEmpty == false) ? draft.location : nil
+            location: (draft.location?.isEmpty == false) ? draft.location : nil,
+            recurrenceRule: ruleString(draft),
+            alarms: alarmItems(draft.alarms)
         )
         items[id] = item
         return item
@@ -102,6 +141,12 @@ final class MockRemindersStore: RemindersStoring, @unchecked Sendable {
         if let p = draft.priority { item.priority = p }
         if let u = draft.url { item.url = u.isEmpty ? nil : u }
         if let loc = draft.location { item.location = loc.isEmpty ? nil : loc }
+        if let freq = draft.recurrenceFreq {
+            item.recurrenceRule = freq.isEmpty ? nil : ruleString(draft)
+        }
+        if let alarms = draft.alarms {
+            item.alarms = alarms.isEmpty ? nil : alarmItems(alarms)
+        }
         if let l = draft.listId {
             guard lists_.contains(where: { $0.id == l }) else {
                 throw RemindersModuleError.listNotFound(l)
@@ -286,6 +331,68 @@ func runRemindersModuleTests() async {
         let crec = objField(cleared, "reminder")!
         try expect(objField(crec, "url") == nil, "url not cleared")
         try expect(objField(crec, "location") == nil, "location not cleared")
+    }
+
+    await test("reminders_create/update set, change + clear recurrence and alarms (v3.7.2 fields)") {
+        let router = await makeRouter(MockRemindersStore())
+        // create with weekly recurrence + a relative alarm + a geofence alarm
+        let created = try await callHandler(router, "reminders_create", .object([
+            "title": .string("Water the plants"),
+            "due": .string("2026-06-10T09:00:00Z"),
+            "recurrenceFreq": .string("weekly"),
+            "recurrenceInterval": .int(1),
+            "alarms": .array([
+                .object([
+                    "type": .string("relative"),
+                    "triggerMinutesBefore": .int(30)
+                ]),
+                .object([
+                    "type": .string("geofence"),
+                    "latitude": .double(37.3349),
+                    "longitude": .double(-122.009),
+                    "radius": .double(100.0),
+                    "proximity": .string("arrive")
+                ])
+            ])
+        ]))
+        guard case .string(let id)? = objField(created, "id") else { throw TestError.assertion("no id") }
+        let rec = objField(created, "reminder")!
+        try expect(objField(rec, "recurrenceRule") == .string("weekly;interval:1"), "recurrence not set on create")
+        guard case .array(let alarms)? = objField(rec, "alarms") else {
+            throw TestError.assertion("alarms not set on create")
+        }
+        try expect(alarms.count == 2, "expected 2 alarms, got \(alarms.count)")
+        // relative alarm
+        let relative = alarms.first { objField($0, "type") == .string("relative") }
+        try expect(relative != nil, "relative alarm missing")
+        try expect(objField(relative!, "triggerMinutesBefore") == .int(30), "relative offset wrong")
+        // geofence alarm (lat/long/radius/proximity)
+        let geo = alarms.first { objField($0, "type") == .string("geofence") }
+        try expect(geo != nil, "geofence alarm missing")
+        try expect(objField(geo!, "latitude") == .double(37.3349), "geofence lat wrong")
+        try expect(objField(geo!, "longitude") == .double(-122.009), "geofence lon wrong")
+        try expect(objField(geo!, "radius") == .double(100.0), "geofence radius wrong")
+        try expect(objField(geo!, "proximity") == .string("arrive"), "geofence proximity wrong")
+
+        // update recurrence (daily, every 2 days, 5 occurrences)
+        let updated = try await callHandler(router, "reminders_update", .object([
+            "id": .string(id),
+            "recurrenceFreq": .string("daily"),
+            "recurrenceInterval": .int(2),
+            "recurrenceCount": .int(5)
+        ]))
+        let urec = objField(updated, "reminder")!
+        try expect(objField(urec, "recurrenceRule") == .string("daily;interval:2;count:5"), "recurrence not updated")
+
+        // clear recurrence ("") + alarms ([]) → nil
+        let cleared = try await callHandler(router, "reminders_update", .object([
+            "id": .string(id),
+            "recurrenceFreq": .string(""),
+            "alarms": .array([])
+        ]))
+        let crec = objField(cleared, "reminder")!
+        try expect(objField(crec, "recurrenceRule") == nil, "recurrence not cleared")
+        try expect(objField(crec, "alarms") == nil, "alarms not cleared")
     }
 
     // MARK: completion idempotency

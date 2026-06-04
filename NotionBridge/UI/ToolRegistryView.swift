@@ -84,11 +84,11 @@ struct ToolRegistryView: View {
     private func tierColor(_ tier: String) -> Color {
         switch tier {
         case "open":
-            return .green
+            return BridgeTokens.ok
         case "notify":
-            return .orange
+            return BridgeTokens.warn
         default:
-            return .red
+            return BridgeTokens.bad
         }
     }
 
@@ -116,7 +116,7 @@ struct ToolRegistryView: View {
                         Label("Notification permission is not granted. Notify/Request tiers cannot prompt or alert.",
                               systemImage: "exclamationmark.triangle.fill")
                             .font(.callout)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(BridgeTokens.warn)
                     }
                 }
 
@@ -161,7 +161,7 @@ struct ToolRegistryView: View {
                                 Text("Reset to Defaults")
                             }
                         }
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(BridgeTokens.warn)
                     }
                 }
             }
@@ -261,7 +261,7 @@ struct ToolRegistryView: View {
                 if gatedCredentials {
                     Text("Enable Keychain credentials under Settings → Credentials to use these tools.")
                         .font(.caption2)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(BridgeTokens.warn)
                 }
             }
         }

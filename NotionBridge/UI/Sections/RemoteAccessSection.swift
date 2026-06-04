@@ -82,10 +82,10 @@ public struct RemoteAccessSection: View {
 
         var dotColor: Color {
             switch self {
-            case .online:     return .green
-            case .degraded:   return .orange
-            case .connecting: return .yellow
-            case .offline:    return .red
+            case .online:     return BridgeTokens.ok
+            case .degraded:   return BridgeTokens.warn
+            case .connecting: return BridgeTokens.warn
+            case .offline:    return BridgeTokens.bad
             case .disabled:   return .secondary
             }
         }

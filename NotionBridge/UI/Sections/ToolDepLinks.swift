@@ -60,6 +60,8 @@ public enum PermissionToolDependencies {
         case .contacts:         return ["contacts"]
         case .notifications:    return []  // not tool-gated; banners only
         case .automation:       return ["applescript", "spotlight"]
+        case .reminders:        return ["reminders"]
+        case .calendar:         return ["calendar"]
         }
     }
 }

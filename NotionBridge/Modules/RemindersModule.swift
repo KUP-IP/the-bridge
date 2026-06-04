@@ -30,6 +30,7 @@
 // entitlement. This is an OPERATOR step — NOT validated by this packet.
 
 import AppKit
+import CoreLocation
 @preconcurrency import EventKit
 import Foundation
 import MCP
@@ -60,6 +61,76 @@ public struct ReminderList: Sendable, Equatable {
     }
 }
 
+/// A draft alarm for `reminders_create` / `reminders_update`. Maps to an
+/// `EKAlarm`. `type` selects the trigger shape:
+///   - "relative"  → fires `triggerMinutesBefore` minutes before the due date
+///                   (`EKAlarm(relativeOffset:)`, a negative offset).
+///   - "absolute"  → fires at `triggerAbsoluteDate` (ISO-8601)
+///                   (`EKAlarm(absoluteDate:)`).
+///   - "geofence"  → fires on `proximity` ("arrive"/"leave") at the
+///                   lat/long/radius location (`EKStructuredLocation` +
+///                   `CLLocation`).
+public struct AlarmDraft: Sendable, Equatable {
+    public var type: String                 // "relative" | "absolute" | "geofence"
+    public var triggerMinutesBefore: Int?    // relative: minutes before due
+    public var triggerAbsoluteDate: String?  // absolute: ISO-8601
+    public var latitude: Double?             // geofence
+    public var longitude: Double?            // geofence
+    public var radius: Double?               // geofence: meters
+    public var proximity: String?            // geofence: "arrive" | "leave" | nil
+
+    public init(
+        type: String,
+        triggerMinutesBefore: Int? = nil,
+        triggerAbsoluteDate: String? = nil,
+        latitude: Double? = nil,
+        longitude: Double? = nil,
+        radius: Double? = nil,
+        proximity: String? = nil
+    ) {
+        self.type = type
+        self.triggerMinutesBefore = triggerMinutesBefore
+        self.triggerAbsoluteDate = triggerAbsoluteDate
+        self.latitude = latitude
+        self.longitude = longitude
+        self.radius = radius
+        self.proximity = proximity
+    }
+}
+
+/// A plain alarm record (the read-back shape of `AlarmDraft` + a stable id).
+/// Decoupled from EKAlarm so the seam is testable without EventKit objects.
+public struct AlarmItem: Sendable, Equatable {
+    public let id: String
+    public var type: String                 // "relative" | "absolute" | "geofence"
+    public var triggerMinutesBefore: Int?
+    public var triggerAbsoluteDate: String?
+    public var latitude: Double?
+    public var longitude: Double?
+    public var radius: Double?
+    public var proximity: String?
+
+    public init(
+        id: String,
+        type: String,
+        triggerMinutesBefore: Int? = nil,
+        triggerAbsoluteDate: String? = nil,
+        latitude: Double? = nil,
+        longitude: Double? = nil,
+        radius: Double? = nil,
+        proximity: String? = nil
+    ) {
+        self.id = id
+        self.type = type
+        self.triggerMinutesBefore = triggerMinutesBefore
+        self.triggerAbsoluteDate = triggerAbsoluteDate
+        self.latitude = latitude
+        self.longitude = longitude
+        self.radius = radius
+        self.proximity = proximity
+    }
+}
+
 /// A plain reminder record. `due` is ISO-8601 (or nil). Decoupled from
 /// EKReminder so the seam is testable without EventKit objects.
 public struct ReminderItem: Sendable, Equatable {
@@ -73,6 +144,10 @@ public struct ReminderItem: Sendable, Equatable {
     public var priority: Int    // EKReminder.priority (0 = none, 1 = high … 9 = low)
     public var url: String?      // EKCalendarItem.url (absolute string)
     public var location: String? // EKCalendarItem.location (free text)
+    /// Compact serialization of the first EKRecurrenceRule, e.g.
+    /// "weekly;interval:1" (+ ";count:N" or ";until:ISO"). nil = not recurring.
+    public var recurrenceRule: String?
+    public var alarms: [AlarmItem]?
 
     public init(
         id: String,
@@ -84,7 +159,9 @@ public struct ReminderItem: Sendable, Equatable {
         notes: String?,
         priority: Int,
         url: String? = nil,
-        location: String? = nil
+        location: String? = nil,
+        recurrenceRule: String? = nil,
+        alarms: [AlarmItem]? = nil
     ) {
         self.id = id
         self.title = title
@@ -96,6 +173,8 @@ public struct ReminderItem: Sendable, Equatable {
         self.priority = priority
         self.url = url
         self.location = location
+        self.recurrenceRule = recurrenceRule
+        self.alarms = alarms
     }
 }
 
@@ -127,6 +206,18 @@ public struct ReminderDraft: Sendable {
     public var url: String?
     /// EKCalendarItem.location (free text). On update, empty string clears it.
     public var location: String?
+    /// Recurrence frequency: "daily" | "weekly" | "monthly" | "yearly".
+    /// On update, an explicit empty string clears the recurrence.
+    public var recurrenceFreq: String?
+    /// Recurrence interval (every N units). Defaults to 1 when freq is set.
+    public var recurrenceInterval: Int?
+    /// Recurrence end date (ISO-8601). Mutually informs EKRecurrenceEnd.
+    public var recurrenceEndDate: String?
+    /// Recurrence occurrence count. Mutually informs EKRecurrenceEnd.
+    public var recurrenceCount: Int?
+    /// Alarms to set. On update, an explicit empty array clears all alarms;
+    /// nil leaves them unchanged.
+    public var alarms: [AlarmDraft]?
 
     public init(
         title: String? = nil,
@@ -136,7 +227,12 @@ public struct ReminderDraft: Sendable {
         notes: String? = nil,
         priority: Int? = nil,
         url: String? = nil,
-        location: String? = nil
+        location: String? = nil,
+        recurrenceFreq: String? = nil,
+        recurrenceInterval: Int? = nil,
+        recurrenceEndDate: String? = nil,
+        recurrenceCount: Int? = nil,
+        alarms: [AlarmDraft]? = nil
     ) {
         self.title = title
         self.due = due
@@ -146,6 +242,11 @@ public struct ReminderDraft: Sendable {
         self.priority = priority
         self.url = url
         self.location = location
+        self.recurrenceFreq = recurrenceFreq
+        self.recurrenceInterval = recurrenceInterval
+        self.recurrenceEndDate = recurrenceEndDate
+        self.recurrenceCount = recurrenceCount
+        self.alarms = alarms
     }
 }
 
@@ -270,8 +371,123 @@ public final class EventKitRemindersStore: RemindersStoring, @unchecked Sendable
             notes: r.notes,
             priority: r.priority,
             url: r.url?.absoluteString,
-            location: r.location
+            location: r.location,
+            recurrenceRule: serializeRule(r.recurrenceRules?.first),
+            alarms: serializeAlarms(r.alarms)
         )
+    }
+
+    /// Compact, lossy serialization of the first recurrence rule, e.g.
+    /// "weekly;interval:1", "daily;interval:2;count:5",
+    /// "monthly;interval:1;until:2026-12-31T00:00:00Z".
+    private func serializeRule(_ rule: EKRecurrenceRule?) -> String? {
+        guard let rule else { return nil }
+        let freq: String
+        switch rule.frequency {
+        case .daily: freq = "daily"
+        case .weekly: freq = "weekly"
+        case .monthly: freq = "monthly"
+        case .yearly: freq = "yearly"
+        @unknown default: freq = "daily"
+        }
+        var parts = ["\(freq);interval:\(rule.interval)"]
+        if let end = rule.recurrenceEnd {
+            if end.occurrenceCount > 0 {
+                parts.append("count:\(end.occurrenceCount)")
+            } else if let until = end.endDate {
+                parts.append("until:\(Self.makeISO().string(from: until))")
+            }
+        }
+        return parts.joined(separator: ";")
+    }
+
+    /// Map EKAlarms back into the Sendable AlarmItem shape.
+    private func serializeAlarms(_ alarms: [EKAlarm]?) -> [AlarmItem]? {
+        guard let alarms, !alarms.isEmpty else { return nil }
+        return alarms.enumerated().map { idx, alarm in
+            if let loc = alarm.structuredLocation, let geo = loc.geoLocation {
+                let proximity: String?
+                switch alarm.proximity {
+                case .enter: proximity = "arrive"
+                case .leave: proximity = "leave"
+                default: proximity = nil
+                }
+                return AlarmItem(
+                    id: "alarm-\(idx)",
+                    type: "geofence",
+                    latitude: geo.coordinate.latitude,
+                    longitude: geo.coordinate.longitude,
+                    radius: loc.radius,
+                    proximity: proximity
+                )
+            } else if let absolute = alarm.absoluteDate {
+                return AlarmItem(
+                    id: "alarm-\(idx)",
+                    type: "absolute",
+                    triggerAbsoluteDate: Self.makeISO().string(from: absolute)
+                )
+            } else {
+                return AlarmItem(
+                    id: "alarm-\(idx)",
+                    type: "relative",
+                    triggerMinutesBefore: Int((-alarm.relativeOffset) / 60.0)
+                )
+            }
+        }
+    }
+
+    /// Build an EKRecurrenceRule from the draft's recurrence fields. Returns
+    /// nil when no frequency is set (or it's the empty clear sentinel).
+    private func buildRecurrenceRule(_ draft: ReminderDraft) -> EKRecurrenceRule? {
+        guard let freqRaw = draft.recurrenceFreq, !freqRaw.isEmpty else { return nil }
+        let frequency: EKRecurrenceFrequency
+        switch freqRaw.lowercased() {
+        case "daily": frequency = .daily
+        case "weekly": frequency = .weekly
+        case "monthly": frequency = .monthly
+        case "yearly": frequency = .yearly
+        default: return nil
+        }
+        let interval = max(1, draft.recurrenceInterval ?? 1)
+        var end: EKRecurrenceEnd?
+        if let count = draft.recurrenceCount, count > 0 {
+            end = EKRecurrenceEnd(occurrenceCount: count)
+        } else if let endRaw = draft.recurrenceEndDate, !endRaw.isEmpty,
+                  let endDate = Self.makeISO().date(from: endRaw) {
+            end = EKRecurrenceEnd(end: endDate)
+        }
+        return EKRecurrenceRule(recurrenceWith: frequency, interval: interval, end: end)
+    }
+
+    /// Build EKAlarms from the draft alarm shapes.
+    private func buildAlarms(_ drafts: [AlarmDraft]) -> [EKAlarm] {
+        drafts.compactMap { d in
+            switch d.type.lowercased() {
+            case "relative":
+                let minutes = d.triggerMinutesBefore ?? 0
+                return EKAlarm(relativeOffset: TimeInterval(-60 * minutes))
+            case "absolute":
+                guard let iso = d.triggerAbsoluteDate, let date = Self.makeISO().date(from: iso) else {
+                    return nil
+                }
+                return EKAlarm(absoluteDate: date)
+            case "geofence":
+                guard let lat = d.latitude, let lon = d.longitude else { return nil }
+                let alarm = EKAlarm()
+                let structured = EKStructuredLocation(title: "Reminder location")
+                structured.geoLocation = CLLocation(latitude: lat, longitude: lon)
+                if let radius = d.radius { structured.radius = radius }
+                alarm.structuredLocation = structured
+                switch d.proximity?.lowercased() {
+                case "arrive": alarm.proximity = .enter
+                case "leave": alarm.proximity = .leave
+                default: alarm.proximity = .none
+                }
+                return alarm
+            default:
+                return nil
+            }
+        }
     }
 
     public func lists() async throws -> [ReminderList] {
@@ -349,6 +565,8 @@ public final class EventKitRemindersStore: RemindersStoring, @unchecked Sendable
         if let priority = draft.priority { reminder.priority = priority }
         if let url = draft.url, !url.isEmpty { reminder.url = URL(string: url) }
         if let location = draft.location, !location.isEmpty { reminder.location = location }
+        if let rule = buildRecurrenceRule(draft) { reminder.recurrenceRules = [rule] }
+        if let alarms = draft.alarms, !alarms.isEmpty { reminder.alarms = buildAlarms(alarms) }
         try store.save(reminder, commit: true)
         return toItem(reminder)
     }
@@ -373,6 +591,14 @@ public final class EventKitRemindersStore: RemindersStoring, @unchecked Sendable
         if let priority = draft.priority { reminder.priority = priority }
         if let url = draft.url { reminder.url = url.isEmpty ? nil : URL(string: url) }
         if let location = draft.location { reminder.location = location.isEmpty ? nil : location }
+        if let freq = draft.recurrenceFreq {
+            // Empty string clears recurrence; otherwise (re)build the rule.
+            reminder.recurrenceRules = freq.isEmpty ? nil : buildRecurrenceRule(draft).map { [$0] }
+        }
+        if let alarms = draft.alarms {
+            // Empty array clears all alarms; otherwise replace them wholesale.
+            reminder.alarms = alarms.isEmpty ? nil : buildAlarms(alarms)
+        }
         if let listId = draft.listId {
             reminder.calendar = try resolveCalendar(listId)
         }
@@ -466,7 +692,7 @@ public enum RemindersModule {
             name: "reminders_create",
             module: moduleName,
             tier: .notify,
-            description: "Create a reminder. Requires title; optional due (ISO-8601), listId, notes, priority (0 none, 1 high … 9 low), url (rich link), location (free text). Returns the new reminder id + record.",
+            description: "Create a reminder. Requires title; optional due (ISO-8601), listId, notes, priority (0 none, 1 high … 9 low), url (rich link), location (free text), recurrence (recurrenceFreq daily/weekly/monthly/yearly + recurrenceInterval/EndDate/Count), and alarms (relative/absolute/geofence). Returns the new reminder id + record.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -476,7 +702,27 @@ public enum RemindersModule {
                     "notes": .object(["type": .string("string"), "description": .string("Freeform notes (optional)")]),
                     "priority": .object(["type": .string("integer"), "description": .string("EKReminder priority 0–9 (0 none, 1 high, 5 medium, 9 low)")]),
                     "url": .object(["type": .string("string"), "description": .string("Attached URL / rich link (optional)")]),
-                    "location": .object(["type": .string("string"), "description": .string("Location text shown on the reminder (optional)")])
+                    "location": .object(["type": .string("string"), "description": .string("Location text shown on the reminder (optional)")]),
+                    "recurrenceFreq": .object(["type": .string("string"), "description": .string("Repeat frequency: daily | weekly | monthly | yearly (optional)")]),
+                    "recurrenceInterval": .object(["type": .string("integer"), "description": .string("Repeat every N units (default 1)")]),
+                    "recurrenceEndDate": .object(["type": .string("string"), "description": .string("Recurrence end date ISO-8601 (optional; mutually exclusive with recurrenceCount)")]),
+                    "recurrenceCount": .object(["type": .string("integer"), "description": .string("Number of occurrences before recurrence ends (optional)")]),
+                    "alarms": .object([
+                        "type": .string("array"),
+                        "description": .string("Alarms to attach. Each: type (relative|absolute|geofence), triggerMinutesBefore (relative), triggerAbsoluteDate ISO-8601 (absolute), latitude/longitude/radius + proximity arrive|leave (geofence)"),
+                        "items": .object([
+                            "type": .string("object"),
+                            "properties": .object([
+                                "type": .object(["type": .string("string"), "description": .string("relative | absolute | geofence")]),
+                                "triggerMinutesBefore": .object(["type": .string("integer"), "description": .string("Relative: minutes before the due date")]),
+                                "triggerAbsoluteDate": .object(["type": .string("string"), "description": .string("Absolute: fire-at date ISO-8601")]),
+                                "latitude": .object(["type": .string("number"), "description": .string("Geofence: latitude")]),
+                                "longitude": .object(["type": .string("number"), "description": .string("Geofence: longitude")]),
+                                "radius": .object(["type": .string("number"), "description": .string("Geofence: radius in meters")]),
+                                "proximity": .object(["type": .string("string"), "description": .string("Geofence: arrive | leave")])
+                            ])
+                        ])
+                    ])
                 ]),
                 "required": .array([.string("title")])
             ]),
@@ -492,7 +738,12 @@ public enum RemindersModule {
                     notes: stringArg(args, "notes"),
                     priority: intArg(args, "priority"),
                     url: stringArg(args, "url"),
-                    location: stringArg(args, "location")
+                    location: stringArg(args, "location"),
+                    recurrenceFreq: stringArg(args, "recurrenceFreq"),
+                    recurrenceInterval: intArg(args, "recurrenceInterval"),
+                    recurrenceEndDate: stringArg(args, "recurrenceEndDate"),
+                    recurrenceCount: intArg(args, "recurrenceCount"),
+                    alarms: parseAlarmArray(args, "alarms")
                 )
                 let item = try await store.create(draft)
                 return .object([
@@ -507,7 +758,7 @@ public enum RemindersModule {
             name: "reminders_update",
             module: moduleName,
             tier: .notify,
-            description: "Update a reminder by id. Any of title, due, notes, priority, listId, url, location. Pass due/url/location as empty string to clear them. Returns the updated record.",
+            description: "Update a reminder by id. Any of title, due, notes, priority, listId, url, location, recurrence, alarms. Pass due/url/location as empty string to clear them; recurrenceFreq \"\" clears recurrence; alarms [] clears all alarms. Returns the updated record.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -518,7 +769,27 @@ public enum RemindersModule {
                     "notes": .object(["type": .string("string"), "description": .string("New notes")]),
                     "priority": .object(["type": .string("integer"), "description": .string("New priority 0–9")]),
                     "url": .object(["type": .string("string"), "description": .string("New URL; empty string clears it")]),
-                    "location": .object(["type": .string("string"), "description": .string("New location text; empty string clears it")])
+                    "location": .object(["type": .string("string"), "description": .string("New location text; empty string clears it")]),
+                    "recurrenceFreq": .object(["type": .string("string"), "description": .string("Repeat frequency daily | weekly | monthly | yearly; empty string clears recurrence")]),
+                    "recurrenceInterval": .object(["type": .string("integer"), "description": .string("Repeat every N units (default 1)")]),
+                    "recurrenceEndDate": .object(["type": .string("string"), "description": .string("Recurrence end date ISO-8601 (optional)")]),
+                    "recurrenceCount": .object(["type": .string("integer"), "description": .string("Number of occurrences before recurrence ends (optional)")]),
+                    "alarms": .object([
+                        "type": .string("array"),
+                        "description": .string("Replace all alarms. Empty array clears alarms. Each: type (relative|absolute|geofence), triggerMinutesBefore, triggerAbsoluteDate, latitude/longitude/radius + proximity arrive|leave"),
+                        "items": .object([
+                            "type": .string("object"),
+                            "properties": .object([
+                                "type": .object(["type": .string("string"), "description": .string("relative | absolute | geofence")]),
+                                "triggerMinutesBefore": .object(["type": .string("integer"), "description": .string("Relative: minutes before the due date")]),
+                                "triggerAbsoluteDate": .object(["type": .string("string"), "description": .string("Absolute: fire-at date ISO-8601")]),
+                                "latitude": .object(["type": .string("number"), "description": .string("Geofence: latitude")]),
+                                "longitude": .object(["type": .string("number"), "description": .string("Geofence: longitude")]),
+                                "radius": .object(["type": .string("number"), "description": .string("Geofence: radius in meters")]),
+                                "proximity": .object(["type": .string("string"), "description": .string("Geofence: arrive | leave")])
+                            ])
+                        ])
+                    ])
                 ]),
                 "required": .array([.string("id")])
             ]),
@@ -536,7 +807,12 @@ public enum RemindersModule {
                     notes: stringArg(args, "notes"),
                     priority: intArg(args, "priority"),
                     url: stringArg(args, "url"),
-                    location: stringArg(args, "location")
+                    location: stringArg(args, "location"),
+                    recurrenceFreq: stringArg(args, "recurrenceFreq"),
+                    recurrenceInterval: intArg(args, "recurrenceInterval"),
+                    recurrenceEndDate: stringArg(args, "recurrenceEndDate"),
+                    recurrenceCount: intArg(args, "recurrenceCount"),
+                    alarms: parseAlarmArray(args, "alarms")
                 )
                 let item = try await store.update(id: id, draft)
                 return .object([
@@ -626,6 +902,22 @@ public enum RemindersModule {
         if let notes = item.notes { entry["notes"] = .string(notes) }
         if let url = item.url { entry["url"] = .string(url) }
         if let location = item.location { entry["location"] = .string(location) }
+        if let rule = item.recurrenceRule { entry["recurrenceRule"] = .string(rule) }
+        if let alarms = item.alarms { entry["alarms"] = .array(alarms.map(formatAlarm)) }
+        return .object(entry)
+    }
+
+    static func formatAlarm(_ alarm: AlarmItem) -> Value {
+        var entry: [String: Value] = [
+            "id": .string(alarm.id),
+            "type": .string(alarm.type)
+        ]
+        if let m = alarm.triggerMinutesBefore { entry["triggerMinutesBefore"] = .int(m) }
+        if let d = alarm.triggerAbsoluteDate { entry["triggerAbsoluteDate"] = .string(d) }
+        if let lat = alarm.latitude { entry["latitude"] = .double(lat) }
+        if let lon = alarm.longitude { entry["longitude"] = .double(lon) }
+        if let r = alarm.radius { entry["radius"] = .double(r) }
+        if let p = alarm.proximity { entry["proximity"] = .string(p) }
         return .object(entry)
     }
 
@@ -651,6 +943,33 @@ public enum RemindersModule {
         case .int(let i)?: return i
         case .double(let d)?: return Int(d)
         default: return nil
+        }
+    }
+
+    private static func doubleArg(_ args: [String: Value], _ key: String) -> Double? {
+        switch args[key] {
+        case .double(let d)?: return d
+        case .int(let i)?: return Double(i)
+        default: return nil
+        }
+    }
+
+    /// Parse the `alarms` argument (an array of objects) into `[AlarmDraft]`.
+    /// Returns nil when the key is absent (leave unchanged); an empty array
+    /// when an empty array was passed (clear-all sentinel on update).
+    private static func parseAlarmArray(_ args: [String: Value], _ key: String) -> [AlarmDraft]? {
+        guard case .array(let arr)? = args[key] else { return nil }
+        return arr.compactMap { element in
+            guard case .object(let obj) = element, let type = stringArg(obj, "type") else { return nil }
+            return AlarmDraft(
+                type: type,
+                triggerMinutesBefore: intArg(obj, "triggerMinutesBefore"),
+                triggerAbsoluteDate: stringArg(obj, "triggerAbsoluteDate"),
+                latitude: doubleArg(obj, "latitude"),
+                longitude: doubleArg(obj, "longitude"),
+                radius: doubleArg(obj, "radius"),
+                proximity: stringArg(obj, "proximity")
+            )
         }
     }
 }

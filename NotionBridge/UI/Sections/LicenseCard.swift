@@ -111,8 +111,8 @@ public struct LicenseCard: View {
                 content
                 if let err = state.lastError {
                     Text(err)
-                        .font(.caption2)
-                        .foregroundStyle(NotionPalette.red.opacity(0.95))
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(BridgeTokens.badText)
                         .accessibilityLabel("License activation error: \(err)")
                 }
             }
@@ -123,11 +123,11 @@ public struct LicenseCard: View {
 
     private var statusPillColor: Color {
         switch state.kind {
-        case .trial:           return NotionPalette.blue
-        case .trialExpired:    return NotionPalette.red
-        case .licensed:        return NotionPalette.green
-        case .licenseExpired:  return NotionPalette.orange
-        case .grandfathered:   return NotionPalette.green
+        case .trial:           return BridgeTokens.accent
+        case .trialExpired:    return BridgeTokens.bad
+        case .licensed:        return BridgeTokens.ok
+        case .licenseExpired:  return BridgeTokens.warn
+        case .grandfathered:   return BridgeTokens.ok
         }
     }
 
@@ -163,7 +163,7 @@ public struct LicenseCard: View {
                      ? "Your Bridge trial ends within 24 hours. Activate a license to keep automating after the trial ends."
                      : "Your Bridge trial has \(d) days left. Bring a license now to skip the countdown later.")
                     .font(.system(size: 12.5))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BridgeTokens.fg3)
                 pasteRow
                 buyRow
             }
@@ -171,34 +171,23 @@ public struct LicenseCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Your trial has ended. The Bridge will refuse to dispatch tools until a license is activated. Local data is untouched and will resume the moment a key activates.")
                     .font(.system(size: 12.5))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BridgeTokens.fg3)
                 pasteRow
                 buyRow
             }
         case .licensed(let subject, let expS):
             VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Licensed to").font(.system(size: 12.5)).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
-                    Text(subject).font(.system(size: 13)).textSelection(.enabled)
-                    Spacer()
-                }
+                licenseKVRow("Licensed to", subject, muted: false)
                 if let expS = expS {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("Expires").font(.system(size: 12.5)).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
-                        Text(expS).font(.system(size: 13)).textSelection(.enabled)
-                        Spacer()
-                    }
+                    licenseKVRow("Expires", expS, muted: false)
                 } else {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("Expires").font(.system(size: 12.5)).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
-                        Text("Never").font(.system(size: 13)).foregroundStyle(.tertiary)
-                        Spacer()
-                    }
+                    licenseKVRow("Expires", "Never", muted: true)
                 }
                 HStack {
                     Spacer()
                     Button("Remove license", role: .destructive, action: onDeactivate)
                         .buttonStyle(.bordered)
+                        .tint(BridgeTokens.bad)
                         .controlSize(.small)
                 }
             }
@@ -206,13 +195,14 @@ public struct LicenseCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Your license\(expS.map { " (expired \($0))" } ?? "") has lapsed. Activate a renewed key or remove the expired one.")
                     .font(.system(size: 12.5))
-                    .foregroundStyle(.secondary)
-                Text(subject).font(.system(size: 12)).foregroundStyle(.tertiary)
+                    .foregroundStyle(BridgeTokens.fg3)
+                Text(subject).font(.system(size: 12)).foregroundStyle(BridgeTokens.fg4)
                 pasteRow
                 HStack {
                     Spacer()
                     Button("Remove license", role: .destructive, action: onDeactivate)
                         .buttonStyle(.bordered)
+                        .tint(BridgeTokens.bad)
                         .controlSize(.small)
                 }
             }
@@ -220,8 +210,25 @@ public struct LicenseCard: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("You upgraded from a previous version of The Bridge — your install is licensed automatically and no trial countdown will appear. Thank you for being an early user.")
                     .font(.system(size: 12.5))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BridgeTokens.fg3)
             }
+        }
+    }
+
+    /// Key/value row used by the `.licensed` variant — mirrors the
+    /// About-card kv treatment so the two cards read as one family.
+    @ViewBuilder
+    private func licenseKVRow(_ key: String, _ value: String, muted: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(key)
+                .font(.system(size: 12.5))
+                .foregroundStyle(BridgeTokens.fg3)
+                .frame(width: 110, alignment: .leading)
+            Text(value)
+                .font(.system(size: 13))
+                .foregroundStyle(muted ? BridgeTokens.fg4 : BridgeTokens.fg1)
+                .textSelection(.enabled)
+            Spacer()
         }
     }
 
@@ -237,13 +244,14 @@ public struct LicenseCard: View {
                     .accessibilityLabel("License key input")
                 Button("Activate", action: onActivate)
                     .buttonStyle(.borderedProminent)
+                    .tint(BridgeTokens.accent)
                     .controlSize(.small)
                     .disabled(pasteField.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !state.canPasteActivate)
             }
             if !state.canPasteActivate {
                 Text("Paste-activation is unavailable in this build (no bundled public key). Reach out to support if you have a valid key.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(BridgeTokens.fg4)
             }
         }
     }

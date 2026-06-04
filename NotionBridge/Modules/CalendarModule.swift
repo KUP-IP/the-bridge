@@ -256,16 +256,48 @@ public final class EventKitCalendarStore: CalendarStoring, @unchecked Sendable {
         return f
     }
 
+    /// Fallback parser for naive, no-timezone ISO timestamps like
+    /// `2026-06-03T00:00:00` (and the date-only `2026-06-03`). The strict
+    /// `ISO8601DateFormatter` above REJECTS these because it requires a
+    /// timezone designator; agents routinely pass a wall-clock string with no
+    /// offset, so we interpret such input as the user's LOCAL time zone
+    /// (`.current`) rather than failing the whole query.
+    private static func makeNaiveLocal() -> DateFormatter {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        return f
+    }
+
+    /// Date-only fallback (`yyyy-MM-dd`) — also anchored to local midnight.
+    private static func makeNaiveLocalDateOnly() -> DateFormatter {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }
+
     private func dateToISO(_ date: Date?) -> String {
         guard let date else { return "" }
         return Self.makeISO().string(from: date)
     }
 
     private func isoToDate(_ iso: String) throws -> Date {
-        guard let date = Self.makeISO().date(from: iso) else {
-            throw CalendarModuleError.invalidDate(iso)
+        // Try strict / timezone-aware ISO-8601 first (preserves the existing
+        // behaviour for fully-qualified timestamps), then fall back to naive
+        // local-time formatters for no-TZ strings before giving up.
+        if let date = Self.makeISO().date(from: iso) {
+            return date
         }
-        return date
+        if let date = Self.makeNaiveLocal().date(from: iso) {
+            return date
+        }
+        if let date = Self.makeNaiveLocalDateOnly().date(from: iso) {
+            return date
+        }
+        throw CalendarModuleError.invalidDate(iso)
     }
 
     private func toEvent(_ e: EKEvent) -> CalendarEvent {

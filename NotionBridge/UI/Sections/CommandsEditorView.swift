@@ -1,85 +1,47 @@
-// CommandsEditorView.swift — Settings → Commands TextExpander-analog editor.
-// PKT-6 UI v3.5. Wraps CommandStore CRUD into a glass-themed list + editor pane.
+// CommandsEditorView.swift — Settings → Commands master-detail editor.
+// PKT-6 UI v3.5 · Commands redesign (bundle-2). Mirrors the locked mockup
+// (design/.../ui_kits/the-bridge/Commands.jsx + commands.css): an alphabetical
+// master list (A→Z) on the left, a command editor on the right (name, command
+// markdown, color/icon picker, favorite-slot grid, Command-Bridge tray preview).
+//
+// Restructure is VIEW-ONLY. Every binding is preserved verbatim: CommandStore
+// CRUD (create / update / delete / setKeySlot), the icon/color picker sheet,
+// favorite-slot assignment + eviction, and clipboard-copy of the markdown body.
+// The `commands` array + `selectedSlug` are owned by CommandsSection and passed
+// as bindings so the hero stat tiles stay live with this pane's edits.
 
 import SwiftUI
+import AppKit
 
 public struct CommandsEditorView: View {
-    @State private var commands: [CommandStore.Command] = []
-    @State private var selectedSlug: String? = nil
+    @Binding private var commands: [CommandStore.Command]
+    @Binding private var selectedSlug: String?
+
     @State private var loadError: String? = nil
     @State private var saveMessage: String? = nil
-    @State private var isCreatingNew: Bool = false
+    @State private var searchQuery: String = ""
     // PKT-879: icon picker sheet state
     @State private var iconPickerPresented: Bool = false
 
-    public init() {}
+    public init(
+        commands: Binding<[CommandStore.Command]>,
+        selectedSlug: Binding<String?>
+    ) {
+        self._commands = commands
+        self._selectedSlug = selectedSlug
+    }
 
     public var body: some View {
-        HStack(spacing: 0) {
-            // Inner sidebar — command list
-            VStack(spacing: 0) {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                    Text("Search commands")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        createNew()
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                    .buttonStyle(.borderless)
-                }
-                .padding(10)
-                .background(Color.black.opacity(0.18))
-
-                ScrollView {
-                    VStack(spacing: 1) {
-                        ForEach(commands, id: \.slug) { c in
-                            commandRow(c)
-                        }
-                    }
-                    .padding(6)
-                }
-
-                Divider().background(Color.white.opacity(0.08))
-                HStack {
-                    Text("\(commands.count) commands · \(favoriteCount) favorites")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-            }
-            .frame(width: 240)
-            .background(Color.white.opacity(0.03))
-            .overlay(Divider().background(Color.white.opacity(0.10)), alignment: .trailing)
-
-            // Editor pane
-            if let cmd = currentCommand {
-                ScrollView {
-                    VStack(spacing: 14) {
-                        editorHeader(cmd)
-                        appearanceCard(cmd)
-                        favoriteSlotCard(cmd)
-                        nameCard(cmd)
-                        bodyCard(cmd)
-                    }
-                    .padding(18)
-                }
-                .frame(maxWidth: .infinity)
-            } else {
-                emptyState
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+        BridgeGlassCard(padding: 0) {
+            HStack(spacing: 0) {
+                masterColumn
+                    .frame(width: 236)
+                Rectangle().fill(Color.white.opacity(0.10)).frame(width: 0.5)
+                detailColumn
+                    .frame(maxWidth: .infinity)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task { await load() }
-        .onChange(of: commands) { _, _ in
-            if selectedSlug == nil { selectedSlug = commands.first?.slug }
-        }
         // PKT-879: icon picker sheet
         .sheet(isPresented: $iconPickerPresented) {
             if let cmd = currentCommand {
@@ -95,78 +57,180 @@ public struct CommandsEditorView: View {
         }
     }
 
-    // MARK: - Sidebar row
+    // MARK: - Master column (alphabetical list)
+
+    private var masterColumn: some View {
+        VStack(spacing: 0) {
+            // search + new
+            HStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12))
+                        .foregroundStyle(BridgeTokens.fg4)
+                    TextField("Search commands", text: $searchQuery)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(BridgeTokens.fg2)
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+
+                Button {
+                    createNew()
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(BridgeTokens.accentLink)
+                        .frame(width: 30, height: 30)
+                        .background(BridgeTokens.accent.opacity(0.28), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.accent.opacity(0.45), lineWidth: 0.5))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("New command")
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 13)
+            .padding(.bottom, 9)
+
+            // list
+            ScrollView {
+                VStack(spacing: 2) {
+                    ForEach(sortedCommands, id: \.slug) { c in
+                        commandRow(c)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.bottom, 8)
+            }
+
+            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
+            HStack {
+                Text("\(commands.count) commands · \(favoriteCount) favorites")
+                    .font(.system(size: 11))
+                    .foregroundStyle(BridgeTokens.fg4)
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+        }
+        .frame(maxHeight: .infinity)
+    }
 
     private func commandRow(_ c: CommandStore.Command) -> some View {
         Button {
             selectedSlug = c.slug
             saveMessage = nil
         } label: {
-            HStack(spacing: 10) {
-                iconView(c.icon, color: c.color)
-                    .frame(width: 28, height: 28)
+            HStack(spacing: 11) {
+                iconBubble(c.icon, color: c.color, diameter: 28, glyph: 14)
                 Text(c.name)
                     .font(.system(size: 13.5))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(BridgeTokens.fg1)
                     .lineLimit(1)
-                Spacer()
+                Spacer(minLength: 4)
                 if let slot = c.keySlot {
                     Text(String(slot))
                         .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BridgeTokens.fg3)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 5))
+                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
+                        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
                 }
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(
-                selectedSlug == c.slug
-                    ? AnyShapeStyle(LinearGradient(
-                        colors: [Color.white.opacity(0.16), Color.white.opacity(0.04)],
-                        startPoint: .top, endPoint: .bottom))
-                    : AnyShapeStyle(Color.clear),
-                in: RoundedRectangle(cornerRadius: 9)
+            .frame(height: 42)
+            .background(rowBackground(selected: selectedSlug == c.slug),
+                        in: RoundedRectangle(cornerRadius: 9))
+            .overlay(
+                RoundedRectangle(cornerRadius: 9)
+                    .strokeBorder(selectedSlug == c.slug ? Color.white.opacity(0.16) : Color.clear, lineWidth: 0.5)
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    // MARK: - Editor sections
+    private func rowBackground(selected: Bool) -> AnyShapeStyle {
+        if selected {
+            return AnyShapeStyle(LinearGradient(
+                colors: [BridgeTokens.accent.opacity(0.34), BridgeTokens.accent.opacity(0.18)],
+                startPoint: .top, endPoint: .bottom))
+        }
+        return AnyShapeStyle(Color.clear)
+    }
+
+    // MARK: - Detail column (editor)
+
+    @ViewBuilder private var detailColumn: some View {
+        if let cmd = currentCommand {
+            ScrollView {
+                VStack(spacing: 13) {
+                    editorHeader(cmd)
+                    appearanceCard(cmd)
+                    favoriteSlotCard(cmd)
+                    bodyCard(cmd)
+                    trayPreviewCard
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 16)
+            }
+        } else {
+            emptyState
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
 
     private func editorHeader(_ c: CommandStore.Command) -> some View {
         HStack(spacing: 14) {
-            // PKT-879: editor header icon is now the picker entry point.
+            // PKT-879: the header icon is the picker entry point.
             Button {
                 iconPickerPresented = true
             } label: {
-                iconView(c.icon, color: c.color)
-                    .frame(width: 44, height: 44)
-                    .background(
-                        Circle().fill(Color.white.opacity(0.06))
-                            .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
-                    )
+                iconBubble(c.icon, color: c.color, diameter: 46, glyph: 23)
             }
             .buttonStyle(.plain)
             .help("Change icon")
             .accessibilityLabel("Change icon")
 
-            Text(c.name)
-                .font(.system(size: 22, weight: .semibold))
-            Spacer()
-            Button {
-                Task { await duplicate(c) }
-            } label: { Image(systemName: "doc.on.doc") }
-            .buttonStyle(.borderless)
-            .help("Duplicate")
+            // Name — inline editable, no favorite star (the assigned number
+            // IS the favorite indicator; it lives in the slot grid below).
+            TextField("Command name", text: Binding(
+                get: { c.name },
+                set: { updateName(slug: c.slug, name: $0) }
+            ))
+            .textFieldStyle(.plain)
+            .font(.system(size: 22, weight: .semibold))
+            .foregroundStyle(BridgeTokens.fg1)
 
-            Button(role: .destructive) {
-                Task { await delete(c) }
-            } label: { Image(systemName: "trash") }
-            .buttonStyle(.borderless)
-            .help("Delete")
+            Spacer(minLength: 8)
+
+            HStack(spacing: 3) {
+                headerAction("doc.on.clipboard", help: "Copy markdown to clipboard") { copyBody(c) }
+                headerAction("doc.on.doc", help: "Duplicate") { duplicate(c) }
+                headerAction("trash", help: "Delete", danger: true) { delete(c) }
+            }
         }
+    }
+
+    private func headerAction(
+        _ systemImage: String,
+        help: String,
+        danger: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14))
+                .foregroundStyle(danger ? BridgeTokens.badText : BridgeTokens.fg3)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 
     private func appearanceCard(_ c: CommandStore.Command) -> some View {
@@ -175,7 +239,9 @@ public struct CommandsEditorView: View {
                 HStack {
                     BridgeCardLabel("Appearance")
                     Spacer()
-                    // PKT-879: open the new icon picker sheet.
+                    Text("Color applies to symbols, not emoji")
+                        .font(.system(size: 11))
+                        .foregroundStyle(BridgeTokens.fg4)
                     Button {
                         iconPickerPresented = true
                     } label: {
@@ -188,6 +254,7 @@ public struct CommandsEditorView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
+                // Per-command color picker — NotionPalette swatches (user-chosen).
                 HStack(spacing: 6) {
                     ForEach(CommandStore.NotionColor.allCases, id: \.self) { col in
                         Button {
@@ -206,89 +273,77 @@ public struct CommandsEditorView: View {
                         .help("Set color: \(col.rawValue)")
                     }
                     Spacer()
-                    Text("Color applies to symbols, not emoji")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                 }
-                Text("Current: \(c.icon.displayHint). Tap the icon (or Change icon) to pick a new emoji or SF Symbol.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
             }
         }
     }
 
     private func favoriteSlotCard(_ c: CommandStore.Command) -> some View {
         BridgeGlassCard {
-            VStack(alignment: .leading, spacing: 10) {
-                BridgeCardLabel("Favorite slot")
-                HStack(spacing: 6) {
-                    ForEach(1...9, id: \.self) { slot in
+            VStack(alignment: .leading, spacing: 12) {
+                // Reset lives in the top-right corner (no caption needed).
+                HStack {
+                    BridgeCardLabel("Favorite slot")
+                    Spacer()
+                    Button {
+                        setSlot(slug: c.slug, slot: nil)
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 12))
+                            .foregroundStyle(BridgeTokens.fg3)
+                            .frame(width: 26, height: 26)
+                            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
+                            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(c.keySlot == nil)
+                    .opacity(c.keySlot == nil ? 0.4 : 1.0)
+                    .help("Clear favorite slot")
+                }
+                // Slots 1…9, 0 — evenly distributed.
+                HStack(spacing: 7) {
+                    ForEach(slotKeys, id: \.self) { slot in
                         slotButton(slot: slot, cmd: c)
                     }
-                    slotButton(slot: 0, cmd: c)
-                    Button("None") {
-                        setSlot(slug: c.slug, slot: nil)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
                 }
-                Text(slotHint(for: c))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
         }
     }
 
+    private var slotKeys: [Int] { [1, 2, 3, 4, 5, 6, 7, 8, 9, 0] }
+
     private func slotButton(slot: Int, cmd: CommandStore.Command) -> some View {
         let isMine = cmd.keySlot == slot
-        let takenBy = commands.first { $0.slug != cmd.slug && $0.keySlot == slot }
-        let isTaken = takenBy != nil
+        let isTaken = commands.contains { $0.slug != cmd.slug && $0.keySlot == slot }
         return Button {
             setSlot(slug: cmd.slug, slot: slot)
         } label: {
             Text(String(slot))
-                .font(.system(size: 13, weight: .semibold).monospacedDigit())
-                .frame(width: 36, height: 36)
-                .background(
-                    isMine
-                        ? AnyShapeStyle(LinearGradient(
-                            colors: [Color.white.opacity(0.22), Color.white.opacity(0.06)],
-                            startPoint: .top, endPoint: .bottom))
-                        : AnyShapeStyle(Color.black.opacity(0.18)),
-                    in: RoundedRectangle(cornerRadius: 9)
-                )
+                .font(.system(size: 14, weight: .semibold).monospacedDigit())
+                .foregroundStyle(isMine ? BridgeTokens.fg1
+                                 : (isTaken ? BridgeTokens.fg5 : BridgeTokens.fg3))
+                .frame(maxWidth: .infinity)
+                .aspectRatio(1, contentMode: .fit)
+                .background(slotBackground(isMine: isMine), in: RoundedRectangle(cornerRadius: 9))
                 .overlay(
                     RoundedRectangle(cornerRadius: 9)
-                        .strokeBorder(
-                            isMine ? Color.white.opacity(0.30) : Color.white.opacity(0.10),
-                            lineWidth: isMine ? 1 : 0.5
-                        )
+                        .strokeBorder(isMine ? BridgeTokens.accent.opacity(0.6) : Color.white.opacity(0.10),
+                                      lineWidth: isMine ? 1 : 0.5)
                 )
-                .foregroundStyle(isMine ? .primary : (isTaken ? .secondary : .primary))
-                .opacity(isTaken && !isMine ? 0.45 : 1.0)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(isTaken && !isMine)
     }
 
-    private func slotHint(for c: CommandStore.Command) -> String {
-        if let s = c.keySlot {
-            return "Press \(s) while Command Bridge is open to fire this command. Greyed slots are held by other commands — clicking reassigns."
-        } else {
-            return "Pick a 0–9 slot to make this command fireable from the Command Bridge popup."
+    private func slotBackground(isMine: Bool) -> AnyShapeStyle {
+        if isMine {
+            return AnyShapeStyle(LinearGradient(
+                colors: [BridgeTokens.accent.opacity(0.5), BridgeTokens.accent.opacity(0.3)],
+                startPoint: .top, endPoint: .bottom))
         }
-    }
-
-    private func nameCard(_ c: CommandStore.Command) -> some View {
-        BridgeGlassCard {
-            VStack(alignment: .leading, spacing: 10) {
-                BridgeCardLabel("Name")
-                TextField("Command name", text: Binding(
-                    get: { c.name },
-                    set: { newName in updateName(slug: c.slug, name: newName) }
-                ))
-                .textFieldStyle(.roundedBorder)
-            }
-        }
+        return AnyShapeStyle(Color.black.opacity(0.2))
     }
 
     private func bodyCard(_ c: CommandStore.Command) -> some View {
@@ -298,58 +353,151 @@ public struct CommandsEditorView: View {
                     BridgeCardLabel("Command")
                     Spacer()
                     Text("Copied to clipboard as plain-text markdown")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11))
+                        .foregroundStyle(BridgeTokens.fg4)
                 }
                 TextEditor(text: Binding(
                     get: { c.body },
-                    set: { newBody in updateBody(slug: c.slug, body: newBody) }
+                    set: { updateBody(slug: c.slug, body: $0) }
                 ))
-                .font(.system(.body, design: .monospaced))
-                .frame(minHeight: 140)
+                .font(.system(size: 12, design: .monospaced))
                 .scrollContentBackground(.hidden)
-                .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
-                )
+                .padding(10)
+                .frame(minHeight: 150)
+                .background(Color.black.opacity(0.26), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
                 if let msg = saveMessage {
                     Text(msg)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11))
+                        .foregroundStyle(BridgeTokens.fg3)
                 }
             }
         }
     }
 
+    // MARK: - Command-Bridge tray preview
+
+    /// Live preview of the Command-Bridge tray: up to 10 bubbles for FAVORED
+    /// slots, ordered 1…9 then 0, expanding toward 10 as more are favored.
+    /// No descriptive text — the tray itself is the explainer.
+    private var trayPreviewCard: some View {
+        BridgeGlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                BridgeCardLabel("In the Command Bridge")
+                if favoredCommands.isEmpty {
+                    HStack {
+                        Spacer()
+                        Text("No favorites yet — assign a slot above to place a bubble here.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(BridgeTokens.fg4)
+                        Spacer()
+                    }
+                    .padding(.vertical, 18)
+                } else {
+                    HStack(alignment: .top, spacing: 12) {
+                        Spacer(minLength: 0)
+                        ForEach(favoredCommands, id: \.slug) { c in
+                            VStack(spacing: 6) {
+                                trayBubble(c)
+                                Text(String(c.keySlot ?? 0))
+                                    .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                                    .foregroundStyle(BridgeTokens.fg4)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.vertical, 16)
+                    .padding(.horizontal, 18)
+                    .frame(maxWidth: .infinity)
+                    .background(trayCanvas, in: RoundedRectangle(cornerRadius: 18))
+                    .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+                }
+            }
+        }
+    }
+
+    private var trayCanvas: some ShapeStyle {
+        LinearGradient(
+            colors: [Color.white.opacity(0.08), Color.white.opacity(0.02)],
+            startPoint: .top, endPoint: .bottom
+        )
+    }
+
+    private func trayBubble(_ c: CommandStore.Command) -> some View {
+        let isSelected = c.slug == selectedSlug
+        return iconBubble(c.icon, color: c.color, diameter: 46, glyph: 24)
+            .opacity(isSelected ? 1.0 : 0.42)
+    }
+
+    // MARK: - Empty state
+
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: "command")
                 .font(.system(size: 36))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(BridgeTokens.fg4)
             Text("No command selected")
-                .font(.headline)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(BridgeTokens.fg2)
             Text("Pick one from the list, or create a new command with the + button.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 12))
+                .foregroundStyle(BridgeTokens.fg4)
                 .multilineTextAlignment(.center)
         }
         .padding(40)
     }
 
+    // MARK: - Icon bubble
+
     @ViewBuilder
-    private func iconView(_ icon: CommandStore.Icon, color: CommandStore.NotionColor?) -> some View {
-        switch icon {
-        case .emoji(let s):
-            Text(s).font(.system(size: 18))
-        case .symbol(let name):
-            Image(systemName: name)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(color.flatMap { NotionPalette.color(named: $0.rawValue) } ?? .primary)
+    private func iconBubble(
+        _ icon: CommandStore.Icon,
+        color: CommandStore.NotionColor?,
+        diameter: CGFloat,
+        glyph: CGFloat
+    ) -> some View {
+        ZStack {
+            Circle()
+                .fill(Color.white.opacity(0.05))
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5))
+            switch icon {
+            case .emoji(let s):
+                Text(s).font(.system(size: glyph))
+            case .symbol(let name):
+                Image(systemName: name)
+                    .font(.system(size: glyph * 0.7, weight: .medium))
+                    .foregroundStyle(color.flatMap { NotionPalette.color(named: $0.rawValue) } ?? BridgeTokens.fg1)
+            }
         }
+        .frame(width: diameter, height: diameter)
     }
 
     // MARK: - Computed
+
+    /// Alphabetical (A→Z by name), filtered by the search field.
+    private var sortedCommands: [CommandStore.Command] {
+        let base = commands.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+        let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return base }
+        return base.filter { $0.name.lowercased().contains(q) }
+    }
+
+    /// Favored commands for the tray — ordered by slot 1…9 then 0, capped at 10.
+    private var favoredCommands: [CommandStore.Command] {
+        commands
+            .filter { $0.keySlot != nil }
+            .sorted { slotOrder($0.keySlot) < slotOrder($1.keySlot) }
+            .prefix(10)
+            .map { $0 }
+    }
+
+    /// Slot 0 sorts last (treated as 10), 1…9 in natural order.
+    private func slotOrder(_ slot: Int?) -> Int {
+        guard let s = slot else { return Int.max }
+        return s == 0 ? 10 : s
+    }
 
     private var currentCommand: CommandStore.Command? {
         commands.first(where: { $0.slug == selectedSlug })
@@ -357,7 +505,7 @@ public struct CommandsEditorView: View {
 
     private var favoriteCount: Int { commands.filter { $0.keySlot != nil }.count }
 
-    // MARK: - Mutations
+    // MARK: - Mutations (bindings preserved verbatim)
 
     private func load() async {
         do {
@@ -365,12 +513,18 @@ public struct CommandsEditorView: View {
             let list = try CommandStore.shared.list()
             await MainActor.run {
                 self.commands = list
-                if self.selectedSlug == nil { self.selectedSlug = list.first?.slug }
+                if self.selectedSlug == nil || !list.contains(where: { $0.slug == self.selectedSlug }) {
+                    self.selectedSlug = self.firstAlphabetical(list)?.slug
+                }
                 self.loadError = nil
             }
         } catch {
             await MainActor.run { self.loadError = error.localizedDescription }
         }
+    }
+
+    private func firstAlphabetical(_ list: [CommandStore.Command]) -> CommandStore.Command? {
+        list.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }.first
     }
 
     private func createNew() {
@@ -445,7 +599,16 @@ public struct CommandsEditorView: View {
         }
     }
 
-    private func duplicate(_ c: CommandStore.Command) async {
+    /// Clipboard-copy of the command's markdown body — the literal payload
+    /// the Command Bridge popup copies. Binding preserved + surfaced here.
+    private func copyBody(_ c: CommandStore.Command) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(c.body, forType: .string)
+        saveMessage = "Copied to clipboard"
+    }
+
+    private func duplicate(_ c: CommandStore.Command) {
         var name = "\(c.name) copy"
         var i = 1
         while commands.contains(where: { $0.name == name }) {
@@ -462,14 +625,12 @@ public struct CommandsEditorView: View {
         }
     }
 
-    private func delete(_ c: CommandStore.Command) async {
+    private func delete(_ c: CommandStore.Command) {
         do {
             try CommandStore.shared.delete(slug: c.slug)
             let list = try CommandStore.shared.list()
-            await MainActor.run {
-                self.commands = list
-                self.selectedSlug = list.first?.slug
-            }
+            self.commands = list
+            self.selectedSlug = firstAlphabetical(list)?.slug
         } catch {
             saveMessage = error.localizedDescription
         }

@@ -71,132 +71,6 @@ extension SettingsView {
         }
     }
 
-    // MARK: - Commands (cmd-ux, Change A + B)
-
-    /// Settings → **Commands** (the single, de-duplicated tab — the old
-    /// redundant "Skills" tab was removed in Change A; this IS the
-    /// command manager). It stacks, top-to-bottom:
-    ///
-    ///   (a) the persisted master Toggle that live-registers /
-    ///       unregisters the global hot-key via the AppDelegate (no
-    ///       relaunch);
-    ///   (b) a status row driven by the pure `CommandsSettingsStatus`
-    ///       ("Active — ⌃⌥⌘C" / red "⚠ unavailable" / "Disabled"), the
-    ///       glyph read LIVE from the registered combo;
-    ///   (c) the in-Settings hot-key RECORDER (Change B): shows the
-    ///       current combo, "Record shortcut" enters capture, the next
-    ///       valid chord live-rebinds via `AppDelegate.setCommandsHotkey`,
-    ///       and "Reset to default" restores `productionDefault`;
-    ///   (d) the FULL existing `SkillsView` CRUD list — add / edit /
-    ///       delete a command is unchanged (Commands ARE the enabled
-    ///       Skills; the page body is what the palette copies).
-    ///
-    /// The status string mapping is the pure `CommandsSettingsStatus`
-    /// and the recorded-chord mapping is the pure `HotkeyConfig.from`
-    /// (both unit-tested headlessly); only the SwiftUI rendering + the
-    /// raw `NSEvent` capture gesture are the operator-smoke ceiling.
-    var commandsSection: some View {
-        let disabledTools = Set(UserDefaults.standard.stringArray(forKey: BridgeDefaults.disabledTools) ?? [])
-        let current = commandsHotkeyConfig
-        // cmd-ux W2: drive the status off the OBSERVED structured
-        // register outcome so a TRUE ⌃⌥⌘C collision shows a specific,
-        // actionable message ("⚠ ⌃⌥⌘C is in use by another app — record a
-        // different shortcut") DISTINCT from a plumbing failure — fixing
-        // the Bug-2 residual where any non-registered state read the
-        // same generic, accusatory copy. The pure
-        // `CommandsSettingsStatus` mapping stays the single source of the
-        // strings; this only feeds it the live observed status.
-        let status = CommandsSettingsStatus(
-            enabled: commandsPaletteEnabled,
-            lastRegisterStatus: commandsLastRegisterStatus,
-            hotkey: current.displayString
-        )
-        return Form {
-            Section("Commands palette") {
-                Toggle("Enable Commands palette", isOn: Binding(
-                    get: { commandsPaletteEnabled },
-                    set: { newValue in
-                        commandsPaletteEnabled = newValue
-                        (NSApp.delegate as? AppDelegate)?.setCommandsPaletteEnabled(newValue)
-                    }
-                ))
-                .help("Global hot-key command box. Type a command, press \u{23CE} to copy its body to the clipboard.")
-
-                HStack(spacing: BridgeSpacing.xs) {
-                    Image(systemName: status.isWarning
-                          ? "exclamationmark.triangle.fill"
-                          : (commandsPaletteEnabled ? "checkmark.circle.fill" : "minus.circle"))
-                        .foregroundStyle(status.isWarning
-                                         ? Color.red
-                                         : (commandsPaletteEnabled ? Color.green : Color.secondary))
-                    Text(status.message)
-                        .font(.callout)
-                        .foregroundStyle(status.isWarning ? Color.red : Color.primary)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Commands palette status: \(status.message)")
-
-                // (c) Change B: in-Settings hot-key recorder.
-                // W4 (3.4.1): kbd-chip display when not recording; explicit
-                // Retry button instead of the "toggle off/on" workaround copy.
-                HStack(spacing: BridgeSpacing.sm) {
-                    Text("Shortcut")
-                    Spacer()
-                    if isRecordingHotkey {
-                        HotkeyRecorderField(
-                            currentDisplay: current.displayString,
-                            isRecording: $isRecordingHotkey,
-                            onCapture: { keyCode, mods in
-                                guard let cfg = HotkeyConfig.from(
-                                    keyCode: keyCode, cocoaModifiers: mods
-                                ) else { return false }
-                                _ = (NSApp.delegate as? AppDelegate)?.setCommandsHotkey(cfg)
-                                return true
-                            }
-                        )
-                        .frame(width: 150)
-                    } else {
-                        BridgeKbdChips(displayString: current.displayString)
-                    }
-                    Button(isRecordingHotkey ? "Press shortcut\u{2026}" : "Record shortcut") {
-                        isRecordingHotkey.toggle()
-                    }
-                    .disabled(!commandsPaletteEnabled)
-                    Button("Reset to default") {
-                        isRecordingHotkey = false
-                        _ = (NSApp.delegate as? AppDelegate)?
-                            .setCommandsHotkey(.productionDefault)
-                    }
-                    .disabled(!commandsPaletteEnabled)
-                    if status.isWarning {
-                        Button {
-                            (NSApp.delegate as? AppDelegate)?.retryHotkeyRegistration()
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        .buttonStyle(.borderless)
-                        .help("Retry registering this shortcut now.")
-                        .accessibilityLabel("Retry shortcut registration")
-                    }
-                }
-                .help("Click \u{201C}Record shortcut\u{201D}, then press the new combo. A modifier (\u{2318}/\u{2325}/\u{2303}/\u{21E7}) is required.")
-            }
-
-            Section {
-                SkillsView(
-                    skillsManager: skillsManager,
-                    fetchSkillDisabled: disabledTools.contains("fetch_skill")
-                )
-            } header: {
-                Text("Skills here can be flipped into routing discovery, the Commands palette, or both. Routing surfaces a skill in the discovery list so agents can find it by name. Palette surfaces it under the global hot-key — pressing the shortcut and selecting a command copies that skill's page body to your clipboard.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .textCase(nil)
-            }
-        }
-        .formStyle(.grouped)
-    }
-
     // MARK: - Credentials (PKT-876 v3.6.1 — Liquid Glass reskin)
 
     var credentialsSection: some View {
@@ -447,7 +321,7 @@ private struct IntegratedToolsContent: View {
     private func statusColor(_ status: BridgeConnectionStatus) -> Color {
         switch status {
         case .connected: return BridgeColors.success
-        case .warning: return .orange
+        case .warning: return BridgeTokens.warn
         case .disconnected, .invalid: return BridgeColors.error
         case .notConfigured: return BridgeColors.secondary
         case .checking: return BridgeColors.secondary

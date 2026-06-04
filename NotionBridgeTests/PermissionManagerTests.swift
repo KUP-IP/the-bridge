@@ -25,15 +25,17 @@ func runPermissionManagerTests() async {
         }
     }
 
-    await test("Grant enum has all 5 required TCC grants") {
+    await test("Grant enum has all required TCC grants") {
         let grants = PermissionManager.Grant.allCases
-        try expect(grants.count == 6, "Expected 6 grants, got \(grants.count)")
+        try expect(grants.count == 8, "Expected 8 grants, got \(grants.count)")
         try expect(grants.contains(.accessibility))
         try expect(grants.contains(.screenRecording))
         try expect(grants.contains(.fullDiskAccess))
         try expect(grants.contains(.automation))
         try expect(grants.contains(.notifications))
         try expect(grants.contains(.contacts))
+        try expect(grants.contains(.reminders))
+        try expect(grants.contains(.calendar))
     }
 
     await test("Grant display names are human-readable") {
@@ -43,6 +45,8 @@ func runPermissionManagerTests() async {
         try expect(PermissionManager.Grant.automation.displayName == "Automation")
         try expect(PermissionManager.Grant.notifications.displayName == "Notifications")
         try expect(PermissionManager.Grant.contacts.displayName == "Contacts")
+        try expect(PermissionManager.Grant.reminders.displayName == "Reminders")
+        try expect(PermissionManager.Grant.calendar.displayName == "Calendar")
     }
 
     await test("Grant IDs are unique") {
@@ -59,6 +63,8 @@ func runPermissionManagerTests() async {
         try expect(PermissionManager.Grant.accessibility.isAutoGrantable == false)
         try expect(PermissionManager.Grant.screenRecording.isAutoGrantable == false)
         try expect(PermissionManager.Grant.fullDiskAccess.isAutoGrantable == false)
+        try expect(PermissionManager.Grant.reminders.isAutoGrantable == false)
+        try expect(PermissionManager.Grant.calendar.isAutoGrantable == false)
     }
 
     await test("GrantStatus equality works correctly") {
@@ -135,6 +141,8 @@ func runPermissionManagerTests() async {
         try expect(await manager.status(for: .automation) == manager.automationStatus)
         try expect(await manager.status(for: .notifications) == manager.notificationStatus)
         try expect(await manager.status(for: .contacts) == manager.contactsStatus)
+        try expect(await manager.status(for: .reminders) == manager.remindersStatus)
+        try expect(await manager.status(for: .calendar) == manager.calendarStatus)
     }
 
     await test("checkAll populates lastCheckedAt and probe evidence") {

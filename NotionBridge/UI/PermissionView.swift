@@ -85,58 +85,88 @@ public struct PermissionView: View {
 
     // MARK: - Row
 
-    /// PKT-362 D1: Grant name, status dot, label, and action — no extra description copy.
-    /// PKT-362 D3: Yellow "Checking…" indicator when grantCheckingState is active.
+    /// v3.7.2 redesign: LED-badged glass icon tile + grant name + status badge +
+    /// action, matching design/permissions.css `.pm-grant`/`.pm-gled`.
+    /// PKT-362 D1: name + status only, no DisclosureGroup verbosity.
+    /// PKT-362 D3: amber LED + "Checking…" while grantCheckingState is active.
     private func permissionRow(
         grant: PermissionManager.Grant,
         status: PermissionManager.GrantStatus
     ) -> some View {
         let isChecking = permissionManager.grantCheckingState[grant] ?? false
 
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                // D3: Yellow circle during check, normal status color otherwise
+        return HStack(spacing: 12) {
+            // LED-badged glass icon tile (.pm-gicon + .pm-gled)
+            ZStack(alignment: .topTrailing) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color.white.opacity(0.05))
+                        .frame(width: 34, height: 34)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+                        )
+                    Image(systemName: rowIcon(for: grant))
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.80))
+                }
+                let dot = isChecking ? BridgeTokens.warn : statusColor(status)
                 Circle()
-                    .fill(isChecking ? .yellow : statusColor(status))
-                    .frame(width: 8, height: 8)
+                    .fill(dot)
+                    .frame(width: 9, height: 9)
+                    .overlay(Circle().strokeBorder(BridgeTokens.bgCarbon2, lineWidth: 2))
+                    .shadow(color: dot.opacity(0.7), radius: 3)
+                    .offset(x: 3, y: -3)
+            }
+            .frame(width: 34, height: 34)
 
-                Text(grant.displayName)
-                    .font(.callout)
+            Text(grant.displayName)
+                .font(.callout)
 
-                Spacer()
+            Spacer()
 
-                // D3: "Checking…" label during animated recheck
-                if isChecking {
-                    Text("Checking\u{2026}")
-                        .font(.caption)
-                        .foregroundStyle(.yellow)
-                } else if recentlyGranted.contains(grant) {
-                    Text("\u{2713} Granted")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                } else {
-                    Text(permissionManager.statusLabel(for: grant))
-                        .font(.caption)
-                        .foregroundStyle(status == .granted ? .green : .orange)
-                }
-
-                // D1: Action button only for non-granted, non-checking states
-                if status != .granted && !isChecking {
-                    Button(actionButtonTitle(for: grant, status: status)) {
-                        permLog.notice("Button tapped for grant: \(grant.displayName)")
-                        openSystemSettings(for: grant)
-                    }
-                    .buttonStyle(.plain)
+            // D3: "Checking…" label during animated recheck
+            if isChecking {
+                Text("Checking\u{2026}")
                     .font(.caption)
-                    .foregroundStyle(.blue)
-                }
+                    .foregroundStyle(BridgeTokens.warn)
+            } else if recentlyGranted.contains(grant) {
+                Text("\u{2713} Granted")
+                    .font(.caption)
+                    .foregroundStyle(BridgeTokens.ok)
+            } else {
+                Text(permissionManager.statusLabel(for: grant))
+                    .font(.caption)
+                    .foregroundStyle(status == .granted ? BridgeTokens.ok : BridgeTokens.warn)
             }
 
-            // D1: DisclosureGroup REMOVED — probe/evidence data available via
-            // Diagnostics export in Advanced settings or debugDetail(for:) API.
+            // D1: Action button only for non-granted, non-checking states
+            if status != .granted && !isChecking {
+                Button(actionButtonTitle(for: grant, status: status)) {
+                    permLog.notice("Button tapped for grant: \(grant.displayName)")
+                    openSystemSettings(for: grant)
+                }
+                .buttonStyle(.plain)
+                .font(.caption)
+                .foregroundStyle(BridgeTokens.accent)
+            }
         }
         // D3: Animate row transitions (checking ↔ result) with 0.3s fade
         .animation(.easeInOut(duration: 0.3), value: isChecking)
+    }
+
+    /// SF Symbol per TCC grant for the row's glass icon tile.
+    private func rowIcon(for grant: PermissionManager.Grant) -> String {
+        switch grant {
+        case .accessibility:   return "accessibility"
+        case .screenRecording: return "rectangle.dashed.badge.record"
+        case .fullDiskAccess:  return "internaldrive"
+        case .contacts:        return "person.crop.circle"
+        case .notifications:   return "bell.badge"
+        case .automation:      return "gearshape.2"
+        case .reminders:       return "checklist"
+        case .calendar:        return "calendar"
+        }
     }
 
     // MARK: - PKT-798 (WS-C) Upcoming Capability Gates
@@ -176,7 +206,7 @@ public struct PermissionView: View {
         ForEach(upcomingCapabilities) { capability in
             HStack(spacing: 8) {
                 Circle()
-                    .fill(capability.enabled ? Color.blue : Color.secondary.opacity(0.4))
+                    .fill(capability.enabled ? BridgeTokens.accent : Color.secondary.opacity(0.4))
                     .frame(width: 8, height: 8)
 
                 Text(capability.name)
@@ -188,7 +218,7 @@ public struct PermissionView: View {
                      ? "Enabled \u{2014} wiring pending"
                      : "Not requested (feature disabled)")
                     .font(.caption)
-                    .foregroundStyle(capability.enabled ? .blue : .secondary)
+                    .foregroundStyle(capability.enabled ? BridgeTokens.accent : .secondary)
             }
         }
     }
@@ -210,12 +240,12 @@ public struct PermissionView: View {
                 Label("All permissions granted \u{2014} restart to apply changes.",
                       systemImage: "checkmark.circle.fill")
                     .font(.caption)
-                    .foregroundStyle(.green)
+                    .foregroundStyle(BridgeTokens.ok)
             } else {
                 Label("\(grantedCount) of \(totalCount) granted \u{2014} grant remaining permissions, then restart.",
                       systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(BridgeTokens.warn)
             }
 
             Button("Restart Notion Bridge") {
@@ -228,7 +258,7 @@ public struct PermissionView: View {
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(allGranted ? Color.green.opacity(0.1) : Color.yellow.opacity(0.1))
+                .fill(allGranted ? BridgeTokens.ok.opacity(0.1) : BridgeTokens.warn.opacity(0.1))
         )
     }
 
@@ -243,7 +273,7 @@ public struct PermissionView: View {
         VStack(spacing: 6) {
             Label("Automation mismatch detected", systemImage: "exclamationmark.triangle.fill")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.orange)
+                .foregroundStyle(BridgeTokens.warn)
 
             Text("\(targets): TCC database shows granted but runtime probe fails. This happens when macOS stores a stale code signature (csreq) from a previous build.")
                 .font(.caption2)
@@ -252,7 +282,7 @@ public struct PermissionView: View {
 
             Text("⚠️ This will reset ALL automation permissions. You will be prompted to re-authorize each app.")
                 .font(.caption2)
-                .foregroundStyle(.orange)
+                .foregroundStyle(BridgeTokens.warn)
                 .multilineTextAlignment(.center)
 
             Button("Reset & Re-authorize") {
@@ -261,14 +291,14 @@ public struct PermissionView: View {
                 }
             }
             .buttonStyle(.borderedProminent)
-            .tint(.orange)
+            .tint(BridgeTokens.warn)
             .controlSize(.small)
         }
         .padding(8)
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.orange.opacity(0.1))
+                .fill(BridgeTokens.warn.opacity(0.1))
         )
     }
 
@@ -276,11 +306,11 @@ public struct PermissionView: View {
 
     private func statusColor(_ status: PermissionManager.GrantStatus) -> Color {
         switch status {
-        case .granted: return .green
-        case .denied: return .orange
-        case .unknown: return .orange
-        case .partiallyGranted: return .orange
-        case .restartRecommended: return .orange
+        case .granted: return BridgeTokens.ok
+        case .denied: return BridgeTokens.warn
+        case .unknown: return BridgeTokens.warn
+        case .partiallyGranted: return BridgeTokens.warn
+        case .restartRecommended: return BridgeTokens.warn
         }
     }
 
@@ -291,7 +321,7 @@ public struct PermissionView: View {
         switch grant {
         case .automation, .fullDiskAccess:
             return "Open Settings"
-        case .contacts, .notifications:
+        case .contacts, .notifications, .reminders, .calendar:
             return status == .unknown ? "Allow" : "Open Settings"
         case .accessibility, .screenRecording:
             return "Allow"
@@ -385,6 +415,36 @@ public struct PermissionView: View {
                         NSWorkspace.shared.open(url)
                     }
                 } else if let url = PermissionManager.Grant.contacts.systemSettingsURL {
+                    NSWorkspace.shared.open(url)
+                }
+                await permissionManager.recheckAllForTruth()
+            }
+        case .reminders:
+            let status = permissionManager.status(for: .reminders)
+            Task {
+                if status == .unknown {
+                    _ = await permissionManager.requestRemindersAccess()
+                    let resolvedStatus = permissionManager.status(for: .reminders)
+                    if resolvedStatus != .granted,
+                       let url = PermissionManager.Grant.reminders.systemSettingsURL {
+                        NSWorkspace.shared.open(url)
+                    }
+                } else if let url = PermissionManager.Grant.reminders.systemSettingsURL {
+                    NSWorkspace.shared.open(url)
+                }
+                await permissionManager.recheckAllForTruth()
+            }
+        case .calendar:
+            let status = permissionManager.status(for: .calendar)
+            Task {
+                if status == .unknown {
+                    _ = await permissionManager.requestCalendarAccess()
+                    let resolvedStatus = permissionManager.status(for: .calendar)
+                    if resolvedStatus != .granted,
+                       let url = PermissionManager.Grant.calendar.systemSettingsURL {
+                        NSWorkspace.shared.open(url)
+                    }
+                } else if let url = PermissionManager.Grant.calendar.systemSettingsURL {
                     NSWorkspace.shared.open(url)
                 }
                 await permissionManager.recheckAllForTruth()
@@ -514,7 +574,7 @@ struct AutoPermissionsStepView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.caption)
-                .foregroundStyle(.blue)
+                .foregroundStyle(BridgeTokens.accent)
             }
         }
         .animation(.easeInOut(duration: 0.2), value: state)
@@ -598,10 +658,10 @@ struct AutoPermissionsStepView: View {
 
     private func color(for state: AutoGrantProgressState) -> Color {
         switch state {
-        case .pending: return .orange
-        case .prompting: return .yellow
-        case .granted: return .green
-        case .denied: return .red
+        case .pending: return BridgeTokens.warn
+        case .prompting: return BridgeTokens.warn
+        case .granted: return BridgeTokens.ok
+        case .denied: return BridgeTokens.bad
         }
     }
 
@@ -691,7 +751,7 @@ struct ManualPermissionsStepView: View {
 
                 Text(permissionManager.statusLabel(for: grant))
                     .font(.caption)
-                    .foregroundStyle(status == .granted ? .green : .orange)
+                    .foregroundStyle(status == .granted ? BridgeTokens.ok : BridgeTokens.warn)
             }
 
             Text(manualInstruction(for: grant))
@@ -704,15 +764,15 @@ struct ManualPermissionsStepView: View {
             }
             .buttonStyle(.plain)
             .font(.caption)
-            .foregroundStyle(.blue)
+            .foregroundStyle(BridgeTokens.accent)
         }
     }
 
     private func statusColor(_ status: PermissionManager.GrantStatus) -> Color {
         switch status {
-        case .granted: return .green
-        case .denied: return .red
-        case .unknown, .partiallyGranted, .restartRecommended: return .orange
+        case .granted: return BridgeTokens.ok
+        case .denied: return BridgeTokens.bad
+        case .unknown, .partiallyGranted, .restartRecommended: return BridgeTokens.warn
         }
     }
 
@@ -724,7 +784,7 @@ struct ManualPermissionsStepView: View {
             return "System Settings > Privacy & Security > Screen Recording: enable Notion Bridge."
         case .fullDiskAccess:
             return "System Settings > Privacy & Security > Full Disk Access: enable Notion Bridge."
-        case .automation, .notifications, .contacts:
+        case .automation, .notifications, .contacts, .reminders, .calendar:
             return permissionManager.remediation(for: grant)
         }
     }
