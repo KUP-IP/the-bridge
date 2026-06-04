@@ -210,6 +210,100 @@ public enum SpecialistFilter {
         guard sawSpace, idx < lower.endIndex else { return false }
         return lower[idx].isNumber
     }
+
+    // MARK: Active-status guard (v3.7.6 — routing/specialist-active-status)
+
+    /// Lifecycle predicate (fast-follow to v3.7.4's relation source). A
+    /// curated specialist may stay a MEMBER of a parent's `Specialist`
+    /// relation for history even after it is retired (e.g. focus-keepr's
+    /// deprecation-dated `retro`). Routing must never surface such a row.
+    /// `isActiveSpecialist` inspects the specialist PAGE's own properties and
+    /// returns `false` ONLY on a confident inactive signal:
+    ///   • a populated `Deprecation Date` (or common aliases), OR
+    ///   • a lifecycle `Status`/`Lifecycle`/`State`/`Maturity`/`Stage`
+    ///     select/status/multi_select whose value is an inactive token.
+    ///
+    /// It FAILS OPEN: an absent, empty, or unrecognized status leaves the
+    /// specialist ACTIVE, so a missing or oddly-named property can never
+    /// silently empty the routing surface — the same reliability bias as the
+    /// relation reader's "empty → fall back" contract. Pairs with
+    /// `isSpecialist(title:)` as the second hydration-time guard.
+    /// Pure + deterministic; never throws.
+    public static func isActiveSpecialist(properties: [String: Any]) -> Bool {
+        // 1) An explicit deprecation / sunset / retirement DATE retires the row.
+        if hasPopulatedDate(in: properties,
+                            keys: ["Deprecation Date", "Deprecated On", "Deprecated",
+                                   "Sunset Date", "Sunset", "Retired On", "Archived On"]) {
+            return false
+        }
+        // 2) A lifecycle status/select in a known inactive state.
+        for key in ["Status", "Lifecycle", "State", "Maturity", "Stage"] {
+            for token in statusTokens(in: properties, key: key)
+            where inactiveStatusTokens.contains(token) {
+                return false
+            }
+        }
+        return true
+    }
+
+    /// Lower-cased status values that mark a specialist INACTIVE for routing.
+    /// Conservative on purpose (exact-match, not substring): only unambiguous
+    /// retirement words, so an in-flight status — "Active", "Stable", "Beta",
+    /// "Draft", "Experimental", "Production" — never hides a live specialist.
+    static let inactiveStatusTokens: Set<String> = [
+        "deprecated", "archived", "folded", "retired",
+        "sunset", "sunsetted", "removed", "obsolete", "inactive", "merged"
+    ]
+
+    /// Lower-cased display name(s) of a `status` / `select` / `multi_select`
+    /// property, matched case-insensitively by key. Empty when the property
+    /// is absent or a different type. Pure.
+    static func statusTokens(in properties: [String: Any], key: String) -> [String] {
+        var out: [String] = []
+        for (k, v) in properties where k.caseInsensitiveCompare(key) == .orderedSame {
+            guard let prop = v as? [String: Any],
+                  let type = prop["type"] as? String else { continue }
+            switch type {
+            case "status":
+                if let s = prop["status"] as? [String: Any], let name = s["name"] as? String {
+                    out.append(name.lowercased())
+                }
+            case "select":
+                if let s = prop["select"] as? [String: Any], let name = s["name"] as? String {
+                    out.append(name.lowercased())
+                }
+            case "multi_select":
+                if let arr = prop["multi_select"] as? [[String: Any]] {
+                    for opt in arr {
+                        if let name = opt["name"] as? String {
+                            out.append(name.lowercased())
+                        }
+                    }
+                }
+            default:
+                continue
+            }
+        }
+        return out
+    }
+
+    /// True when any of `keys` resolves to a `date`-typed property whose
+    /// `start` is a non-empty string (Notion's representation of a set date).
+    /// Case-insensitive on the key. Pure.
+    static func hasPopulatedDate(in properties: [String: Any], keys: [String]) -> Bool {
+        for key in keys {
+            for (k, v) in properties where k.caseInsensitiveCompare(key) == .orderedSame {
+                guard let prop = v as? [String: Any],
+                      (prop["type"] as? String) == "date",
+                      let date = prop["date"] as? [String: Any],
+                      let start = date["start"] as? String else { continue }
+                if !start.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return true
+                }
+            }
+        }
+        return false
+    }
 }
 
 // MARK: - SkillIntentScorer
