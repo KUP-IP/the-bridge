@@ -811,6 +811,15 @@ await runCloudAccessWSGTests()
 // a TEMP DB path (never the real config-dir store, never the shared singleton).
 await runMemoryModuleTests()
 
+// v3.7.6 (system-tethered Light/Dark theme): the appearance-adaptive
+// BridgeTokens contract. Resolves every adaptive token under .darkAqua and
+// .aqua and asserts (a) the DARK branch equals the exact v3.7.5 carbon literal
+// (dark = regression-free), (b) the LIGHT branch equals the defined titanium
+// value, (c) each adaptive token genuinely differs across appearances, (d)
+// canvasNSColor (AppKit window backing) tracks bgCanvas in both, and (e) the
+// LEAVE-UNCHANGED tokens (accents/base signals/gold/titanium) stay fixed.
+await runBridgeTokensAdaptiveTests()
+
 // ============================================================
 // MARK: - Summary
 // ============================================================
