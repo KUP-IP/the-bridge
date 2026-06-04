@@ -11,7 +11,7 @@ import Foundation
 public enum AppVersion {
     /// Marketing version (CFBundleShortVersionString equivalent).
     /// Format: MAJOR.MINOR.PATCH (Semantic Versioning).
-    public static let marketing = "3.7.1"
+    public static let marketing = "3.7.2"
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
@@ -21,7 +21,7 @@ public enum AppVersion {
     /// v3.7.1 release (PKT-933): 45 → 46 — Remote Access "coming soon" guard +
     ///   toggle re-entrancy fix (so the published build carries the guard that
     ///   the 3.7.0 DMG predates).
-    public static let build = "46"
+    public static let build = "47"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }
