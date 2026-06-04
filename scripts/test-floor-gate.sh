@@ -687,7 +687,23 @@ set -euo pipefail
 # read-resolves-to-SSOT-bytes byte-identical to instructions, unknown-URI
 # throw). All file-I/O hermetic (withTempHome), no GUI/TCC gate, so they run in
 # CI and local alike: 1657 + 11 = 1668.
-FLOOR="${BRIDGE_TEST_FLOOR:-1668}"
+# Delivery telemetry W2 (2026-06-04): DeliveryLog (@MainActor @Observable
+# singleton recording per-session delivery events — handshakeDelivered /
+# resourceRead / reminderToolCall) + the truthful "Delivery audit · active
+# sessions" card in StandingOrdersSection. Both transports (SSETransport
+# Streamable-HTTP + legacy SSE) and the stdio (ServerManager) path emit the
+# handshake + resource-read events identically; reminders_* tool calls are
+# recorded audit-only at the transport CallTool dispatch (never gates). Off-main
+# transport code records via nonisolated record* funcs that hop to the main
+# actor (mirrors the W1 BridgeResources broadcaster). Added DeliveryLogTests.swift
+# with 10 harness test() blocks — ingest + per-(session,kind) latest rollup,
+# bounded history ring (historyCap), per-session audit projection, truthful
+# freshness logic (last-read hash == current composition hash → fresh; changed →
+# stale; no read → nil, never "not honored"), prune-on-teardown, first-seen
+# ordering, audit-only reminder events. All main-actor hermetic (injected
+# currentHash, no file I/O / singleton), so they run in CI and local alike:
+# 1668 + 10 = 1678.
+FLOOR="${BRIDGE_TEST_FLOOR:-1678}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

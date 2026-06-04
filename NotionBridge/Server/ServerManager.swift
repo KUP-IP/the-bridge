@@ -20,6 +20,11 @@ import MCP
 /// Pattern: Nudge Server — SwiftUI + async MCP server coexistence.
 /// The actor isolates all server state; UI updates flow through a MainActor callback.
 public actor ServerManager {
+    /// W2 telemetry: the stable synthetic session id under which the single
+    /// stdio connection's delivery events (handshake + resource reads) roll up
+    /// into one Delivery-audit row. stdio has no per-session id of its own.
+    public static let stdioSessionID = "stdio-local"
+
     private var server: Server?
     private var router: ToolRouter?
     private var sseServer: SSEServer?
@@ -208,7 +213,19 @@ public actor ServerManager {
         // path and the SSETransport legacy path serve byte-identical bytes
         // — the same composition that backs the bridge:// resources. The
         // best-effort store-read fallback lives inside the SSOT.
-        let composedInstructions = StandingOrdersDelivery.composition().instructionsMarkdown
+        let composition = StandingOrdersDelivery.composition()
+        let composedInstructions = composition.instructionsMarkdown
+
+        // W2 telemetry: record the handshake we composed + shipped on the
+        // stdio path, identically to both SSE paths. stdio is a single
+        // connection with no per-session id, so it rolls up under one stable
+        // synthetic session id (`Self.stdioSessionID`).
+        DeliveryLog.shared.recordHandshakeDelivered(
+            sessionID: Self.stdioSessionID,
+            clientName: "stdio",
+            tokenCount: composition.tokenCount,
+            contentHash: composition.contentHash
+        )
 
         let server = Server(
             // PKT-1 v3.5: serverInfo.name announces the new brand to clients.
@@ -274,7 +291,17 @@ public actor ServerManager {
             ListResources.Result(resources: BridgeResources.list)
         }
         await server.withMethodHandler(ReadResource.self) { params in
-            try BridgeResources.read(uri: params.uri, clientName: nil)
+            let result = try BridgeResources.read(uri: params.uri, clientName: nil)
+            // W2 telemetry: record the resource read we served on the stdio
+            // path + the composition hash at serve time, identical to the SSE
+            // paths (under the stable synthetic stdio session id).
+            DeliveryLog.shared.recordResourceRead(
+                sessionID: Self.stdioSessionID,
+                clientName: "stdio",
+                uri: params.uri,
+                contentHash: StandingOrdersDelivery.composition().contentHash
+            )
+            return result
         }
         await server.withMethodHandler(ResourceSubscribe.self) { _ in Empty() }
         await server.withMethodHandler(ResourceUnsubscribe.self) { _ in Empty() }

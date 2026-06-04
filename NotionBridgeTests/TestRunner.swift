@@ -717,6 +717,10 @@ await runStandingOrdersTests()
 // content-hash stability) and the shared BridgeResources URI→bytes resolution.
 await runStandingOrdersDeliveryTests()
 
+// W2 delivery telemetry: DeliveryLog ingest + per-(session,kind) rollup +
+// bounded history ring + truthful per-session freshness logic + session prune.
+await runDeliveryLogTests()
+
 // PKT-6 (v3.5): CommandStore (markdown-per-command + index.json).
 await runCommandStoreTests()
 

@@ -45,6 +45,12 @@ public final class LegacySSEBridge: @unchecked Sendable {
         lock.withLock { clientNames[sessionID] = name }
     }
 
+    /// Look up the client name for a legacy session, if known. Used by the W2
+    /// delivery telemetry so legacy-session audit rows carry the client label.
+    public func clientName(sessionID: String) -> String? {
+        lock.withLock { clientNames[sessionID] }
+    }
+
     /// Remove a disconnected SSE session. Returns client name if known (F13).
     @discardableResult
     public func remove(sessionID: String) -> String? {
@@ -646,7 +652,17 @@ public actor SSEServer {
         // comes from StandingOrdersDelivery — byte-identical to the stdio
         // (ServerManager) path and the legacy SSE path, and the same
         // composition that backs the bridge:// resources.
-        let composedInstructions = StandingOrdersDelivery.composition(clientName: clientName).instructionsMarkdown
+        let composition = StandingOrdersDelivery.composition(clientName: clientName)
+        let composedInstructions = composition.instructionsMarkdown
+        // W2 telemetry: record the handshake we composed + shipped (tokens +
+        // content hash) for this session. Off-actor-safe via the nonisolated
+        // main-actor hop (see DeliveryLog).
+        DeliveryLog.shared.recordHandshakeDelivered(
+            sessionID: sessionID,
+            clientName: clientName,
+            tokenCount: composition.tokenCount,
+            contentHash: composition.contentHash
+        )
         let server = Server(
             name: "NotionBridgeSSE",
             version: appVersion,
@@ -668,11 +684,21 @@ public actor SSEServer {
         // for this transport is owned by the actor's `resourceSubscribers`
         // set, keyed by sessionID (see `broadcastResourcesUpdated`).
         let resourceClientName = clientName
+        let resourceSessionID = sessionID
         await server.withMethodHandler(ListResources.self) { _ in
             ListResources.Result(resources: BridgeResources.list)
         }
         await server.withMethodHandler(ReadResource.self) { params in
-            try BridgeResources.read(uri: params.uri, clientName: resourceClientName)
+            let result = try BridgeResources.read(uri: params.uri, clientName: resourceClientName)
+            // W2 telemetry: record the resource read we served + the
+            // composition hash at serve time (drives the freshness dot).
+            DeliveryLog.shared.recordResourceRead(
+                sessionID: resourceSessionID,
+                clientName: resourceClientName,
+                uri: params.uri,
+                contentHash: StandingOrdersDelivery.composition(clientName: resourceClientName).contentHash
+            )
+            return result
         }
         let subscribeSessionID = sessionID
         await server.withMethodHandler(ResourceSubscribe.self) { [weak self] _ in
@@ -697,6 +723,15 @@ public actor SSEServer {
         await server.withMethodHandler(CallTool.self) { params in
             if let allowlist = toolAllowlist, !allowlist.contains(params.name) {
                 return .init(content: [.text(.init("Error: Tool '\(params.name)' is not allowed in this session"))], isError: true)
+            }
+            // W2 telemetry (AUDIT ONLY — never gates dispatch): record
+            // reminders_* tool calls so the Delivery audit can show activity.
+            if params.name.hasPrefix("reminders_") {
+                DeliveryLog.shared.recordReminderToolCall(
+                    sessionID: resourceSessionID,
+                    clientName: resourceClientName,
+                    toolName: params.name
+                )
             }
             let arguments: Value = params.arguments.map { .object($0) } ?? .object([:])
             let (text, isError) = await router.dispatchFormatted(toolName: params.name, arguments: arguments)
@@ -771,7 +806,19 @@ public actor SSEServer {
             // (ServerManager) and Streamable-HTTP paths, and the same
             // composition that backs the bridge:// resources. The
             // best-effort store-read fallback lives inside the SSOT.
-            let composedInstructions = StandingOrdersDelivery.composition().instructionsMarkdown
+            let composition = StandingOrdersDelivery.composition()
+            let composedInstructions = composition.instructionsMarkdown
+            // W2 telemetry: record the handshake we composed + shipped, same as
+            // the Streamable-HTTP path (both transports emit identically). The
+            // clientName was stored into `legacy` before this handler ran.
+            if let sessionID {
+                DeliveryLog.shared.recordHandshakeDelivered(
+                    sessionID: sessionID,
+                    clientName: legacy.clientName(sessionID: sessionID),
+                    tokenCount: composition.tokenCount,
+                    contentHash: composition.contentHash
+                )
+            }
             return buildRPCResponse(id: requestId, result: [
                 "protocolVersion": BridgeConstants.mcpProtocolVersion,
                 // Advertise resources (subscribe + listChanged) alongside tools.
@@ -816,7 +863,17 @@ public actor SSEServer {
                     "isError": true
                 ] as [String: Any])
             }
-            
+
+            // W2 telemetry (AUDIT ONLY — never gates dispatch): record
+            // reminders_* tool calls, identical to the Streamable-HTTP path.
+            if name.hasPrefix("reminders_"), let sessionID {
+                DeliveryLog.shared.recordReminderToolCall(
+                    sessionID: sessionID,
+                    clientName: legacy.clientName(sessionID: sessionID),
+                    toolName: name
+                )
+            }
+
             let args = params["arguments"] as? [String: Any] ?? [:]
 
             let argsValue: Value
@@ -853,6 +910,17 @@ public actor SSEServer {
             // (it is the future-overlay hook and ignored for content anyway).
             do {
                 let markdown = try BridgeResources.markdown(for: uri, clientName: nil)
+                // W2 telemetry: record the resource read we served + the
+                // composition hash at serve time (identical to the
+                // Streamable-HTTP path; both transports emit the same event).
+                if let sessionID {
+                    DeliveryLog.shared.recordResourceRead(
+                        sessionID: sessionID,
+                        clientName: legacy.clientName(sessionID: sessionID),
+                        uri: uri,
+                        contentHash: StandingOrdersDelivery.composition().contentHash
+                    )
+                }
                 return buildRPCResponse(id: requestId, result: [
                     "contents": [[
                         "uri": uri,
@@ -1050,6 +1118,12 @@ public actor SSEServer {
         // Drop any resource subscription this session held so a torn-down
         // session never lingers in the broadcast set.
         resourceSubscribers.remove(id)
+
+        // W2 telemetry: prune this session's delivery events so the audit card
+        // and debug timeline never show a torn-down session. Hop to the main
+        // actor (DeliveryLog is @MainActor); enqueued AFTER any in-flight
+        // ingest hops for this session, so it wins the teardown race.
+        await MainActor.run { DeliveryLog.shared.prune(sessionID: id) }
 
         if incrementClosed { totalSessionsClosed += 1 }
         if incrementExpired { totalSessionsExpired += 1 }

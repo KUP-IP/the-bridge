@@ -19,6 +19,13 @@ public struct StandingOrdersSection: View {
     private enum ExpandSide { case editor, preview }
     @State private var expanded: ExpandSide? = nil
 
+    /// The live delivery telemetry the "Delivery audit" card reads. Observing
+    /// the @Observable singleton makes the card live-update as the transports
+    /// record handshakes / resource reads / reminders calls.
+    @State private var deliveryLog = DeliveryLog.shared
+    /// Whether the debug timeline (recent raw events) is expanded.
+    @State private var timelineExpanded = false
+
     private let tokenBudget = 4000
 
     public init() {}
@@ -29,6 +36,7 @@ public struct StandingOrdersSection: View {
                 hero
                 if let err = loadError { errorBanner(err) }
                 splitCard
+                deliveryAuditCard
                 templatesCard
             }
             .padding(20)
@@ -260,6 +268,184 @@ public struct StandingOrdersSection: View {
 
     private func collapse() {
         withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) { expanded = nil }
+    }
+
+    // MARK: - Delivery audit · active sessions
+    //
+    // Truthful telemetry of what the server actually DID per connected client:
+    // the handshake we DELIVERED (token count + when), the bridge:// resource
+    // it FETCHED (when), and a freshness dot (emerald = the last read served the
+    // current composition hash, amber = the orders changed since). We never
+    // claim "Honored" — the server cannot observe whether a client obeyed the
+    // orders, only what we shipped and what was read back.
+
+    private var deliveryAuditCard: some View {
+        let sessions = deliveryLog.sessions()
+        let events = deliveryLog.timeline(limit: 30)
+        return BridgeGlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    BridgeCardLabel("Delivery audit · active sessions")
+                    Spacer()
+                    Text("\(sessions.count) connected")
+                        .font(.system(size: 11)).foregroundStyle(BridgeTokens.fg4)
+                }
+
+                if sessions.isEmpty {
+                    Text("No clients connected.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(BridgeTokens.fg4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 6)
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(sessions) { row in
+                            sessionRow(row)
+                        }
+                    }
+                }
+
+                if !events.isEmpty {
+                    Divider().overlay(Color.white.opacity(0.08))
+                    debugTimeline(events)
+                }
+            }
+        }
+    }
+
+    private func sessionRow(_ row: SessionAudit) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            freshnessDot(row.isFresh)
+                .padding(.top, 4)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(row.clientName ?? "Unknown client")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(BridgeTokens.fg1)
+                HStack(spacing: 6) {
+                    if let tokens = row.deliveredTokens, let at = row.deliveredAt {
+                        Text("Delivered · \(tokens) tok · \(relativeTime(at))")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(BridgeTokens.fg3)
+                    }
+                    // Truthful: only show "Fetched ✓" when a read actually
+                    // happened. Absence is NOT rendered as "not honored".
+                    if let readAt = row.lastResourceReadAt {
+                        Text("Fetched ✓ · \(relativeTime(readAt))")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(BridgeTokens.okText)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(11)
+        .background(Color.black.opacity(0.20), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+    }
+
+    /// Freshness dot: emerald when the last read served the CURRENT composition
+    /// hash, amber when the orders changed since the last read. No read yet →
+    /// a muted neutral dot (we say nothing about freshness we can't assert).
+    @ViewBuilder private func freshnessDot(_ isFresh: Bool?) -> some View {
+        let color: Color = {
+            switch isFresh {
+            case .some(true): return BridgeTokens.ok
+            case .some(false): return BridgeTokens.warn
+            case .none: return BridgeTokens.fg5
+            }
+        }()
+        Circle()
+            .fill(color)
+            .frame(width: 8, height: 8)
+            .overlay(Circle().strokeBorder(Color.white.opacity(0.15), lineWidth: 0.5))
+            .help(freshnessHelp(isFresh))
+    }
+
+    private func freshnessHelp(_ isFresh: Bool?) -> String {
+        switch isFresh {
+        case .some(true): return "Last read served the current Standing Orders."
+        case .some(false): return "Standing Orders changed since this client last read them."
+        case .none: return "No resource read yet for this session."
+        }
+    }
+
+    @ViewBuilder private func debugTimeline(_ events: [DeliveryEvent]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) { timelineExpanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: timelineExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text("Debug timeline")
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(0.4)
+                    Text("\(events.count) recent")
+                        .font(.system(size: 10))
+                        .foregroundStyle(BridgeTokens.fg4)
+                }
+                .foregroundStyle(BridgeTokens.fg3)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if timelineExpanded {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(events) { ev in
+                        HStack(spacing: 8) {
+                            Text(eventKindLabel(ev.kind))
+                                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                                .foregroundStyle(eventKindColor(ev.kind))
+                                .frame(width: 86, alignment: .leading)
+                            Text(ev.clientName ?? "—")
+                                .font(.system(size: 11)).foregroundStyle(BridgeTokens.fg3)
+                                .lineLimit(1)
+                            if let uri = ev.uri {
+                                Text(uri)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundStyle(BridgeTokens.fg4)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 4)
+                            Text(relativeTime(ev.at))
+                                .font(.system(size: 10)).foregroundStyle(BridgeTokens.fg4)
+                                .monospacedDigit()
+                        }
+                    }
+                }
+                .padding(10)
+                .background(Color.black.opacity(0.18), in: RoundedRectangle(cornerRadius: 8))
+            }
+        }
+    }
+
+    private func eventKindLabel(_ kind: DeliveryEventKind) -> String {
+        switch kind {
+        case .handshakeDelivered: return "delivered"
+        case .resourceRead: return "fetched"
+        case .reminderToolCall: return "reminder"
+        }
+    }
+
+    private func eventKindColor(_ kind: DeliveryEventKind) -> Color {
+        switch kind {
+        case .handshakeDelivered: return BridgeTokens.infoText
+        case .resourceRead: return BridgeTokens.okText
+        case .reminderToolCall: return BridgeTokens.warnText
+        }
+    }
+
+    /// Compact relative time ("just now", "3m ago", "2h ago", "1d ago").
+    private func relativeTime(_ date: Date) -> String {
+        let s = Int(Date().timeIntervalSince(date))
+        if s < 5 { return "just now" }
+        if s < 60 { return "\(s)s ago" }
+        let m = s / 60
+        if m < 60 { return "\(m)m ago" }
+        let h = m / 60
+        if h < 24 { return "\(h)h ago" }
+        return "\(h / 24)d ago"
     }
 
     // MARK: - Templates
