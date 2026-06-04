@@ -18,18 +18,28 @@ public struct BridgeStage: View {
 
     public var body: some View {
         ZStack {
-            BridgeTokens.bgCarbon
+            BridgeTokens.bgCanvas
             BridgeCarbonWeave()
         }
         .ignoresSafeArea()
     }
 }
 
-/// Subtle diagonal cross-hatch evoking carbon fibre, layered over the carbon
-/// fill. Faint by design (white .02 / black .22 hairlines). Drawn once per size.
+/// Subtle diagonal cross-hatch evoking carbon fibre, layered over the canvas
+/// fill. Faint by design. On DARK: white .02 / black .22 hairlines (unchanged
+/// carbon weave). On LIGHT: a whisper — the harsh black@.22 would scar the
+/// titanium ground, so the woven texture is preserved with a faint dark
+/// hairline (black@.04) plus a soft white highlight. Drawn once per size.
 struct BridgeCarbonWeave: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
-        Canvas { ctx, size in
+        // Resolve stroke styling for the active appearance up front so the
+        // Canvas closure (which captures by value) stays cheap & deterministic.
+        let isDark = colorScheme == .dark
+        let highlight = isDark ? Color.white.opacity(0.02) : Color.white.opacity(0.30)
+        let shadow    = isDark ? Color.black.opacity(0.22) : Color.black.opacity(0.04)
+        return Canvas { ctx, size in
             let step: CGFloat = 4
             var light = Path()
             var dark = Path()
@@ -39,8 +49,8 @@ struct BridgeCarbonWeave: View {
                 dark.move(to: CGPoint(x: x + 2, y: 0));  dark.addLine(to: CGPoint(x: x + 2 + size.height, y: size.height))
                 x += step
             }
-            ctx.stroke(light, with: .color(.white.opacity(0.02)), lineWidth: 1)
-            ctx.stroke(dark,  with: .color(.black.opacity(0.22)), lineWidth: 1)
+            ctx.stroke(light, with: .color(highlight), lineWidth: 1)
+            ctx.stroke(dark,  with: .color(shadow),    lineWidth: 1)
         }
         .allowsHitTesting(false)
     }

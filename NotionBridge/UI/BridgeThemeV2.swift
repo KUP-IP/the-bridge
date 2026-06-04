@@ -45,6 +45,12 @@ public struct BridgeGlassCard<Content: View>: View {
     private let cornerRadius: CGFloat
     private let padding: CGFloat
 
+    // System-tethered (v3.7.6): the white sheen + white hairlines assume a dark
+    // base and VANISH on titanium. On LIGHT we swap to a subtle dark/neutral
+    // sheen + a darker hairline so cards still read as RAISED glass; DARK is
+    // byte-for-byte unchanged.
+    @Environment(\.colorScheme) private var colorScheme
+
     public init(
         cornerRadius: CGFloat = 12,
         padding: CGFloat = 14,
@@ -56,24 +62,37 @@ public struct BridgeGlassCard<Content: View>: View {
     }
 
     public var body: some View {
-        content
+        let isDark = colorScheme == .dark
+        // Sheen gradient (top→bottom). DARK: white .07→.02 (unchanged).
+        // LIGHT: a brighter near-white lift on top fading out, so the card
+        // surface reads slightly raised off the #ECEDEF canvas.
+        let sheenTop    = isDark ? Color.white.opacity(0.07) : Color.white.opacity(0.65)
+        let sheenBottom = isDark ? Color.white.opacity(0.02) : Color.white.opacity(0.30)
+        // Tint opacity: the dark tint sits low; the light neutral tint sits even
+        // lower so it just cools the white sheen rather than graying the card.
+        let tintOpacity = isDark ? 0.20 : 0.10
+        // Edge hairline. DARK: white@.10 (unchanged). LIGHT: black@.06 so the
+        // card has a visible darker border on the light ground.
+        let hairline = isDark ? Color.white.opacity(0.10) : Color.black.opacity(0.06)
+        // Top rim highlight. DARK: white@.25 (unchanged). LIGHT: a soft white
+        // rim still helps, but darker beneath — keep a faint white top rim.
+        let rimHighlight = isDark ? Color.white.opacity(0.25) : Color.white.opacity(0.55)
+
+        return content
             .padding(padding)
             .background(
                 ZStack {
                     LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.07),
-                            Color.white.opacity(0.02)
-                        ],
+                        colors: [sheenTop, sheenBottom],
                         startPoint: .top, endPoint: .bottom
                     )
-                    BridgeTokens.glassCardTint.opacity(0.20)
+                    BridgeTokens.glassCardTint.opacity(tintOpacity)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+                    .strokeBorder(hairline, lineWidth: 0.5)
             )
             .overlay(
                 // top rim highlight
@@ -81,7 +100,7 @@ public struct BridgeGlassCard<Content: View>: View {
                     .inset(by: 0.5)
                     .stroke(
                         LinearGradient(
-                            colors: [Color.white.opacity(0.25), .clear],
+                            colors: [rimHighlight, .clear],
                             startPoint: .top, endPoint: .bottom
                         ),
                         lineWidth: 0.5

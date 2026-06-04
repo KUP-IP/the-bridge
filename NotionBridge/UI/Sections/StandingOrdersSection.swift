@@ -261,7 +261,7 @@ public struct StandingOrdersSection: View {
                 tokenMeter.padding(.horizontal, 18).padding(.bottom, 14)
             }
         }
-        .background(BridgeTokens.bgCarbon2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(BridgeTokens.bgRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.7), radius: 50, y: 24)
     }

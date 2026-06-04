@@ -114,7 +114,7 @@ public struct PermissionView: View {
                 Circle()
                     .fill(dot)
                     .frame(width: 9, height: 9)
-                    .overlay(Circle().strokeBorder(BridgeTokens.bgCarbon2, lineWidth: 2))
+                    .overlay(Circle().strokeBorder(BridgeTokens.bgRaised, lineWidth: 2))
                     .shadow(color: dot.opacity(0.7), radius: 3)
                     .offset(x: 3, y: -3)
             }
