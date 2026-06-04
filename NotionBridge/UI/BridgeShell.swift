@@ -176,6 +176,10 @@ public struct BridgeSectionNav: View {
         // SettingsSection. Clamps at the ends (no wrap); mouse clicking and
         // the per-item visual states are untouched.
         .focusable()
+        // Keep keyboard navigation (Up/Down arrows) but suppress the system
+        // blue focus ring that otherwise outlines the whole sidebar — the
+        // trailing hairline above is the only border we want (operator feedback).
+        .focusEffectDisabled()
         .onMoveCommand { direction in
             moveSelection(direction)
         }
