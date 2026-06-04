@@ -112,7 +112,7 @@ public struct LicenseCard: View {
                 if let err = state.lastError {
                     Text(err)
                         .font(.caption2)
-                        .foregroundStyle(NotionPalette.red.opacity(0.95))
+                        .foregroundStyle(BridgeTokens.bad.opacity(0.95))
                         .accessibilityLabel("License activation error: \(err)")
                 }
             }
@@ -123,11 +123,11 @@ public struct LicenseCard: View {
 
     private var statusPillColor: Color {
         switch state.kind {
-        case .trial:           return NotionPalette.blue
-        case .trialExpired:    return NotionPalette.red
-        case .licensed:        return NotionPalette.green
-        case .licenseExpired:  return NotionPalette.orange
-        case .grandfathered:   return NotionPalette.green
+        case .trial:           return BridgeTokens.accent
+        case .trialExpired:    return BridgeTokens.bad
+        case .licensed:        return BridgeTokens.ok
+        case .licenseExpired:  return BridgeTokens.warn
+        case .grandfathered:   return BridgeTokens.ok
         }
     }
 

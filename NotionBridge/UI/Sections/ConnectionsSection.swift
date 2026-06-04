@@ -66,12 +66,12 @@ public struct ConnectionsSection: View {
     private var serverStatusPill: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(statusBar.isServerRunning ? Color.green : Color.red)
+                .fill(statusBar.isServerRunning ? BridgeTokens.ok : BridgeTokens.bad)
                 .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 1) {
                 Text(statusBar.isServerRunning ? "Server running" : "Server stopped")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(statusBar.isServerRunning ? Color.green : Color.red)
+                    .foregroundStyle(statusBar.isServerRunning ? BridgeTokens.ok : BridgeTokens.bad)
                 Text("uptime \(statusBar.uptimeString)")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
@@ -157,10 +157,10 @@ public struct ConnectionsSection: View {
     private func statusBadge(_ status: BridgeConnectionStatus) -> some View {
         let (text, color): (String, Color) = {
             switch status {
-            case .connected: return ("Connected", Color.green)
-            case .warning: return ("Warning", Color.orange)
-            case .disconnected: return ("Disconnected", Color.red)
-            case .invalid: return ("Invalid", Color.red)
+            case .connected: return ("Connected", BridgeTokens.ok)
+            case .warning: return ("Warning", BridgeTokens.warn)
+            case .disconnected: return ("Disconnected", BridgeTokens.bad)
+            case .invalid: return ("Invalid", BridgeTokens.bad)
             case .notConfigured: return ("Not configured", Color.secondary)
             case .checking: return ("Checking\u{2026}", Color.secondary)
             }
@@ -222,7 +222,7 @@ public struct ConnectionsSection: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
             Circle()
-                .fill(Color.green)
+                .fill(BridgeTokens.ok)
                 .frame(width: 7, height: 7)
         }
         .padding(.vertical, 2)
@@ -253,7 +253,7 @@ public struct ConnectionsSection: View {
                 if let err = launchAtLoginError {
                     Text(err)
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(BridgeTokens.warn)
                         .padding(.top, 2)
                 }
                 Divider().background(Color.white.opacity(0.08))

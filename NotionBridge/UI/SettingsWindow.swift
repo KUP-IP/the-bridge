@@ -68,7 +68,7 @@ public final class SettingsWindowController {
 
         let window = NSWindow(contentViewController: hostingController)
         window.title = "The Bridge Settings"
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
         // v3.7.2: the square-ish default the operator settled on — frame ≈
         // 1080×908 (content 1080×880; a standard non-full-size titlebar adds
         // ~28pt). Replaces the old tall "match macOS System Settings" 720×900.
@@ -86,6 +86,11 @@ public final class SettingsWindowController {
         // autosaved frame — or a window-manager (Magnet) snap — must never
         // override the default. The window stays drag-resizable for the
         // session; it simply resets to the square next launch.
+        // v3.7.2 resurface: the carbon Liquid-Glass stage is dark-only, so pin
+        // the window to dark appearance regardless of the system setting, and
+        // paint a carbon backing so a resize never flashes system white.
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = NSColor(red: 0.043, green: 0.047, blue: 0.055, alpha: 1) // #0B0C0E
         window.center()
         window.isReleasedWhenClosed = false
 
@@ -206,16 +211,20 @@ public struct SettingsView: View {
     }
 
     public var body: some View {
-        NavigationSplitView {
-            List(SettingsSection.allCases, selection: $nav.section) { section in
-                Label(section.rawValue, systemImage: section.icon)
-                    .tag(section)
+        ZStack {
+            BridgeStage()
+            VStack(spacing: 0) {
+                BridgeTitleBar(title: nav.section.rawValue)
+                HStack(spacing: 0) {
+                    BridgeSectionNav(selection: $nav.section)
+                    detailContent
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                BridgeFootBar(version: "v\(appVersion) · build \(AppVersion.build)")
             }
-            .tint(NotionPalette.blue)
-            .navigationSplitViewColumnWidth(min: 140, ideal: 160, max: 200)
-        } detail: {
-            detailContent
         }
+        .frame(minWidth: 760, minHeight: 600)
+        .preferredColorScheme(.dark)
     }
 
     @ViewBuilder

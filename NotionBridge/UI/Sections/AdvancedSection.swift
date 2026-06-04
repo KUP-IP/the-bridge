@@ -254,7 +254,7 @@ public struct AdvancedSection: View {
                     Spacer()
                 }
                 if let ssePortError {
-                    Text(ssePortError).font(.caption2).foregroundStyle(.orange)
+                    Text(ssePortError).font(.caption2).foregroundStyle(BridgeTokens.warn)
                 }
                 Text("Changes apply after Restart Bridge.")
                     .font(.caption2)

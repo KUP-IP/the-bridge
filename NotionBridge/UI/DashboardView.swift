@@ -66,6 +66,7 @@ public struct DashboardView: View {
         }
         .frame(width: PKT879Dashboard.popoverWidth)
         .padding(.vertical, 6)
+        .preferredColorScheme(.dark) // v3.7.2: carbon glass is dark-only
         .task {
             await permissionManager.checkAllAsync()
             await refreshLicenseStatus()
@@ -96,8 +97,8 @@ public struct DashboardView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.red.opacity(0.18))
-            .foregroundStyle(Color.red.opacity(0.95))
+            .background(BridgeTokens.bad.opacity(0.18))
+            .foregroundStyle(BridgeTokens.bad.opacity(0.95))
             .accessibilityLabel("Bridge license expired. Open Settings → Advanced → License to activate.")
         }
         .buttonStyle(.plain)
@@ -166,7 +167,7 @@ public struct DashboardView: View {
             onOpenSettings(.connections)
         } label: {
             HStack(spacing: 10) {
-                StatusPulseDot(color: statusBar.isServerRunning ? .green : .red,
+                StatusPulseDot(color: statusBar.isServerRunning ? BridgeTokens.ok : .red,
                                radius: PKT879Dashboard.statusDotSize)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(statusBar.isServerRunning ? "Server running" : "Server stopped")
@@ -295,9 +296,9 @@ public struct DashboardView: View {
 
     private func dotColor(_ status: PermissionManager.GrantStatus) -> Color {
         switch status {
-        case .granted: return .green
-        case .denied: return .red
-        case .unknown, .partiallyGranted, .restartRecommended: return .orange
+        case .granted: return BridgeTokens.ok
+        case .denied: return BridgeTokens.bad
+        case .unknown, .partiallyGranted, .restartRecommended: return BridgeTokens.warn
         }
     }
 
@@ -375,7 +376,7 @@ public struct DashboardView: View {
             Button(actionTitle, action: action)
                 .buttonStyle(.plain)
                 .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(Color(red: 0.47, green: 0.63, blue: 0.86))
+                .foregroundStyle(BridgeTokens.accentLink)
         }
         .padding(.horizontal, 14)
         .padding(.top, 4)
@@ -515,19 +516,19 @@ struct PKT879PillButtonStyle: ButtonStyle {
     private var foreground: Color {
         switch tone {
         case .neutral: return Color.primary
-        case .danger:  return Color(red: 1.0, green: 0.61, blue: 0.61)
+        case .danger:  return BridgeTokens.badText
         }
     }
     private var border: Color {
         switch tone {
         case .neutral: return Color.white.opacity(0.16)
-        case .danger:  return Color.red.opacity(0.30)
+        case .danger:  return BridgeTokens.bad.opacity(0.30)
         }
     }
     private func background(pressed: Bool) -> Color {
         switch tone {
         case .neutral: return Color.white.opacity(pressed ? 0.14 : 0.08)
-        case .danger:  return Color.red.opacity(pressed ? 0.18 : 0.10)
+        case .danger:  return BridgeTokens.bad.opacity(pressed ? 0.18 : 0.10)
         }
     }
 }

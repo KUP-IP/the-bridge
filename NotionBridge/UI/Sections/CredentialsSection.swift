@@ -120,7 +120,7 @@ public struct CredentialsSection: View {
                 if let errorMessage {
                     Text(errorMessage)
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(BridgeTokens.bad)
                 }
                 if stored.isEmpty && !isLoading {
                     // PKT-934 ·5: post-PKT-933 the list shows ONLY Bridge-saved
@@ -247,9 +247,9 @@ public struct CredentialsSection: View {
             .font(.system(size: 11, weight: .semibold))
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
-            .background(Color.green.opacity(0.15), in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.green.opacity(0.28), lineWidth: 0.5))
-            .foregroundStyle(Color.green)
+            .background(BridgeTokens.ok.opacity(0.15), in: Capsule())
+            .overlay(Capsule().strokeBorder(BridgeTokens.ok.opacity(0.28), lineWidth: 0.5))
+            .foregroundStyle(BridgeTokens.ok)
     }
 
     // MARK: - Policy

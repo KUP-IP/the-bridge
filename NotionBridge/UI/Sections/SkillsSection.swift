@@ -58,7 +58,7 @@ public struct SkillsSection: View {
                 if let msg = cacheMessage {
                     Text(msg)
                         .font(.caption)
-                        .foregroundStyle(cacheIsError ? .red : .secondary)
+                        .foregroundStyle(cacheIsError ? BridgeTokens.bad : .secondary)
                 }
                 Button {
                     Task { await refreshCache() }

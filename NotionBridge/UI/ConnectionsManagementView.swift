@@ -73,7 +73,7 @@ public struct ConnectionsManagementView: View {
             if let errorMessage, !errorMessage.isEmpty {
                 Text(errorMessage)
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(BridgeTokens.warn)
                     .padding(.top, 8)
             }
 
@@ -173,8 +173,8 @@ public struct ConnectionsManagementView: View {
                             .font(.system(size: 8, weight: .bold, design: .rounded))
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
-                            .background(Color.blue.opacity(0.12))
-                            .foregroundStyle(.blue)
+                            .background(BridgeTokens.accent.opacity(0.12))
+                            .foregroundStyle(BridgeTokens.accent)
                             .clipShape(RoundedRectangle(cornerRadius: 3))
                     }
                 }
@@ -422,17 +422,17 @@ public struct ConnectionsManagementView: View {
     private func statusColor(_ status: BridgeConnectionStatus) -> Color {
         switch status {
         case .connected:
-            return .green
+            return BridgeTokens.ok
         case .warning:
-            return .yellow
+            return BridgeTokens.warn
         case .disconnected:
-            return .red
+            return BridgeTokens.bad
         case .notConfigured:
             return .gray
         case .checking:
-            return .orange
+            return BridgeTokens.warn
         case .invalid:
-            return .red
+            return BridgeTokens.bad
         }
     }
 }
@@ -495,7 +495,7 @@ struct AddWorkspaceConnectionSheet: View {
             if let errorMessage {
                 Text(errorMessage)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(BridgeTokens.bad)
             }
 
             if let helpURL = selectedProvider.helpURL {

@@ -97,7 +97,7 @@ public struct PermissionView: View {
             HStack(spacing: 8) {
                 // D3: Yellow circle during check, normal status color otherwise
                 Circle()
-                    .fill(isChecking ? .yellow : statusColor(status))
+                    .fill(isChecking ? BridgeTokens.warn : statusColor(status))
                     .frame(width: 8, height: 8)
 
                 Text(grant.displayName)
@@ -109,15 +109,15 @@ public struct PermissionView: View {
                 if isChecking {
                     Text("Checking\u{2026}")
                         .font(.caption)
-                        .foregroundStyle(.yellow)
+                        .foregroundStyle(BridgeTokens.warn)
                 } else if recentlyGranted.contains(grant) {
                     Text("\u{2713} Granted")
                         .font(.caption)
-                        .foregroundStyle(.green)
+                        .foregroundStyle(BridgeTokens.ok)
                 } else {
                     Text(permissionManager.statusLabel(for: grant))
                         .font(.caption)
-                        .foregroundStyle(status == .granted ? .green : .orange)
+                        .foregroundStyle(status == .granted ? BridgeTokens.ok : BridgeTokens.warn)
                 }
 
                 // D1: Action button only for non-granted, non-checking states
@@ -128,7 +128,7 @@ public struct PermissionView: View {
                     }
                     .buttonStyle(.plain)
                     .font(.caption)
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(BridgeTokens.accent)
                 }
             }
 
@@ -176,7 +176,7 @@ public struct PermissionView: View {
         ForEach(upcomingCapabilities) { capability in
             HStack(spacing: 8) {
                 Circle()
-                    .fill(capability.enabled ? Color.blue : Color.secondary.opacity(0.4))
+                    .fill(capability.enabled ? BridgeTokens.accent : Color.secondary.opacity(0.4))
                     .frame(width: 8, height: 8)
 
                 Text(capability.name)
@@ -188,7 +188,7 @@ public struct PermissionView: View {
                      ? "Enabled \u{2014} wiring pending"
                      : "Not requested (feature disabled)")
                     .font(.caption)
-                    .foregroundStyle(capability.enabled ? .blue : .secondary)
+                    .foregroundStyle(capability.enabled ? BridgeTokens.accent : .secondary)
             }
         }
     }
@@ -210,12 +210,12 @@ public struct PermissionView: View {
                 Label("All permissions granted \u{2014} restart to apply changes.",
                       systemImage: "checkmark.circle.fill")
                     .font(.caption)
-                    .foregroundStyle(.green)
+                    .foregroundStyle(BridgeTokens.ok)
             } else {
                 Label("\(grantedCount) of \(totalCount) granted \u{2014} grant remaining permissions, then restart.",
                       systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(BridgeTokens.warn)
             }
 
             Button("Restart Notion Bridge") {
@@ -228,7 +228,7 @@ public struct PermissionView: View {
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(allGranted ? Color.green.opacity(0.1) : Color.yellow.opacity(0.1))
+                .fill(allGranted ? BridgeTokens.ok.opacity(0.1) : BridgeTokens.warn.opacity(0.1))
         )
     }
 
@@ -243,7 +243,7 @@ public struct PermissionView: View {
         VStack(spacing: 6) {
             Label("Automation mismatch detected", systemImage: "exclamationmark.triangle.fill")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.orange)
+                .foregroundStyle(BridgeTokens.warn)
 
             Text("\(targets): TCC database shows granted but runtime probe fails. This happens when macOS stores a stale code signature (csreq) from a previous build.")
                 .font(.caption2)
@@ -252,7 +252,7 @@ public struct PermissionView: View {
 
             Text("⚠️ This will reset ALL automation permissions. You will be prompted to re-authorize each app.")
                 .font(.caption2)
-                .foregroundStyle(.orange)
+                .foregroundStyle(BridgeTokens.warn)
                 .multilineTextAlignment(.center)
 
             Button("Reset & Re-authorize") {
@@ -261,14 +261,14 @@ public struct PermissionView: View {
                 }
             }
             .buttonStyle(.borderedProminent)
-            .tint(.orange)
+            .tint(BridgeTokens.warn)
             .controlSize(.small)
         }
         .padding(8)
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.orange.opacity(0.1))
+                .fill(BridgeTokens.warn.opacity(0.1))
         )
     }
 
@@ -276,11 +276,11 @@ public struct PermissionView: View {
 
     private func statusColor(_ status: PermissionManager.GrantStatus) -> Color {
         switch status {
-        case .granted: return .green
-        case .denied: return .orange
-        case .unknown: return .orange
-        case .partiallyGranted: return .orange
-        case .restartRecommended: return .orange
+        case .granted: return BridgeTokens.ok
+        case .denied: return BridgeTokens.warn
+        case .unknown: return BridgeTokens.warn
+        case .partiallyGranted: return BridgeTokens.warn
+        case .restartRecommended: return BridgeTokens.warn
         }
     }
 
@@ -514,7 +514,7 @@ struct AutoPermissionsStepView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.caption)
-                .foregroundStyle(.blue)
+                .foregroundStyle(BridgeTokens.accent)
             }
         }
         .animation(.easeInOut(duration: 0.2), value: state)
@@ -598,10 +598,10 @@ struct AutoPermissionsStepView: View {
 
     private func color(for state: AutoGrantProgressState) -> Color {
         switch state {
-        case .pending: return .orange
-        case .prompting: return .yellow
-        case .granted: return .green
-        case .denied: return .red
+        case .pending: return BridgeTokens.warn
+        case .prompting: return BridgeTokens.warn
+        case .granted: return BridgeTokens.ok
+        case .denied: return BridgeTokens.bad
         }
     }
 
@@ -691,7 +691,7 @@ struct ManualPermissionsStepView: View {
 
                 Text(permissionManager.statusLabel(for: grant))
                     .font(.caption)
-                    .foregroundStyle(status == .granted ? .green : .orange)
+                    .foregroundStyle(status == .granted ? BridgeTokens.ok : BridgeTokens.warn)
             }
 
             Text(manualInstruction(for: grant))
@@ -704,15 +704,15 @@ struct ManualPermissionsStepView: View {
             }
             .buttonStyle(.plain)
             .font(.caption)
-            .foregroundStyle(.blue)
+            .foregroundStyle(BridgeTokens.accent)
         }
     }
 
     private func statusColor(_ status: PermissionManager.GrantStatus) -> Color {
         switch status {
-        case .granted: return .green
-        case .denied: return .red
-        case .unknown, .partiallyGranted, .restartRecommended: return .orange
+        case .granted: return BridgeTokens.ok
+        case .denied: return BridgeTokens.bad
+        case .unknown, .partiallyGranted, .restartRecommended: return BridgeTokens.warn
         }
     }
 

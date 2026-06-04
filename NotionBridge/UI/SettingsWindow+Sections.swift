@@ -127,11 +127,11 @@ extension SettingsView {
                           ? "exclamationmark.triangle.fill"
                           : (commandsPaletteEnabled ? "checkmark.circle.fill" : "minus.circle"))
                         .foregroundStyle(status.isWarning
-                                         ? Color.red
-                                         : (commandsPaletteEnabled ? Color.green : Color.secondary))
+                                         ? BridgeTokens.bad
+                                         : (commandsPaletteEnabled ? BridgeTokens.ok : Color.secondary))
                     Text(status.message)
                         .font(.callout)
-                        .foregroundStyle(status.isWarning ? Color.red : Color.primary)
+                        .foregroundStyle(status.isWarning ? BridgeTokens.bad : Color.primary)
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("Commands palette status: \(status.message)")
@@ -447,7 +447,7 @@ private struct IntegratedToolsContent: View {
     private func statusColor(_ status: BridgeConnectionStatus) -> Color {
         switch status {
         case .connected: return BridgeColors.success
-        case .warning: return .orange
+        case .warning: return BridgeTokens.warn
         case .disconnected, .invalid: return BridgeColors.error
         case .notConfigured: return BridgeColors.secondary
         case .checking: return BridgeColors.secondary

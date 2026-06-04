@@ -22,11 +22,11 @@ struct SensitivePathsEditor: View {
             if paths.isEmpty {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(BridgeTokens.warn)
                         .font(.caption)
                     Text("No sensitive paths configured. All path protections are disabled.")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(BridgeTokens.warn)
                 }
             } else {
                 ForEach(Array(paths.enumerated()), id: \.offset) { index, path in
@@ -41,7 +41,7 @@ struct SensitivePathsEditor: View {
                             removePath(at: index)
                         } label: {
                             Image(systemName: "minus.circle.fill")
-                                .foregroundStyle(.red)
+                                .foregroundStyle(BridgeTokens.bad)
                         }
                         .buttonStyle(.plain)
                     }
@@ -71,7 +71,7 @@ struct SensitivePathsEditor: View {
                 if let error = validationError {
                     Text(error)
                         .font(.caption2)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(BridgeTokens.bad)
                 }
             } else {
                 Button {

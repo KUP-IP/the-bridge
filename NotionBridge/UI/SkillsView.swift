@@ -68,7 +68,7 @@ struct SkillsView: View {
                         systemImage: "exclamationmark.triangle.fill"
                     )
                     .font(.callout)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(BridgeTokens.warn)
                 }
             }
 
@@ -78,7 +78,7 @@ struct SkillsView: View {
                     Label("Skill retrieval is disabled in Tools. Skills won\u{2019}t be available to AI clients until you re-enable it.",
                           systemImage: "exclamationmark.triangle.fill")
                         .font(.callout)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(BridgeTokens.warn)
                 }
             }
 
@@ -214,7 +214,7 @@ struct SkillsView: View {
                 if let error = addError {
                     Text(error)
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(BridgeTokens.bad)
                 }
 
                 Button("Add skill") {
@@ -428,7 +428,7 @@ struct SkillsView: View {
                         if let renameError {
                             Text(renameError)
                                 .font(.caption2)
-                                .foregroundStyle(.red)
+                                .foregroundStyle(BridgeTokens.bad)
                         }
                     }
                     .frame(maxWidth: 200)
@@ -484,7 +484,7 @@ struct SkillsView: View {
                         if let urlValidationError {
                             Text(urlValidationError)
                                 .font(.caption2)
-                                .foregroundStyle(.red)
+                                .foregroundStyle(BridgeTokens.bad)
                         }
                     }
                 } else {
@@ -502,7 +502,7 @@ struct SkillsView: View {
                         if skill.notionPageId.isEmpty {
                             Label("Set URL", systemImage: "link.badge.plus")
                                 .font(.caption)
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(BridgeTokens.warn)
                         } else {
                             let tail = String(skill.notionPageId.suffix(6))
                             HStack(spacing: 4) {
@@ -614,7 +614,7 @@ struct SkillsView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.red.opacity(0.8))
+            .foregroundStyle(BridgeTokens.bad.opacity(0.8))
             .accessibilityLabel("Delete skill \(skill.name)")
         }
         .padding(.vertical, 4)

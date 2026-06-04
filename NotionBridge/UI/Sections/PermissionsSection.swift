@@ -97,7 +97,7 @@ public struct PermissionsSection: View {
         VStack(alignment: .trailing, spacing: 1) {
             Text("\(granted) / \(total)")
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(allGood ? Color.green : Color.orange)
+                .foregroundStyle(allGood ? BridgeTokens.ok : BridgeTokens.warn)
             Text("granted")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -193,13 +193,13 @@ public struct PermissionsSection: View {
     @ViewBuilder
     private func statusBadge(status: PermissionManager.GrantStatus, isChecking: Bool) -> some View {
         let (text, color): (String, Color) = {
-            if isChecking { return ("Checking\u{2026}", Color.yellow) }
+            if isChecking { return ("Checking\u{2026}", BridgeTokens.warn) }
             switch status {
-            case .granted: return ("Granted", Color.green)
-            case .denied: return ("Not granted", Color.orange)
-            case .unknown: return ("Unknown", Color.orange)
-            case .partiallyGranted: return ("Partial", Color.orange)
-            case .restartRecommended: return ("Restart needed", Color.orange)
+            case .granted: return ("Granted", BridgeTokens.ok)
+            case .denied: return ("Not granted", BridgeTokens.warn)
+            case .unknown: return ("Unknown", BridgeTokens.warn)
+            case .partiallyGranted: return ("Partial", BridgeTokens.warn)
+            case .restartRecommended: return ("Restart needed", BridgeTokens.warn)
             }
         }()
         Text(text)

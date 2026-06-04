@@ -134,7 +134,7 @@ public struct JobsView: View {
             ProgressView("Loading jobs…").frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let err = errorMessage {
             VStack(spacing: 8) {
-                Image(systemName: "exclamationmark.triangle").font(.largeTitle).foregroundStyle(.orange)
+                Image(systemName: "exclamationmark.triangle").font(.largeTitle).foregroundStyle(BridgeTokens.warn)
                 Text(err).font(.callout).foregroundStyle(.secondary)
                 Button("Retry") { Task { await reload() } }
             }
@@ -414,8 +414,8 @@ private struct JobCardHeader: View {
 
     private var statusColor: Color {
         switch job.status {
-        case .active: return .green
-        case .paused: return .orange
+        case .active: return BridgeTokens.ok
+        case .paused: return BridgeTokens.warn
         }
     }
 
@@ -462,7 +462,7 @@ private struct NewJobSheet: View {
                     .font(.body.monospaced())
                     .onChange(of: schedule) { _, v in validateSchedule(v) }
                 if let err = scheduleError {
-                    Text(err).font(.caption).foregroundStyle(.red)
+                    Text(err).font(.caption).foregroundStyle(BridgeTokens.bad)
                 } else {
                     Text((CronHumanizer.describe(schedule) ?? schedule)).font(.caption).foregroundStyle(.secondary)
                 }
@@ -475,12 +475,12 @@ private struct NewJobSheet: View {
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
                         .onChange(of: actionsJSON) { _, v in validateActions(v) }
                     if let err = actionsError {
-                        Text(err).font(.caption).foregroundStyle(.red)
+                        Text(err).font(.caption).foregroundStyle(BridgeTokens.bad)
                     }
                 }
             }
             if let err = errorMsg {
-                Text(err).font(.caption).foregroundStyle(.red)
+                Text(err).font(.caption).foregroundStyle(BridgeTokens.bad)
             }
             HStack {
                 Spacer()
@@ -586,7 +586,7 @@ private struct JobDetailView: View {
             HStack {
                 TextField("Job name", text: $editedName).textFieldStyle(.roundedBorder)
                 Circle()
-                    .fill(job.status == .active ? Color.green : Color.orange)
+                    .fill(job.status == .active ? BridgeTokens.ok : BridgeTokens.warn)
                     .frame(width: 10, height: 10)
                 Text(job.status.rawValue.capitalized).font(.caption).foregroundStyle(.secondary)
             }
@@ -622,7 +622,7 @@ private struct JobDetailView: View {
                     validateSchedule(newValue)
                 }
             if let err = scheduleError {
-                Text(err).font(.caption).foregroundStyle(.red)
+                Text(err).font(.caption).foregroundStyle(BridgeTokens.bad)
             } else {
                 Text((CronHumanizer.describe(editedSchedule) ?? editedSchedule)).font(.caption).foregroundStyle(.secondary)
             }
@@ -644,7 +644,7 @@ private struct JobDetailView: View {
                     validateActions(newValue)
                 }
             if let err = actionsError {
-                Text(err).font(.caption).foregroundStyle(.red)
+                Text(err).font(.caption).foregroundStyle(BridgeTokens.bad)
             }
         }
     }

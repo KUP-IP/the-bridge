@@ -77,6 +77,7 @@ public final class CommandBridgePanel: NSPanel {
         backgroundColor = .clear
         isOpaque = false
         hasShadow = false   // shadows are baked into BridgeGlass surfaces
+        appearance = NSAppearance(named: .darkAqua) // v3.7.2: carbon glass is dark-only
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
     }
 
@@ -815,7 +816,7 @@ public struct CommandBridgeRootView: View {
         .frame(width: CommandBridgeController.pillWidth, height: 66)
         .background(
             ZStack {
-                Color(red: 0.086, green: 0.086, blue: 0.110).opacity(0.34)
+                BridgeTokens.glassWindowTint.opacity(0.34)
                 LinearGradient(
                     colors: [Color.white.opacity(0.14),
                              Color.white.opacity(0.02)],
@@ -933,7 +934,7 @@ public struct CommandBridgeRootView: View {
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(selected
-                          ? Color(red: 0.47, green: 0.63, blue: 0.86).opacity(0.18)
+                          ? BridgeTokens.accent.opacity(0.18)
                           : Color.clear)
             )
         }

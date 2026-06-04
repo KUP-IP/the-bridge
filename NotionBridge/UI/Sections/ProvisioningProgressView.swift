@@ -97,7 +97,7 @@ public struct ProvisioningProgressView: View {
                     indicatorView(p.indicator)
                     Text(p.title)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(p.indicator == .failure ? Color.red : .primary)
+                        .foregroundStyle(p.indicator == .failure ? BridgeTokens.bad : .primary)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer()
                     if p.showsRetry {
@@ -129,10 +129,10 @@ public struct ProvisioningProgressView: View {
                 .foregroundStyle(NotionPalette.blue)
         case .success:
             Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+                .foregroundStyle(BridgeTokens.ok)
         case .failure:
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.red)
+                .foregroundStyle(BridgeTokens.bad)
         }
     }
 }

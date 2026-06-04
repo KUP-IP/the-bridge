@@ -51,15 +51,22 @@ public final class OnboardingWindowController {
             }
         )
 
-        let hostingController = NSHostingController(rootView: onboardingView)
+        let hostingController = NSHostingController(
+            rootView: ZStack { BridgeStage(); onboardingView }
+                .preferredColorScheme(.dark)
+        )
 
         let window = NSWindow(contentViewController: hostingController)
-        window.title = "Welcome to Notion Bridge"
-        window.styleMask = [.titled, .closable]
+        window.title = "Welcome to The Bridge"
+        window.styleMask = [.titled, .closable, .fullSizeContentView]
+        window.titlebarAppearsTransparent = true
         window.setContentSize(NSSize(width: 520, height: 480))
         window.center()
         window.isReleasedWhenClosed = false
         window.level = .floating
+        // v3.7.2 resurface: carbon stage is dark-only.
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = NSColor(red: 0.043, green: 0.047, blue: 0.055, alpha: 1)
 
         self.window = window
         window.makeKeyAndOrderFront(nil)
@@ -190,8 +197,8 @@ struct OnboardingView: View {
                         .fill(
                             LinearGradient(
                                 colors: [
-                                    Color(red: 0.54, green: 0.49, blue: 0.94),
-                                    Color(red: 0.70, green: 0.54, blue: 0.93)
+                                    BridgeTokens.accent,
+                                    BridgeTokens.accentStrong
                                 ],
                                 startPoint: .leading, endPoint: .trailing
                             )
@@ -259,7 +266,7 @@ struct OnboardingView: View {
             // PKT-357 F7: Larger brand icon for visual impact
             Image(systemName: "bridge.fill")
                 .font(.system(size: 56))
-                .foregroundStyle(.purple)
+                .foregroundStyle(BridgeTokens.accent)
 
             // PKT-357 F6: Explicit opacity to prevent animation fade-in
             Text("Welcome to Notion Bridge")
@@ -283,7 +290,7 @@ struct OnboardingView: View {
         VStack(spacing: 14) {
             Image(systemName: "doc.text.fill")
                 .font(.system(size: 40))
-                .foregroundStyle(.purple)
+                .foregroundStyle(BridgeTokens.accent)
 
             Text("Privacy & Terms")
                 .font(.title2)
@@ -334,7 +341,7 @@ struct OnboardingView: View {
                     .font(.caption)
                 }
             }
-            .foregroundStyle(.purple)
+            .foregroundStyle(BridgeTokens.accent)
 
             // Acceptance checkbox
             HStack(alignment: .top, spacing: 8) {
@@ -367,7 +374,7 @@ struct OnboardingView: View {
         VStack(spacing: 14) {
             Image(systemName: "key.fill")
                 .font(.system(size: 40))
-                .foregroundStyle(.purple)
+                .foregroundStyle(BridgeTokens.accent)
 
             Text("Connect a Service")
                 .font(.title2)
@@ -389,7 +396,7 @@ struct OnboardingView: View {
                             Text(selectedProvider.helpLabel)
                         }
                         .font(.caption)
-                        .foregroundStyle(.purple)
+                        .foregroundStyle(BridgeTokens.accent)
                     }
                 }
 
@@ -405,16 +412,16 @@ struct OnboardingView: View {
             if let workspaceError {
                 Text(workspaceError)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(BridgeTokens.bad)
             }
 
             if workspaceSaved {
                 HStack(spacing: 4) {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(BridgeTokens.ok)
                     Text("Workspace connected!")
                         .font(.caption)
-                        .foregroundStyle(.green)
+                        .foregroundStyle(BridgeTokens.ok)
                 }
             }
 
@@ -424,7 +431,7 @@ struct OnboardingView: View {
                         Task { await saveWorkspaceConnection() }
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.purple)
+                    .tint(BridgeTokens.accent)
                     .disabled(
                         workspaceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         || workspaceToken.isEmpty
@@ -437,7 +444,7 @@ struct OnboardingView: View {
                         currentStep = OnboardingStep(rawValue: currentStep.rawValue + 1) ?? .testConnection
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.purple)
+                    .tint(BridgeTokens.accent)
                     .font(.callout)
                 } else {
                     Button("Skip for now") {
@@ -621,11 +628,11 @@ struct OnboardingView: View {
                 case .success:
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 48))
-                        .foregroundStyle(.green)
+                        .foregroundStyle(BridgeTokens.ok)
                 case .failed:
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 48))
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(BridgeTokens.warn)
                 }
             }
 
@@ -653,11 +660,11 @@ struct OnboardingView: View {
                 case .success:
                     Text("Notion Bridge is running and responding! You\u{2019}re all set.")
                         .font(.caption)
-                        .foregroundStyle(.green)
+                        .foregroundStyle(BridgeTokens.ok)
                 case .failed(let reason):
                     Text("Connection check failed: \(reason)")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(BridgeTokens.warn)
                 }
             }
 
@@ -671,7 +678,7 @@ struct OnboardingView: View {
                 .frame(minWidth: 160)
             }
             .buttonStyle(.borderedProminent)
-            .tint(healthCheckStatus.isSuccess ? .green : .purple)
+            .tint(healthCheckStatus.isSuccess ? BridgeTokens.ok : BridgeTokens.accent)
             .disabled(healthCheckStatus.isChecking)
 
             if healthCheckStatus.isSuccess {
@@ -726,7 +733,7 @@ struct OnboardingView: View {
     private func tipRow(icon: String, text: String) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
-                .foregroundStyle(.purple)
+                .foregroundStyle(BridgeTokens.accent)
                 .frame(width: 20)
             Text(text)
                 .font(.callout)
@@ -758,7 +765,7 @@ struct OnboardingView: View {
                     onComplete()
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.purple)
+                .tint(BridgeTokens.accent)
             } else {
                 Button("Continue") {
                     // PKT-491: Record legal acceptance when advancing past legal step
@@ -771,7 +778,7 @@ struct OnboardingView: View {
                     currentStep = OnboardingStep(rawValue: currentStep.rawValue + 1) ?? .testConnection
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.purple)
+                .tint(BridgeTokens.accent)
                 // PKT-491: Gate Continue on legal acceptance
                 .disabled(currentStep == .legalAcceptance && !hasAcceptedLegal)
             }

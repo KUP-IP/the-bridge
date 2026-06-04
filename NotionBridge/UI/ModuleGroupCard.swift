@@ -42,7 +42,7 @@ private struct ModuleGroupToolRow: View {
         HStack(spacing: 11) {
             // Status glyph — small filled dot, green when on, dim when off.
             Circle()
-                .fill(isEnabled ? Color(red: 0.243, green: 0.788, blue: 0.478)
+                .fill(isEnabled ? BridgeTokens.ok
                                 : Color.white.opacity(0.18))
                 .frame(width: 7, height: 7)
 
@@ -224,9 +224,9 @@ public struct ModuleGroupCard: View {
         switch group.masterState {
         case .on:
             label = "\(group.total) of \(group.total) active"
-            bg = Color(red: 0.243, green: 0.788, blue: 0.478).opacity(0.14)
-            stroke = Color(red: 0.243, green: 0.788, blue: 0.478).opacity(0.28)
-            fg = Color(red: 0.490, green: 0.863, blue: 0.627)
+            bg = BridgeTokens.ok.opacity(0.14)
+            stroke = BridgeTokens.ok.opacity(0.28)
+            fg = BridgeTokens.okText
         case .off:
             label = "0 of \(group.total) active"
             bg = Color.white.opacity(0.06)
@@ -234,9 +234,9 @@ public struct ModuleGroupCard: View {
             fg = Color.white.opacity(0.65)
         case .partial:
             label = "\(group.enabledCount) of \(group.total) active"
-            bg = Color(red: 0.960, green: 0.768, blue: 0.318).opacity(0.14)
-            stroke = Color(red: 0.960, green: 0.768, blue: 0.318).opacity(0.28)
-            fg = Color(red: 0.960, green: 0.812, blue: 0.486)
+            bg = BridgeTokens.warn.opacity(0.14)
+            stroke = BridgeTokens.warn.opacity(0.28)
+            fg = BridgeTokens.warnText
         }
         return Text(label)
             .font(.system(size: 10.5, weight: .semibold))
@@ -382,7 +382,7 @@ public struct ModuleGroupList: View {
     private func heroStat(value: Int, label: String, emphasis: HeroEmphasis) -> some View {
         let valueColor: Color = {
             switch emphasis {
-            case .on:      return Color(red: 0.490, green: 0.863, blue: 0.627)
+            case .on:      return BridgeTokens.okText
             case .off:     return Color.white.opacity(0.45)
             case .neutral: return Color.white
             }

@@ -47,8 +47,8 @@ private enum RemoteAccessStatus {
 
     var dotColor: Color {
         switch self {
-        case .active: return .green
-        case .misconfigured: return .yellow
+        case .active: return BridgeTokens.ok
+        case .misconfigured: return BridgeTokens.warn
         case .notConfigured: return .gray
         }
     }
@@ -201,14 +201,14 @@ public struct ConnectionSetupView: View {
             if let error = urlValidationError {
                 Text(error)
                     .font(.caption2)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(BridgeTokens.bad)
             }
 
             // Save confirmation
             if showSaveConfirmation {
                 Text("Saved")
                     .font(.caption2)
-                    .foregroundStyle(.green)
+                    .foregroundStyle(BridgeTokens.ok)
                     .transition(.opacity)
             }
         }
@@ -256,7 +256,7 @@ public struct ConnectionSetupView: View {
             if showBearerWarning {
                 Text("Active clients disconnected — reconnect with the new token.")
                     .font(.caption2)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(BridgeTokens.warn)
                     .transition(.opacity)
             }
         }
@@ -356,7 +356,7 @@ public struct ConnectionSetupView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: activeProvider == provider ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(activeProvider == provider ? .blue : .secondary)
+                    .foregroundStyle(activeProvider == provider ? BridgeTokens.accent : .secondary)
                     .font(.callout)
                 Image(systemName: provider.icon)
                     .foregroundStyle(.secondary)

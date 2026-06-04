@@ -221,12 +221,12 @@ struct StripeConnectionSection: View {
 
     private func statusColor(_ status: BridgeConnectionStatus) -> Color {
         switch status {
-        case .connected: return .green
-        case .warning: return .yellow
-        case .disconnected: return .red
+        case .connected: return BridgeTokens.ok
+        case .warning: return BridgeTokens.warn
+        case .disconnected: return BridgeTokens.bad
         case .notConfigured: return .gray
-        case .checking: return .orange
-        case .invalid: return .red
+        case .checking: return BridgeTokens.warn
+        case .invalid: return BridgeTokens.bad
         }
     }
 }
@@ -253,7 +253,7 @@ struct StripeConnectionSheet: View {
             if let errorMessage {
                 Text(errorMessage)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(BridgeTokens.bad)
             }
 
             Link(destination: URL(string: "https://dashboard.stripe.com/apikeys")!) {

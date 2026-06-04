@@ -401,7 +401,7 @@ struct CredentialsView: View {
             Text(feedback.message)
         }
         .font(.caption)
-        .foregroundStyle(feedback.isError ? BridgeColors.error : .green)
+        .foregroundStyle(feedback.isError ? BridgeColors.error : BridgeTokens.ok)
     }
 
     // MARK: - Row Views
