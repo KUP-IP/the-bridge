@@ -234,6 +234,14 @@ public enum ToolAnnotationCatalog {
         "skill_update": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "skill_rename": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "skill_sync_notion": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        // Unified Memory foundation (Wave 1): local SQLite memory store.
+        // remember WRITES but is non-destructive + reversible (soft tombstone)
+        // and tier .notify, so requiresConfirmation stays false; openWorld is
+        // false (a closed local store). recall is read-only — recall DOES bump
+        // useCount/lastUsedAt (use-promotion), but that is metadata-only and
+        // does not mutate content, so readOnlyHint stays true.
+        "memory_recall": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
+        "memory_remember": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "messages_chat": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "messages_content": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         "messages_participants": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),

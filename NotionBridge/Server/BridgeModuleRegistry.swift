@@ -84,6 +84,7 @@ public enum BridgeModuleRegistry {
         await SnippetsModule.register(on: router)
         await StandingOrdersModule.register(on: router)
         await ShortcutsModule.register(on: router)
+        await MemoryModule.register(on: router)
     }
 
     /// WS-D (PKT-921): register the cloud-gated `bridge_status` tool.

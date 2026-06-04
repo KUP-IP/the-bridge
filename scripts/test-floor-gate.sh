@@ -741,7 +741,17 @@ set -euo pipefail
 # relation-preferred primary source; the 5 resolved ids classified REAL via
 # the guard; doc-page-in-relation still excluded by the guard). All pure / no
 # network — run in CI and local alike: 1694 + 9 = 1703.
-FLOOR="${BRIDGE_TEST_FLOOR:-1703}"
+# Unified Memory subsystem · FOUNDATION (Wave 1): MemoryStore (SQLite + FTS5)
+# + memory_* MCP tools. Added MemoryModuleTests.swift with 18 harness test()
+# blocks (insert/get round-trip; FTS recall + type-weight ranking order; empty-
+# query salience fallback; dedup exact-hash refresh + near-duplicate supersede/
+# tombstone + distinct-no-dedup; use-promotion bump+reorder; pin-to-top + unpin;
+# soft forget tombstone excluded from recall/list but still get-able;
+# scope/entity filters; handshakeSlice pinned-first + non-promoting; module
+# registers exactly 2 tools; remember=.notify/recall=.open tiering; handler
+# round-trip; missing-text rejection). All against a temp DB path (never the
+# real config-dir store / shared singleton): 1703 + 18 = 1721.
+FLOOR="${BRIDGE_TEST_FLOOR:-1721}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

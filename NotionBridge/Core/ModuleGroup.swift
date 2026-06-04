@@ -42,6 +42,7 @@ public enum ModuleGroupID: String, CaseIterable, Sendable, Hashable {
     case contacts
     case reminders
     case calendar
+    case memory
     case screen
     case chrome
     case stripe
@@ -74,6 +75,7 @@ public enum ModuleGroupID: String, CaseIterable, Sendable, Hashable {
         case .contacts:      return "contacts"
         case .reminders:     return "reminders"
         case .calendar:      return "calendar"
+        case .memory:        return "memory"
         case .screen:        return "screen"
         case .chrome:        return "chrome"
         case .stripe:        return "stripe"
@@ -108,6 +110,7 @@ public enum ModuleGroupID: String, CaseIterable, Sendable, Hashable {
         case .contacts:      return "handle resolution for relationship work"
         case .reminders:     return "iCloud Reminders — list, create, complete"
         case .calendar:      return "Calendar — list, query events, create/update/delete"
+        case .memory:        return "unified memory — remember + salience-ranked recall"
         case .screen:        return "capture, OCR, recording"
         case .chrome:        return "tab inspection, JS exec, navigation"
         case .stripe:        return "billing, payments, customers"
@@ -142,6 +145,7 @@ public enum ModuleGroupID: String, CaseIterable, Sendable, Hashable {
         case .contacts:      return "person.crop.circle.fill"
         case .reminders:     return "checklist"
         case .calendar:      return "calendar"
+        case .memory:        return "brain"
         case .screen:        return "rectangle.on.rectangle"
         case .chrome:        return "globe"
         case .stripe:        return "dollarsign.circle.fill"
@@ -330,6 +334,7 @@ public enum ModuleGroupDerivation {
         "contacts":    .contacts,
         "reminders":   .reminders,
         "calendar":    .calendar,
+        "memory":      .memory,
         "screen":      .screen,
         "chrome":      .chrome,
         "stripe":      .stripe,

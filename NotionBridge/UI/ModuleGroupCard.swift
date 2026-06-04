@@ -291,7 +291,7 @@ public struct ModuleGroupCard: View {
         case .screen, .applescript, .shell, .synthetic, .bgProcess: return BridgeTokens.badText
         case .chrome, .accessibility, .clipboard, .system:      return BridgeTokens.accentLink
         case .stripe, .payment, .credential:                    return BridgeTokens.gold
-        case .skills, .jobs:                                    return BridgeTokens.gold
+        case .skills, .jobs, .memory:                           return BridgeTokens.gold
         }
     }
 

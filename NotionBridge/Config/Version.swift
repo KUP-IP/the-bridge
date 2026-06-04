@@ -88,7 +88,9 @@ public enum BridgeConstants {
     ///   `registerStaticFeatureModules`), so it deliberately does NOT count
     ///   toward this always-present static surface. A default (cloud-off)
     ///   install exposes exactly these 200 module tools (195 Wave-1 + 5 calendar).
-    public static let staticFeatureModuleToolCount = 200
+    /// Unified Memory foundation (Wave 1): 200 + 2 (memory_remember +
+    ///   memory_recall) = 202.
+    public static let staticFeatureModuleToolCount = 202
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.
@@ -104,5 +106,6 @@ public enum BridgeConstants {
     /// v3.7·G (PKT-960): + notes family.
     /// v3.7 Wave-1 integration: 21 + 1 (shortcuts) + 1 (mail) + 1 (notes) = 24.
     /// v3.7·I (PKT-962): + calendar family = 25.
-    public static let staticFeatureModuleFamilyCount = 25
+    /// Unified Memory foundation (Wave 1): + memory family = 26.
+    public static let staticFeatureModuleFamilyCount = 26
 }

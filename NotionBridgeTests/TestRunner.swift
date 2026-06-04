@@ -802,6 +802,15 @@ await runCloudStatusModuleTests()
 // SwiftUI render / WindowServer / cloudflared / network).
 await runCloudAccessWSGTests()
 
+// Unified Memory subsystem · FOUNDATION (Wave 1): MemoryStore (SQLite + FTS5)
+// insert/get, salience-ranked FTS recall + order, dedup (exact-hash refresh +
+// near-duplicate supersede/tombstone), use-promotion (recall bumps useCount +
+// reorders), pin-to-top, soft forget (tombstone excluded from recall/list),
+// scope/entity filters, the handshakeSlice extension-point seam, and the
+// memory_* MCP tool registration + tiering + handler round-trip. All against
+// a TEMP DB path (never the real config-dir store, never the shared singleton).
+await runMemoryModuleTests()
+
 // ============================================================
 // MARK: - Summary
 // ============================================================
