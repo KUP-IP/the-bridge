@@ -69,6 +69,11 @@ public enum BridgeTokens {
     public static let accentStrong = Color(red: 0.227, green: 0.353, blue: 0.878) // #3A5AE0
     /// Lightened royal blue — link + jump text legible on glass.
     public static let accentLink   = Color(red: 0.616, green: 0.706, blue: 0.961) // #9DB4F5
+    /// Text/glyph color that sits ON the royal-blue accent fill (primary
+    /// buttons). The accent is the SAME royal blue in both appearances, so this
+    /// is a fixed near-white in both — it is the legible ink for that one fill,
+    /// not a system-following surface ink. Use instead of a bare `Color.white`.
+    public static let onAccent     = Color(red: 0.98, green: 0.98, blue: 1.0)
 
     // MARK: - Secondary / neutral metals
 

@@ -793,7 +793,31 @@ set -euo pipefail
 # net additive count over the prior floor (1725 + 12 = 1737), staying well below
 # the measured 1796 so the existing GUI/TCC + flake headroom is preserved while
 # the 12 new tests cannot be silently dropped.
-FLOOR="${BRIDGE_TEST_FLOOR:-1737}"
+# v3.7.6 Wave 4a (2026-06-04): premium Credentials vault. Retired the legacy
+# Form CRUD (CredentialsView.swift deleted; crudCard removed) and replaced it
+# with a premium add/replace sheet (CredentialAddSheet) + Full live validation.
+# New validation core (CredentialHealth.swift, CredentialValidator.swift):
+# CredentialHealth{valid,expiring,revoked,unchecked,error} + last-known
+# persistence (CredentialHealthStore, UserDefaults JSON); the validator REUSES
+# existing infra (Notion → ConnectionHealthChecker.checkNotionHealth →
+# NotionClient.validate(); Stripe → StripeClient.retrieveAccountInfo()); card →
+# pure local expiry; everything else → .unchecked (truthfulness invariant). All
+# network is off-main, ~10s time-bounded, and gated on isAppBundle so it NEVER
+# runs under the test executable. Weekly auto-validate is an on-launch
+# lastAutoValidateAt + >7d check (the Jobs/launchd action-chain infra only hosts
+# MCP-tool invocations via SSE, not internal Swift calls — documented fallback).
+# +39 test() blocks in CredentialValidatorTests.swift — service→method mapping
+# (notion/stripe/card/unmappable), the truthfulness invariant (unmappable +
+# unchecked → never .valid), health→badge-tone, ConnectionHealth/StripeError
+# mapping, card-expiry math (fixed now), persistence round-trip + prune, the
+# Touch-ID reveal-gate decision, the weekly-due decision, and the Luhn/expiry
+# card-form validators. All pure (ephemeral UserDefaults suite, fixed dates) —
+# no live network / no host deps, run in CI + local alike. Measured green
+# 1796 -> 1835 locally (0 failed). Floor raised by the +39 net additive count
+# over the prior floor (1737 + 39 = 1776), staying below the measured 1835 so
+# the existing GUI/TCC + flake headroom is preserved while the 39 new tests
+# cannot be silently dropped.
+FLOOR="${BRIDGE_TEST_FLOOR:-1776}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

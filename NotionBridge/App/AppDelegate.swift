@@ -219,6 +219,24 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // PKT-441: One-time Stripe key migration to unified credential vault
         Task { await ConnectionRegistry.shared.migrateStripeKeyIfNeeded() }
 
+        // v3.7.6 Wave 4a: Weekly credential auto-validate (on-launch fallback).
+        // The Jobs infra hosts launchd LaunchAgents whose action chains are MCP
+        // tool invocations executed via SSE — it cannot cleanly host an INTERNAL
+        // Swift call like CredentialValidator.validateAll(). So the weekly cadence
+        // is implemented as a persisted lastAutoValidateAt + an on-launch
+        // "if toggle ON AND >7d since last run → validate" check (the documented
+        // fallback). Real + observable: results persist to CredentialHealthStore
+        // and surface as the rows' last-known badges + "checked <relative>" line.
+        Task {
+            if CredentialAutoValidatePolicy.isDue(
+                enabled: CredentialAutoValidatePolicy.isEnabled(),
+                lastRun: CredentialAutoValidatePolicy.lastRun()
+            ) {
+                _ = await CredentialValidator.shared.validateAll()
+                CredentialAutoValidatePolicy.recordRun()
+            }
+        }
+
         registerAutoLaunch()
 
         // PKT-357 F15: Prevent App Nap — keep MCP server alive during idle.
