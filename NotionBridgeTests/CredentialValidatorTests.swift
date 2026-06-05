@@ -223,11 +223,19 @@ func runCredentialValidatorTests() async {
     await test("Reveal gate: OFF passes through") {
         try expect(CredentialRevealGate.shouldGate(requireTouchID: false) == false)
     }
-    await test("Reveal gate: isRequired reads the persisted flag") {
+    await test("Reveal gate: isRequired reads the persisted flag (defaults ON)") {
         let suite = makeEphemeralDefaults()
-        try expect(CredentialRevealGate.isRequired(defaults: suite) == false, "Defaults OFF")
+        try expect(CredentialRevealGate.isRequired(defaults: suite) == true, "Absent key defaults ON")
+        suite.set(false, forKey: CredentialRevealGate.requireTouchIDKey)
+        try expect(CredentialRevealGate.isRequired(defaults: suite) == false, "Explicit opt-out is honored")
         suite.set(true, forKey: CredentialRevealGate.requireTouchIDKey)
         try expect(CredentialRevealGate.isRequired(defaults: suite) == true)
+    }
+    await test("Weekly: isEnabled reads the persisted flag (defaults ON)") {
+        let suite = makeEphemeralDefaults()
+        try expect(CredentialAutoValidatePolicy.isEnabled(defaults: suite) == true, "Absent key defaults ON")
+        suite.set(false, forKey: CredentialAutoValidatePolicy.enabledKey)
+        try expect(CredentialAutoValidatePolicy.isEnabled(defaults: suite) == false, "Explicit opt-out is honored")
     }
 
     // MARK: - Weekly auto-validate decision

@@ -817,7 +817,8 @@ set -euo pipefail
 # over the prior floor (1737 + 39 = 1776), staying below the measured 1835 so
 # the existing GUI/TCC + flake headroom is preserved while the 39 new tests
 # cannot be silently dropped.
-FLOOR="${BRIDGE_TEST_FLOOR:-1776}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1777}"
+# v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

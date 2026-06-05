@@ -34,9 +34,10 @@ public struct CredentialsSection: View {
 
     @State private var sheetMode: CredentialSheetMode?
 
-    // Policy toggles (persisted; defaults OFF — opt-in).
-    @AppStorage(CredentialRevealGate.requireTouchIDKey) private var requireTouchID = false
-    @AppStorage(CredentialAutoValidatePolicy.enabledKey) private var autoValidateWeekly = false
+    // Policy toggles (persisted; default ON — enterprise-grade protection +
+    // proactive token-health monitoring; the user can opt out in the policy card).
+    @AppStorage(CredentialRevealGate.requireTouchIDKey) private var requireTouchID = true
+    @AppStorage(CredentialAutoValidatePolicy.enabledKey) private var autoValidateWeekly = true
 
     private let store = CredentialHealthStore()
 

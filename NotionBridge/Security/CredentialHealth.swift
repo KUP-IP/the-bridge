@@ -221,9 +221,12 @@ public enum CredentialRevealGate {
         requireTouchID
     }
 
-    /// Read the persisted toggle (defaults OFF — opt-in).
+    /// Read the persisted toggle (defaults ON — enterprise-grade reveal
+    /// protection; the user can opt out in the policy card). An absent key reads
+    /// ON; an explicitly stored value is honored. Biometric falls back to device
+    /// passcode, so ON-by-default carries no lockout risk.
     public static func isRequired(defaults: UserDefaults = .standard) -> Bool {
-        defaults.bool(forKey: requireTouchIDKey)
+        defaults.object(forKey: requireTouchIDKey) == nil ? true : defaults.bool(forKey: requireTouchIDKey)
     }
 }
 
@@ -249,8 +252,11 @@ public enum CredentialAutoValidatePolicy {
         return now.timeIntervalSince(lastRun) > interval
     }
 
+    /// Read the persisted toggle (defaults ON — proactive token-health
+    /// monitoring; read-only weekly pings to services that have a real check).
+    /// An absent key reads ON; an explicitly stored value is honored.
     public static func isEnabled(defaults: UserDefaults = .standard) -> Bool {
-        defaults.bool(forKey: enabledKey)
+        defaults.object(forKey: enabledKey) == nil ? true : defaults.bool(forKey: enabledKey)
     }
 
     public static func lastRun(defaults: UserDefaults = .standard) -> Date? {
