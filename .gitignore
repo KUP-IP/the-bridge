@@ -17,6 +17,8 @@ build/
 AGENT_FEEDBACK.md
 RELEASE_HANDOFF.md
 design/
+!docs/design/
+!docs/design/**
 
 # Stray test-run log dumps (redirected suite output)
 test_output.txt
