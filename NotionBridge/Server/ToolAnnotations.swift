@@ -343,6 +343,14 @@ public enum ToolAnnotationCatalog {
         "standing_orders_read": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
         "standing_orders_save": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
         "stripe_reconnect": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
+        // FB [buildtools]: swift_build / swift_test / make_run wrap BgProcessRuntime
+        // (start + poll + tail). Same shape as the vitest/playwright/lighthouse
+        // runners: not read-only, not destructive (builds produce artifacts, no
+        // irreversible mutation), not idempotent, tier .request ⇒ requiresConfirmation,
+        // openWorld (compiler / dependency fetch / wider machine).
+        "swift_build": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: true),
+        "swift_test": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: true),
+        "make_run": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: true),
         "system_info": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
         "tools_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
         "tree_sitter_query": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),

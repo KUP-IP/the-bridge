@@ -280,6 +280,7 @@ public enum ModuleGroupOverride {
     ///   • `mouse_click`      → synthetic
     ///   • `payment_execute`  → payment
     ///   • `vitest_run` / `playwright_run` / `lighthouse_run` → system  (dev test runners; group as system to avoid 1-tool "vitest"/"playwright"/"lighthouse" groups)
+    ///   • `swift_build` / `swift_test` / `make_run` → system  (FB [buildtools] dev build/test runners over bg_process; same rationale)
     ///   • `run_script`       → shell          (shell-adjacent)
     ///   • `http_fetch`       → http
     ///   • `stripe_reconnect` → stripe
@@ -309,6 +310,12 @@ public enum ModuleGroupOverride {
         "vitest_run":           .system,
         "playwright_run":       .system,
         "lighthouse_run":       .system,
+        // FB [buildtools]: swift_build/swift_test/make_run are dev build/test
+        // runners (module "swift"); group as system to avoid a 1-prefix "swift"
+        // group, matching the vitest/playwright/lighthouse runner convention.
+        "swift_build":          .system,
+        "swift_test":           .system,
+        "make_run":             .system,
         "run_script":           .shell,
         "http_fetch":           .http,
         "stripe_reconnect":     .stripe,

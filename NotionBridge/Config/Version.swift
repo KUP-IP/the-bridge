@@ -92,7 +92,11 @@ public enum BridgeConstants {
     ///   install exposes exactly these 200 module tools (195 Wave-1 + 5 calendar).
     /// Unified Memory foundation (Wave 1): 200 + 2 (memory_remember +
     ///   memory_recall) = 202.
-    public static let staticFeatureModuleToolCount = 202
+    /// FB [buildtools]: + 3 swift_* / make_run build-tool wrappers
+    ///   (swift_build + swift_test + make_run, module "swift") that wrap
+    ///   BgProcessRuntime so long builds/tests don't hit the ~60s transport
+    ///   cap: 202 + 3 = 205.
+    public static let staticFeatureModuleToolCount = 205
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.
@@ -109,5 +113,6 @@ public enum BridgeConstants {
     /// v3.7 Wave-1 integration: 21 + 1 (shortcuts) + 1 (mail) + 1 (notes) = 24.
     /// v3.7·I (PKT-962): + calendar family = 25.
     /// Unified Memory foundation (Wave 1): + memory family = 26.
-    public static let staticFeatureModuleFamilyCount = 26
+    /// FB [buildtools]: + swift family (swift_build/swift_test/make_run) = 27.
+    public static let staticFeatureModuleFamilyCount = 27
 }
