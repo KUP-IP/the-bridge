@@ -73,7 +73,10 @@ func runCredentialModuleTests() async {
            case .array(let required) = schema["required"] {
             let requiredNames = required.compactMap { if case .string(let s) = $0 { return s } else { return nil } }
             try expect(requiredNames.contains("service"), "Missing required field: service")
-            try expect(requiredNames.contains("account"), "Missing required field: account")
+            // [credentials] hardening: 'account' is now OPTIONAL — when 'service'
+            // is an env-var-style alias (e.g. CURSOR_API_KEY) the account is
+            // inferred from the provider. Only 'service' is strictly required.
+            try expect(!requiredNames.contains("account"), "account should be optional after alias hardening")
         } else {
             throw TestError.assertion("Expected object schema with required array")
         }

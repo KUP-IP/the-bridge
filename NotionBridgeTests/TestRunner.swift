@@ -635,6 +635,7 @@ await runChromeModuleTests()
 await runSkillsModuleTests()
 await runCredentialManagerTests()
 await runCredentialModuleTests()
+await runCredentialHardeningTests()   // [credentials] hardening: env-var alias normalization → canonical service:account, sentinel/placeholder detection, idempotent-read transient-drop retry policy. PURE — no Keychain / no live network.
 await runCredentialValidatorTests()   // v3.7.6 Wave 4a: premium vault validation core — pure service→method mapping (incl. unmappable→unchecked truthfulness invariant), health→badge-tone, status persistence round-trip, Touch-ID reveal gate, weekly-due decision, card expiry/form validators. NO live network.
 await runStripeClientTests()
 await runPaymentModuleTests()
