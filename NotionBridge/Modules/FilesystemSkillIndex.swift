@@ -261,12 +261,32 @@ public actor FilesystemSkillIndex {
     // MARK: - Default roots
 
     private static func defaultBundledDirectory() -> URL? {
-        // SPM resources live under `Bundle.module`. The subdirectory
-        // matches the `.process("Resources")` declaration in Package.swift.
-        // W3 will place skills under `<bundle>/skills/<name>/SKILL.md`.
-        guard let base = Bundle.module.resourceURL else { return nil }
-        let dir = base.appendingPathComponent("skills", isDirectory: true)
-        return dir
+        // SPM resources live in the `NotionBridge_NotionBridgeLib.bundle`
+        // resource bundle (the `.copy("Resources/skills")` declaration in
+        // Package.swift), exposed at `<bundle>/skills/<name>/SKILL.md`.
+        //
+        // fix(sparkle), 2026-06-05: this used to read `Bundle.module.resourceURL`
+        // directly. `Bundle.module` is the SPM-synthesized accessor that TRAPS
+        // (`Swift.fatalError`) when the resource bundle is missing or corrupt —
+        // the same crash class that the staged-update bundle corruption caused at
+        // the menu-bar-icon load site. Bundled skills are an OPTIONAL convenience
+        // (the user-dir + Notion sources still work), so a broken resource bundle
+        // must NOT abort the process here. Resolve the bundle through a
+        // non-trapping `Bundle(path:)` lookup instead and degrade to `nil`
+        // (no bundled skills) if it cannot load.
+        let candidate = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Resources/NotionBridge_NotionBridgeLib.bundle")
+            .path
+        let base: URL?
+        if let bundle = Bundle(path: candidate) {
+            base = bundle.resourceURL
+        } else {
+            // Fall back to the main bundle's own resource dir (e.g. when the SPM
+            // bundle is absent in non-.app contexts). Still non-trapping.
+            base = Bundle.main.resourceURL
+        }
+        guard let base else { return nil }
+        return base.appendingPathComponent("skills", isDirectory: true)
     }
 
     private static func defaultUserDirectory() -> URL {

@@ -9,28 +9,33 @@
 import SwiftUI
 import NotionBridgeLib
 
-/// Load menu bar icon from SPM resource bundle.
-/// Uses the bridge logo as a template image for the menu bar.
-/// Source PNGs are RGBA with clean transparency (low-alpha pixels pre-zeroed).
-/// PKT-353: Unified to Bundle.module (SPM executable target with processed resources).
-/// Bundle.main kept as secondary lookup for .app packaging scenarios.
-/// Icon sized at 30pt for optimal display on notched MacBook Pro menu bars.
-private func loadMenuBarIcon() -> NSImage? {
-    let nsImage: NSImage? =
-        Bundle.module.image(forResource: "MenuBarIcon")
-        ?? Bundle.main.image(forResource: "MenuBarIcon")
-    guard let nsImage else { return nil }
-    nsImage.size = NSSize(width: 30, height: 30)
-    nsImage.isTemplate = true
-    return nsImage
+/// Load the menu bar icon — NEVER fatal (fix(sparkle), 2026-06-05).
+///
+/// HISTORY: this used to read the icon via the SPM-generated `Bundle.module`
+/// accessor. That accessor is synthesized to TRAP (`_assertionFailure`) when
+/// the resource bundle is missing or corrupt — so a raced Sparkle staged-update
+/// swap that left `NotionBridge_NotionBridge.bundle` without a `Contents/` dir
+/// made this function SIGTRAP on EVERY launch (a bootable-but-crash-looping app
+/// needing manual recovery).
+///
+/// We now delegate to `MenuBarIconResolver`, which resolves the icon through
+/// non-trapping `Bundle(path:)` candidate lookups and falls back to a system
+/// SF Symbol if the resource bundle / asset is unloadable. It ALWAYS returns a
+/// usable image, so the app always boots. (Bundle.module is never touched on the
+/// launch path.) Icon sized at 30pt for notched MacBook Pro menu bars.
+@MainActor
+private func loadMenuBarIcon() -> NSImage {
+    MenuBarIconResolver.makeMenuBarImage()
 }
 
 @main
 struct NotionBridgeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
-    /// Pre-load the icon once to avoid repeated loading in body evaluations
-    private let menuBarIcon: NSImage? = loadMenuBarIcon()
+    /// Pre-load the icon once to avoid repeated loading in body evaluations.
+    /// Always non-nil — `loadMenuBarIcon()` degrades to an SF Symbol rather than
+    /// returning nil / trapping (fix(sparkle), 2026-06-05).
+    private let menuBarIcon: NSImage = loadMenuBarIcon()
 
     var body: some Scene {
         MenuBarExtra {
@@ -42,11 +47,12 @@ struct NotionBridgeApp: App {
                 }
             )
         } label: {
-            if let menuBarIcon {
-                Image(nsImage: menuBarIcon)
-            } else {
-                Text("NB")
-            }
+            // Always an image: a resource icon when the SPM bundle is intact,
+            // otherwise the SF Symbol fallback from MenuBarIconResolver. The
+            // "NB" text fallback is no longer reachable — the resolver never
+            // returns nil — but the icon is always present so the menu-bar item
+            // stays clickable even with a corrupt resource bundle.
+            Image(nsImage: menuBarIcon)
         }
         .menuBarExtraStyle(.window)
     }

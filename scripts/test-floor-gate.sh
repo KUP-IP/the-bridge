@@ -944,6 +944,32 @@ set -euo pipefail
 # net-additive count (1777 + 17 = 1794), below the measured 1859 so existing
 # GUI/TCC + flake headroom is preserved while the 17 new tests cannot be
 # silently dropped.
+# fix(sparkle) (2026-06-05): staged-update crash-loop guard. The 2026-06-05
+# incident was a raced Sparkle staged-update swap that left the SPM resource
+# bundle `NotionBridge_NotionBridge.bundle` an empty husk → SwiftPM's generated
+# `Bundle.module` accessor TRAPPED (`Swift.fatalError`) at the menu-bar-icon load
+# site → EXC_BREAKPOINT/SIGTRAP crash-loop on every launch. Fix: (1) graceful
+# degradation — MenuBarIconResolver resolves the icon via non-trapping
+# `Bundle(path:)` lookups and falls back to a system SF Symbol, so the app ALWAYS
+# boots (Bundle.module never touched on the launch path; FilesystemSkillIndex
+# bundled-dir lookup likewise moved off Bundle.module); (2) best-effort pre-swap
+# defense — StagedUpdateValidator (pure, non-trapping resource-bundle integrity
+# predicate) wired into the SPUUpdaterDelegate `shouldProceedWithUpdate` veto
+# (refuses install-on-top of an already-corrupt running app) + install-transition
+# logging. Sparkle's API cannot validate the STAGED bundle pre-swap (the only
+# abort-capable hook runs before extract; the post-extract hooks are void; the
+# swap is done by the sandboxed Installer XPC) — documented in
+# docs/release/sparkle-troubleshooting.md; we rely on (1) + install-copy
+# hardening. +15 SparkleResilienceTests test() blocks (MenuBarIconResolver
+# degrade-to-fallback / first-match / non-trapping probes / candidate paths;
+# StagedUpdateValidator empty-husk-corrupt / absent / flat-valid /
+# validateResources corrupt-absent-ok / validateRunningApp non-fatal). All pure
+# (temp-dir synthetic bundles, injected probes — NEVER /Applications, NEVER a
+# real Bundle.module), so they run in CI and local alike. Measured green
+# 1842 -> 1857 locally (0 failed). Floor raised by the +15 net additive count
+# over the prior floor (1777 + 15 = 1792), staying below the measured 1857 so the
+# existing GUI/TCC + flake headroom is preserved while the 15 new tests cannot be
+# silently dropped.
 FLOOR="${BRIDGE_TEST_FLOOR:-1804}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.

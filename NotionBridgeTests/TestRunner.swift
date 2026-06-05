@@ -837,6 +837,15 @@ await runMemoryModuleTests()
 // LEAVE-UNCHANGED tokens (accents/base signals/gold/titanium) stay fixed.
 await runBridgeTokensAdaptiveTests()
 
+// fix(sparkle) (2026-06-05): staged-update crash-loop guard. The pure,
+// injectable menu-bar-icon resolution (MenuBarIconResolver) degrades to an SF
+// Symbol when the SPM resource bundle is missing/corrupt instead of trapping
+// via Bundle.module, and StagedUpdateValidator detects the present-but-
+// Contents-less .bundle incident signature. Driven with simulated
+// missing/malformed bundle paths + a synthetic Contents-less .bundle in a temp
+// dir — never touches /Applications.
+await runSparkleResilienceTests()
+
 // ============================================================
 // MARK: - Summary
 // ============================================================

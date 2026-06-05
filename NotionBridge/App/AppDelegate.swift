@@ -54,6 +54,23 @@ private func crashFlushHandler(_ sig: Int32) {
 /// failed/aborted check (or "no update found") produced no log and no UI — the
 /// reason "Check for Updates" silently did nothing. These NSLog lines surface
 /// the actual outcome in the unified log (filter: process == "NotionBridge").
+///
+/// fix(sparkle), 2026-06-05: also carries the staged-update integrity guards.
+/// The 2026-06-05 incident was a raced staged-update swap that left the SPM
+/// resource bundle without a `Contents/` dir → `Bundle.module` trap → menu-bar
+/// crash-loop. The DEFINITIVE fix is graceful degradation at the load site
+/// (`MenuBarIconResolver`); this delegate adds the BEST-EFFORT pre-swap defense
+/// the Sparkle API allows:
+///   • `shouldProceedWithUpdate` — the only abort-capable hook. It runs BEFORE
+///     download/extract, so it cannot validate the STAGED bundle (it doesn't
+///     exist yet), but it CAN refuse to install on top of an already-corrupt
+///     RUNNING app (a poisoned base) so an update never perpetuates corruption.
+///   • `didExtractUpdate` / `willInstallUpdate` — VOID notification hooks (they
+///     cannot abort the install — that is performed by Sparkle's sandboxed
+///     Installer XPC service the app cannot reach). We use them to log the
+///     install transition so a future corruption is diagnosable in the unified
+///     log. See docs/release/sparkle-troubleshooting.md for why the post-extract
+///     pre-swap surface cannot cleanly abort.
 private final class UpdaterLogger: NSObject, SPUUpdaterDelegate {
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         NSLog("[Bridge][Updater] found valid update: \(item.versionString)")
@@ -64,6 +81,48 @@ private final class UpdaterLogger: NSObject, SPUUpdaterDelegate {
     func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
         let ns = error as NSError
         NSLog("[Bridge][Updater] check ABORTED: \(ns.domain)#\(ns.code) — \(error.localizedDescription)")
+    }
+
+    /// fix(sparkle): the ONLY abort-capable Sparkle hook (Swift `throws` form of
+    /// `updater:shouldProceedWithUpdate:updateCheck:error:`). Throwing here makes
+    /// Sparkle NOT download/install the update. We veto only when the CURRENTLY-
+    /// RUNNING app's SPM resource bundle is already structurally corrupt: an
+    /// install-on-top from a poisoned base risks perpetuating the crash-loop, and
+    /// the operator should recover via clear-staging + `make install-copy` first
+    /// (see docs/release/sparkle-troubleshooting.md). This does NOT (and cannot
+    /// here) validate the staged bundle — that doesn't exist until after extract.
+    func updater(
+        _ updater: SPUUpdater,
+        shouldProceedWithUpdate updateItem: SUAppcastItem,
+        updateCheck: SPUUpdateCheck
+    ) throws {
+        switch StagedUpdateValidator.validateRunningApp() {
+        case .ok:
+            NSLog("[Bridge][Updater] proceeding with \(updateItem.versionString) — running-app resource bundle OK")
+        case .corrupt(let bundleName, let reason):
+            NSLog("[Bridge][Updater] ABORT update \(updateItem.versionString): running app already corrupt (\(bundleName)): \(reason). Recover with clear-staging + make install-copy.")
+            throw NSError(
+                domain: "com.notionbridge.updater",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey:
+                    "The Bridge's resource bundle (\(bundleName)) is corrupt. "
+                    + "Please reinstall before updating (clear Sparkle staging + reinstall) — "
+                    + "see docs/release/sparkle-troubleshooting.md."]
+            )
+        }
+    }
+
+    /// fix(sparkle): VOID notification — logs the extract transition. Cannot
+    /// abort the install (no return value); the validate-and-abort post-extract
+    /// surface does not exist in Sparkle (documented).
+    func updater(_ updater: SPUUpdater, didExtractUpdate item: SUAppcastItem) {
+        NSLog("[Bridge][Updater] extracted \(item.versionString) — install pending (swap performed by Sparkle Installer XPC)")
+    }
+
+    /// fix(sparkle): VOID notification — logs immediately before the swap so a
+    /// post-update corruption can be correlated to this install in the log.
+    func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
+        NSLog("[Bridge][Updater] will install \(item.versionString) — if the menu-bar icon is missing after relaunch the resource bundle was corrupted; the app still boots (SF Symbol fallback). See docs/release/sparkle-troubleshooting.md.")
     }
 }
 
