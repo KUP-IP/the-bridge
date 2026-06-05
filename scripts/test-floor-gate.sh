@@ -817,7 +817,19 @@ set -euo pipefail
 # over the prior floor (1737 + 39 = 1776), staying below the measured 1835 so
 # the existing GUI/TCC + flake headroom is preserved while the 39 new tests
 # cannot be silently dropped.
-FLOOR="${BRIDGE_TEST_FLOOR:-1777}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1794}"
+# ITEM [session] (2026-06-04): MCP session durability across restart/install.
+# +17 SessionPersistenceTests covering the new SessionPersistenceStore (upsert/
+# touch/remove round-trip + atomic-write durability across a fresh store
+# instance = the restart simulation, corrupt-file recovery, clean-shutdown
+# marker + dirty-run liveness, resume lookup decision unknown-vs-resumable and
+# clean-vs-unclean) and the pure SSEServer.resumableReconnectResponse builder
+# (404 + resume header + stable reason token + clean/unclean phrasing, distinct
+# from the opaque hard-404). Measured green 1859 passed / 0 failed locally
+# (after the gate's known-teardown-flake retry). Floor raised by the +17
+# net-additive count (1777 + 17 = 1794), below the measured 1859 so existing
+# GUI/TCC + flake headroom is preserved while the 17 new tests cannot be
+# silently dropped.
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

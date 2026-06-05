@@ -495,7 +495,9 @@ public actor ServerManager {
         await securityGate?.requestNotificationPermission()
     }
 
-    /// Stop the SSE server gracefully.
+    /// Stop the SSE server gracefully. ITEM [session]: this also writes the
+    /// clean-shutdown marker + preserves the durable session snapshot for
+    /// resume (see `SSEServer.stop()`).
     public func stopSSE() async {
         await sseServer?.stop()
     }

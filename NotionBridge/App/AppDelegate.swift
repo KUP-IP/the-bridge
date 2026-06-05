@@ -357,6 +357,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationWillTerminate(_ notification: Notification) {
         print("[The Bridge] Shutting down MCP server...")
+        // ITEM [session]: write the clean-shutdown marker SYNCHRONOUSLY here so
+        // it lands even though `applicationWillTerminate` cannot reliably await
+        // the async `stopSSE()` Task before the process exits (same constraint
+        // as the LogManager flush). This preserves the durable session snapshot
+        // and stamps the run as cleanly-ended, so on the next launch a returning
+        // client gets the resumable re-initialize signal instead of a hard-404.
+        // The async `stop()` path (below) ALSO writes the marker; both are
+        // idempotent.
+        SessionPersistenceStore.recordCleanShutdownSync(reason: "app quit")
         serverTask?.cancel()
         serverTask = nil
         if let manager = serverManager {

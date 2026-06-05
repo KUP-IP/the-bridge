@@ -170,10 +170,22 @@ public actor SSEServer {
     /// scope are enforced ONLY when this is non-nil AND only on the
     /// Streamable-HTTP connector funnel (`handleHTTPRequest`).
     private let connectorAuth: ConnectorAuthContext?
+
+    /// ITEM [session]: durable snapshot of active session ids + minimal
+    /// context, persisted across app restart / `make install`. Lets a returning
+    /// client carrying its prior `Mcp-Session-Id` be answered with a resumable
+    /// re-initialize signal instead of an opaque hard-404. Injected (default
+    /// `.shared`) so tests drive it over a temp path. The actor mutates it only
+    /// through `await`, so its own actor isolation serializes the disk writes.
+    private let sessionStore: SessionPersistenceStore
     private var totalSessionsCreated = 0
     private var totalSessionsExpired = 0
     private var totalSessionsEvicted = 0
     private var totalSessionsClosed = 0
+    /// Count of reconnects answered with the resumable re-initialize signal
+    /// (a returning client whose id was persisted from a prior run). Surfaced
+    /// in health diagnostics so the durability path is observable.
+    private var totalSessionsResumeSignaled = 0
 
     /// Session IDs (Streamable-HTTP + legacy SSE) that have issued a
     /// `resources/subscribe`. Actor-isolated — every mutation/read happens
@@ -237,7 +249,8 @@ public actor SSEServer {
         sessionCleanupInterval: TimeInterval = 30,
         maxHTTPSessions: Int = 48,
         toolAllowlist: Set<String>? = nil,
-        connectorAuth: ConnectorAuthContext? = nil
+        connectorAuth: ConnectorAuthContext? = nil,
+        sessionStore: SessionPersistenceStore = .shared
     ) {
         let normalizedSessionTimeout = sessionTimeout.isInfinite ? .infinity : max(30, sessionTimeout)
         self.host = host
@@ -253,7 +266,56 @@ public actor SSEServer {
         self.maxHTTPSessions = max(8, maxHTTPSessions)
         self.toolAllowlist = toolAllowlist
         self.connectorAuth = connectorAuth
+        self.sessionStore = sessionStore
     }
+
+    // MARK: - Session Durability (ITEM [session])
+
+    /// Custom response header signalling that a 404 on a reconnect is a
+    /// RESUMABLE one — the session id was persisted from a prior run and the
+    /// host restarted; the client should re-initialize (not treat the id as
+    /// corrupt). Distinct from the opaque hard-404 a forged/unknown id gets.
+    public static let resumableHeaderName = "Mcp-Session-Resumable"
+    /// Echoes the prior session id back so a client can correlate the resume
+    /// signal with the id it sent.
+    public static let priorSessionHeaderName = "Mcp-Prior-Session-Id"
+
+    /// Stable, machine-readable prefix on the resumable-reconnect error message
+    /// so a non-header-aware client can still branch on it.
+    public static let resumeSignalReason = "session_expired_resumable"
+
+    /// Build the structured resumable-reconnect response for a returning client
+    /// whose `Mcp-Session-Id` was persisted from a prior run but has no live
+    /// transport (the host restarted / was reinstalled). Per Streamable-HTTP
+    /// resumability guidance this is still a 404 (the session id is no longer
+    /// live), but it carries a distinct, recoverable signal:
+    ///   • `Mcp-Session-Resumable: true` header,
+    ///   • the prior session id echoed back,
+    ///   • a stable `[session_expired_resumable]` reason token in the message,
+    /// so the client knows to re-initialize rather than surface an opaque
+    /// "Session not found or expired" failure. Pure given its inputs — unit
+    /// tested without a live server.
+    public static func resumableReconnectResponse(
+        priorSessionID: String,
+        cleanShutdown: Bool
+    ) -> HTTPResponse {
+        let phase = cleanShutdown ? "host restarted" : "host recovered from an unexpected stop"
+        return .error(
+            statusCode: 404,
+            .invalidRequest(
+                "[\(resumeSignalReason)] The MCP host \(phase); this session id is "
+                + "no longer live. Re-initialize to resume — your prior session "
+                + "state was persisted."
+            ),
+            extraHeaders: [
+                resumableHeaderName: "true",
+                priorSessionHeaderName: priorSessionID
+            ]
+        )
+    }
+
+    /// Count of reconnects answered with the resumable signal (test/diagnostic).
+    public var resumeSignaledCount: Int { totalSessionsResumeSignaled }
 
     /// PKT-366 F13: Bridge NIO thread to MainActor disconnect UI callback without redundant `await` on stored closure.
     private func notifyClientDisconnected(_ name: String) async {
@@ -361,9 +423,19 @@ public actor SSEServer {
 
     /// Stop the SSE server gracefully.
     public func stop() async {
+        // ITEM [session]: a graceful stop (app quit / install) is NOT a
+        // per-session teardown — the sessions are being suspended by a host
+        // restart, not closed by the client. So we tear down the live
+        // transports but PRESERVE the durable snapshot (preservePersistence:
+        // true), then write the clean-shutdown marker. On the next launch a
+        // returning client's id still resolves to `.resumable` and it gets the
+        // re-initialize signal instead of a hard-404.
+        let activeAtStop = sessions.count
         for id in Array(sessions.keys) {
-            await removeSession(id, reason: "server stop")
+            await removeSession(id, reason: "server stop", preservePersistence: true)
         }
+        await sessionStore.recordCleanShutdown(reason: "server stop")
+        print("[SSE] Clean-shutdown marker written (\(activeAtStop) session(s) preserved for resume)")
         try? await channel?.close()
         channel = nil
         print("[SSE] Server stopped")
@@ -409,6 +481,10 @@ public actor SSEServer {
             return Int(Date().timeIntervalSince(earliest))
         }()
         let diagnostics = sessionRuntimeDiagnostics()
+        // ITEM [session]: durability counters — how many ids are persisted for
+        // resume and how many reconnects we've answered with the resume signal.
+        let persistedCount = await sessionStore.count
+        let priorRunClean = await sessionStore.priorRunEndedCleanly()
 
         let health: [String: Any] = [
             "status": "running",
@@ -424,7 +500,10 @@ public actor SSEServer {
             "sessionsCreated": diagnostics.totalSessionsCreated,
             "sessionsExpired": diagnostics.totalSessionsExpired,
             "sessionsEvicted": diagnostics.totalSessionsEvicted,
-            "sessionsClosed": diagnostics.totalSessionsClosed
+            "sessionsClosed": diagnostics.totalSessionsClosed,
+            "sessionsPersisted": persistedCount,
+            "sessionsResumeSignaled": totalSessionsResumeSignaled,
+            "priorRunEndedCleanly": priorRunClean
         ]
 
         return (try? JSONSerialization.data(withJSONObject: health, options: [.sortedKeys])) ?? Data()
@@ -482,6 +561,8 @@ public actor SSEServer {
         if let sessionID, var session = sessions[sessionID] {
             session.lastAccessedAt = Date()
             sessions[sessionID] = session
+            // Durability: refresh the persisted last-accessed timestamp.
+            await sessionStore.touch(sessionID: sessionID, at: session.lastAccessedAt)
 
             let response = await session.transport.handleRequest(request)
 
@@ -499,8 +580,24 @@ public actor SSEServer {
             return await createSession(request)
         }
 
-        if sessionID != nil {
-            return .error(statusCode: 404, .invalidRequest("Session not found or expired"))
+        if let sessionID {
+            // ITEM [session]: the id is not live in THIS run. Before the opaque
+            // hard-404, consult the durable snapshot — if the id was persisted
+            // from a prior run, the host restarted / was reinstalled. Answer
+            // with the resumable re-initialize signal so the client recovers
+            // instead of surfacing "Session not found or expired".
+            switch await sessionStore.resumeLookup(sessionID: sessionID) {
+            case .resumable(_, let cleanShutdown):
+                totalSessionsResumeSignaled += 1
+                print("[SSE] Resume signal: \(sessionID.prefix(8))… reconnected after restart "
+                    + "(clean=\(cleanShutdown)) — instructing re-initialize")
+                return Self.resumableReconnectResponse(
+                    priorSessionID: sessionID,
+                    cleanShutdown: cleanShutdown
+                )
+            case .unknown:
+                return .error(statusCode: 404, .invalidRequest("Session not found or expired"))
+            }
         }
         return .error(statusCode: 400, .invalidRequest("Missing Mcp-Session-Id header"))
     }
@@ -768,15 +865,29 @@ public actor SSEServer {
         do {
             try await server.start(transport: transport)
 
+            let createdAt = Date()
             sessions[sessionID] = SessionContext(
                 server: server,
                 transport: transport,
-                createdAt: Date(),
-                lastAccessedAt: Date(),
+                createdAt: createdAt,
+                lastAccessedAt: createdAt,
                 clientName: clientName,
                 clientVersion: clientVersion
             )
             totalSessionsCreated += 1
+
+            // ITEM [session]: snapshot the new session to disk so it survives an
+            // app restart / install and a returning client gets the resumable
+            // signal. Minimal context only — never tool args or bearer material.
+            await sessionStore.upsert(PersistedSession(
+                sessionID: sessionID,
+                clientName: clientName,
+                clientVersion: clientVersion,
+                transport: "streamable-http",
+                protocolVersion: BridgeConstants.mcpProtocolVersion,
+                createdAt: createdAt,
+                lastAccessedAt: createdAt
+            ))
 
             print("[SSE] Session created: \(sessionID.prefix(8))… (active HTTP: \(sessions.count)/\(maxHTTPSessions))")
 
@@ -1151,13 +1262,24 @@ public actor SSEServer {
         reason: String,
         incrementClosed: Bool = false,
         incrementExpired: Bool = false,
-        incrementEvicted: Bool = false
+        incrementEvicted: Bool = false,
+        preservePersistence: Bool = false
     ) async {
         guard let session = sessions.removeValue(forKey: id) else { return }
 
         // Drop any resource subscription this session held so a torn-down
         // session never lingers in the broadcast set.
         resourceSubscribers.remove(id)
+
+        // ITEM [session]: a session torn down WITHIN this run (DELETE / expiry /
+        // eviction) is genuinely gone — drop it from the durable snapshot so a
+        // later reconnect does NOT get a spurious resume signal. The graceful
+        // server-stop path passes `preservePersistence: true` so a host restart
+        // keeps the rows AND writes a clean-shutdown marker, letting a returning
+        // client resume after the restart.
+        if !preservePersistence {
+            await sessionStore.remove(sessionID: id)
+        }
 
         // W2 telemetry: prune this session's delivery events so the audit card
         // and debug timeline never show a torn-down session. Hop to the main
