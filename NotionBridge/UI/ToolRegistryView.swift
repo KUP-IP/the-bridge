@@ -38,6 +38,14 @@ struct ToolRegistryView: View {
         UserDefaults.standard.dictionary(forKey: BridgeDefaults.tierOverrides) as? [String: String]
     ) ?? [:]
 
+    /// fb-securitygate: module-scoped "Always Allow" grants (module name → tier
+    /// rawValue). A module grant covers every tool in that module; a per-tool
+    /// override takes precedence over it. Written by SecurityGate when the user
+    /// picks "Always Allow" — surfaced + individually revocable below.
+    @State private var moduleTierOverrides: [String: String] = (
+        UserDefaults.standard.dictionary(forKey: BridgeDefaults.moduleTierOverrides) as? [String: String]
+    ) ?? [:]
+
     private static let coreTools: Set<String> = ["echo", "session_info", "tools_list"]
 
     /// Brand-correct display names for modules whose `.capitalized` form is wrong.
@@ -57,9 +65,29 @@ struct ToolRegistryView: View {
         return dict.keys.sorted().map { ($0, dict[$0]!.sorted(by: { $0.name < $1.name })) }
     }
 
-    /// Effective tier for a tool, considering user overrides.
+    /// Effective tier for a tool — per-tool override > per-module grant >
+    /// registered default (mirrors `ToolRouter.resolveEffectiveTier`). Without
+    /// the module layer, a sibling tool covered by a module grant would have
+    /// displayed its registered default while actually resolving to the grant.
     private func effectiveTier(for tool: ToolInfo) -> String {
-        tierOverrides[tool.name] ?? tool.tier
+        ToolTierResolution.effectiveTier(
+            toolName: tool.name,
+            module: tool.module,
+            registeredTier: tool.tier,
+            toolOverrides: tierOverrides,
+            moduleOverrides: moduleTierOverrides
+        )
+    }
+
+    /// Where a tool's effective tier comes from — drives the row annotation that
+    /// distinguishes a module grant from the tool's own override.
+    private func tierSource(for tool: ToolInfo) -> ToolTierSource {
+        ToolTierResolution.source(
+            toolName: tool.name,
+            module: tool.module,
+            toolOverrides: tierOverrides,
+            moduleOverrides: moduleTierOverrides
+        )
     }
 
     /// Whether any tool is set to a tier that emits notifications.
@@ -149,8 +177,27 @@ struct ToolRegistryView: View {
                     }
                 }
 
+                // fb-securitygate-revoke-ui: surface active module-scoped
+                // "Always Allow" grants with a per-module revoke, so a user who
+                // granted module-wide can pull back ONE module without the
+                // blanket Reset nuking every override.
+                if !moduleTierOverrides.isEmpty {
+                    Section {
+                        ForEach(moduleTierOverrides.keys.sorted(), id: \.self) { module in
+                            moduleGrantRow(module)
+                        }
+                    } header: {
+                        Text("Module Grants")
+                            .font(.headline)
+                    } footer: {
+                        Text("“Always Allow” grants that apply to every tool in a module. A tool’s own tier override takes precedence over its module grant.")
+                            .font(.caption)
+                            .foregroundStyle(BridgeColors.secondary)
+                    }
+                }
+
                 // F4: Reset to Defaults — keep this after the tool list.
-                if !tierOverrides.isEmpty {
+                if !tierOverrides.isEmpty || !moduleTierOverrides.isEmpty {
                     Section {
                         Button {
                             tierOverrides.removeAll()
@@ -159,7 +206,8 @@ struct ToolRegistryView: View {
                             // "Always Allow" grants so a reset is complete —
                             // otherwise a module grant would silently outlive
                             // the per-tool overrides the user just cleared.
-                            UserDefaults.standard.removeObject(forKey: BridgeDefaults.moduleTierOverrides)
+                            moduleTierOverrides.removeAll()
+                            persistModuleTierOverrides()
                             NotificationCenter.default.post(name: .notionBridgeTierOverridesDidChange, object: nil)
                         } label: {
                             HStack {
@@ -178,6 +226,7 @@ struct ToolRegistryView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .notionBridgeTierOverridesDidChange)) { _ in
                 tierOverrides = (UserDefaults.standard.dictionary(forKey: BridgeDefaults.tierOverrides) as? [String: String]) ?? [:]
+                moduleTierOverrides = (UserDefaults.standard.dictionary(forKey: BridgeDefaults.moduleTierOverrides) as? [String: String]) ?? [:]
             }
         }
     }
@@ -228,9 +277,13 @@ struct ToolRegistryView: View {
 
                     // Tappable 3-state tier toggle (Open -> Notify -> Request).
                     Button {
+                        // Base = what the tool resolves to WITHOUT its own
+                        // override: the module grant if one exists, else the
+                        // registered default. Landing back on the base clears the
+                        // per-tool override so the tool follows the grant/default.
+                        let base = moduleTierOverrides[tool.module] ?? tool.tier
                         let newTier = nextTier(after: currentTier)
-                        if newTier == tool.tier {
-                            // Reverted to registered default — remove override
+                        if newTier == base {
                             tierOverrides.removeValue(forKey: tool.name)
                         } else {
                             tierOverrides[tool.name] = newTier
@@ -255,6 +308,14 @@ struct ToolRegistryView: View {
                             .font(.caption2)
                             .foregroundStyle(BridgeColors.secondary)
                     }
+                }
+
+                // Distinguish a tier inherited from a module-wide grant from the
+                // tool's own override (the tappable chip above is the per-tool one).
+                if tierSource(for: tool) == .moduleGrant {
+                    Text("tier via \(displayName(for: tool.module)) module grant")
+                        .font(.caption2)
+                        .foregroundStyle(BridgeColors.secondary)
                 }
 
                 if !isEnabled {
@@ -293,5 +354,57 @@ struct ToolRegistryView: View {
     /// Persist tier overrides to UserDefaults.
     private func persistTierOverrides() {
         UserDefaults.standard.set(tierOverrides, forKey: BridgeDefaults.tierOverrides)
+    }
+
+    /// A single revocable module-scoped "Always Allow" grant.
+    @ViewBuilder
+    private func moduleGrantRow(_ module: String) -> some View {
+        let tier = moduleTierOverrides[module] ?? SecurityTier.notify.rawValue
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(displayName(for: module))
+                    .fontWeight(.medium)
+                Text("Covers every \(displayName(for: module)) tool")
+                    .font(.caption2)
+                    .foregroundStyle(BridgeColors.secondary)
+            }
+            Spacer()
+            Text(tier)
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 1)
+                .background(tierColor(tier).opacity(0.15))
+                .foregroundStyle(tierColor(tier))
+                .clipShape(Capsule())
+            Button {
+                revokeModuleGrant(module)
+            } label: {
+                Text("Revoke")
+                    .font(.caption)
+                    .fontWeight(.medium)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(BridgeTokens.bad)
+        }
+        .padding(.vertical, 2)
+    }
+
+    /// Revoke ONE module grant; sibling tools fall back to their per-tool
+    /// override (if any) or their registered default.
+    private func revokeModuleGrant(_ module: String) {
+        moduleTierOverrides.removeValue(forKey: module)
+        persistModuleTierOverrides()
+        NotificationCenter.default.post(name: .notionBridgeTierOverridesDidChange, object: nil)
+    }
+
+    /// Persist module grants; remove the key entirely when empty so an absent
+    /// key keeps meaning "no module overrides" (matches `ToolRouter`'s read).
+    private func persistModuleTierOverrides() {
+        if moduleTierOverrides.isEmpty {
+            UserDefaults.standard.removeObject(forKey: BridgeDefaults.moduleTierOverrides)
+        } else {
+            UserDefaults.standard.set(moduleTierOverrides, forKey: BridgeDefaults.moduleTierOverrides)
+        }
     }
 }
