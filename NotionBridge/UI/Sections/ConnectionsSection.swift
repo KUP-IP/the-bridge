@@ -279,8 +279,8 @@ public struct ConnectionsSection: View {
                     integrationTile(
                         connection: notionConnection,
                         name: "Notion",
-                        glyph: "circle.grid.2x2.fill",
-                        glyphColor: BridgeTokens.fg1,
+                        // Real branded Notion "N" mark (adaptive ink).
+                        mark: { NotionMark().frame(width: 19, height: 19) },
                         tileTint: BridgeTokens.chipFill,
                         fallbackSub: "Not configured · add a workspace token",
                         anchor: "notion"
@@ -288,9 +288,9 @@ public struct ConnectionsSection: View {
                     integrationTile(
                         connection: stripeConnection,
                         name: "Stripe",
-                        glyph: "creditcard.fill",
-                        glyphColor: Color(red: 0.616, green: 0.553, blue: 1.0), // #9d8dff
-                        tileTint: Color(red: 0.463, green: 0.333, blue: 0.922).opacity(0.18),
+                        // Real branded Stripe "S" mark in brand purple #635BFF.
+                        mark: { StripeMark().frame(width: 19, height: 19) },
+                        tileTint: BridgeServiceMarkTokens.stripePurple.opacity(0.16),
                         fallbackSub: "Not configured · add an API key",
                         anchor: "stripe"
                     )
@@ -299,11 +299,10 @@ public struct ConnectionsSection: View {
         }
     }
 
-    private func integrationTile(
+    private func integrationTile<Mark: View>(
         connection: BridgeConnection?,
         name: String,
-        glyph: String,
-        glyphColor: Color,
+        @ViewBuilder mark: () -> Mark,
         tileTint: Color,
         fallbackSub: String,
         anchor: String
@@ -319,9 +318,8 @@ public struct ConnectionsSection: View {
                         .frame(width: 38, height: 38)
                         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
-                    Image(systemName: glyph)
-                        .font(.system(size: 17, weight: .medium))
-                        .foregroundStyle(glyphColor)
+                    // Real branded service mark (true vector), sized to the tile.
+                    mark()
                 }
                 Spacer()
                 statusBadge(badgeText, color: badgeColor)

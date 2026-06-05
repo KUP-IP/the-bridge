@@ -764,7 +764,36 @@ set -euo pipefail
 # were UPDATED in place (2→3 count), not added. NOT auto-injected into the
 # handshake instructions (flag-gated TODO left at the composition site):
 # 1721 + 4 = 1725.
-FLOOR="${BRIDGE_TEST_FLOOR:-1725}"
+# v3.7.6 Wave 3 delivery-audit + Tools deep-link (2026-06-04): two delivery-audit
+# bug fixes + a Tools dep-link chip deep-link (navigate → scroll → expand) with
+# regression coverage.
+#   BUG 1 (overlay-freshness false-stale): reads record the CLIENT-specific
+#   composition hash, but freshness compared against the overlay-LESS default
+#   hash, so any client with a ClientOverlayStore overlay was permanently
+#   amber/stale. Fix: DeliveryLog.currentHash is now (clientName:) -> String
+#   (default StandingOrdersDelivery.composition(clientName:).contentHash) and
+#   sessions() resolves the live hash per-session from the session's client name.
+#   Added ClientOverlayStore.allOverlays() (public over the private readAll()).
+#   BUG 2 (legacy-SSE rows never pruned): channelInactive dropped the channel
+#   but never pruned the session's DeliveryLog events (Streamable-HTTP + stdio
+#   prune via removeSession). Fix: a nonisolated SSEServer.pruneLegacyDelivery-
+#   Telemetry(sessionID:) seam hops to the main actor; channelInactive calls it.
+#   DEEP-LINK: ModuleGroupDerivation.groupID(forAnchor:registeredTools:) maps a
+#   Tools dep-link chip's anchor (a lowercased tool-module name) to the target
+#   ModuleGroupID; ModuleGroupList wraps its cards in a ScrollViewReader, scrolls
+#   to the anchored group and auto-expands it (ModuleGroupCard gains forceExpanded).
+#   Factored the truthful audit labels into the pure DeliveryAuditLabels helper.
+# +12 test() blocks: DeliveryAuditWave3Tests (+7 — overlay-fresh/stale/no-overlay,
+# legacy-prune-on-disconnect, record* wiring ×2, truthful-label invariant) and
+# ModuleGroupTests deep-link section (+5 — anchor→group resolution incl. derived
+# group / single-tool / id-fallback / nil-graceful). Measured green 1784 -> 1796
+# across direct runs. The only intermittent gate failure observed is the
+# PRE-EXISTING, documented load-sensitive WS-F provision-timeout flake (see the
+# 2026-06-02 WS-G note above) — unrelated to this wave. Floor raised by the +12
+# net additive count over the prior floor (1725 + 12 = 1737), staying well below
+# the measured 1796 so the existing GUI/TCC + flake headroom is preserved while
+# the 12 new tests cannot be silently dropped.
+FLOOR="${BRIDGE_TEST_FLOOR:-1737}"
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

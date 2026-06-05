@@ -723,6 +723,13 @@ await runStandingOrdersDeliveryTests()
 // bounded history ring + truthful per-session freshness logic + session prune.
 await runDeliveryLogTests()
 
+// Wave 3 delivery-audit regressions: (a) overlay-freshness (an overlay client
+// reading its own composition is FRESH, not permanently amber — real
+// composition(clientName:) path), (b) legacy-SSE prune-on-disconnect, (c) the
+// record* wiring seam (handshake/read land the expected event), (d) truthful
+// labels ("Fetched ✓" only on a real read; never "Honored").
+await runDeliveryAuditWave3Tests()
+
 // PKT-6 (v3.5): CommandStore (markdown-per-command + index.json).
 await runCommandStoreTests()
 

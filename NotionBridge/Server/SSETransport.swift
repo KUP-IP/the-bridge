@@ -189,6 +189,20 @@ public actor SSEServer {
     /// PKT-336: Thread-safe bridge for legacy SSE connections (no actor boundary for channels).
     public nonisolated let legacy = LegacySSEBridge()
 
+    /// Tear down a disconnected LEGACY SSE session's delivery telemetry.
+    ///
+    /// BUG FIX (legacy-SSE rows never pruned): the Streamable-HTTP + stdio paths
+    /// prune a torn-down session's `DeliveryLog` events via `removeSession`, but
+    /// legacy SSE has no such hook — its `LegacySSEBridge.remove` only dropped
+    /// the channel, leaving the audit row + debug-timeline events to linger
+    /// after disconnect. `channelInactive` now calls this on the NIO event-loop
+    /// thread; it hops to the main actor (DeliveryLog is @MainActor), mirroring
+    /// `removeSession`'s prune hop. Factored out as a `nonisolated` seam so the
+    /// disconnect-prune wiring is exercised by the same code the handler runs.
+    public nonisolated static func pruneLegacyDeliveryTelemetry(sessionID: String) {
+        Task { @MainActor in DeliveryLog.shared.prune(sessionID: sessionID) }
+    }
+
     private struct SessionContext {
         let server: Server
         let transport: StatefulHTTPServerTransport
@@ -1254,6 +1268,13 @@ private final class SSEHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
                 let callback = self.onClientDisconnected
                 Task { await callback(name) }
             }
+            // W2 telemetry: prune this legacy session's delivery events on
+            // disconnect so the audit card + debug timeline never show a
+            // torn-down legacy session. The Streamable-HTTP + stdio paths prune
+            // via `removeSession`; legacy SSE had no such hook, so it leaked
+            // rows. The seam hops to the main actor (DeliveryLog is @MainActor)
+            // from this NIO event-loop thread — same posture as `removeSession`.
+            SSEServer.pruneLegacyDeliveryTelemetry(sessionID: sessionID)
         }
         context.fireChannelInactive()
     }

@@ -207,6 +207,63 @@ func runModuleGroupTests() async {
     }
 
     // ----------------------------------------------------------------
+    // Deep-link anchor → group resolution (Tools chip → scroll/expand).
+    // The pure resolver that ModuleGroupList uses to map a dep-link chip's
+    // `anchor` (a lowercased tool-module name) to the card it should scroll
+    // to and auto-expand.
+    // ----------------------------------------------------------------
+
+    await test("deep-link: anchor matching a live tool's module resolves to that tool's group") {
+        // The Tools dep-link chip anchor is `ToolInfo.module.lowercased()`.
+        let live: [(name: String, module: String)] = [
+            ("chrome_tabs", "chrome"),
+            ("chrome_navigate", "chrome"),
+            ("file_read", "file"),
+        ]
+        try expect(ModuleGroupDerivation.groupID(forAnchor: "chrome", registeredTools: live) == .chrome,
+                   "a 'chrome' chip lands on the chrome group")
+        try expect(ModuleGroupDerivation.groupID(forAnchor: "file", registeredTools: live) == .file)
+        // Case-insensitive on the anchor.
+        try expect(ModuleGroupDerivation.groupID(forAnchor: "Chrome", registeredTools: live) == .chrome)
+    }
+
+    await test("deep-link: anchor whose module groups elsewhere lands on the DERIVED group") {
+        // `ax_*` tools register module "ax" but DERIVE to .accessibility — the
+        // chip must follow the live tool's derived group, not a literal id.
+        let live: [(name: String, module: String)] = [
+            ("ax_inspect", "ax"),
+            ("ax_tree", "ax"),
+        ]
+        try expect(ModuleGroupDerivation.groupID(forAnchor: "ax", registeredTools: live) == .accessibility,
+                   "an 'ax' chip lands on the accessibility group (where ax_* tools live)")
+    }
+
+    await test("deep-link: anchor referencing a single tool expands the group that contains it") {
+        // A chip can reference a tool whose module is a singleton; it must still
+        // resolve to the group the tool belongs to (here payment_execute → payment).
+        let live: [(name: String, module: String)] = [
+            ("payment_execute", "payment"),
+            ("stripe_api_execute", "stripe"),
+        ]
+        try expect(ModuleGroupDerivation.groupID(forAnchor: "payment", registeredTools: live) == .payment)
+        try expect(ModuleGroupDerivation.groupID(forAnchor: "stripe", registeredTools: live) == .stripe)
+    }
+
+    await test("deep-link: anchor that is a group id but matches no live module falls back to the id") {
+        // No live tool has module "memory", but "memory" IS a ModuleGroupID.
+        try expect(ModuleGroupDerivation.groupID(forAnchor: "memory", registeredTools: []) == .memory)
+    }
+
+    await test("deep-link: nil / empty / unmappable anchor → nil (graceful no-op)") {
+        try expect(ModuleGroupDerivation.groupID(forAnchor: nil, registeredTools: []) == nil)
+        try expect(ModuleGroupDerivation.groupID(forAnchor: "", registeredTools: []) == nil)
+        try expect(ModuleGroupDerivation.groupID(forAnchor: "   ", registeredTools: []) == nil)
+        // An orphaned-credential chip (no live tools, not a group id) → nil.
+        try expect(ModuleGroupDerivation.groupID(forAnchor: "openai", registeredTools: []) == nil,
+                   "an anchor with no live tool and no matching group id resolves to nil")
+    }
+
+    // ----------------------------------------------------------------
     // Self-critique print: dump the live group map so it appears in
     // CI output. If a maintainer sees an unexpected group or count,
     // they can audit ModuleGroupOverride.map and prefixMap directly.

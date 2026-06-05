@@ -372,15 +372,21 @@ public struct StandingOrdersSection: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(BridgeTokens.fg1)
                 HStack(spacing: 6) {
-                    if let tokens = row.deliveredTokens, let at = row.deliveredAt {
-                        Text("Delivered · \(tokens) tok · \(relativeTime(at))")
+                    // Labels come from the pure DeliveryAuditLabels helper so the
+                    // truthful-label rules ("Fetched ✓" only on a real read;
+                    // never "Honored") are unit-tested without a render; the
+                    // clock-dependent relative-time suffix stays in the view.
+                    if let delivered = DeliveryAuditLabels.deliveredLabel(for: row),
+                       let at = row.deliveredAt {
+                        Text("\(delivered) · \(relativeTime(at))")
                             .font(.system(size: 11.5))
                             .foregroundStyle(BridgeTokens.fg3)
                     }
                     // Truthful: only show "Fetched ✓" when a read actually
                     // happened. Absence is NOT rendered as "not honored".
-                    if let readAt = row.lastResourceReadAt {
-                        Text("Fetched ✓ · \(relativeTime(readAt))")
+                    if let fetched = DeliveryAuditLabels.fetchedLabel(for: row),
+                       let readAt = row.lastResourceReadAt {
+                        Text("\(fetched) · \(relativeTime(readAt))")
                             .font(.system(size: 11.5))
                             .foregroundStyle(BridgeTokens.okText)
                     }

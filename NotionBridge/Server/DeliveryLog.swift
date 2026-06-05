@@ -122,6 +122,34 @@ public struct SessionAudit: Sendable, Equatable, Identifiable {
     }
 }
 
+/// Pure, view-free derivation of the TRUTHFUL labels the "Delivery audit" card
+/// renders for one session row. Factored out of the SwiftUI view so the
+/// honesty invariants are unit-testable WITHOUT a render: the server can only
+/// state what it shipped (DELIVERED) and what was read back (FETCHED) — it can
+/// NEVER claim a client "Honored" the orders, because it cannot observe
+/// obedience. These rules pin that contract:
+///   • `deliveredLabel` is present iff a handshake was recorded (tokens + when).
+///   • `fetchedLabel` is present iff a real resource read occurred — the
+///     ABSENCE of a read is NEVER rendered as "not honored" / "not fetched".
+///   • Neither label ever contains the word "Honored".
+public enum DeliveryAuditLabels {
+
+    /// The "Delivered · N tok" segment, or nil when no handshake was recorded.
+    /// (The relative-time suffix stays in the view — it is clock-dependent and
+    /// not part of the truthful-label contract.)
+    public static func deliveredLabel(for row: SessionAudit) -> String? {
+        guard let tokens = row.deliveredTokens, row.deliveredAt != nil else { return nil }
+        return "Delivered · \(tokens) tok"
+    }
+
+    /// The "Fetched ✓" segment, or nil when NO read has happened. Truthful:
+    /// only a recorded read produces this; absence renders nothing (it is NOT
+    /// "not honored"). Never the word "Honored".
+    public static func fetchedLabel(for row: SessionAudit) -> String? {
+        row.lastResourceReadAt == nil ? nil : "Fetched ✓"
+    }
+}
+
 /// `@MainActor @Observable` singleton holding recent delivery telemetry keyed
 /// by sessionID. Bounded: per-session the LATEST event of each kind is kept
 /// (so a session's audit row is O(1)), plus a small capped recent-history ring
@@ -156,12 +184,23 @@ public final class DeliveryLog {
     /// card renders sessions stably rather than dictionary-random.
     private var sessionOrder: [String] = []
 
-    /// Resolves the CURRENT composition hash for freshness comparison. Injected
-    /// so tests are hermetic; production reads the live SSOT.
-    private let currentHash: @Sendable () -> String
+    /// Resolves the CLIENT-APPROPRIATE current composition hash for freshness
+    /// comparison. Injected so tests are hermetic; production reads the live
+    /// SSOT for the given client name.
+    ///
+    /// BUG FIX (overlay freshness): a read records the CLIENT-specific
+    /// composition hash (`composition(clientName:).contentHash` — see
+    /// SSETransport `recordResourceRead`), so freshness MUST be computed against
+    /// that same per-client live hash. Passing the session's client name here
+    /// makes a client with a `ClientOverlayStore` overlay compare its read
+    /// against ITS OWN live composition — not the overlay-less default — so it
+    /// is no longer permanently amber/stale. With no overlay set (the default
+    /// for every install) `composition(clientName:)` is byte-identical to
+    /// `composition()`, so the no-overlay path is unchanged.
+    private let currentHash: @Sendable (_ clientName: String?) -> String
 
-    nonisolated public init(currentHash: @escaping @Sendable () -> String = {
-        StandingOrdersDelivery.composition().contentHash
+    nonisolated public init(currentHash: @escaping @Sendable (_ clientName: String?) -> String = { clientName in
+        StandingOrdersDelivery.composition(clientName: clientName).contentHash
     }) {
         self.currentHash = currentHash
     }
@@ -306,18 +345,24 @@ public final class DeliveryLog {
     // MARK: - Read accessors (UI + tests)
 
     /// One audit row per active session, in first-seen order. Freshness is
-    /// computed against the CURRENT composition hash (so a Standing Orders edit
-    /// flips already-read sessions to stale).
+    /// computed against the CLIENT-APPROPRIATE current composition hash (so a
+    /// Standing Orders edit flips already-read sessions to stale) — resolved
+    /// per-session via the session's client name so a client with a per-client
+    /// overlay compares its read against ITS OWN live composition rather than
+    /// the overlay-less default (the overlay-freshness bug fix).
     public func sessions() -> [SessionAudit] {
-        let liveHash = currentHash()
         return sessionOrder.compactMap { sid -> SessionAudit? in
             guard let byKind = latest[sid] else { return nil }
             let handshake = byKind[.handshakeDelivered]
             let read = byKind[.resourceRead]
-            let isFresh: Bool? = read.map { $0.contentHash == liveHash }
+            let clientName = handshake?.clientName ?? read?.clientName
+            // Resolve the live hash for THIS client (overlay-aware) and compare
+            // the last read against it. No-overlay clients resolve the default
+            // composition hash, so their freshness is unchanged.
+            let isFresh: Bool? = read.map { $0.contentHash == currentHash(clientName) }
             return SessionAudit(
                 sessionID: sid,
-                clientName: handshake?.clientName ?? read?.clientName,
+                clientName: clientName,
                 deliveredTokens: handshake?.tokenCount,
                 deliveredAt: handshake?.at,
                 lastResourceReadAt: read?.at,
