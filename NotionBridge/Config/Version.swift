@@ -98,7 +98,9 @@ public enum BridgeConstants {
     ///   (swift_build + swift_test + make_run, module "swift") that wrap
     ///   BgProcessRuntime so long builds/tests don't hit the ~60s transport
     ///   cap: 204 + 3 = 207.
-    public static let staticFeatureModuleToolCount = 207
+    /// FB-notionwrite: + 1 (notion_page_edit — surgical in-place body edit,
+    ///   joins the existing `notion` family) = 208.
+    public static let staticFeatureModuleToolCount = 208
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

@@ -634,6 +634,28 @@ public actor NotionClient {
         return data
     }
 
+    /// FB-notionwrite: Replace a page's whole markdown body in one call.
+    /// PATCH /v1/pages/{id}/markdown with the `replace_content` tagged-union body
+    /// (verified contract: `{"type":"replace_content","replace_content":{"new_str":...}}`).
+    /// This is the write half of the surgical `notion_page_edit` tool: the caller
+    /// reads markdown, applies old_str/new_str edits in-process, then writes the
+    /// already-edited result back here — so the wire payload is always the full,
+    /// intentionally-edited body, never a blind overwrite.
+    public func replacePageMarkdown(pageId: String, markdown: String) async throws -> Data {
+        let cleanId = pageId.replacingOccurrences(of: "-", with: "")
+        let body: [String: Any] = [
+            "type": "replace_content",
+            "replace_content": ["new_str": markdown]
+        ]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await request(method: "PATCH", path: "/pages/\(cleanId)/markdown", body: bodyData)
+        guard (200...299).contains(response.statusCode) else {
+            let msg = String(data: data, encoding: .utf8) ?? ""
+            throw NotionClientError.httpError(response.statusCode, msg)
+        }
+        return data
+    }
+
 
 
     /// A9a: List comments on a block or page.

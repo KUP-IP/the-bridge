@@ -22,15 +22,16 @@ func runNotionModuleTests() async {
     // MARK: - Tool Registration (23 tools)
     // ============================================================
 
-    await test("NotionModule registers 23 tools (Sprint A · #1: notion_block_read removed)") {
+    await test("NotionModule registers 24 tools (FB-notionwrite: notion_page_edit added)") {
         let tools = await router.registrations(forModule: "notion")
-        try expect(tools.count == 23, "Expected 23 notion tools, got \(tools.count)")
+        try expect(tools.count == 24, "Expected 24 notion tools, got \(tools.count)")
     }
 
     let expectedTools: [String] = [
         "notion_search", "notion_page_read", "notion_page_update",
         "notion_query", "notion_page_create", "notion_blocks_append",
-        "notion_block_delete", "notion_page_markdown_read", "notion_database_get", "notion_datasource_get",
+        "notion_block_delete", "notion_page_markdown_read", "notion_page_edit",
+        "notion_database_get", "notion_datasource_get",
         "notion_comments_list", "notion_comment_create", "notion_users_list",
         "notion_page_move", "notion_file_upload", "notion_token_introspect",
         "notion_connections_list", "notion_block_update",
@@ -66,7 +67,7 @@ func runNotionModuleTests() async {
 
     let notifyTools = [
         "notion_page_update", "notion_page_create", "notion_blocks_append",
-        "notion_block_delete",
+        "notion_block_delete", "notion_page_edit",
         "notion_comment_create", "notion_page_move", "notion_file_upload",
         "notion_datasource_update", "notion_datasource_create",
         "notion_block_update"
@@ -319,6 +320,108 @@ func runNotionModuleTests() async {
             // Any non-router error (e.g. no Notion connection configured) is expected
             // here and means the blockIds argument was accepted past validation.
         }
+    }
+
+    // FB-notionwrite: applyContentEdits is the pure, network-free core of
+    // notion_page_edit. Cover literal first-match, replaceAll, ordered/cascading
+    // edits, unmatched reporting, and the empty-old_str no-op guard.
+    await test("applyContentEdits applies a literal first-match edit") {
+        let (text, results) = NotionModule.applyContentEdits(
+            "alpha beta alpha",
+            edits: [NotionModule.ContentEdit(oldStr: "alpha", newStr: "ALPHA", replaceAll: false)]
+        )
+        try expect(text == "ALPHA beta alpha", "only the first occurrence should change, got: \(text)")
+        try expect(results.count == 1 && results[0].matched && results[0].replacements == 1,
+                   "expected one match / one replacement")
+    }
+
+    await test("applyContentEdits replaceAll replaces every occurrence and counts them") {
+        let (text, results) = NotionModule.applyContentEdits(
+            "x x x",
+            edits: [NotionModule.ContentEdit(oldStr: "x", newStr: "y", replaceAll: true)]
+        )
+        try expect(text == "y y y", "all occurrences should change, got: \(text)")
+        try expect(results[0].replacements == 3, "expected 3 replacements, got \(results[0].replacements)")
+    }
+
+    await test("applyContentEdits applies edits in order, each seeing prior results") {
+        // Edit 1 turns "foo" -> "bar"; edit 2 then matches the new "bar".
+        let (text, results) = NotionModule.applyContentEdits(
+            "foo",
+            edits: [
+                NotionModule.ContentEdit(oldStr: "foo", newStr: "bar", replaceAll: false),
+                NotionModule.ContentEdit(oldStr: "bar", newStr: "baz", replaceAll: false)
+            ]
+        )
+        try expect(text == "baz", "cascading edits should produce baz, got: \(text)")
+        try expect(results.allSatisfy { $0.matched }, "both edits should match")
+    }
+
+    await test("applyContentEdits reports unmatched old_str without altering text") {
+        let (text, results) = NotionModule.applyContentEdits(
+            "hello world",
+            edits: [NotionModule.ContentEdit(oldStr: "absent", newStr: "X", replaceAll: false)]
+        )
+        try expect(text == "hello world", "unmatched edit must leave text unchanged")
+        try expect(!results[0].matched && results[0].replacements == 0, "edit should report no match")
+    }
+
+    await test("applyContentEdits treats empty old_str as a no-op that never matches") {
+        let (text, results) = NotionModule.applyContentEdits(
+            "data",
+            edits: [NotionModule.ContentEdit(oldStr: "", newStr: "INJECTED", replaceAll: false)]
+        )
+        try expect(text == "data", "empty old_str must not corrupt the body, got: \(text)")
+        try expect(!results[0].matched, "empty old_str must report no match")
+    }
+
+    // FB-notionwrite: notion_page_edit handler input validation. These run
+    // network-free: malformed args must be rejected before any registry/client call.
+    await test("notion_page_edit rejects missing pageId/edits") {
+        do {
+            _ = try await router.dispatch(toolName: "notion_page_edit", arguments: .object([:]))
+            throw TestError.assertion("Expected error for missing params")
+        } catch is ToolRouterError {
+            // Expected
+        }
+    }
+
+    await test("notion_page_edit rejects an empty edits array") {
+        do {
+            _ = try await router.dispatch(
+                toolName: "notion_page_edit",
+                arguments: .object(["pageId": .string("p1"), "edits": .array([])])
+            )
+            throw TestError.assertion("Expected error for empty edits array")
+        } catch is ToolRouterError {
+            // Expected
+        }
+    }
+
+    await test("notion_page_edit rejects an edit with empty old_str before any write") {
+        do {
+            _ = try await router.dispatch(
+                toolName: "notion_page_edit",
+                arguments: .object([
+                    "pageId": .string("p1"),
+                    "edits": .array([.object(["old_str": .string(""), "new_str": .string("X")])])
+                ])
+            )
+            throw TestError.assertion("Expected error for empty old_str")
+        } catch is ToolRouterError {
+            // Expected — empty old_str is rejected at arg validation, never reaching the client.
+        }
+    }
+
+    await test("notion_page_edit schema declares pageId + edits with old_str/new_str") {
+        let tools = await router.registrations(forModule: "notion")
+        guard let tool = tools.first(where: { $0.name == "notion_page_edit" }) else {
+            throw TestError.assertion("notion_page_edit not found")
+        }
+        let schema = String(describing: tool.inputSchema)
+        try expect(schema.contains("old_str") && schema.contains("new_str"),
+                   "page_edit schema should declare old_str/new_str edit shape")
+        try expect(schema.contains("edits"), "page_edit schema should declare the edits array")
     }
 
     // ============================================================

@@ -872,6 +872,19 @@ set -euo pipefail
 # SwiftBuildRunner success/non-zero-exit/stdout+stderr-tail/tail-truncation/
 # timeout-job-left-running/env; and swift_build/swift_test/make_run dispatch
 # envelope shapes). 1777 + 22 = 1799.
+# FB-notionwrite (2026-06-05): notion_page_edit — surgical in-place page-body edit
+# (literal old_str→new_str find/replace mirroring the official MCP update_content),
+# reusing the MARK 9 slot vacated by the deprecated whole-page markdown_write (D3
+# v1.8.0). Read page markdown → applyContentEdits in-process (ordered, literal,
+# first-match or replaceAll) → PATCH .../markdown replace_content with the edited
+# body; fail-fast on any unmatched old_str so no silently-unchanged body is written.
+# staticFeatureModuleToolCount 202→203; NotionModule 23→24. +11 net-new test():
+# 5 applyContentEdits unit tests (first-match / replaceAll+count / ordered-cascade /
+# unmatched-no-op / empty-old_str guard), 4 handler input-validation tests, +1
+# expectedTools-loop iteration, +1 notifyTools-loop iteration. Measured green
+# 1853 locally (0 failed). Floor raised by the +11 net additive count (1777 + 11 =
+# 1788), staying well below the measured 1853 so headroom is preserved while the new
+# tests cannot be silently dropped.
 FLOOR="${BRIDGE_TEST_FLOOR:-1803}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
