@@ -673,6 +673,7 @@ await runShortcutsModuleTests()   // PKT-959 (v3.7·F): shortcuts_* MCP tools (m
 await runCommandsDataTests()      // cmd-w2: Commands data layer (CommandsManager + MentionResolver + cache)
 await runFetchSkillMarkdownTests() // cmd-w4: fetch_skill /markdown + shared MentionResolver
 await runFetchSkillPropertiesTests() // cu-sa: fetch_skill simplified `properties` map (additive)
+await runResultSizeControlsTests() // fb-resultsize: fetch_skill section selector + notion_query relation filter/compact + calendar_events compact/limit
 await runCommandBoxSpikeTests()   // cmd-w1 spike (imported): GUI-free command-box units + cmd-ux recorder/persist
 await runCommandPaletteTests()    // cmd-w3: palette search + gate + AppDelegate gating + coordinator
 await runSkillVsCommandSplitTests() // cmd-ux: LOCK the skill-vs-command body/properties split

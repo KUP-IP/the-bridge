@@ -885,6 +885,22 @@ set -euo pipefail
 # 1853 locally (0 failed). Floor raised by the +11 net additive count (1777 + 11 =
 # 1788), staying well below the measured 1853 so headroom is preserved while the new
 # tests cannot be silently dropped.
+# fb-resultsize (2026-06-05): result-size / token-cap controls. +17 test()
+# blocks in ResultSizeControlsTests.swift covering the three mitigations:
+#   (1) fetch_skill `section` selector — SkillsModule.extractMarkdownSection
+#       heading slicer (named-slice, nested-subsection inclusion, case/`#`-
+#       insensitive match, no-match→nil fallback, blank no-op, level-math
+#       guard, fenced-code `#`-comment guard);
+#   (2) notion_query PROJECT-relation server-side filter (NotionRelationFilter
+#       relationContains / merge / mergeData — bare predicate, AND-array
+#       append, single-predicate wrap, JSON round-trip, empty-filter degrade);
+#   (3) calendar_events compact mode + `limit` cap with honest
+#       has_more/truncated/totalInRange signalling, driven off the in-memory
+#       MockCalendarStore (zero network / zero live EventKit).
+# All pure / mock-backed — run in CI + local alike. Measured green 1859 (0
+# failed). Floor raised by the +17 net additive count per the order-inversion
+# rule (1777 + 17 = 1794), staying well below the measured 1859 so the
+# existing GUI/TCC + flake headroom is preserved.
 FLOOR="${BRIDGE_TEST_FLOOR:-1803}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
