@@ -90,6 +90,16 @@ private final class FakeProvisioner: CloudProvisioning, @unchecked Sendable {
 private final class ManualClock: CloudClock, @unchecked Sendable {
     private let lock = NSLock()
     private var continuations: [UUID: CheckedContinuation<Void, Error>] = [:]
+    /// Edge-pending latch. A `fire()` that arrives BEFORE any `sleep` has
+    /// registered its continuation is remembered here, so the next `sleep`
+    /// resolves immediately instead of hanging forever. The flow arms its
+    /// timeout guard via `clock.sleep(...)` on a background task inside a
+    /// `withTaskGroup`, so a test that `fire()`s right after observing a state
+    /// transition can race ahead of that registration. Latching makes the
+    /// timeout fire deterministically regardless of which side lands first —
+    /// removing the load-sensitive ordering flake without touching the WS-F
+    /// flow's production behavior.
+    private var pendingFires = 0
     /// A pending sleep that never resolves on its own — but IS cancellation
     /// aware (a real `Task.sleep`-backed clock throws `CancellationError` on
     /// cancel, so the fake must too, or a losing timeout-guard task would
@@ -102,6 +112,12 @@ private final class ManualClock: CloudClock, @unchecked Sendable {
                 if Task.isCancelled {
                     lock.unlock()
                     cont.resume(throwing: CancellationError())
+                } else if pendingFires > 0 {
+                    // A fire() already arrived for this sleep — consume the
+                    // latch and resolve at once (the timeout has elapsed).
+                    pendingFires -= 1
+                    lock.unlock()
+                    cont.resume()
                 } else {
                     continuations[id] = cont
                     lock.unlock()
@@ -112,9 +128,15 @@ private final class ManualClock: CloudClock, @unchecked Sendable {
             c?.resume(throwing: CancellationError())
         }
     }
-    /// Resolve all pending sleeps (i.e. fire the timeout).
+    /// Resolve all pending sleeps (i.e. fire the timeout). If no sleep has
+    /// registered yet, latch the fire so the NEXT `sleep` resolves at once —
+    /// closing the fire()-before-sleep() ordering race.
     func fire() {
-        lock.lock(); let conts = Array(continuations.values); continuations = [:]; lock.unlock()
+        lock.lock()
+        let conts = Array(continuations.values)
+        continuations = [:]
+        if conts.isEmpty { pendingFires += 1 }
+        lock.unlock()
         for c in conts { c.resume() }
     }
 }
