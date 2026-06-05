@@ -641,6 +641,7 @@ await runConnectionsModuleTests()
 await runStripeTokenizationTests()
 await runSecurityAuditTests()
 await runReadOnlyTierAuditTests()
+await runSecurityGateUXTests()        // fb-securitygate: coalescing + module-scoped Always-Allow + timeout seam
 
 
 // ============================================================

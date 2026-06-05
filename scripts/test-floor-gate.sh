@@ -817,7 +817,27 @@ set -euo pipefail
 # over the prior floor (1737 + 39 = 1776), staying below the measured 1835 so
 # the existing GUI/TCC + flake headroom is preserved while the 39 new tests
 # cannot be silently dropped.
-FLOOR="${BRIDGE_TEST_FLOOR:-1777}"
+# fb-securitygate SecurityGate UX (2026-06-04): completes the SecurityGate UX
+# remediation. (1) read-only re-tiering already shipped (FB-5) — a regression
+# guard is re-asserted here. (2) "Always Allow" is now MODULE-scoped, not only
+# per-tool: SecurityGate persists moduleTierOverrides[module] = notify so a grant
+# covers sibling tools; ToolRouter.resolveEffectiveTier resolves per-tool >
+# per-module > registered default (neverAutoApprove always forces .request).
+# Concurrent identical Request-tier prompts (the 3-way-parallel snippets_delete
+# that previously fired 3 prompts and timed out) now COALESCE into one prompt via
+# the pure ApprovalCoalescer — the user answers once and every coalesced caller
+# honors that single answer. (3) the silent 30s auto-deny is harder to miss:
+# default approval timeout raised to 90s (injectable test seam) and prompts are
+# posted .timeSensitive. +16 test() blocks in SecurityGateUXTests.swift
+# (ApprovalCoalescer begin/drain/idempotency/per-key isolation ×7, effective-tier
+# precedence matrix ×6, module-grant end-to-end ×1, read-only regression ×1,
+# timeout-seam ×1). All pure / ephemeral UserDefaults — no live network, no
+# notification center (the test process short-circuits requestApproval). Measured
+# green 1842 -> 1858 locally (0 failed). Floor raised by the +16 net additive
+# count over the prior floor (1777 + 16 = 1793), staying below the measured 1858
+# so existing GUI/TCC + flake headroom is preserved while the 16 new tests cannot
+# be silently dropped.
+FLOOR="${BRIDGE_TEST_FLOOR:-1793}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
