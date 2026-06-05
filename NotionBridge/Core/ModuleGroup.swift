@@ -421,6 +421,38 @@ public enum ModuleGroupDerivation {
         }
     }
 
+    /// Resolve a deep-link ANCHOR (a Tools dep-link chip's `anchor`, which is a
+    /// lowercased tool-MODULE name such as "chrome" / "notion" / "ax" / a single
+    /// tool's module) to the `ModuleGroupID` whose card the chip should scroll to
+    /// and expand. Resolution order:
+    ///   1) If a live registered tool's `module` (lowercased) equals the anchor,
+    ///      resolve THAT tool's group — this is authoritative because the Tools
+    ///      list groups by `resolve(toolName:)`, and a module's tools all share a
+    ///      group. (If the chip references a single tool, the group containing it
+    ///      is returned — the instruction's "expand the group that contains it".)
+    ///   2) Else, if the anchor matches a `ModuleGroupID.rawValue` directly, use
+    ///      it (covers anchors that already are a group id but have no live tool
+    ///      whose `module` string matches verbatim).
+    ///   3) Else `nil` — no group to land on (e.g. an orphaned credential whose
+    ///      module registers no live tools); callers no-op gracefully.
+    ///
+    /// `nil`/empty anchor → `nil`. Pure (no SwiftUI) so it is unit-testable.
+    public static func groupID(
+        forAnchor anchor: String?,
+        registeredTools: [(name: String, module: String)]
+    ) -> ModuleGroupID? {
+        guard let raw = anchor?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !raw.isEmpty else { return nil }
+        // 1) Live-tool module match → that tool's derived group.
+        if let tool = registeredTools.first(where: { $0.module.lowercased() == raw }) {
+            return resolve(toolName: tool.name)
+        }
+        // 2) Direct group-id match.
+        if let direct = ModuleGroupID(rawValue: raw) { return direct }
+        // 3) No mapping.
+        return nil
+    }
+
     /// Build the full group list from a set of registered tool names and
     /// the user's per-tool disabled set. Groups are returned in a stable,
     /// design-aligned order; empty groups are dropped (a group with zero

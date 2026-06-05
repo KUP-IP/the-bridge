@@ -1,5 +1,23 @@
 # Changelog
 
+## [unreleased] — v3.7.6 — System-tethered Light/Dark theme
+
+> The Bridge now follows the macOS **system appearance** across every surface. There is **no in-app theme toggle** — appearance is always tethered to the system and **live-adapts** when you flip System Settings → Appearance (no relaunch). **Dark mode is visually unchanged** (the carbon look); **Light mode** is a new titanium treatment.
+
+### Added — adaptive design tokens
+- **`BridgeTokens` is now appearance-adaptive** (and remains the single source of truth). A dynamic-`NSColor` provider (`adaptive(dark:light:)` / `adaptiveNSColor(dark:light:)`) resolves the same token correctly in **both SwiftUI and AppKit** and re-evaluates on every draw, so a system appearance flip updates the running app with no relaunch.
+- **Light "titanium" anchors** beside the carbon anchors: canvas `#ECEDEF`, raised surface `#F4F5F7`. New semantic tokens `bgCanvas` / `bgRaised` and an AppKit `canvasNSColor` for window chrome.
+- **Adaptive ink + glass + signal-text**: `fg1…fg5` (white-at-alpha on carbon → tuned black-at-alpha on titanium), `glassWindowTint` / `glassCardTint`, and `okText`/`warnText`/`badText`/`infoText` (lighter on dark, deepened for titanium legibility on light).
+
+### Changed — system-tethered surfaces
+- **Removed all 9 force-dark mechanisms**: 3 `.preferredColorScheme(.dark)` (menu-bar popover, Settings, Onboarding), 3 `NSAppearance(named: .darkAqua)` (Settings, Onboarding, Command-Bridge palette), and the 2 hardcoded `#0B0C0E` window backgrounds (now the dynamic `canvasNSColor`). All four scene roots — popover, Settings, Onboarding, Command palette — follow the system.
+- **Adaptive drawing**: the carbon-fibre weave (`BridgeCarbonWeave`) and the glass-card sheen/hairline/rim (`BridgeGlassCard`) now branch on the active color scheme — on light they become a subtle whisper/neutral sheen so the texture and raised-glass read on titanium, while **dark is byte-for-byte unchanged**.
+
+### Notes
+- **Dark regression-free by construction**: every adaptive token's dark branch reproduces the exact v3.7.5 sRGB literal. A new test suite (`BridgeTokensAdaptiveTests`) resolves every token under `.aqua` and `.darkAqua` and asserts the dark branch equals the prior literal, the light branch equals the defined titanium value, and each token genuinely adapts.
+- `accent` / `accentStrong` / `accentLink`, base signals `ok`/`warn`/`bad`, `gold`, `titanium`, and `Radius` are intentionally appearance-agnostic and unchanged. `NotionPalette` swatches are left as-is (Notion brand fidelity).
+- **Residual (visual QA)**: a headless agent cannot render live AppKit pixels — on-device Light/Dark visual confirmation across all four surfaces is the operator's final step.
+
 ## [3.6.1] — 2026-05-31 — Cloud-access foundation + test-suite hermeticity
 
 ### Added — Mac-side cloud access (WS-C / WS-E)

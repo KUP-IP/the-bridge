@@ -45,6 +45,12 @@ public struct BridgeGlassCard<Content: View>: View {
     private let cornerRadius: CGFloat
     private let padding: CGFloat
 
+    // System-tethered (v3.7.6): the white sheen + white hairlines assume a dark
+    // base and VANISH on titanium. On LIGHT we swap to a subtle dark/neutral
+    // sheen + a darker hairline so cards still read as RAISED glass; DARK is
+    // byte-for-byte unchanged.
+    @Environment(\.colorScheme) private var colorScheme
+
     public init(
         cornerRadius: CGFloat = 12,
         padding: CGFloat = 14,
@@ -56,24 +62,37 @@ public struct BridgeGlassCard<Content: View>: View {
     }
 
     public var body: some View {
-        content
+        let isDark = colorScheme == .dark
+        // Sheen gradient (top→bottom). DARK: white .07→.02 (unchanged).
+        // LIGHT: a brighter near-white lift on top fading out, so the card
+        // surface reads slightly raised off the #ECEDEF canvas.
+        let sheenTop    = isDark ? Color.white.opacity(0.07) : Color.white.opacity(0.65)
+        let sheenBottom = isDark ? Color.white.opacity(0.02) : Color.white.opacity(0.30)
+        // Tint opacity: the dark tint sits low; the light neutral tint sits even
+        // lower so it just cools the white sheen rather than graying the card.
+        let tintOpacity = isDark ? 0.20 : 0.10
+        // Edge hairline. DARK: white@.10 (unchanged). LIGHT: black@.06 so the
+        // card has a visible darker border on the light ground.
+        let hairline = isDark ? Color.white.opacity(0.10) : Color.black.opacity(0.06)
+        // Top rim highlight. DARK: white@.25 (unchanged). LIGHT: a soft white
+        // rim still helps, but darker beneath — keep a faint white top rim.
+        let rimHighlight = isDark ? Color.white.opacity(0.25) : Color.white.opacity(0.55)
+
+        return content
             .padding(padding)
             .background(
                 ZStack {
                     LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.07),
-                            Color.white.opacity(0.02)
-                        ],
+                        colors: [sheenTop, sheenBottom],
                         startPoint: .top, endPoint: .bottom
                     )
-                    BridgeTokens.glassCardTint.opacity(0.20)
+                    BridgeTokens.glassCardTint.opacity(tintOpacity)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+                    .strokeBorder(hairline, lineWidth: 0.5)
             )
             .overlay(
                 // top rim highlight
@@ -81,7 +100,7 @@ public struct BridgeGlassCard<Content: View>: View {
                     .inset(by: 0.5)
                     .stroke(
                         LinearGradient(
-                            colors: [Color.white.opacity(0.25), .clear],
+                            colors: [rimHighlight, .clear],
                             startPoint: .top, endPoint: .bottom
                         ),
                         lineWidth: 0.5
@@ -99,7 +118,7 @@ public struct BridgeCardLabel: View {
         Text(text.uppercased())
             .font(.system(size: 11, weight: .semibold))
             .tracking(1.2)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(BridgeTokens.fg3)
     }
 }
 
@@ -124,27 +143,11 @@ public struct BridgeDepLink: View {
                 Text("↗").opacity(0.7)
             }
             .font(.system(size: 11, weight: .medium))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 2)
-            .background(background, in: Capsule())
-            .overlay(Capsule().strokeBorder(border, lineWidth: 0.5))
             .foregroundStyle(foreground)
         }
         .buttonStyle(.plain)
     }
 
-    private var background: Color {
-        switch variant {
-        case .info: return BridgeTokens.accent.opacity(0.10)
-        case .bad:  return BridgeTokens.bad.opacity(0.10)
-        }
-    }
-    private var border: Color {
-        switch variant {
-        case .info: return BridgeTokens.accent.opacity(0.20)
-        case .bad:  return BridgeTokens.bad.opacity(0.28)
-        }
-    }
     private var foreground: Color {
         switch variant {
         case .info: return BridgeTokens.infoText
@@ -172,7 +175,7 @@ public struct PartialToggle: View {
                 Capsule()
                     .fill(track)
                     .frame(width: 40, height: 24)
-                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
+                    .overlay(Capsule().strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
                 Circle()
                     .fill(LinearGradient(colors: [.white, Color(white: 0.84)], startPoint: .top, endPoint: .bottom))
                     .frame(width: 18, height: 18)
@@ -195,7 +198,7 @@ public struct PartialToggle: View {
         switch state {
         case .off:
             return LinearGradient(
-                colors: [Color.white.opacity(0.08), Color.white.opacity(0.04)],
+                colors: [BridgeTokens.chipFill, BridgeTokens.chipFill],
                 startPoint: .top, endPoint: .bottom)
         case .partial:
             return LinearGradient(
@@ -228,6 +231,13 @@ public struct BridgeGlassBubble<Content: View>: View {
     private let content: Content?
     private let size: CGFloat
 
+    // System-tethered (v3.7.6): the white specular dome + white rim assume a
+    // dark base and VANISH on titanium, leaving a flat invisible slot. On LIGHT
+    // we swap to a subtle near-white sheen over a faint neutral tint plus a
+    // darker rim so the bubble still reads as a RAISED glass dome; DARK is
+    // byte-for-byte unchanged.
+    @Environment(\.colorScheme) private var colorScheme
+
     public init(size: CGFloat = 52, @ViewBuilder content: () -> Content) {
         self.content = content()
         self.size = size
@@ -240,17 +250,32 @@ public struct BridgeGlassBubble<Content: View>: View {
     }
 
     public var body: some View {
-        ZStack {
+        let isDark = colorScheme == .dark
+        // Specular dome (hotspot → falloff). DARK: white .42→.10→.02 (unchanged).
+        // LIGHT: a softer white sheen that fades to clear over the neutral tint.
+        let domeColors: [Color] = isDark
+            ? [Color.white.opacity(0.42), Color.white.opacity(0.10), Color.white.opacity(0.02)]
+            : [Color.white.opacity(0.70), Color.white.opacity(0.22), Color.white.opacity(0.0)]
+        // Surface tint under the sheen. DARK: white@.12 (v3.7.6 Command-Bridge
+        // legibility bump from .06 — the tray bubbles now sit on a transparent
+        // panel that hugs the bar, so a heavier well keeps the favorite domes
+        // reading as solid glass rather than washing out against the desktop).
+        // LIGHT: a faint neutral well so the dome sits on a cooler, slightly-
+        // recessed base.
+        let surfaceTint = isDark ? Color.white.opacity(0.12) : BridgeTokens.chipFill
+        // Rim. DARK: white@.18 (unchanged). LIGHT: a darker hairline edge.
+        let rim = isDark ? Color.white.opacity(0.18) : BridgeTokens.hairlineStrong
+        return ZStack {
             Circle()
                 .fill(
                     RadialGradient(
-                        colors: [Color.white.opacity(0.42), Color.white.opacity(0.10), Color.white.opacity(0.02)],
+                        colors: domeColors,
                         center: UnitPoint(x: 0.3, y: 0.18),
                         startRadius: 0, endRadius: size * 0.9
                     )
                 )
-                .overlay(Circle().fill(Color.white.opacity(0.06)))
-            Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                .overlay(Circle().fill(surfaceTint))
+            Circle().strokeBorder(rim, lineWidth: 1)
             content
         }
         .frame(width: size, height: size)

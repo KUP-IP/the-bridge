@@ -49,7 +49,7 @@ private enum RemoteAccessStatus {
         switch self {
         case .active: return BridgeTokens.ok
         case .misconfigured: return BridgeTokens.warn
-        case .notConfigured: return .gray
+        case .notConfigured: return BridgeTokens.fg4
         }
     }
 
@@ -361,7 +361,7 @@ public struct ConnectionSetupView: View {
             HStack(spacing: 10) {
                 ZStack {
                     Circle()
-                        .strokeBorder(on ? BridgeTokens.accentLink : Color.white.opacity(0.30),
+                        .strokeBorder(on ? BridgeTokens.accentLink : BridgeTokens.hairlineStrong,
                                       lineWidth: 1.5)
                         .frame(width: 15, height: 15)
                     if on {
@@ -388,12 +388,12 @@ public struct ConnectionSetupView: View {
                 ? AnyShapeStyle(LinearGradient(
                     colors: [BridgeTokens.accent.opacity(0.18), BridgeTokens.accent.opacity(0.06)],
                     startPoint: .top, endPoint: .bottom))
-                : AnyShapeStyle(Color.black.opacity(0.20)),
+                : AnyShapeStyle(BridgeTokens.wellFill),
                 in: RoundedRectangle(cornerRadius: 10, style: .continuous)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(on ? BridgeTokens.accent.opacity(0.50) : Color.white.opacity(0.10),
+                    .strokeBorder(on ? BridgeTokens.accent.opacity(0.50) : BridgeTokens.hairline,
                                   lineWidth: 0.5)
             )
         }

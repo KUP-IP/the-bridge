@@ -357,6 +357,15 @@ public final class ClientOverlayStore: @unchecked Sendable {
         return readAll()[k]
     }
 
+    /// The full overlay map (normalized client-name keys → addendum markdown).
+    /// EMPTY DICT on a fresh install. Public surface over the private
+    /// `readAll()` so callers that need to resolve per-client live composition
+    /// hashes (the delivery-audit freshness path) — and a future overlays
+    /// card — can enumerate the set without re-plumbing storage.
+    public func allOverlays() -> [String: String] {
+        readAll()
+    }
+
     /// Set (or, with nil/empty, clear) the overlay for `clientName`.
     /// Case-insensitive on the client name. A nil or whitespace-only
     /// `overlay` removes the entry so it reverts to the empty default.

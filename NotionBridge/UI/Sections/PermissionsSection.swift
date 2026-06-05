@@ -137,8 +137,8 @@ public struct PermissionsSection: View {
                 .foregroundStyle(BridgeTokens.fg4)
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
     }
 
     private func pmIconButton(_ systemImage: String, help: String, action: @escaping () -> Void) -> some View {
@@ -187,7 +187,7 @@ public struct PermissionsSection: View {
                     grantRow(grant: grant)
                     if idx < PermissionManager.Grant.v1Cases.count - 1 {
                         Rectangle()
-                            .fill(Color.white.opacity(0.08))
+                            .fill(BridgeTokens.hairline)
                             .frame(height: 0.5)
                             .padding(.horizontal, -2)
                     }
@@ -250,20 +250,20 @@ public struct PermissionsSection: View {
         ZStack(alignment: .topTrailing) {
             ZStack {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(Color.white.opacity(0.05))
+                    .fill(BridgeTokens.chipFill)
                     .frame(width: 34, height: 34)
                     .overlay(
                         RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+                            .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
                     )
                 Image(systemName: systemIcon(for: grant))
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(Color.white.opacity(0.80))
+                    .foregroundStyle(BridgeTokens.fg2)
             }
             Circle()
                 .fill(dot)
                 .frame(width: 9, height: 9)
-                .overlay(Circle().strokeBorder(BridgeTokens.bgCarbon2, lineWidth: 2))
+                .overlay(Circle().strokeBorder(BridgeTokens.bgRaised, lineWidth: 2))
                 .shadow(color: dot.opacity(0.7), radius: 3)
                 .offset(x: 3, y: -3)
         }
@@ -284,10 +284,6 @@ public struct PermissionsSection: View {
         }()
         Text(text)
             .font(.system(size: 11, weight: .semibold))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.15), in: Capsule())
-            .overlay(Capsule().strokeBorder(color.opacity(0.28), lineWidth: 0.5))
             .foregroundStyle(color)
     }
 

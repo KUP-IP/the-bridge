@@ -86,7 +86,7 @@ public struct RemoteAccessSection: View {
             case .degraded:   return BridgeTokens.warn
             case .connecting: return BridgeTokens.warn
             case .offline:    return BridgeTokens.bad
-            case .disabled:   return .secondary
+            case .disabled:   return BridgeTokens.fg3
             }
         }
     }
@@ -217,7 +217,7 @@ public struct RemoteAccessSection: View {
                         .font(.system(size: 18, weight: .semibold))
                     Text("Reach this Mac from the cloud over a private tunnel. Every remote action is capability-scoped and passkey-gated — your credentials never leave this machine.")
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BridgeTokens.fg3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
@@ -239,7 +239,7 @@ public struct RemoteAccessSection: View {
                              ? "Starts a cloudflared tunnel so cloud agents can delegate work to this Mac."
                              : "Cloud sign-in isn't set up on this build yet — remote access is coming soon.")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(BridgeTokens.fg3)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer()
@@ -252,7 +252,7 @@ public struct RemoteAccessSection: View {
                             handleToggle(on)
                         }
                 }
-                Divider().background(Color.white.opacity(0.08))
+                Divider().background(BridgeTokens.hairline)
                 statusRow
                 if let flow, ProvisioningPresentation.make(for: flow.state).indicator != .none {
                     ProvisioningProgressView(
@@ -404,7 +404,7 @@ public struct RemoteAccessSection: View {
                 if didCopyMCPURL {
                     Text(ClaudeAIIntegration.pasteHint)
                         .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BridgeTokens.fg3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -433,15 +433,15 @@ public struct RemoteAccessSection: View {
     private var statusRow: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(cloudConfigured ? displayState.dotColor : Color.secondary)
+                .fill(cloudConfigured ? displayState.dotColor : BridgeTokens.fg3)
                 .frame(width: 8, height: 8)
             Text(cloudConfigured ? displayState.rawValue : "Coming soon")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(cloudConfigured ? displayState.dotColor : .secondary)
+                .foregroundStyle(cloudConfigured ? displayState.dotColor : BridgeTokens.fg3)
             Spacer()
             Text("Tunnel: cloudflared")
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(BridgeTokens.fg3)
         }
     }
 
@@ -456,13 +456,13 @@ public struct RemoteAccessSection: View {
                     title: "Capability-scoped",
                     detail: "The cloud can only ask this Mac to run one short-lived, pre-scoped operation at a time — never browse freely."
                 )
-                Divider().background(Color.white.opacity(0.08))
+                Divider().background(BridgeTokens.hairline)
                 postureRow(
                     icon: "touchid",
                     title: "Passkey-gated",
                     detail: "Before any stored credential is used, this Mac requires a fresh local passkey (Touch ID) approval."
                 )
-                Divider().background(Color.white.opacity(0.08))
+                Divider().background(BridgeTokens.hairline)
                 postureRow(
                     icon: "lock.fill",
                     title: "Credentials stay local",
@@ -477,11 +477,11 @@ public struct RemoteAccessSection: View {
         HStack(alignment: .top, spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
+                    .fill(BridgeTokens.chipFill)
                     .frame(width: 34, height: 34)
                     .overlay(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+                            .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
                     )
                 Image(systemName: icon)
                     .font(.system(size: 15, weight: .medium))
@@ -492,7 +492,7 @@ public struct RemoteAccessSection: View {
                     .font(.system(size: 14, weight: .medium))
                 Text(detail)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BridgeTokens.fg3)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()

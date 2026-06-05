@@ -36,7 +36,7 @@ public struct CommandsEditorView: View {
             HStack(spacing: 0) {
                 masterColumn
                     .frame(width: 236)
-                Rectangle().fill(Color.white.opacity(0.10)).frame(width: 0.5)
+                Rectangle().fill(BridgeTokens.hairline).frame(width: 0.5)
                 detailColumn
                     .frame(maxWidth: .infinity)
             }
@@ -74,21 +74,16 @@ public struct CommandsEditorView: View {
                 }
                 .padding(.horizontal, 10)
                 .frame(height: 30)
-                .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
 
                 Button {
                     createNew()
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(BridgeTokens.accentLink)
-                        .frame(width: 30, height: 30)
-                        .background(BridgeTokens.accent.opacity(0.28), in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.accent.opacity(0.45), lineWidth: 0.5))
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(AddCommandButtonStyle())
                 .help("New command")
             }
             .padding(.horizontal, 12)
@@ -106,7 +101,7 @@ public struct CommandsEditorView: View {
                 .padding(.bottom, 8)
             }
 
-            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
+            Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5)
             HStack {
                 Text("\(commands.count) commands · \(favoriteCount) favorites")
                     .font(.system(size: 11))
@@ -137,8 +132,8 @@ public struct CommandsEditorView: View {
                         .foregroundStyle(BridgeTokens.fg3)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 5))
-                        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+                        .background(BridgeTokens.chipFill, in: RoundedRectangle(cornerRadius: 5))
+                        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
                 }
             }
             .padding(.horizontal, 10)
@@ -147,7 +142,7 @@ public struct CommandsEditorView: View {
                         in: RoundedRectangle(cornerRadius: 9))
             .overlay(
                 RoundedRectangle(cornerRadius: 9)
-                    .strokeBorder(selectedSlug == c.slug ? Color.white.opacity(0.16) : Color.clear, lineWidth: 0.5)
+                    .strokeBorder(selectedSlug == c.slug ? BridgeTokens.hairlineStrong : Color.clear, lineWidth: 0.5)
             )
             .contentShape(Rectangle())
         }
@@ -170,7 +165,6 @@ public struct CommandsEditorView: View {
             ScrollView {
                 VStack(spacing: 13) {
                     editorHeader(cmd)
-                    appearanceCard(cmd)
                     favoriteSlotCard(cmd)
                     bodyCard(cmd)
                     trayPreviewCard
@@ -233,58 +227,29 @@ public struct CommandsEditorView: View {
         .help(help)
     }
 
-    private func appearanceCard(_ c: CommandStore.Command) -> some View {
-        BridgeGlassCard {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    BridgeCardLabel("Appearance")
-                    Spacer()
-                    Text("Color applies to symbols, not emoji")
-                        .font(.system(size: 11))
-                        .foregroundStyle(BridgeTokens.fg4)
-                    Button {
-                        iconPickerPresented = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "square.grid.2x2")
-                            Text("Change icon")
-                        }
-                        .font(.system(size: 11.5, weight: .medium))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-                // Per-command color picker — NotionPalette swatches (user-chosen).
-                HStack(spacing: 6) {
-                    ForEach(CommandStore.NotionColor.allCases, id: \.self) { col in
-                        Button {
-                            updateColor(slug: c.slug, color: col)
-                        } label: {
-                            Circle()
-                                .fill(NotionPalette.color(named: col.rawValue) ?? .gray)
-                                .frame(width: 18, height: 18)
-                                .overlay(
-                                    Circle().strokeBorder(
-                                        c.color == col ? Color.white : Color.white.opacity(0.12),
-                                        lineWidth: c.color == col ? 2 : 0.5)
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .help("Set color: \(col.rawValue)")
-                    }
-                    Spacer()
-                }
-            }
-        }
-    }
-
     private func favoriteSlotCard(_ c: CommandStore.Command) -> some View {
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 12) {
                 // Reset lives in the top-right corner (no caption needed).
-                HStack {
+                HStack(spacing: 6) {
                     BridgeCardLabel("Favorite slot")
                     Spacer()
+                    // Change icon — moved here from the removed Appearance card;
+                    // sits immediately to the LEFT of Reset (operator feedback).
+                    Button {
+                        iconPickerPresented = true
+                    } label: {
+                        Image(systemName: "square.grid.2x2")
+                            .font(.system(size: 12))
+                            .foregroundStyle(BridgeTokens.fg3)
+                            .frame(width: 26, height: 26)
+                            .background(BridgeTokens.hoverFill, in: RoundedRectangle(cornerRadius: 7))
+                            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Change icon")
+                    .accessibilityLabel("Change icon")
                     Button {
                         setSlot(slug: c.slug, slot: nil)
                     } label: {
@@ -292,8 +257,8 @@ public struct CommandsEditorView: View {
                             .font(.system(size: 12))
                             .foregroundStyle(BridgeTokens.fg3)
                             .frame(width: 26, height: 26)
-                            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
-                            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5))
+                            .background(BridgeTokens.hoverFill, in: RoundedRectangle(cornerRadius: 7))
+                            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5))
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -313,6 +278,10 @@ public struct CommandsEditorView: View {
 
     private var slotKeys: [Int] { [1, 2, 3, 4, 5, 6, 7, 8, 9, 0] }
 
+    // Favorite-slot "keys": pronounced, square keyboard-style caps that fill
+    // the row (operator feedback — "like keys on the computer"). Raised look =
+    // adaptive surface + top sheen + soft drop shadow; selected lights up royal
+    // blue with a brighter sheen.
     private func slotButton(slot: Int, cmd: CommandStore.Command) -> some View {
         let isMine = cmd.keySlot == slot
         let isTaken = commands.contains { $0.slug != cmd.slug && $0.keySlot == slot }
@@ -320,30 +289,44 @@ public struct CommandsEditorView: View {
             setSlot(slug: cmd.slug, slot: slot)
         } label: {
             Text(String(slot))
-                .font(.system(size: 14, weight: .semibold).monospacedDigit())
-                .foregroundStyle(isMine ? BridgeTokens.fg1
-                                 : (isTaken ? BridgeTokens.fg5 : BridgeTokens.fg3))
+                .font(.system(size: 17, weight: .semibold).monospacedDigit())
+                .foregroundStyle(isMine ? Color.white
+                                 : (isTaken ? BridgeTokens.fg5 : BridgeTokens.fg2))
                 .frame(maxWidth: .infinity)
-                .aspectRatio(1, contentMode: .fit)
-                .background(slotBackground(isMine: isMine), in: RoundedRectangle(cornerRadius: 9))
+                .frame(height: 46)
+                .background(slotKeyBackground(isMine: isMine, isTaken: isTaken))
+                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 9)
-                        .strokeBorder(isMine ? BridgeTokens.accent.opacity(0.6) : Color.white.opacity(0.10),
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .strokeBorder(isMine ? BridgeTokens.accent.opacity(0.7) : BridgeTokens.hairline,
                                       lineWidth: isMine ? 1 : 0.5)
                 )
+                .shadow(color: Color.black.opacity(isTaken ? 0 : 0.14), radius: 2, y: 1.5)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(isTaken && !isMine)
+        .help(isTaken ? "Slot \(slot) — taken by another command" : "Assign slot \(slot)")
     }
 
-    private func slotBackground(isMine: Bool) -> AnyShapeStyle {
+    /// Key-cap surface: a top-lit sheen over an adaptive raised surface so each
+    /// slot reads as a physical key in both themes. Selected = royal blue lit.
+    @ViewBuilder private func slotKeyBackground(isMine: Bool, isTaken: Bool) -> some View {
         if isMine {
-            return AnyShapeStyle(LinearGradient(
-                colors: [BridgeTokens.accent.opacity(0.5), BridgeTokens.accent.opacity(0.3)],
-                startPoint: .top, endPoint: .bottom))
+            ZStack {
+                BridgeTokens.accent.opacity(0.9)
+                LinearGradient(colors: [Color.white.opacity(0.28), Color.white.opacity(0.05)],
+                               startPoint: .top, endPoint: .bottom)
+            }
+        } else if isTaken {
+            BridgeTokens.wellFill
+        } else {
+            ZStack {
+                BridgeTokens.bgRaised
+                LinearGradient(colors: [Color.white.opacity(0.10), Color.clear],
+                               startPoint: .top, endPoint: .bottom)
+            }
         }
-        return AnyShapeStyle(Color.black.opacity(0.2))
     }
 
     private func bodyCard(_ c: CommandStore.Command) -> some View {
@@ -364,8 +347,8 @@ public struct CommandsEditorView: View {
                 .scrollContentBackground(.hidden)
                 .padding(10)
                 .frame(minHeight: 150)
-                .background(Color.black.opacity(0.26), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                .background(BridgeTokens.wellFillDeep, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
                 if let msg = saveMessage {
                     Text(msg)
                         .font(.system(size: 11))
@@ -410,7 +393,7 @@ public struct CommandsEditorView: View {
                     .padding(.horizontal, 18)
                     .frame(maxWidth: .infinity)
                     .background(trayCanvas, in: RoundedRectangle(cornerRadius: 18))
-                    .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(BridgeTokens.hairline, lineWidth: 1))
                 }
             }
         }
@@ -458,8 +441,8 @@ public struct CommandsEditorView: View {
     ) -> some View {
         ZStack {
             Circle()
-                .fill(Color.white.opacity(0.05))
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5))
+                .fill(BridgeTokens.chipFill)
+                .overlay(Circle().strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5))
             switch icon {
             case .emoji(let s):
                 Text(s).font(.system(size: glyph))
@@ -560,12 +543,6 @@ public struct CommandsEditorView: View {
         applyUpdate(c)
     }
 
-    private func updateColor(slug: String, color: CommandStore.NotionColor) {
-        guard var c = commands.first(where: { $0.slug == slug }) else { return }
-        c.color = color
-        applyUpdate(c)
-    }
-
     /// PKT-879: atomic icon + color update from the icon picker sheet.
     /// Color is only relevant for symbol icons; the picker passes `nil`
     /// for emoji selections.
@@ -634,5 +611,26 @@ public struct CommandsEditorView: View {
         } catch {
             saveMessage = error.localizedDescription
         }
+    }
+}
+
+// MARK: - Add-command button style
+
+/// The "+" new-command button: GREEN (signal-ok) at rest, neutral GRAY while
+/// pressed. Keyed on `configuration.isPressed` so the fill/icon/border swap to
+/// a muted gray on press, then snap back to green on release — adaptive in both
+/// themes (all tokens via BridgeTokens, no hardcoded white/black).
+private struct AddCommandButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed
+        let icon = pressed ? BridgeTokens.fg4 : BridgeTokens.ok
+        let fill = pressed ? BridgeTokens.wellFill : BridgeTokens.ok.opacity(0.28)
+        let border = pressed ? BridgeTokens.hairline : BridgeTokens.ok.opacity(0.45)
+        return configuration.label
+            .foregroundStyle(icon)
+            .frame(width: 30, height: 30)
+            .background(fill, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(border, lineWidth: 0.5))
+            .contentShape(Rectangle())
     }
 }

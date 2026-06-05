@@ -764,7 +764,61 @@ set -euo pipefail
 # were UPDATED in place (2→3 count), not added. NOT auto-injected into the
 # handshake instructions (flag-gated TODO left at the composition site):
 # 1721 + 4 = 1725.
-FLOOR="${BRIDGE_TEST_FLOOR:-1725}"
+# v3.7.6 Wave 3 delivery-audit + Tools deep-link (2026-06-04): two delivery-audit
+# bug fixes + a Tools dep-link chip deep-link (navigate → scroll → expand) with
+# regression coverage.
+#   BUG 1 (overlay-freshness false-stale): reads record the CLIENT-specific
+#   composition hash, but freshness compared against the overlay-LESS default
+#   hash, so any client with a ClientOverlayStore overlay was permanently
+#   amber/stale. Fix: DeliveryLog.currentHash is now (clientName:) -> String
+#   (default StandingOrdersDelivery.composition(clientName:).contentHash) and
+#   sessions() resolves the live hash per-session from the session's client name.
+#   Added ClientOverlayStore.allOverlays() (public over the private readAll()).
+#   BUG 2 (legacy-SSE rows never pruned): channelInactive dropped the channel
+#   but never pruned the session's DeliveryLog events (Streamable-HTTP + stdio
+#   prune via removeSession). Fix: a nonisolated SSEServer.pruneLegacyDelivery-
+#   Telemetry(sessionID:) seam hops to the main actor; channelInactive calls it.
+#   DEEP-LINK: ModuleGroupDerivation.groupID(forAnchor:registeredTools:) maps a
+#   Tools dep-link chip's anchor (a lowercased tool-module name) to the target
+#   ModuleGroupID; ModuleGroupList wraps its cards in a ScrollViewReader, scrolls
+#   to the anchored group and auto-expands it (ModuleGroupCard gains forceExpanded).
+#   Factored the truthful audit labels into the pure DeliveryAuditLabels helper.
+# +12 test() blocks: DeliveryAuditWave3Tests (+7 — overlay-fresh/stale/no-overlay,
+# legacy-prune-on-disconnect, record* wiring ×2, truthful-label invariant) and
+# ModuleGroupTests deep-link section (+5 — anchor→group resolution incl. derived
+# group / single-tool / id-fallback / nil-graceful). Measured green 1784 -> 1796
+# across direct runs. The only intermittent gate failure observed is the
+# PRE-EXISTING, documented load-sensitive WS-F provision-timeout flake (see the
+# 2026-06-02 WS-G note above) — unrelated to this wave. Floor raised by the +12
+# net additive count over the prior floor (1725 + 12 = 1737), staying well below
+# the measured 1796 so the existing GUI/TCC + flake headroom is preserved while
+# the 12 new tests cannot be silently dropped.
+# v3.7.6 Wave 4a (2026-06-04): premium Credentials vault. Retired the legacy
+# Form CRUD (CredentialsView.swift deleted; crudCard removed) and replaced it
+# with a premium add/replace sheet (CredentialAddSheet) + Full live validation.
+# New validation core (CredentialHealth.swift, CredentialValidator.swift):
+# CredentialHealth{valid,expiring,revoked,unchecked,error} + last-known
+# persistence (CredentialHealthStore, UserDefaults JSON); the validator REUSES
+# existing infra (Notion → ConnectionHealthChecker.checkNotionHealth →
+# NotionClient.validate(); Stripe → StripeClient.retrieveAccountInfo()); card →
+# pure local expiry; everything else → .unchecked (truthfulness invariant). All
+# network is off-main, ~10s time-bounded, and gated on isAppBundle so it NEVER
+# runs under the test executable. Weekly auto-validate is an on-launch
+# lastAutoValidateAt + >7d check (the Jobs/launchd action-chain infra only hosts
+# MCP-tool invocations via SSE, not internal Swift calls — documented fallback).
+# +39 test() blocks in CredentialValidatorTests.swift — service→method mapping
+# (notion/stripe/card/unmappable), the truthfulness invariant (unmappable +
+# unchecked → never .valid), health→badge-tone, ConnectionHealth/StripeError
+# mapping, card-expiry math (fixed now), persistence round-trip + prune, the
+# Touch-ID reveal-gate decision, the weekly-due decision, and the Luhn/expiry
+# card-form validators. All pure (ephemeral UserDefaults suite, fixed dates) —
+# no live network / no host deps, run in CI + local alike. Measured green
+# 1796 -> 1835 locally (0 failed). Floor raised by the +39 net additive count
+# over the prior floor (1737 + 39 = 1776), staying below the measured 1835 so
+# the existing GUI/TCC + flake headroom is preserved while the 39 new tests
+# cannot be silently dropped.
+FLOOR="${BRIDGE_TEST_FLOOR:-1777}"
+# v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
 # PKT-907 Notion-source eager-enumeration carve-out and the v3.6·5

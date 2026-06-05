@@ -15,7 +15,7 @@ func runDeliveryLogTests() async {
 
     await test("DeliveryLog: handshake then read rolls up to one session audit row") {
         try await MainActor.run {
-            let log = DeliveryLog(currentHash: { "HASH_A" })
+            let log = DeliveryLog(currentHash: { _ in "HASH_A" })
             log.ingest(.init(
                 sessionID: "s1", clientName: "claude", kind: .handshakeDelivered,
                 tokenCount: 1200, contentHash: "HASH_A"))
@@ -35,7 +35,7 @@ func runDeliveryLogTests() async {
 
     await test("DeliveryLog: a session with no read reports nil read + nil freshness (NOT stale)") {
         try await MainActor.run {
-            let log = DeliveryLog(currentHash: { "HASH_A" })
+            let log = DeliveryLog(currentHash: { _ in "HASH_A" })
             log.ingest(.init(
                 sessionID: "s1", clientName: "c", kind: .handshakeDelivered,
                 tokenCount: 10, contentHash: "HASH_A"))
@@ -47,7 +47,7 @@ func runDeliveryLogTests() async {
 
     await test("DeliveryLog: freshness is emerald when last read hash == current composition hash") {
         try await MainActor.run {
-            let log = DeliveryLog(currentHash: { "HASH_CURRENT" })
+            let log = DeliveryLog(currentHash: { _ in "HASH_CURRENT" })
             log.ingest(.init(
                 sessionID: "s1", clientName: "c", kind: .resourceRead,
                 uri: BridgeResources.standingOrdersURI, contentHash: "HASH_CURRENT"))
@@ -60,7 +60,7 @@ func runDeliveryLogTests() async {
     await test("DeliveryLog: freshness is stale when orders changed since the last read") {
         try await MainActor.run {
             // The read served HASH_OLD, but the live composition is now HASH_NEW.
-            let log = DeliveryLog(currentHash: { "HASH_NEW" })
+            let log = DeliveryLog(currentHash: { _ in "HASH_NEW" })
             log.ingest(.init(
                 sessionID: "s1", clientName: "c", kind: .resourceRead,
                 uri: BridgeResources.standingOrdersURI, contentHash: "HASH_OLD"))
@@ -71,7 +71,7 @@ func runDeliveryLogTests() async {
 
     await test("DeliveryLog: latest-per-kind keeps only the newest read for a session") {
         try await MainActor.run {
-            let log = DeliveryLog(currentHash: { "H2" })
+            let log = DeliveryLog(currentHash: { _ in "H2" })
             let t0 = Date(timeIntervalSince1970: 1000)
             let t1 = Date(timeIntervalSince1970: 2000)
             log.ingest(.init(
@@ -89,7 +89,7 @@ func runDeliveryLogTests() async {
 
     await test("DeliveryLog: history ring is bounded at historyCap") {
         try await MainActor.run {
-            let log = DeliveryLog(currentHash: { "H" })
+            let log = DeliveryLog(currentHash: { _ in "H" })
             let overflow = DeliveryLog.historyCap + 50
             for i in 0..<overflow {
                 log.ingest(.init(
@@ -104,7 +104,7 @@ func runDeliveryLogTests() async {
 
     await test("DeliveryLog: timeline is newest-first and respects the limit") {
         try await MainActor.run {
-            let log = DeliveryLog(currentHash: { "H" })
+            let log = DeliveryLog(currentHash: { _ in "H" })
             for i in 0..<10 {
                 log.ingest(.init(
                     sessionID: "s\(i)", clientName: "c", kind: .handshakeDelivered,
@@ -120,7 +120,7 @@ func runDeliveryLogTests() async {
 
     await test("DeliveryLog: reminderToolCall is recorded with the tool name (audit-only)") {
         try await MainActor.run {
-            let log = DeliveryLog(currentHash: { "H" })
+            let log = DeliveryLog(currentHash: { _ in "H" })
             log.ingest(.init(
                 sessionID: "s1", clientName: "c", kind: .reminderToolCall,
                 uri: "reminders_create"))
@@ -133,7 +133,7 @@ func runDeliveryLogTests() async {
 
     await test("DeliveryLog: prune drops a session from rows and timeline") {
         try await MainActor.run {
-            let log = DeliveryLog(currentHash: { "H" })
+            let log = DeliveryLog(currentHash: { _ in "H" })
             log.ingest(.init(
                 sessionID: "s1", clientName: "a", kind: .handshakeDelivered,
                 tokenCount: 1, contentHash: "H"))
@@ -152,7 +152,7 @@ func runDeliveryLogTests() async {
 
     await test("DeliveryLog: sessions render in first-seen order") {
         try await MainActor.run {
-            let log = DeliveryLog(currentHash: { "H" })
+            let log = DeliveryLog(currentHash: { _ in "H" })
             for sid in ["z", "a", "m"] {
                 log.ingest(.init(
                     sessionID: sid, clientName: sid, kind: .handshakeDelivered,

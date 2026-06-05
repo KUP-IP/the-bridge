@@ -55,7 +55,7 @@ private struct ModuleGroupToolRow: View {
             // dim when off (design `.tl-glyph.on` / `.off`).
             Circle()
                 .fill(isEnabled ? BridgeTokens.ok
-                                : Color.white.opacity(0.18))
+                                : BridgeTokens.fg5)
                 .frame(width: 7, height: 7)
                 .shadow(color: isEnabled ? BridgeTokens.ok.opacity(0.6) : .clear,
                         radius: 2.5)
@@ -63,11 +63,11 @@ private struct ModuleGroupToolRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(toolName)
                     .font(.system(size: 12.5, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.95))
+                    .foregroundStyle(BridgeTokens.fg1)
                 if !description.isEmpty {
                     Text(description)
                         .font(.system(size: 11.5))
-                        .foregroundStyle(Color.white.opacity(0.5))
+                        .foregroundStyle(BridgeTokens.fg4)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -132,6 +132,13 @@ public struct ModuleGroupCard: View {
     public let onMasterChange: (Bool) -> Void
     public let onDepLinkTapped: (ModuleGroupDependency) -> Void
 
+    /// Deep-link auto-expand signal. `true` when this card is the target of a
+    /// Tools dep-link chip (its group == the resolved anchor); the card expands
+    /// itself so the operator lands on an OPEN card, not a collapsed one. Driven
+    /// by `ModuleGroupList` off `SettingsNavigation.anchor`. Default `false`
+    /// preserves the persisted-expand cold-launch behaviour for every other card.
+    public let forceExpanded: Bool
+
     @State private var isExpanded: Bool
 
     /// v3.6.0 D6: per-group expand state persists in BridgeDefaults
@@ -144,6 +151,7 @@ public struct ModuleGroupCard: View {
         group: ModuleGroup,
         toolDescriptions: [String: String],
         toolTiers: [String: String] = [:],
+        forceExpanded: Bool = false,
         onPerToolChange: @escaping (String, Bool) -> Void,
         onMasterChange: @escaping (Bool) -> Void,
         onDepLinkTapped: @escaping (ModuleGroupDependency) -> Void
@@ -151,11 +159,14 @@ public struct ModuleGroupCard: View {
         self.group = group
         self.toolDescriptions = toolDescriptions
         self.toolTiers = toolTiers
+        self.forceExpanded = forceExpanded
         self.onPerToolChange = onPerToolChange
         self.onMasterChange = onMasterChange
         self.onDepLinkTapped = onDepLinkTapped
         let saved = ModuleGroupCard.savedExpandState(forGroupId: group.id.rawValue)
         let initial: Bool = {
+            // Deep-link target → start expanded so the chip lands on an open card.
+            if forceExpanded { return true }
             // Off groups always collapse, regardless of saved state.
             if group.masterState == .off { return false }
             // Use saved value if present, otherwise default to collapsed.
@@ -192,7 +203,7 @@ public struct ModuleGroupCard: View {
                     if !group.dependencies.isEmpty {
                         depChipRow
                     }
-                    Divider().background(Color.white.opacity(0.06))
+                    Divider().background(BridgeTokens.hairlineFaint)
                     if let dep = unmetDependency, group.masterState != .off {
                         warnBanner(for: dep)
                     }
@@ -203,6 +214,14 @@ public struct ModuleGroupCard: View {
         .opacity(group.masterState == .off ? 0.62 : 1.0)
         .animation(.easeInOut(duration: 0.18), value: isExpanded)
         .animation(.easeInOut(duration: 0.15), value: group.masterState)
+        // Deep-link: when this card becomes the chip target while already
+        // on-screen (e.g. the operator was already on Tools), expand it.
+        .onChange(of: forceExpanded) { _, nowTarget in
+            if nowTarget && !isExpanded {
+                isExpanded = true
+                ModuleGroupCard.persistExpandState(forGroupId: group.id.rawValue, expanded: true)
+            }
+        }
     }
 
     private func warnBanner(for dep: ModuleGroupDependency) -> some View {
@@ -236,12 +255,12 @@ public struct ModuleGroupCard: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(group.displayName)
                     .font(.system(size: 14.5, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(0.95))
+                    .foregroundStyle(BridgeTokens.fg1)
                 HStack(spacing: 6) {
                     countBadge
                     Text(group.subtitle)
                         .font(.system(size: 11.5))
-                        .foregroundStyle(Color.white.opacity(0.5))
+                        .foregroundStyle(BridgeTokens.fg4)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -300,7 +319,7 @@ public struct ModuleGroupCard: View {
             .fill(accent.opacity(0.12))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+                    .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
             )
             .overlay(
                 // top rim highlight — matches the design's inset sheen.
@@ -333,9 +352,9 @@ public struct ModuleGroupCard: View {
             fg = BridgeTokens.okText
         case .off:
             label = "0 of \(group.total) active"
-            bg = Color.white.opacity(0.06)
-            stroke = Color.white.opacity(0.10)
-            fg = Color.white.opacity(0.65)
+            bg = BridgeTokens.chipFill
+            stroke = BridgeTokens.hairline
+            fg = BridgeTokens.fg3
         case .partial:
             label = "\(group.enabledCount) of \(group.total) active"
             bg = BridgeTokens.warn.opacity(0.14)
@@ -355,7 +374,7 @@ public struct ModuleGroupCard: View {
     private var chevron: some View {
         Image(systemName: "chevron.down")
             .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(Color.white.opacity(0.42))
+            .foregroundStyle(BridgeTokens.fg4)
             .rotationEffect(.degrees(isExpanded ? 0 : -90))
     }
 
@@ -363,7 +382,7 @@ public struct ModuleGroupCard: View {
         HStack(spacing: 6) {
             Text("depends on")
                 .font(.system(size: 11))
-                .foregroundStyle(Color.white.opacity(0.46))
+                .foregroundStyle(BridgeTokens.fg4)
             ForEach(group.dependencies, id: \.self) { dep in
                 BridgeDepLink(
                     dep.label,
@@ -428,43 +447,92 @@ public struct ModuleGroupList: View {
     }
 
     private var groups: [ModuleGroup] {
+        // Display the grouped cards alphabetically by group name (case-
+        // insensitive), mirroring the legacy ToolRegistryView's
+        // `dict.keys.sorted()`. The dispatch-side `deriveGroups` order is
+        // left untouched (it feeds the safety gate); only the UI list sorts.
         ModuleGroupDerivation.deriveGroups(
             registeredToolNames: tools.map(\.name),
             disabledNames: disabledTools
         )
+        .sorted {
+            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        }
+    }
+
+    /// The `ModuleGroupID` a Tools dep-link chip's `anchor` targets, resolved
+    /// against the live tool list (so it tracks the chip's module → group). nil
+    /// when there is no anchor or it maps to no on-screen group. Drives both the
+    /// `ScrollViewReader` scroll target and the matching card's auto-expand.
+    private var anchoredGroupID: ModuleGroupID? {
+        ModuleGroupDerivation.groupID(
+            forAnchor: nav.anchor,
+            registeredTools: tools.map { (name: $0.name, module: $0.module) }
+        )
     }
 
     public var body: some View {
-        ScrollView {
-            // PKT-934 W1: card-stack spacing aligned to the BridgeSpacing
-            // grid (sm) so the Tools and Jobs card pages share one tier;
-            // was an off-grid literal 10.
-            VStack(alignment: .leading, spacing: BridgeSpacing.sm) {
-                hero
-                ForEach(groups) { group in
-                    ModuleGroupCard(
-                        group: group,
-                        toolDescriptions: descriptions,
-                        toolTiers: tiers,
-                        onPerToolChange: { toolName, enabled in
-                            setEnabled(toolName, enabled)
-                        },
-                        onMasterChange: { enabled in
-                            setGroupEnabled(group, enabled: enabled)
-                        },
-                        onDepLinkTapped: { dep in
-                            handleDepLink(dep)
-                        }
-                    )
+        ScrollViewReader { proxy in
+            ScrollView {
+                // PKT-934 W1: card-stack spacing aligned to the BridgeSpacing
+                // grid (sm) so the Tools and Jobs card pages share one tier;
+                // was an off-grid literal 10.
+                VStack(alignment: .leading, spacing: BridgeSpacing.sm) {
+                    hero
+                    ForEach(groups) { group in
+                        ModuleGroupCard(
+                            group: group,
+                            toolDescriptions: descriptions,
+                            toolTiers: tiers,
+                            // Deep-link: auto-expand the chip's target group.
+                            forceExpanded: group.id == anchoredGroupID,
+                            onPerToolChange: { toolName, enabled in
+                                setEnabled(toolName, enabled)
+                            },
+                            onMasterChange: { enabled in
+                                setGroupEnabled(group, enabled: enabled)
+                            },
+                            onDepLinkTapped: { dep in
+                                handleDepLink(dep)
+                            }
+                        )
+                        // Scroll anchor id — the resolved group id, so the
+                        // ScrollViewReader can jump straight to the target card.
+                        .id(group.id)
+                    }
                 }
+                .padding(BridgeSpacing.md)
             }
-            .padding(BridgeSpacing.md)
+            // Deep-link: scroll the chip's target group into view. Fires on first
+            // appear (chip tapped from another page → Tools just rendered) and on
+            // every later anchor change (operator already on Tools). The anchor is
+            // cleared after consuming so re-selecting the same chip re-triggers.
+            .onAppear { scrollToAnchorIfNeeded(proxy) }
+            .onChange(of: nav.anchor) { _, _ in scrollToAnchorIfNeeded(proxy) }
         }
         .onReceive(NotificationCenter.default.publisher(
             for: UserDefaults.didChangeNotification
         )) { _ in
             let fresh = Set(UserDefaults.standard.stringArray(forKey: BridgeDefaults.disabledTools) ?? [])
             if fresh != disabledTools { disabledTools = fresh }
+        }
+    }
+
+    /// Scroll the anchored group's card to the top, then clear the consumed
+    /// anchor so the same chip can re-trigger later. No-op when the anchor maps
+    /// to no on-screen group (e.g. an orphaned-credential chip).
+    private func scrollToAnchorIfNeeded(_ proxy: ScrollViewProxy) {
+        guard let target = anchoredGroupID else { return }
+        // A tiny hop lets the ForEach lay out the cards before we scroll —
+        // matches the cross-page nav timing (the section view appears, THEN we
+        // jump). withAnimation keeps the jump legible rather than instant.
+        DispatchQueue.main.async {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                proxy.scrollTo(target, anchor: .top)
+            }
+            // Clear the consumed anchor so re-tapping the same chip re-fires the
+            // onChange (and so a later visit doesn't re-jump unexpectedly).
+            nav.anchor = nil
         }
     }
 
@@ -508,8 +576,8 @@ public struct ModuleGroupList: View {
         let valueColor: Color = {
             switch emphasis {
             case .on:      return BridgeTokens.okText
-            case .off:     return Color.white.opacity(0.45)
-            case .neutral: return Color.white
+            case .off:     return BridgeTokens.fg4
+            case .neutral: return BridgeTokens.fg1
             }
         }()
         return VStack(spacing: 3) {
@@ -522,8 +590,8 @@ public struct ModuleGroupList: View {
                 .foregroundStyle(BridgeTokens.fg4)
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
     }
 
     // MARK: Mutators

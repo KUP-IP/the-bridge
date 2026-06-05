@@ -634,6 +634,7 @@ await runChromeModuleTests()
 await runSkillsModuleTests()
 await runCredentialManagerTests()
 await runCredentialModuleTests()
+await runCredentialValidatorTests()   // v3.7.6 Wave 4a: premium vault validation core — pure service→method mapping (incl. unmappable→unchecked truthfulness invariant), health→badge-tone, status persistence round-trip, Touch-ID reveal gate, weekly-due decision, card expiry/form validators. NO live network.
 await runStripeClientTests()
 await runPaymentModuleTests()
 await runConnectionsModuleTests()
@@ -679,6 +680,7 @@ await runFlagVisibilityMigrationTests()  // cmd-ux W4 (3.4.1): flag-based visibi
 await runW4ComponentAndStorageTests()    // cmd-ux W4 (3.4.1): kbd-chip splitter + per-path file-source flag storage + effective routing/palette resolution
 await runSkillsMCPFlagRoundTripTests()    // 3.4.2 W3 H1 fix: SkillConfig MCP reconstruction preserves combined-state flag pair
 await runHotkeyRecorderFocusTests()        // 3.4.2 W4 H5 fix: RecorderFocusModel contract locks the button-binding focus path
+await runHotkeyRebindUITests()             // v3.7.6: mount the Commands "Global shortcut" card — HotkeyConfig.from validation + persist round-trip + status-row mapping
 await runFrontmatterParserTests()   // W2 D8: SKILL.md YAML frontmatter parser
 await runSkillSourceTests()         // W2 D2: SkillSource enum + legacy notionPageId backward-compat
 await runFilesystemSkillIndexTests() // W2 D3: SKILL.md filesystem index actor
@@ -721,6 +723,13 @@ await runStandingOrdersDeliveryTests()
 // W2 delivery telemetry: DeliveryLog ingest + per-(session,kind) rollup +
 // bounded history ring + truthful per-session freshness logic + session prune.
 await runDeliveryLogTests()
+
+// Wave 3 delivery-audit regressions: (a) overlay-freshness (an overlay client
+// reading its own composition is FRESH, not permanently amber — real
+// composition(clientName:) path), (b) legacy-SSE prune-on-disconnect, (c) the
+// record* wiring seam (handshake/read land the expected event), (d) truthful
+// labels ("Fetched ✓" only on a real read; never "Honored").
+await runDeliveryAuditWave3Tests()
 
 // PKT-6 (v3.5): CommandStore (markdown-per-command + index.json).
 await runCommandStoreTests()
@@ -810,6 +819,15 @@ await runCloudAccessWSGTests()
 // memory_* MCP tool registration + tiering + handler round-trip. All against
 // a TEMP DB path (never the real config-dir store, never the shared singleton).
 await runMemoryModuleTests()
+
+// v3.7.6 (system-tethered Light/Dark theme): the appearance-adaptive
+// BridgeTokens contract. Resolves every adaptive token under .darkAqua and
+// .aqua and asserts (a) the DARK branch equals the exact v3.7.5 carbon literal
+// (dark = regression-free), (b) the LIGHT branch equals the defined titanium
+// value, (c) each adaptive token genuinely differs across appearances, (d)
+// canvasNSColor (AppKit window backing) tracks bgCanvas in both, and (e) the
+// LEAVE-UNCHANGED tokens (accents/base signals/gold/titanium) stay fixed.
+await runBridgeTokensAdaptiveTests()
 
 // ============================================================
 // MARK: - Summary

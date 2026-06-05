@@ -58,20 +58,20 @@ public struct IconPickerSheet: View {
     public var body: some View {
         VStack(spacing: 0) {
             header
-            Divider().background(Color.white.opacity(0.10))
+            Divider().background(BridgeTokens.hairline)
             tabBar
             swatchRow
             searchField
-            Divider().background(Color.white.opacity(0.10))
+            Divider().background(BridgeTokens.hairline)
             grid
                 .frame(minHeight: 240, maxHeight: 320)
-            Divider().background(Color.white.opacity(0.10))
+            Divider().background(BridgeTokens.hairline)
             footer
         }
         .frame(width: 420, height: 480)
         .background(
             ZStack {
-                Color(red: 0.09, green: 0.09, blue: 0.105)
+                BridgeTokens.bgRaised
                 LinearGradient(
                     colors: [Color.white.opacity(0.06), Color.white.opacity(0.01)],
                     startPoint: .top, endPoint: .bottom
@@ -91,7 +91,7 @@ public struct IconPickerSheet: View {
                 isPresented = false
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(BridgeTokens.fg3)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -111,14 +111,14 @@ public struct IconPickerSheet: View {
                         .padding(.vertical, 5)
                         .background(
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(tab == t ? Color.white.opacity(0.10) : Color.clear)
+                                .fill(tab == t ? BridgeTokens.selectionFill : Color.clear)
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                        .strokeBorder(tab == t ? Color.white.opacity(0.18) : Color.clear,
+                                        .strokeBorder(tab == t ? BridgeTokens.hairlineStrong : Color.clear,
                                                       lineWidth: 0.5)
                                 )
                         )
-                        .foregroundStyle(tab == t ? .primary : .secondary)
+                        .foregroundStyle(tab == t ? .primary : BridgeTokens.fg3)
                 }
                 .buttonStyle(.plain)
             }
@@ -126,7 +126,7 @@ public struct IconPickerSheet: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
-        .background(Color.black.opacity(0.18))
+        .background(BridgeTokens.wellFill)
     }
 
     // MARK: - Color swatch row
@@ -148,7 +148,7 @@ public struct IconPickerSheet: View {
                         .overlay(
                             Circle()
                                 .strokeBorder(
-                                    selectedColor == c ? Color.white : Color.white.opacity(0.12),
+                                    selectedColor == c ? Color.white : BridgeTokens.hairline,
                                     lineWidth: selectedColor == c ? 2 : 0.5
                                 )
                         )
@@ -173,7 +173,7 @@ public struct IconPickerSheet: View {
     private var searchField: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(BridgeTokens.fg3)
                 .font(.system(size: 11))
                 .accessibilityHidden(true)
             TextField(searchPlaceholder, text: $query)
@@ -196,10 +196,10 @@ public struct IconPickerSheet: View {
         .padding(.vertical, 6)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Color.black.opacity(0.25))
+                .fill(BridgeTokens.wellFillDeep)
                 .overlay(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+                        .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
                 )
         )
         .padding(.horizontal, 14)

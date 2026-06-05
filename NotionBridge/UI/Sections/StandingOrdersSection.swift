@@ -1,7 +1,8 @@
 // StandingOrdersSection.swift — Settings → Standing Orders pane.
-// PKT-9 UI v3.5 · v3.7.2 bundle-2 redesign: split markdown editor / rendered
-// preview, click-a-side-to-expand overlay, gold token stat, carbon canvas.
-// Real save/load/compose/routing logic preserved verbatim.
+// PKT-9 UI v3.5 · v3.7.6 redesign: single-panel Preview/Edit toggle editor with
+// an "Open" → centered full-panel overlay, bottom-pinned token meter, gold token
+// stat, adaptive titanium/carbon chrome. Real save/load/compose/routing logic
+// preserved verbatim.
 
 import SwiftUI
 import AppKit
@@ -15,9 +16,13 @@ public struct StandingOrdersSection: View {
     @State private var selectedTemplate: StandingOrdersStore.Template? = nil
     @State private var cachedRouting: [RoutingSkillSummary] = []
 
-    /// Which side is expanded into the float overlay (nil = docked split).
-    private enum ExpandSide { case editor, preview }
-    @State private var expanded: ExpandSide? = nil
+    /// Which view the single editor panel shows (Preview = rendered markdown,
+    /// Edit = raw mono TextEditor). Defaults to Preview, mirroring the design.
+    private enum PanelMode: Hashable { case preview, edit }
+    @State private var mode: PanelMode = .preview
+
+    /// Whether the editor is expanded into the centered full-panel overlay.
+    @State private var expanded = false
 
     /// The live delivery telemetry the "Delivery audit" card reads. Observing
     /// the @Observable singleton makes the card live-update as the transports
@@ -35,7 +40,7 @@ public struct StandingOrdersSection: View {
             VStack(spacing: 14) {
                 hero
                 if let err = loadError { errorBanner(err) }
-                splitCard
+                editorCard
                 deliveryAuditCard
                 templatesCard
             }
@@ -99,8 +104,8 @@ public struct StandingOrdersSection: View {
                 .foregroundStyle(BridgeTokens.fg4)
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
     }
 
     private func soIconButton(_ systemImage: String, help: String, action: @escaping () -> Void) -> some View {
@@ -115,75 +120,113 @@ public struct StandingOrdersSection: View {
         .help(help)
     }
 
-    // MARK: - Split editor / preview
+    // MARK: - Editor card (single-panel Preview/Edit toggle)
+    //
+    // One panel, switched by a segmented [Preview | Edit] toggle on the left of
+    // the header; an "Open" button on the right expands the panel into a
+    // centered full overlay. The token meter is pinned to the bottom of the card.
 
-    private var splitCard: some View {
+    private var editorCard: some View {
         BridgeGlassCard {
-            HStack(spacing: 0) {
-                editorColumn
-                    .padding(.trailing, 14)
-                Rectangle().fill(Color.white.opacity(0.10)).frame(width: 0.5)
-                previewColumn
-                    .padding(.leading, 14)
-            }
-            .frame(height: 320)
-        }
-    }
-
-    private var editorColumn: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            columnHead("Markdown body", tab: "orders.md")
-            TextEditor(text: $draft)
-                .font(.system(size: 12, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .padding(10)
-                .background(Color.black.opacity(0.26), in: RoundedRectangle(cornerRadius: 9))
-                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
-                .frame(maxHeight: .infinity)
-            HStack(spacing: 8) {
-                Button("Save") { Task { await save() } }
-                    .buttonStyle(.borderedProminent).tint(BridgeTokens.accent)
-                    .disabled(snapshot == nil || draft == snapshot?.markdown)
-                if let msg = saveMessage {
-                    Text(msg).font(.caption)
-                        .foregroundStyle(saveIsError ? BridgeTokens.bad : BridgeTokens.ok)
+            VStack(alignment: .leading, spacing: 11) {
+                HStack(spacing: 10) {
+                    modeToggle
+                    Spacer()
+                    openButton
                 }
-                Spacer()
+                panelBody(expandedStyle: false)
+                    .frame(height: 286)
+                tokenMeter
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .onTapGesture { withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) { expanded = .editor } }
     }
 
-    private var previewColumn: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            columnHead("Composed preview", tab: "agent view")
+    /// Segmented [Preview | Edit] control — mirrors the design's `.cm-tabs`.
+    private var modeToggle: some View {
+        HStack(spacing: 0) {
+            modeTab("Preview", .preview)
+            modeTab("Edit", .edit)
+        }
+        .padding(2)
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+    }
+
+    private func modeTab(_ label: String, _ value: PanelMode) -> some View {
+        let on = mode == value
+        return Button {
+            withAnimation(.easeInOut(duration: 0.16)) { mode = value }
+        } label: {
+            Text(label)
+                .font(.system(size: 12, weight: on ? .semibold : .regular))
+                .foregroundStyle(on ? BridgeTokens.fg1 : BridgeTokens.fg3)
+                .padding(.horizontal, 14).padding(.vertical, 5)
+                .background {
+                    if on {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(BridgeTokens.accent.opacity(0.18))
+                            .overlay(RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(BridgeTokens.accent.opacity(0.45), lineWidth: 0.5))
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// "Open" → expand the panel into the centered full overlay.
+    private var openButton: some View {
+        Button {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) { expanded = true }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("Open").font(.system(size: 12))
+            }
+            .foregroundStyle(BridgeTokens.fg2)
+            .padding(.horizontal, 11).padding(.vertical, 5)
+            .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Open full panel")
+    }
+
+    /// The single panel body — renders whichever mode is active. `expandedStyle`
+    /// drives the larger typography used inside the full overlay.
+    @ViewBuilder private func panelBody(expandedStyle: Bool) -> some View {
+        switch mode {
+        case .preview:
             ScrollView {
                 SOMarkdownView(markdown: composedText)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
+                    .padding(expandedStyle ? 18 : 14)
             }
             .background(BridgeTokens.accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
             .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(BridgeTokens.accent.opacity(0.24), lineWidth: 0.5))
             .frame(maxHeight: .infinity)
-            tokenMeter
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .onTapGesture { withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) { expanded = .preview } }
-    }
-
-    private func columnHead(_ label: String, tab: String) -> some View {
-        HStack(spacing: 8) {
-            BridgeCardLabel(label)
-            Spacer()
-            Text(tab)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(BridgeTokens.fg3)
-                .padding(.horizontal, 8).padding(.vertical, 2)
-                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+        case .edit:
+            VStack(alignment: .leading, spacing: 9) {
+                TextEditor(text: $draft)
+                    .font(.system(size: expandedStyle ? 13 : 12, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .padding(expandedStyle ? 13 : 10)
+                    .background(BridgeTokens.wellFillDeep, in: RoundedRectangle(cornerRadius: 9))
+                    .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+                    .frame(maxHeight: .infinity)
+                HStack(spacing: 8) {
+                    Button("Save") { Task { await save() } }
+                        .buttonStyle(.borderedProminent).tint(BridgeTokens.accent)
+                        .disabled(snapshot == nil || draft == snapshot?.markdown)
+                    if let msg = saveMessage {
+                        Text(msg).font(.caption)
+                            .foregroundStyle(saveIsError ? BridgeTokens.bad : BridgeTokens.ok)
+                    }
+                    Spacer()
+                }
+            }
         }
     }
 
@@ -192,82 +235,89 @@ public struct StandingOrdersSection: View {
         let frac = min(1.0, Double(tokens) / Double(tokenBudget))
         return HStack(spacing: 9) {
             Text("\(tokens) of \(tokenBudget.formatted()) tokens")
-                .font(.system(size: 11)).foregroundStyle(BridgeTokens.fg3)
+                .font(.system(size: 11))
+                .monospacedDigit()
+                .foregroundStyle(meterTextColor(frac))
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.08))
+                    Capsule().fill(BridgeTokens.chipFill)
+                    // green → branded blue (mid) → gold (90%) → red (last 10%),
+                    // gradient mapped across the FULL track so the fill reveals
+                    // the colour at its current position (mirrors the design CSS).
                     Capsule()
-                        .fill(LinearGradient(colors: [BridgeTokens.ok, BridgeTokens.gold],
-                                             startPoint: .leading, endPoint: .trailing))
-                        .frame(width: max(4, geo.size.width * frac))
+                        .fill(LinearGradient(
+                            stops: [
+                                .init(color: BridgeTokens.ok, location: 0.0),
+                                .init(color: BridgeTokens.accentStrong, location: 0.5),
+                                .init(color: BridgeTokens.gold, location: 0.9),
+                                .init(color: BridgeTokens.bad, location: 1.0),
+                            ],
+                            startPoint: .leading, endPoint: .trailing))
+                        .frame(width: geo.size.width)
+                        .mask(alignment: .leading) {
+                            Capsule().frame(width: max(4, geo.size.width * frac))
+                        }
                 }
             }
-            .frame(height: 5)
+            .frame(height: 6)
         }
     }
 
-    // MARK: - Expand overlay
+    /// The meter count text goes red once over the budget — matching the
+    /// design's `.so-meter-num.danger`.
+    private func meterTextColor(_ frac: Double) -> Color {
+        frac >= 0.9 ? BridgeTokens.badText : BridgeTokens.fg3
+    }
+
+    // MARK: - Expand overlay (centered full panel)
 
     @ViewBuilder private var expandOverlay: some View {
-        if let side = expanded {
+        if expanded {
             ZStack {
-                Color.black.opacity(0.6)
+                BridgeTokens.bgCanvas.opacity(0.6)
                     .ignoresSafeArea()
                     .onTapGesture { collapse() }
-                floatPanel(side)
-                    .padding(EdgeInsets(
-                        top: 26,
-                        leading: side == .editor ? 26 : 52,
-                        bottom: 26,
-                        trailing: side == .editor ? 52 : 26))
+                floatPanel
+                    .padding(EdgeInsets(top: 24, leading: 24, bottom: 24, trailing: 24))
                     .transition(.scale(scale: 0.93).combined(with: .opacity))
             }
             .onExitCommand { collapse() }
         }
     }
 
-    private func floatPanel(_ side: ExpandSide) -> some View {
+    private var floatPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                BridgeCardLabel(side == .editor ? "Markdown body" : "Composed preview")
-                Text(side == .editor ? "orders.md" : "agent view")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(BridgeTokens.fg3)
+                modeToggle
                 Spacer()
                 Button(action: collapse) {
                     HStack(spacing: 6) { Text("esc"); Text("✕") }
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(BridgeTokens.fg3)
                         .padding(.horizontal, 9).padding(.vertical, 3)
-                        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
-                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
+                        .background(BridgeTokens.chipFill, in: RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .help("Close (esc)")
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
-            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
+            Rectangle().fill(BridgeTokens.hairline).frame(height: 0.5)
 
-            if side == .editor {
-                TextEditor(text: $draft)
-                    .font(.system(size: 13, design: .monospaced))
-                    .scrollContentBackground(.hidden)
-                    .padding(16)
-            } else {
-                ScrollView {
-                    SOMarkdownView(markdown: composedText)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(18)
-                }
-                tokenMeter.padding(.horizontal, 18).padding(.bottom, 14)
+            VStack(alignment: .leading, spacing: 11) {
+                panelBody(expandedStyle: true)
+                tokenMeter
             }
+            .padding(.horizontal, 18).padding(.vertical, 16)
         }
-        .background(BridgeTokens.bgCarbon2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.7), radius: 50, y: 24)
+        .background(BridgeTokens.bgRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.55), radius: 50, y: 24)
     }
 
     private func collapse() {
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) { expanded = nil }
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) { expanded = false }
     }
 
     // MARK: - Delivery audit · active sessions
@@ -306,7 +356,7 @@ public struct StandingOrdersSection: View {
                 }
 
                 if !events.isEmpty {
-                    Divider().overlay(Color.white.opacity(0.08))
+                    Divider().overlay(BridgeTokens.hairline)
                     debugTimeline(events)
                 }
             }
@@ -322,15 +372,21 @@ public struct StandingOrdersSection: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(BridgeTokens.fg1)
                 HStack(spacing: 6) {
-                    if let tokens = row.deliveredTokens, let at = row.deliveredAt {
-                        Text("Delivered · \(tokens) tok · \(relativeTime(at))")
+                    // Labels come from the pure DeliveryAuditLabels helper so the
+                    // truthful-label rules ("Fetched ✓" only on a real read;
+                    // never "Honored") are unit-tested without a render; the
+                    // clock-dependent relative-time suffix stays in the view.
+                    if let delivered = DeliveryAuditLabels.deliveredLabel(for: row),
+                       let at = row.deliveredAt {
+                        Text("\(delivered) · \(relativeTime(at))")
                             .font(.system(size: 11.5))
                             .foregroundStyle(BridgeTokens.fg3)
                     }
                     // Truthful: only show "Fetched ✓" when a read actually
                     // happened. Absence is NOT rendered as "not honored".
-                    if let readAt = row.lastResourceReadAt {
-                        Text("Fetched ✓ · \(relativeTime(readAt))")
+                    if let fetched = DeliveryAuditLabels.fetchedLabel(for: row),
+                       let readAt = row.lastResourceReadAt {
+                        Text("\(fetched) · \(relativeTime(readAt))")
                             .font(.system(size: 11.5))
                             .foregroundStyle(BridgeTokens.okText)
                     }
@@ -340,8 +396,8 @@ public struct StandingOrdersSection: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(11)
-        .background(Color.black.opacity(0.20), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
     }
 
     /// Freshness dot: emerald when the last read served the CURRENT composition
@@ -358,7 +414,7 @@ public struct StandingOrdersSection: View {
         Circle()
             .fill(color)
             .frame(width: 8, height: 8)
-            .overlay(Circle().strokeBorder(Color.white.opacity(0.15), lineWidth: 0.5))
+            .overlay(Circle().strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5))
             .help(freshnessHelp(isFresh))
     }
 
@@ -415,7 +471,7 @@ public struct StandingOrdersSection: View {
                     }
                 }
                 .padding(10)
-                .background(Color.black.opacity(0.18), in: RoundedRectangle(cornerRadius: 8))
+                .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 8))
             }
         }
     }
@@ -475,10 +531,10 @@ public struct StandingOrdersSection: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(13)
                             .background(
-                                selectedTemplate == t ? BridgeTokens.accent.opacity(0.07) : Color.black.opacity(0.20),
+                                selectedTemplate == t ? BridgeTokens.accent.opacity(0.07) : BridgeTokens.wellFill,
                                 in: RoundedRectangle(cornerRadius: 10))
                             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(
-                                selectedTemplate == t ? BridgeTokens.accent.opacity(0.45) : Color.white.opacity(0.10),
+                                selectedTemplate == t ? BridgeTokens.accent.opacity(0.45) : BridgeTokens.hairline,
                                 lineWidth: 0.5))
                         }
                         .buttonStyle(.plain)
@@ -604,25 +660,25 @@ struct SOMarkdownView: View {
     @ViewBuilder private func row(_ block: Block) -> some View {
         switch block {
         case .h1(let t):
-            Text(inline(t)).font(.system(size: 19, weight: .semibold)).foregroundStyle(.white)
+            Text(inline(t)).font(.system(size: 19, weight: .semibold)).foregroundStyle(BridgeTokens.fg1)
                 .padding(.bottom, 1)
         case .h2(let t):
             VStack(alignment: .leading, spacing: 8) {
-                Rectangle().fill(Color.white.opacity(0.10)).frame(height: 0.5).padding(.top, 4)
-                Text(inline(t)).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                Rectangle().fill(BridgeTokens.hairline).frame(height: 0.5).padding(.top, 4)
+                Text(inline(t)).font(.system(size: 14, weight: .semibold)).foregroundStyle(BridgeTokens.fg1)
             }
         case .bullet(let t):
             HStack(alignment: .top, spacing: 8) {
-                Text("•").foregroundStyle(BridgeTokens.accentLink.opacity(0.7))
-                Text(inline(t)).foregroundStyle(.white.opacity(0.78))
+                Text("•").foregroundStyle(BridgeTokens.infoText.opacity(0.8))
+                Text(inline(t)).foregroundStyle(BridgeTokens.fg2)
             }.font(.system(size: 12.5))
         case .numbered(let n, let t):
             HStack(alignment: .top, spacing: 8) {
-                Text("\(n).").foregroundStyle(BridgeTokens.accentLink.opacity(0.7)).monospacedDigit()
-                Text(inline(t)).foregroundStyle(.white.opacity(0.78))
+                Text("\(n).").foregroundStyle(BridgeTokens.infoText.opacity(0.8)).monospacedDigit()
+                Text(inline(t)).foregroundStyle(BridgeTokens.fg2)
             }.font(.system(size: 12.5))
         case .paragraph(let t):
-            Text(inline(t)).font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.78))
+            Text(inline(t)).font(.system(size: 12.5)).foregroundStyle(BridgeTokens.fg2)
                 .fixedSize(horizontal: false, vertical: true)
         case .spacer:
             Spacer().frame(height: 2)

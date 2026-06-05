@@ -77,7 +77,7 @@ struct SkillsView: View {
                 listColumn
                     .frame(width: 268)
                 Rectangle()
-                    .fill(Color.white.opacity(0.10))
+                    .fill(BridgeTokens.hairline)
                     .frame(width: 0.5)
                 detailColumn
                     .frame(maxWidth: .infinity)
@@ -177,8 +177,8 @@ struct SkillsView: View {
                 }
                 .padding(.horizontal, 10)
                 .frame(height: 32)
-                .background(Color.black.opacity(0.22), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
+                .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
 
                 Button {
                     showAddForm = true
@@ -188,16 +188,16 @@ struct SkillsView: View {
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(showAddForm ? Color.white : BridgeTokens.fg2)
                         .frame(width: 32, height: 32)
-                        .background(showAddForm ? BridgeTokens.accent.opacity(0.85) : Color.white.opacity(0.06),
+                        .background(showAddForm ? BridgeTokens.accent.opacity(0.85) : BridgeTokens.chipFill,
                                     in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5))
+                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5))
                 }
                 .buttonStyle(.plain)
                 .help("Add a new skill")
             }
             .padding(.horizontal, 12).padding(.vertical, 11)
 
-            Divider().overlay(Color.white.opacity(0.08))
+            Divider().overlay(BridgeTokens.hairline)
 
             // list
             ScrollView {
@@ -233,7 +233,7 @@ struct SkillsView: View {
                 .padding(.horizontal, 6).padding(.vertical, 6)
             }
 
-            Divider().overlay(Color.white.opacity(0.08))
+            Divider().overlay(BridgeTokens.hairline)
 
             // footer count
             HStack {
@@ -378,7 +378,7 @@ struct SkillsView: View {
 
     private func rowRim(selected: Bool) -> some View {
         RoundedRectangle(cornerRadius: 8)
-            .strokeBorder(selected ? Color.white.opacity(0.14) : Color.clear, lineWidth: 0.5)
+            .strokeBorder(selected ? BridgeTokens.hairlineStrong : Color.clear, lineWidth: 0.5)
     }
 
     private func avatar(systemImage: String, big: Bool, dimmed: Bool) -> some View {
@@ -391,8 +391,8 @@ struct SkillsView: View {
                         center: UnitPoint(x: 0.3, y: 0.18),
                         startRadius: 0, endRadius: dim * 0.9)
                 )
-                .background(Circle().fill(Color.white.opacity(0.06)))
-            Circle().strokeBorder(Color.white.opacity(big ? 0.18 : 0.14), lineWidth: 0.5)
+                .background(Circle().fill(BridgeTokens.chipFill))
+            Circle().strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5)
             Image(systemName: systemImage)
                 .font(.system(size: big ? 19 : 12, weight: .medium))
                 .foregroundStyle(dimmed ? BridgeTokens.fg4 : BridgeTokens.fg1)
@@ -702,8 +702,8 @@ struct SkillsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
-        .background(Color.black.opacity(0.20), in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
     }
 
     private func visibilityLabel(_ skill: SkillsManager.Skill) -> String {
@@ -946,10 +946,10 @@ struct SkillsView: View {
                     .padding(.horizontal, 11)
                     .frame(height: 26)
                     .background(
-                        (anti ? BridgeTokens.bad.opacity(0.10) : Color.white.opacity(0.05)),
+                        (anti ? BridgeTokens.bad.opacity(0.10) : BridgeTokens.chipFill),
                         in: Capsule())
                     .overlay(Capsule().strokeBorder(
-                        anti ? BridgeTokens.bad.opacity(0.26) : Color.white.opacity(0.10),
+                        anti ? BridgeTokens.bad.opacity(0.26) : BridgeTokens.hairline,
                         lineWidth: 0.5))
             }
         }
@@ -964,7 +964,7 @@ struct SkillsView: View {
 
     private var tokenDivider: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.08))
+            .fill(BridgeTokens.hairline)
             .frame(height: 0.5)
             .padding(.vertical, 10)
     }
@@ -994,8 +994,8 @@ struct SkillsView: View {
                 .font(.system(size: 13))
                 .foregroundStyle(danger ? BridgeTokens.bad.opacity(0.85) : BridgeTokens.fg3)
                 .frame(width: 30, height: 30)
-                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                .background(BridgeTokens.chipFill, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
