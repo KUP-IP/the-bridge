@@ -837,7 +837,10 @@ set -euo pipefail
 # count over the prior floor (1777 + 16 = 1793), staying below the measured 1858
 # so existing GUI/TCC + flake headroom is preserved while the 16 new tests cannot
 # be silently dropped.
-FLOOR="${BRIDGE_TEST_FLOOR:-1793}"
+# fb-securitygate-revoke-ui (2026-06-05): Tool Registry now lists module-scoped
+# "Always Allow" grants with a per-module revoke + a module-aware effective-tier
+# source annotation. +10 ToolTierResolution tests (pure precedence/source/revoke).
+FLOOR="${BRIDGE_TEST_FLOOR:-1803}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
