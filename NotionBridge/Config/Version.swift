@@ -94,7 +94,11 @@ public enum BridgeConstants {
     ///   memory_recall) = 202.
     /// FB-AUTOMATION (on-device automation kit): + 2 (bridge_settings_navigate +
     ///   bridge_focus_settings, new `automation` family) = 204.
-    public static let staticFeatureModuleToolCount = 204
+    /// FB [buildtools]: + 3 swift_* / make_run build-tool wrappers
+    ///   (swift_build + swift_test + make_run, module "swift") that wrap
+    ///   BgProcessRuntime so long builds/tests don't hit the ~60s transport
+    ///   cap: 204 + 3 = 207.
+    public static let staticFeatureModuleToolCount = 207
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.
@@ -113,5 +117,6 @@ public enum BridgeConstants {
     /// Unified Memory foundation (Wave 1): + memory family = 26.
     /// FB-AUTOMATION: + automation family (bridge_settings_navigate +
     ///   bridge_focus_settings) = 27.
-    public static let staticFeatureModuleFamilyCount = 27
+    /// FB [buildtools]: + swift family (swift_build/swift_test/make_run) = 28.
+    public static let staticFeatureModuleFamilyCount = 28
 }

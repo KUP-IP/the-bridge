@@ -80,6 +80,7 @@ public enum BridgeModuleRegistry {
         await PlaywrightModule.register(on: router)
         await VitestModule.register(on: router)
         await LighthouseModule.register(on: router)
+        await SwiftBuildModule.register(on: router)  // FB [buildtools]: swift_build/swift_test/make_run
         await ArtifactModule.register(on: router)
         await SnippetsModule.register(on: router)
         await StandingOrdersModule.register(on: router)

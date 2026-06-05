@@ -865,6 +865,13 @@ set -euo pipefail
 # prior floor (1777 + 17 = 1794) per the order-inversion rule, staying well
 # below the measured 1859 so existing GUI/TCC + flake headroom is preserved
 # while the 17 new tests cannot be silently dropped.
+# FB [buildtools] (2026-06-04): swift_build/swift_test/make_run MCP wrappers over
+# BgProcessRuntime (start+poll+tail) landed with SwiftBuildModuleTests — 22 net-new
+# test() blocks (registration/tier/annotation/camelCase schema; swiftCommand/
+# makeCommand quoting incl. injection-safety; parseCommon extraction+defaults;
+# SwiftBuildRunner success/non-zero-exit/stdout+stderr-tail/tail-truncation/
+# timeout-job-left-running/env; and swift_build/swift_test/make_run dispatch
+# envelope shapes). 1777 + 22 = 1799.
 FLOOR="${BRIDGE_TEST_FLOOR:-1803}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
