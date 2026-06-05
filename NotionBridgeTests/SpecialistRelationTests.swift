@@ -216,4 +216,108 @@ func runSpecialistRelationTests() async {
         try expect(SpecialistFilter.isSpecialist(title: "bug-report"),
                    "while a real specialist in the same relation is kept")
     }
+
+    // =================================================================
+    // Active-status guard (v3.7.6 — routing/specialist-active-status).
+    // A specialist may remain a MEMBER of the curated `Specialist`
+    // relation after retirement; routing must drop it by lifecycle
+    // status. `isActiveSpecialist` is pure + FAILS OPEN.
+    // =================================================================
+
+    // 10. Fail-open default: no status, empty props, unknown status, and
+    //     non-status property types all leave the specialist ACTIVE — a
+    //     missing/odd property can never silently empty the routing surface.
+    await test("ActiveStatus: fails open (absent / empty / unknown → active)") {
+        try expect(SpecialistFilter.isActiveSpecialist(properties: [:]),
+                   "empty props → active (fail-open)")
+        try expect(SpecialistFilter.isActiveSpecialist(properties: [
+            "Skill Name": ["type": "title", "title": [["plain_text": "discourse"]]]
+        ]), "no lifecycle property → active")
+        try expect(SpecialistFilter.isActiveSpecialist(properties: [
+            "Status": ["type": "status", "status": ["name": "Active"]]
+        ]), "an 'Active' status → active")
+        try expect(SpecialistFilter.isActiveSpecialist(properties: [
+            "Status": ["type": "status", "status": ["name": "Some Future State"]]
+        ]), "an unrecognized status token → active (only confident inactives drop)")
+    }
+
+    // 11. A `status`-typed lifecycle field in a known inactive state retires
+    //     the specialist (case-insensitive on the value).
+    await test("ActiveStatus: deprecated/archived/folded status → inactive") {
+        for value in ["Deprecated", "ARCHIVED", "folded", "Retired", "Obsolete", "Merged"] {
+            let props: [String: Any] = [
+                "Status": ["type": "status", "status": ["name": value]]
+            ]
+            try expect(!SpecialistFilter.isActiveSpecialist(properties: props),
+                       "status '\(value)' must mark the specialist inactive")
+        }
+    }
+
+    // 12. Works across property TYPES (select, multi_select) and ALT keys
+    //     (Maturity / Lifecycle), case-insensitive on the key.
+    await test("ActiveStatus: select / multi_select / alt-key all detected") {
+        try expect(!SpecialistFilter.isActiveSpecialist(properties: [
+            "Maturity": ["type": "select", "select": ["name": "Deprecated"]]
+        ]), "a 'select' Maturity = Deprecated → inactive")
+        try expect(!SpecialistFilter.isActiveSpecialist(properties: [
+            "Lifecycle": ["type": "multi_select",
+                          "multi_select": [["name": "v2"], ["name": "Archived"]]]
+        ]), "a multi_select carrying 'Archived' → inactive")
+        try expect(!SpecialistFilter.isActiveSpecialist(properties: [
+            "status": ["type": "status", "status": ["name": "Sunset"]]  // lower-cased key
+        ]), "case-insensitive key 'status' = Sunset → inactive")
+        // A select in an in-flight state stays active.
+        try expect(SpecialistFilter.isActiveSpecialist(properties: [
+            "Maturity": ["type": "select", "select": ["name": "Stable"]]
+        ]), "Maturity = Stable → active")
+    }
+
+    // 13. A populated Deprecation Date (or alias) retires the specialist;
+    //     an empty/absent date does not.
+    await test("ActiveStatus: populated Deprecation Date → inactive; empty → active") {
+        try expect(!SpecialistFilter.isActiveSpecialist(properties: [
+            "Deprecation Date": ["type": "date", "date": ["start": "2026-05-30"]]
+        ]), "a set Deprecation Date → inactive")
+        try expect(!SpecialistFilter.isActiveSpecialist(properties: [
+            "Sunset Date": ["type": "date", "date": ["start": "2025-01-01T00:00:00.000Z"]]
+        ]), "a set Sunset Date alias → inactive")
+        try expect(SpecialistFilter.isActiveSpecialist(properties: [
+            "Deprecation Date": ["type": "date", "date": NSNull()]
+        ]), "a null date → active")
+        try expect(SpecialistFilter.isActiveSpecialist(properties: [
+            "Deprecation Date": ["type": "date", "date": ["start": "   "]]
+        ]), "a whitespace-only date start → active (treated as unset)")
+    }
+
+    // 14. No false positives: in-flight statuses whose names merely resemble
+    //     real lifecycle words stay active (exact-match, not substring).
+    await test("ActiveStatus: in-flight statuses are never hidden") {
+        for value in ["Active", "Beta", "Draft", "Experimental", "Production", "Stable", "Live", "In Review"] {
+            try expect(SpecialistFilter.isActiveSpecialist(properties: [
+                "Status": ["type": "status", "status": ["name": value]]
+            ]), "in-flight status '\(value)' must stay active")
+        }
+    }
+
+    // 15. The two hydration-time guards COMPOSE on the canonical case: a real
+    //     specialist title (passes the title heuristic) that is deprecation-
+    //     dated (fails the status guard) — exactly focus-keepr's `retro`.
+    //     This is what the live enumerators evaluate per candidate page.
+    await test("ActiveStatus: retro-shaped row — kept by title guard, dropped by status guard") {
+        let retroProps: [String: Any] = [
+            "Skill Name": ["type": "title", "title": [["plain_text": "retro"]]],
+            "Status": ["type": "status", "status": ["name": "Deprecated"]],
+            "Deprecation Date": ["type": "date", "date": ["start": "2026-04-01"]]
+        ]
+        // Title heuristic keeps it (it IS a real skill name, not a doc-page)…
+        try expect(SpecialistFilter.isSpecialist(title: "retro"),
+                   "'retro' passes the title heuristic (real specialist name)")
+        // …but the active-status guard drops it (retired). Routing excludes it
+        // only because BOTH guards must pass.
+        try expect(!SpecialistFilter.isActiveSpecialist(properties: retroProps),
+                   "'retro' is dropped by the active-status guard (Deprecated + dated)")
+        let bothPass = SpecialistFilter.isSpecialist(title: "retro")
+            && SpecialistFilter.isActiveSpecialist(properties: retroProps)
+        try expect(!bothPass, "a retired specialist must fail the combined hydration guard")
+    }
 }

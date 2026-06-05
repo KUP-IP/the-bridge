@@ -228,6 +228,10 @@ extension SkillsCacheWriter.ChildEnumerator {
         for cid in candidateIds {
             var title = ""
             var summary = ""
+            // Fail-open: if the page can't be fetched we don't hide it on
+            // status grounds (the title guard below already drops an
+            // unresolved/empty-title candidate).
+            var isActive = true
             if let pageData = try? await client.getPage(pageId: cid),
                let json = try? JSONSerialization.jsonObject(with: pageData) as? [String: Any],
                let props = json["properties"] as? [String: Any] {
@@ -236,10 +240,14 @@ extension SkillsCacheWriter.ChildEnumerator {
                 // Best-effort one-line summary: prefer the curated `Summary`
                 // rich_text, then `Description`, then any `description` key.
                 summary = firstRichText(props, keys: ["Summary", "Description", "description"])
+                isActive = SpecialistFilter.isActiveSpecialist(properties: props)
             }
-            // Defensive secondary guard: exclude any doc-page that slipped
-            // into the curated relation (or the fallback walk).
-            guard SpecialistFilter.isSpecialist(title: title) else { continue }
+            // Two hydration-time guards (belt + suspenders): drop doc-pages by
+            // title, AND drop a retired specialist by lifecycle status — a
+            // deprecated/archived/folded row (or one with a Deprecation Date)
+            // may linger in the curated relation for history but must never
+            // surface in routing (v3.7.6).
+            guard SpecialistFilter.isSpecialist(title: title), isActive else { continue }
             out.append(CachedSpecialist(
                 id: cid,
                 title: title,

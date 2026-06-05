@@ -2681,11 +2681,20 @@ public enum SkillsModule {
                     if !t.isEmpty && t != "Untitled" { resolvedTitle = t }
                 }
             }
-            // Defensive secondary guard: exclude any doc-page (changelogs,
-            // PRDs, §-sections, test matrices, evolution logs, phase/pruning
-            // notes, duplicate stubs) that slipped into the curated relation
-            // or the fallback walk, so the routing surface stays curated.
-            guard SpecialistFilter.isSpecialist(title: resolvedTitle) else { continue }
+            // Two hydration-time guards (belt + suspenders):
+            //  1) exclude any doc-page (changelogs, PRDs, §-sections, test
+            //     matrices, evolution logs, phase/pruning notes, duplicate
+            //     stubs) that slipped into the curated relation or the
+            //     fallback walk, by title; and
+            //  2) exclude a retired specialist by lifecycle status — a
+            //     deprecated/archived/folded row (or one with a Deprecation
+            //     Date) may linger in the curated relation for history but
+            //     must never surface in routing (v3.7.6).
+            // isActiveSpecialist fails open, so an absent/odd Status keeps the
+            // specialist (an empty props from a failed fetch is already
+            // dropped by the title guard above).
+            guard SpecialistFilter.isSpecialist(title: resolvedTitle),
+                  SpecialistFilter.isActiveSpecialist(properties: props) else { continue }
             out.append(NotionChildPageRef(
                 pageId: cid,
                 title: resolvedTitle,
