@@ -1,9 +1,11 @@
 // NotionModule.swift – V1-05 → V1-12 → PKT-367 Notion Integration Tools
 // NotionBridge · Modules
 //
-// 20 tools via NotionClientRegistry for multi-workspace support.
+// 24 tools via NotionClientRegistry for multi-workspace support.
 // PKT-320: Updated references from NOTION_API_KEY to NOTION_API_TOKEN
 // PKT-367: 13 new tools, NotionClientRegistry integration, optional workspace param
+// FB-notionwrite: notion_page_edit — surgical in-place old_str/new_str body edits
+//   (mirrors official MCP update_content), reusing the MARK 9 slot.
 
 import Foundation
 import MCP
@@ -665,7 +667,112 @@ public enum NotionModule {
                 return .object(["markdown": .string(markdown)])
             }
         ))
-        // (MARK 9 removed: notion_page_markdown_write — D3 v1.8.0)
+        // MARK: 9. notion_page_edit – notify (FB-notionwrite)
+        // Surgical in-place body edit mirroring the official MCP `update_content`:
+        // read the page markdown, apply ordered literal old_str→new_str edits in
+        // process, then write the edited body back via PATCH .../markdown
+        // (replace_content). This replaces the block-append-only amendment sprawl
+        // that the deprecated whole-page markdown_write (D3 v1.8.0) invited — every
+        // wire write is the full, intentionally-edited body, never a blind overwrite.
+        await router.register(ToolRegistration(
+            name: "notion_page_edit",
+            module: moduleName,
+            tier: .notify,
+            description: "Surgically edit a Notion page body in place via literal old_str→new_str find/replace (mirrors the official MCP update_content). Reads the page markdown, applies your edits in order, then writes the edited body back. Each old_str must match the current markdown exactly; unmatched edits fail the call without writing. Use notion_page_markdown_read first to copy exact snippets. For pure appends use notion_blocks_append.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "pageId": .object(["type": .string("string"), "description": .string("Notion page ID (with or without hyphens)")]),
+                    "edits": .object([
+                        "type": .string("array"),
+                        "description": .string("Ordered search/replace edits applied to the page markdown. Each item: {\"old_str\": exact existing text, \"new_str\": replacement, optional \"replaceAll\": bool (default false = first match only)}."),
+                        "items": .object([
+                            "type": .string("object"),
+                            "properties": .object([
+                                "old_str": .object(["type": .string("string"), "description": .string("Exact existing markdown to find. Must match verbatim.")]),
+                                "new_str": .object(["type": .string("string"), "description": .string("Replacement markdown.")]),
+                                "replaceAll": .object(["type": .string("boolean"), "description": .string("Replace every occurrence (default false = first only).")])
+                            ]),
+                            "required": .array([.string("old_str"), .string("new_str")])
+                        ])
+                    ]),
+                    "workspace": workspaceParam
+                ]),
+                "required": .array([.string("pageId"), .string("edits")])
+            ]),
+            metadata: ToolMetadata(
+                title: "Notion: Edit Page Body",
+                whenToUse: ["amending existing page text in place (rename a heading, fix a sentence, update a value)",
+                            "avoiding append-only block sprawl when correcting prose already on the page"],
+                whenNotToUse: ["adding brand-new content to the end of a page (use notion_blocks_append)",
+                               "editing one structured block by ID (use notion_block_update)",
+                               "changing page properties/title/status (use notion_page_update)"],
+                relatedTools: ["notion_page_markdown_read", "notion_blocks_append", "notion_block_update"]
+            ),
+            handler: { arguments in
+                guard case .object(let args) = arguments,
+                      case .string(let pageId) = args["pageId"],
+                      case .array(let rawEdits) = args["edits"] else {
+                    throw ToolRouterError.invalidArguments(toolName: "notion_page_edit", reason: "missing 'pageId' or 'edits'")
+                }
+
+                if rawEdits.isEmpty {
+                    throw ToolRouterError.invalidArguments(toolName: "notion_page_edit", reason: "'edits' must contain at least one {old_str, new_str} edit")
+                }
+
+                // Parse edits, preserving order. old_str/new_str are required strings;
+                // replaceAll is optional (default false). Reject empty old_str up front —
+                // it can never match and would otherwise look like a silent no-op edit.
+                var edits: [NotionModule.ContentEdit] = []
+                for (i, raw) in rawEdits.enumerated() {
+                    guard case .object(let e) = raw,
+                          case .string(let oldStr) = e["old_str"],
+                          case .string(let newStr) = e["new_str"] else {
+                        throw ToolRouterError.invalidArguments(toolName: "notion_page_edit", reason: "edit[\(i)] must be an object with string 'old_str' and 'new_str'")
+                    }
+                    if oldStr.isEmpty {
+                        throw ToolRouterError.invalidArguments(toolName: "notion_page_edit", reason: "edit[\(i)] 'old_str' must not be empty")
+                    }
+                    let replaceAll: Bool = { if case .bool(let b) = e["replaceAll"] { return b }; return false }()
+                    edits.append(NotionModule.ContentEdit(oldStr: oldStr, newStr: newStr, replaceAll: replaceAll))
+                }
+
+                let client = try await registryHolder.getClient(workspace: extractWorkspace(args))
+
+                // 1. Read current body.
+                let readData = try await client.getPageMarkdown(pageId: pageId)
+                let currentMarkdown: String = {
+                    if let json = try? JSONSerialization.jsonObject(with: readData) as? [String: Any],
+                       let md = json["markdown"] as? String { return md }
+                    return String(data: readData, encoding: .utf8) ?? ""
+                }()
+
+                // 2. Apply edits in process (literal, ordered).
+                let (editedMarkdown, editResults) = NotionModule.applyContentEdits(currentMarkdown, edits: edits)
+
+                // 3. Fail fast on any unmatched old_str — never write a body whose
+                //    intended edits didn't all land (mirrors the official tool's
+                //    "must exactly match" guarantee). Nothing has been written yet.
+                let unmatched = editResults.filter { !$0.matched }.map { $0.index }
+                if !unmatched.isEmpty {
+                    return .object([
+                        "success": .bool(false),
+                        "error": .string("No match found for old_str in edit(s) at index \(unmatched.map(String.init).joined(separator: ", ")). Read the page with notion_page_markdown_read and copy the exact text. Nothing was written."),
+                        "unmatchedEdits": .array(unmatched.map { .int($0) })
+                    ])
+                }
+
+                // 4. Write the edited body back.
+                _ = try await client.replacePageMarkdown(pageId: pageId, markdown: editedMarkdown)
+
+                let totalReplacements = editResults.reduce(0) { $0 + $1.replacements }
+                return .object([
+                    "success": .bool(true),
+                    "editsApplied": .int(edits.count),
+                    "replacements": .int(totalReplacements)
+                ])
+            }
+        ))
         // MARK: 10. notion_comments_list – open (A9a)
         await router.register(ToolRegistration(
             name: "notion_comments_list",
@@ -1495,6 +1602,70 @@ public enum NotionModule {
 // MARK: - NotionModule Pure Helpers
 
 extension NotionModule {
+    /// FB-notionwrite: one surgical search/replace edit for `notion_page_edit`,
+    /// mirroring the official Notion MCP `update_content` op shape.
+    public struct ContentEdit: Sendable, Equatable {
+        public let oldStr: String
+        public let newStr: String
+        /// When true, replace every literal occurrence of `oldStr`; otherwise only the first.
+        public let replaceAll: Bool
+        public init(oldStr: String, newStr: String, replaceAll: Bool) {
+            self.oldStr = oldStr
+            self.newStr = newStr
+            self.replaceAll = replaceAll
+        }
+    }
+
+    /// Per-edit outcome from `applyContentEdits`.
+    public struct ContentEditResult: Sendable, Equatable {
+        public let index: Int
+        public let matched: Bool
+        public let replacements: Int
+    }
+
+    /// FB-notionwrite: apply ordered `old_str` → `new_str` edits to a markdown body
+    /// in-process, mirroring the official MCP `update_content` semantics.
+    ///
+    /// Contract (matches the official tool):
+    ///   - `old_str` is matched **literally** (no regex) and must appear exactly.
+    ///   - Edits apply in order; each sees the result of the prior edits.
+    ///   - An empty `old_str` is a no-op that never matches (guards against
+    ///     accidental whole-string corruption).
+    ///   - Returns the edited text plus a per-edit match/replacement report so the
+    ///     caller can fail-fast on an unmatched `old_str` instead of writing a
+    ///     silently-unchanged body back to Notion.
+    ///
+    /// Order-of-edits, first-vs-all, and unmatched cases are all covered by tests.
+    public static func applyContentEdits(_ markdown: String, edits: [ContentEdit]) -> (text: String, results: [ContentEditResult]) {
+        var text = markdown
+        var results: [ContentEditResult] = []
+        for (idx, edit) in edits.enumerated() {
+            guard !edit.oldStr.isEmpty else {
+                results.append(ContentEditResult(index: idx, matched: false, replacements: 0))
+                continue
+            }
+            if edit.replaceAll {
+                // Count occurrences against the current text, then replace all literally.
+                var count = 0
+                var search = text.startIndex
+                while let r = text.range(of: edit.oldStr, range: search..<text.endIndex) {
+                    count += 1
+                    search = r.upperBound
+                }
+                if count > 0 {
+                    text = text.replacingOccurrences(of: edit.oldStr, with: edit.newStr)
+                }
+                results.append(ContentEditResult(index: idx, matched: count > 0, replacements: count))
+            } else if let r = text.range(of: edit.oldStr) {
+                text.replaceSubrange(r, with: edit.newStr)
+                results.append(ContentEditResult(index: idx, matched: true, replacements: 1))
+            } else {
+                results.append(ContentEditResult(index: idx, matched: false, replacements: 0))
+            }
+        }
+        return (text, results)
+    }
+
     /// FB-3: Split comment text into ordered chunks no longer than `maxChars` characters.
     /// Uses Swift `Character` counting to match the handler's `text.count` semantics, so the
     /// 2000-character boundary lines up with Notion's per-run limit. Order is preserved and

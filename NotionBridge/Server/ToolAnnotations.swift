@@ -278,6 +278,7 @@ public enum ToolAnnotationCatalog {
         "notion_discussion_create": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "notion_file_upload": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "notion_page_create": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "notion_page_edit": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "notion_page_markdown_read": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         "notion_page_move": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         "notion_page_read": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),

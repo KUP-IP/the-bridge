@@ -367,7 +367,8 @@ func runEndToEndTests() async {
         try expect(system.count == 3, "SystemModule: expected 3")
         try expect(contacts.count == 4, "ContactsModule: expected 4")
         // Sprint A · mcp-builder #1: notion_block_read removed (24 → 23).
-        try expect(notion.count == 23, "NotionModule: expected 23 (Sprint A · #1)")
+        // FB-notionwrite: notion_page_edit added (23 → 24).
+        try expect(notion.count == 24, "NotionModule: expected 24 (FB-notionwrite)")
         try expect(screen.count == 5, "ScreenModule: expected 5")
         // Sprint A · mcp-builder #1 (W2): ax_find_element, ax_element_info
         // removed. #11 (W3): ax_query → ax_inspect rename (alias kept), and

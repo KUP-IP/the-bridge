@@ -92,7 +92,9 @@ public enum BridgeConstants {
     ///   install exposes exactly these 200 module tools (195 Wave-1 + 5 calendar).
     /// Unified Memory foundation (Wave 1): 200 + 2 (memory_remember +
     ///   memory_recall) = 202.
-    public static let staticFeatureModuleToolCount = 202
+    /// FB-notionwrite: 202 + 1 (notion_page_edit — surgical in-place body edit,
+    ///   reuses the MARK 9 slot vacated by the deprecated markdown_write) = 203.
+    public static let staticFeatureModuleToolCount = 203
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.
