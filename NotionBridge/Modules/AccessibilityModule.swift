@@ -68,20 +68,135 @@ public enum AccessibilityModule {
         }
     }
 
+    // MARK: - Bounded Traversal (axcrash hardening)
+    //
+    // The off-main-thread NSAccessibility crash:
+    //   Deep `ax_tree` / `ax_inspect mode=find_element` traversals called the
+    //   ApplicationServices AX reads from the MCP handler's executor thread
+    //   (NOT the main thread). NSAccessibility (the AppKit responder side that
+    //   backs AXUIElement messaging into in-process/cooperating views) is only
+    //   safe on the main thread; a deep walk hitting an offending cell like
+    //   NSThemeZoomWidgetCell off-main crashed the whole Bridge process.
+    //
+    // The fix has two independent layers, both required:
+    //   1. THREAD SAFETY — every AX read now runs on @MainActor. The traversal
+    //      entry points (`elementDict`, `findElements`) and the per-element
+    //      readers (`attr`, `children`, geometry, etc.) are @MainActor, and the
+    //      MCP handlers hop onto the main actor before walking the tree. AXUIElement
+    //      values therefore never escape the main actor.
+    //   2. BOUNDED WORK — a `TraversalBudget` enforces a max depth, a max node
+    //      count, and a wall-clock time budget, and checks cooperative
+    //      cancellation. A pathologically deep/large/slow tree can no longer hang
+    //      or exhaust memory: traversal stops cleanly and the response is marked
+    //      `truncated` with the reason.
+
+    /// Hard ceilings so caller-supplied `maxDepth` can never request an
+    /// unbounded walk. Tuned to cover real UI trees while refusing adversarial
+    /// or runaway ones. Public so the regression suite can pin the contract.
+    public enum TraversalLimits {
+        /// Absolute cap on traversal depth regardless of requested `maxDepth`.
+        public static let maxDepthCeiling = 60
+        /// Absolute cap on total visited nodes per traversal.
+        public static let maxNodes = 20_000
+        /// Wall-clock budget for a single traversal.
+        public static let timeBudget: TimeInterval = 8.0
+        /// Per-message AX timeout (seconds). Bounds a single hung AX read so an
+        /// unresponsive target app can't wedge the traversal indefinitely.
+        public static let axMessagingTimeout: Float = 2.0
+    }
+
+    /// Why a bounded traversal stopped early. Absence of a reason on the budget
+    /// means the traversal completed within all limits.
+    public enum TruncationReason: String, Sendable {
+        case depth
+        case nodeCount = "node_count"
+        case time
+        case cancelled
+    }
+
+    /// Mutable accounting shared across a single traversal. Confined to the
+    /// main actor (the only place traversal runs), so the mutable state needs no
+    /// additional synchronization. Public so the bounded-traversal contract is
+    /// directly unit-testable without a live AX tree.
+    @MainActor
+    public final class TraversalBudget {
+        public let maxDepth: Int
+        public let maxNodes: Int
+        public let deadline: Date
+        public private(set) var visited = 0
+        public private(set) var truncation: TruncationReason?
+
+        public init(requestedDepth: Int,
+                    maxNodes: Int = TraversalLimits.maxNodes,
+                    timeBudget: TimeInterval = TraversalLimits.timeBudget,
+                    now: Date = Date()) {
+            // Clamp requested depth to [0, ceiling]; negative requests collapse
+            // to a single-node read rather than an error.
+            self.maxDepth = max(0, min(requestedDepth, TraversalLimits.maxDepthCeiling))
+            self.maxNodes = maxNodes
+            self.deadline = now.addingTimeInterval(timeBudget)
+        }
+
+        /// Record a visit. Returns false when the node budget is exhausted.
+        @discardableResult
+        public func admit() -> Bool {
+            guard visited < maxNodes else {
+                if truncation == nil { truncation = .nodeCount }
+                return false
+            }
+            visited += 1
+            return true
+        }
+
+        /// True when traversal may descend into `depth`'s children. Centralizes
+        /// every stop condition: depth ceiling, node budget, wall clock, and
+        /// cooperative cancellation. Sets `truncation` on the first stop.
+        public func canDescend(currentDepth: Int, now: Date = Date()) -> Bool {
+            if currentDepth >= maxDepth {
+                if truncation == nil { truncation = .depth }
+                return false
+            }
+            if visited >= maxNodes {
+                if truncation == nil { truncation = .nodeCount }
+                return false
+            }
+            if now >= deadline {
+                if truncation == nil { truncation = .time }
+                return false
+            }
+            if Task.isCancelled {
+                if truncation == nil { truncation = .cancelled }
+                return false
+            }
+            return true
+        }
+    }
+
     // MARK: - AX Helpers
 
     private static func ensureTrusted() throws {
         guard AXIsProcessTrusted() else { throw AXModuleError.notTrusted }
     }
 
+    /// Bound a single AX read so an unresponsive target app can't wedge a
+    /// traversal. Best-effort: AXUIElementSetMessagingTimeout is advisory and
+    /// returns an error for some element kinds — we don't fail the call on it.
+    @MainActor
+    private static func applyMessagingTimeout(_ el: AXUIElement) {
+        _ = AXUIElementSetMessagingTimeout(el, TraversalLimits.axMessagingTimeout)
+    }
+
+    @MainActor
     private static func focusedApp() throws -> (AXUIElement, NSRunningApplication) {
         try ensureTrusted()
         let sys = AXUIElementCreateSystemWide()
+        applyMessagingTimeout(sys)
         var ref: AnyObject?
         guard AXUIElementCopyAttributeValue(sys, kAXFocusedApplicationAttribute as CFString, &ref) == .success,
               let appEl = ref as! AXUIElement? else { // Safe: CF bridging guarantees type on .success
             throw AXModuleError.noFocusedApp
         }
+        applyMessagingTimeout(appEl)
         var pid: pid_t = 0
         AXUIElementGetPid(appEl, &pid)
         guard let app = NSRunningApplication(processIdentifier: pid) else {
@@ -92,6 +207,7 @@ public enum AccessibilityModule {
 
     // MARK: - Parameter Helpers
 
+    @MainActor
     private static func resolvePid(_ params: [String: Value]) throws -> pid_t {
         if let p = params["pid"] {
             switch p {
@@ -130,36 +246,49 @@ public enum AccessibilityModule {
     }
 
     // MARK: - Element Attribute Readers
+    //
+    // axcrash: ALL of these issue AXUIElementCopyAttributeValue, which can
+    // round-trip into NSAccessibility on the responder side — only safe on the
+    // main thread. They are @MainActor so the compiler enforces that no off-main
+    // caller can reach them.
 
+    @MainActor
     private static func attr(_ el: AXUIElement, _ name: String) -> AnyObject? {
         var val: AnyObject?
         return AXUIElementCopyAttributeValue(el, name as CFString, &val) == .success ? val : nil
     }
 
+    @MainActor
     private static func strAttr(_ el: AXUIElement, _ name: String) -> String? {
         attr(el, name) as? String
     }
 
+    @MainActor
     private static func role(_ el: AXUIElement) -> String {
         strAttr(el, kAXRoleAttribute as String) ?? "Unknown"
     }
 
+    @MainActor
     private static func title(_ el: AXUIElement) -> String? {
         strAttr(el, kAXTitleAttribute as String)
     }
 
+    @MainActor
     private static func desc(_ el: AXUIElement) -> String? {
         strAttr(el, kAXDescriptionAttribute as String)
     }
 
+    @MainActor
     private static func label(_ el: AXUIElement) -> String? {
         title(el) ?? desc(el) ?? strAttr(el, kAXValueAttribute as String)
     }
 
+    @MainActor
     private static func children(_ el: AXUIElement) -> [AXUIElement] {
         (attr(el, kAXChildrenAttribute as String) as? [AXUIElement]) ?? []
     }
 
+    @MainActor
     private static func position(_ el: AXUIElement) -> (x: Double, y: Double)? {
         guard let val = attr(el, kAXPositionAttribute as String) else { return nil }
         var pt = CGPoint.zero
@@ -168,6 +297,7 @@ public enum AccessibilityModule {
         return (Double(pt.x), Double(pt.y))
     }
 
+    @MainActor
     private static func size(_ el: AXUIElement) -> (w: Double, h: Double)? {
         guard let val = attr(el, kAXSizeAttribute as String) else { return nil }
         var sz = CGSize.zero
@@ -177,8 +307,14 @@ public enum AccessibilityModule {
     }
 
     // MARK: - Tree Walking
+    //
+    // axcrash: @MainActor + TraversalBudget. The budget enforces the depth
+    // ceiling, node cap, time budget, and cooperative cancellation; the depth
+    // value is informational (path/recursion) — the stop decision is the
+    // budget's, not a bare `depth < maxDepth`.
 
-    private static func elementDict(_ el: AXUIElement, depth: Int, maxDepth: Int,
+    @MainActor
+    private static func elementDict(_ el: AXUIElement, depth: Int, budget: TraversalBudget,
                                      flat: Bool, path: String,
                                      results: inout [Value]) -> Value {
         let r = role(el)
@@ -193,21 +329,27 @@ public enum AccessibilityModule {
 
         if flat {
             results.append(.object(d))
-            if depth < maxDepth {
+            if budget.canDescend(currentDepth: depth) {
                 for child in children(el) {
-                    _ = elementDict(child, depth: depth + 1, maxDepth: maxDepth,
+                    guard budget.admit() else { break }
+                    _ = elementDict(child, depth: depth + 1, budget: budget,
                                     flat: true, path: curPath, results: &results)
                 }
             }
             return .null
         } else {
-            if depth < maxDepth {
+            if budget.canDescend(currentDepth: depth) {
                 let kids = children(el)
                 if !kids.isEmpty {
-                    d["children"] = .array(kids.map {
-                        elementDict($0, depth: depth + 1, maxDepth: maxDepth,
-                                    flat: false, path: curPath, results: &results)
-                    })
+                    var childValues: [Value] = []
+                    childValues.reserveCapacity(kids.count)
+                    for child in kids {
+                        guard budget.admit() else { break }
+                        childValues.append(
+                            elementDict(child, depth: depth + 1, budget: budget,
+                                        flat: false, path: curPath, results: &results))
+                    }
+                    if !childValues.isEmpty { d["children"] = .array(childValues) }
                 }
             }
             return .object(d)
@@ -215,9 +357,12 @@ public enum AccessibilityModule {
     }
 
     // MARK: - Search
+    //
+    // axcrash: @MainActor + TraversalBudget (same rationale as elementDict).
 
+    @MainActor
     private static func findElements(in el: AXUIElement, role r: String?, title t: String?,
-                                      label l: String?, depth: Int, maxDepth: Int,
+                                      label l: String?, depth: Int, budget: TraversalBudget,
                                       path: String = "") -> [(AXUIElement, String)] {
         let er = role(el)
         let et = title(el)
@@ -232,10 +377,11 @@ public enum AccessibilityModule {
         if let l = l, !(elLabel?.localizedCaseInsensitiveContains(l) ?? false) { match = false }
         if match && (r != nil || t != nil || l != nil) { out.append((el, cur)) }
 
-        if depth < maxDepth {
+        if budget.canDescend(currentDepth: depth) {
             for child in children(el) {
+                guard budget.admit() else { break }
                 out.append(contentsOf: findElements(in: child, role: r, title: t, label: l,
-                                                     depth: depth + 1, maxDepth: maxDepth, path: cur))
+                                                     depth: depth + 1, budget: budget, path: cur))
             }
         }
         return out
@@ -243,6 +389,7 @@ public enum AccessibilityModule {
 
     // MARK: - Path Navigation
 
+    @MainActor
     private static func navigateToPath(_ root: AXUIElement, path: String) throws -> AXUIElement {
         let parts = path.split(separator: "/").filter { !$0.isEmpty }
         var current = root
@@ -265,6 +412,7 @@ public enum AccessibilityModule {
 
     // MARK: - Deep Inspect
 
+    @MainActor
     private static func detailedInfo(_ el: AXUIElement) -> Value {
         var d: [String: Value] = ["role": .string(role(el))]
         if let t = title(el)  { d["title"] = .string(t) }
@@ -296,6 +444,7 @@ public enum AccessibilityModule {
 
     // MARK: - Resolve Target Element
 
+    @MainActor
     private static func resolveTarget(_ params: [String: Value], appElement: AXUIElement) throws -> AXUIElement {
         if let path = stringParam(params, "path") {
             return try navigateToPath(appElement, path: path)
@@ -305,8 +454,10 @@ public enum AccessibilityModule {
         guard r != nil || t != nil else {
             throw AXModuleError.invalidInput("Provide 'path' or at least one of 'role'/'title'")
         }
+        let budget = TraversalBudget(requestedDepth: 10)
+        _ = budget.admit() // count the root
         let matches = findElements(in: appElement, role: r, title: t, label: nil,
-                                    depth: 0, maxDepth: 10)
+                                    depth: 0, budget: budget)
         guard let (el, _) = matches.first else {
             throw AXModuleError.elementNotFound(query: "\(r ?? ""):\(t ?? "")")
         }
@@ -321,6 +472,12 @@ public enum AccessibilityModule {
     // a `_deprecated` warning on top via `withDeprecationWarning(_:)`; the new
     // tool returns the bare payload.
 
+    // axcrash: these payload bodies issue AX reads, so they run on @MainActor.
+    // The MCP handlers `await` them, which marshals the whole traversal onto the
+    // main thread — AXUIElement values are created and consumed there and never
+    // cross an actor boundary.
+
+    @MainActor
     private static func focusedAppPayload() -> Value {
         do {
             let (appEl, app) = try focusedApp()
@@ -340,6 +497,7 @@ public enum AccessibilityModule {
         } catch let e as AXModuleError { return e.toResponse() } catch { return .object(["error": .string("Unexpected: \(error)")]) }
     }
 
+    @MainActor
     private static func findElementPayload(params: [String: Value]) -> Value {
         do {
             let pid = try resolvePid(params)
@@ -353,8 +511,11 @@ public enum AccessibilityModule {
             }
 
             let appEl = AXUIElementCreateApplication(pid)
+            applyMessagingTimeout(appEl)
+            let budget = TraversalBudget(requestedDepth: maxD)
+            _ = budget.admit() // count the root
             let matches = findElements(in: appEl, role: r, title: t, label: l,
-                                        depth: 0, maxDepth: maxD)
+                                        depth: 0, budget: budget)
             let elements: [Value] = matches.map { (el, path) in
                 var d: [String: Value] = ["role": .string(role(el)), "path": .string(path)]
                 if let t = title(el)    { d["title"] = .string(t) }
@@ -363,16 +524,56 @@ public enum AccessibilityModule {
                 if let s = size(el)     { d["width"] = .double(s.w); d["height"] = .double(s.h) }
                 return .object(d)
             }
-            return .object(["matches": .array(elements), "count": .int(elements.count)])
+            var out: [String: Value] = ["matches": .array(elements), "count": .int(elements.count)]
+            if let reason = budget.truncation { out["truncated"] = .string(reason.rawValue) }
+            return .object(out)
         } catch let e as AXModuleError { return e.toResponse() } catch { return .object(["error": .string("Unexpected: \(error)")]) }
     }
 
+    @MainActor
     private static func elementInfoPayload(params: [String: Value]) -> Value {
         do {
             let pid = try resolvePid(params)
             let appEl = AXUIElementCreateApplication(pid)
+            applyMessagingTimeout(appEl)
             let target = try resolveTarget(params, appElement: appEl)
             return detailedInfo(target)
+        } catch let e as AXModuleError { return e.toResponse() } catch { return .object(["error": .string("Unexpected: \(error)")]) }
+    }
+
+    // MARK: - ax_tree Payload (axcrash)
+    //
+    // Extracted from the inline handler so the whole tree walk runs on
+    // @MainActor under a single bounded budget and is unit-testable for limit
+    // clamping without a live AX tree.
+
+    @MainActor
+    private static func treePayload(params: [String: Value]) -> Value {
+        do {
+            let pid = try resolvePid(params)
+            let maxD = intParam(params, "maxDepth", default: 5)
+            let flat = boolParam(params, "flat", default: false)
+            let appEl = AXUIElementCreateApplication(pid)
+            applyMessagingTimeout(appEl)
+            guard let appName = NSRunningApplication(processIdentifier: pid)?.localizedName else {
+                throw AXModuleError.appNotFound(pid: pid)
+            }
+
+            let budget = TraversalBudget(requestedDepth: maxD)
+            _ = budget.admit() // count the root
+            var flatResults: [Value] = []
+            let tree = elementDict(appEl, depth: 0, budget: budget,
+                                   flat: flat, path: "", results: &flatResults)
+
+            var out: [String: Value] = ["app": .string(appName), "pid": .int(Int(pid))]
+            if flat {
+                out["elements"] = .array(flatResults)
+                out["count"]    = .int(flatResults.count)
+            } else {
+                out["tree"] = tree
+            }
+            if let reason = budget.truncation { out["truncated"] = .string(reason.rawValue) }
+            return .object(out)
         } catch let e as AXModuleError { return e.toResponse() } catch { return .object(["error": .string("Unexpected: \(error)")]) }
     }
 
@@ -383,6 +584,62 @@ public enum AccessibilityModule {
         guard case .object(var dict) = value else { return value }
         dict["_deprecated"] = .string(deprecationWarning)
         return .object(dict)
+    }
+
+    // MARK: - ax_perform_action Payload (axcrash)
+    //
+    // AX reads (resolveTarget/role/title) AND AX writes (SetAttributeValue /
+    // PerformAction) both round-trip into NSAccessibility, so the whole body
+    // runs on @MainActor — the handler hops once via MainActor.run.
+
+    @MainActor
+    private static func performActionPayload(params: [String: Value]) -> Value {
+        do {
+            try ensureTrusted()
+            let pid = try resolvePid(params)
+            guard let action = stringParam(params, "action") else {
+                throw AXModuleError.invalidInput("action is required")
+            }
+
+            let appEl = AXUIElementCreateApplication(pid)
+            applyMessagingTimeout(appEl)
+            let target = try resolveTarget(params, appElement: appEl)
+
+            // Map friendly names to AX constants
+            switch action.lowercased() {
+            case "setvalue":
+                guard let newVal = stringParam(params, "value") else {
+                    throw AXModuleError.invalidInput("value is required for setValue action")
+                }
+                let res = AXUIElementSetAttributeValue(target, kAXValueAttribute as CFString, newVal as CFTypeRef)
+                guard res == .success else {
+                    throw AXModuleError.actionFailed(action: "setValue", detail: "AXError code \(res.rawValue)")
+                }
+                return .object(["success": .bool(true), "action": .string("setValue"), "value": .string(newVal)])
+
+            default:
+                let axAction: String
+                switch action.lowercased() {
+                case "press":     axAction = kAXPressAction as String
+                case "focus":     axAction = kAXRaiseAction as String
+                case "confirm":   axAction = kAXConfirmAction as String
+                case "cancel":    axAction = kAXCancelAction as String
+                case "increment": axAction = kAXIncrementAction as String
+                case "decrement": axAction = kAXDecrementAction as String
+                default:          axAction = action
+                }
+
+                let res = AXUIElementPerformAction(target, axAction as CFString)
+                guard res == .success else {
+                    throw AXModuleError.actionFailed(action: action, detail: "AXError code \(res.rawValue)")
+                }
+                return .object([
+                    "success": .bool(true),
+                    "action":  .string(action),
+                    "element": .string("\(role(target)):\(title(target) ?? "")")
+                ])
+            }
+        } catch let e as AXModuleError { return e.toResponse() } catch { return .object(["error": .string("Unexpected: \(error)")]) }
     }
 
     // MARK: - Tool Registration
@@ -416,13 +673,15 @@ public enum AccessibilityModule {
                 guard let mode = stringParam(params, "mode") else {
                     return AXModuleError.invalidInput("'mode' is required (focused_app | find_element | element_info)").toResponse()
                 }
+                // axcrash: hop to the main actor so every AX read + traversal
+                // runs on the main thread.
                 switch mode {
                 case "focused_app":
-                    return focusedAppPayload()
+                    return await MainActor.run { focusedAppPayload() }
                 case "find_element":
-                    return findElementPayload(params: params)
+                    return await MainActor.run { findElementPayload(params: params) }
                 case "element_info":
-                    return elementInfoPayload(params: params)
+                    return await MainActor.run { elementInfoPayload(params: params) }
                 default:
                     return AXModuleError.invalidInput("Unknown mode '\(mode)'. Expected: focused_app | find_element | element_info").toResponse()
                 }
@@ -449,7 +708,8 @@ public enum AccessibilityModule {
                 "properties": .object([:])
             ]),
             handler: { _ in
-                focusedAppPayload()
+                // axcrash: AX reads must run on the main thread.
+                await MainActor.run { focusedAppPayload() }
             }
         ))
 
@@ -469,28 +729,8 @@ public enum AccessibilityModule {
             ]),
             handler: { arguments in
                 let params = unwrap(arguments)
-                do {
-                    let pid = try resolvePid(params)
-                    let maxD = intParam(params, "maxDepth", default: 5)
-                    let flat = boolParam(params, "flat", default: false)
-                    let appEl = AXUIElementCreateApplication(pid)
-                    guard let appName = NSRunningApplication(processIdentifier: pid)?.localizedName else {
-                        throw AXModuleError.appNotFound(pid: pid)
-                    }
-
-                    var flatResults: [Value] = []
-                    let tree = elementDict(appEl, depth: 0, maxDepth: maxD,
-                                           flat: flat, path: "", results: &flatResults)
-
-                    var out: [String: Value] = ["app": .string(appName), "pid": .int(Int(pid))]
-                    if flat {
-                        out["elements"] = .array(flatResults)
-                        out["count"]    = .int(flatResults.count)
-                    } else {
-                        out["tree"] = tree
-                    }
-                    return .object(out)
-                } catch let e as AXModuleError { return e.toResponse() }
+                // axcrash: the entire bounded tree walk runs on the main thread.
+                return await MainActor.run { treePayload(params: params) }
             }
         ))
 
@@ -520,51 +760,8 @@ public enum AccessibilityModule {
             ]),
             handler: { arguments in
                 let params = unwrap(arguments)
-                do {
-                    try ensureTrusted()
-                    let pid = try resolvePid(params)
-                    guard let action = stringParam(params, "action") else {
-                        throw AXModuleError.invalidInput("action is required")
-                    }
-
-                    let appEl = AXUIElementCreateApplication(pid)
-                    let target = try resolveTarget(params, appElement: appEl)
-
-                    // Map friendly names to AX constants
-                    switch action.lowercased() {
-                    case "setvalue":
-                        guard let newVal = stringParam(params, "value") else {
-                            throw AXModuleError.invalidInput("value is required for setValue action")
-                        }
-                        let res = AXUIElementSetAttributeValue(target, kAXValueAttribute as CFString, newVal as CFTypeRef)
-                        guard res == .success else {
-                            throw AXModuleError.actionFailed(action: "setValue", detail: "AXError code \(res.rawValue)")
-                        }
-                        return .object(["success": .bool(true), "action": .string("setValue"), "value": .string(newVal)])
-
-                    default:
-                        let axAction: String
-                        switch action.lowercased() {
-                        case "press":     axAction = kAXPressAction as String
-                        case "focus":     axAction = kAXRaiseAction as String
-                        case "confirm":   axAction = kAXConfirmAction as String
-                        case "cancel":    axAction = kAXCancelAction as String
-                        case "increment": axAction = kAXIncrementAction as String
-                        case "decrement": axAction = kAXDecrementAction as String
-                        default:          axAction = action
-                        }
-
-                        let res = AXUIElementPerformAction(target, axAction as CFString)
-                        guard res == .success else {
-                            throw AXModuleError.actionFailed(action: action, detail: "AXError code \(res.rawValue)")
-                        }
-                        return .object([
-                            "success": .bool(true),
-                            "action":  .string(action),
-                            "element": .string("\(role(target)):\(title(target) ?? "")")
-                        ])
-                    }
-                } catch let e as AXModuleError { return e.toResponse() }
+                // axcrash: AX reads + writes must run on the main thread.
+                return await MainActor.run { performActionPayload(params: params) }
             }
         ))
     }
