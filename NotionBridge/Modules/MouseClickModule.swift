@@ -27,6 +27,7 @@ public enum MouseClickModule {
         case invalidInput(String)
         case eventCreateFailed(String)
         case windowLookupFailed(String)
+        case axElementNotFound(String)
 
         func toResponse() -> Value {
             switch self {
@@ -50,6 +51,11 @@ public enum MouseClickModule {
                 return .object([
                     "error": .string("Window lookup failed: \(detail)"),
                     "code":  .string("window_lookup_failed")
+                ])
+            case .axElementNotFound(let detail):
+                return .object([
+                    "error": .string("AX element not found: \(detail)"),
+                    "code":  .string("ax_element_not_found")
                 ])
             }
         }
@@ -123,6 +129,96 @@ public enum MouseClickModule {
         return CGRect(origin: origin, size: size)
     }
 
+    // MARK: - AX-path resolution (coordinate-space fix)
+    //
+    // FB-AUTOMATION (2026-06-04). AX reports element position/size in LOGICAL
+    // points with a top-left origin — the SAME space `mouse_click` posts events
+    // in. (`screen_capture` is the outlier: it returns 2x device pixels, so a
+    // point read off a screenshot must NOT be fed back as mouse_click x/y.)
+    // Resolving an element by AX path and clicking its rect centre sidesteps the
+    // pixel/point mismatch entirely: agents click by stable element identity,
+    // never by a screenshot-derived pixel coordinate.
+
+    private static func axRole(_ el: AXUIElement) -> String {
+        var v: AnyObject?
+        if AXUIElementCopyAttributeValue(el, kAXRoleAttribute as CFString, &v) == .success, let s = v as? String {
+            return s
+        }
+        return "Unknown"
+    }
+
+    private static func axTitle(_ el: AXUIElement) -> String? {
+        var v: AnyObject?
+        if AXUIElementCopyAttributeValue(el, kAXTitleAttribute as CFString, &v) == .success, let s = v as? String {
+            return s
+        }
+        return nil
+    }
+
+    private static func axChildren(_ el: AXUIElement) -> [AXUIElement] {
+        var v: AnyObject?
+        if AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &v) == .success, let kids = v as? [AXUIElement] {
+            return kids
+        }
+        return []
+    }
+
+    /// Walk an AX path of the form
+    /// `/AXApplication:Name/AXWindow:Title/AXButton:Label` (the same format
+    /// `ax_inspect`/`ax_tree` emit). Component 0 is the application root and is
+    /// skipped. Each remaining `Role:Title` segment selects the first matching
+    /// child (title match is exact; an empty title matches on role alone).
+    private static func navigateAXPath(_ root: AXUIElement, path: String) throws -> AXUIElement {
+        let parts = path.split(separator: "/").filter { !$0.isEmpty }
+        var current = root
+        for (i, seg) in parts.enumerated() {
+            if i == 0 { continue } // skip the application root component
+            let pieces = seg.split(separator: ":", maxSplits: 1)
+            let wantRole = String(pieces[0])
+            let wantTitle: String? = pieces.count > 1 && !pieces[1].isEmpty ? String(pieces[1]) : nil
+
+            var found = false
+            for child in axChildren(current) {
+                if axRole(child) == wantRole && (wantTitle == nil || axTitle(child) == wantTitle) {
+                    current = child; found = true; break
+                }
+            }
+            guard found else { throw MouseError.axElementNotFound("no child matching '\(seg)' under path") }
+        }
+        return current
+    }
+
+    /// Resolve the screen-point (top-left origin, logical points) centre of the
+    /// AX element at `axPath` for the given pid (or the focused app when nil).
+    private static func axElementCenter(axPath: String, pid: pid_t?) throws -> CGPoint {
+        let appEl: AXUIElement
+        if let pid { appEl = AXUIElementCreateApplication(pid) }
+        else {
+            let sys = AXUIElementCreateSystemWide()
+            var ref: AnyObject?
+            guard AXUIElementCopyAttributeValue(sys, kAXFocusedApplicationAttribute as CFString, &ref) == .success,
+                  let el = ref as! AXUIElement? else {
+                throw MouseError.axElementNotFound("no focused application")
+            }
+            appEl = el
+        }
+
+        let target = try navigateAXPath(appEl, path: axPath)
+
+        var posRef: AnyObject?
+        var sizeRef: AnyObject?
+        AXUIElementCopyAttributeValue(target, kAXPositionAttribute as CFString, &posRef)
+        AXUIElementCopyAttributeValue(target, kAXSizeAttribute as CFString, &sizeRef)
+        guard let posVal = posRef, let sizeVal = sizeRef else {
+            throw MouseError.axElementNotFound("element has no position/size (\(axPath))")
+        }
+        var origin = CGPoint.zero
+        var size = CGSize.zero
+        AXValueGetValue(posVal as! AXValue, .cgPoint, &origin)
+        AXValueGetValue(sizeVal as! AXValue, .cgSize, &size)
+        return CGPoint(x: origin.x + size.width / 2, y: origin.y + size.height / 2)
+    }
+
     private static func cgButton(from name: String) -> CGMouseButton? {
         switch name.lowercased() {
         case "left":              return .left
@@ -173,26 +269,23 @@ public enum MouseClickModule {
             name: "mouse_click",
             module: moduleName,
             tier: .notify,
-            description: "Synthetic mouse click via CGEvent at absolute screen coordinates or window-relative coordinates (front window of the focused app, resolved via AX). Supports left/right/middle buttons and 1- or 2-click sequences. Requires Accessibility TCC grant. Returns code='capability_missing' on permission denial.",
+            description: "Synthetic mouse click via CGEvent at absolute screen coordinates, window-relative coordinates (front window of the focused app), or the centre of an AX element resolved by path (axPath — deterministic, coordinate-space-safe). AX position is in logical points = the same space this tool consumes; do NOT feed screen_capture pixel coords (those are 2x device pixels). Supports left/right/middle buttons and 1- or 2-click sequences. Requires Accessibility TCC grant. Returns code='capability_missing' on permission denial.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
-                    "x":              .object(["type": .string("number"),  "description": .string("X coordinate (absolute screen pixels, top-left origin) OR window-relative offset when windowRelative=true.")]),
-                    "y":              .object(["type": .string("number"),  "description": .string("Y coordinate (absolute screen pixels, top-left origin) OR window-relative offset when windowRelative=true.")]),
+                    "x":              .object(["type": .string("number"),  "description": .string("X coordinate (absolute screen points, top-left origin) OR window-relative offset when windowRelative=true. Ignored when axPath is set.")]),
+                    "y":              .object(["type": .string("number"),  "description": .string("Y coordinate (absolute screen points, top-left origin) OR window-relative offset when windowRelative=true. Ignored when axPath is set.")]),
                     "button":         .object(["type": .string("string"),  "description": .string("Mouse button: 'left' (default), 'right', or 'middle'/'center'.")]),
                     "clickCount":     .object(["type": .string("integer"), "description": .string("Number of clicks in the sequence (1 = single, 2 = double). Default 1.")]),
-                    "windowRelative": .object(["type": .string("boolean"), "description": .string("If true, (x,y) is interpreted relative to the focused window's top-left corner (resolved via AX). Default false (absolute screen coords).")])
+                    "windowRelative": .object(["type": .string("boolean"), "description": .string("If true, (x,y) is interpreted relative to the focused window's top-left corner (resolved via AX). Default false (absolute screen coords). Ignored when axPath is set.")]),
+                    "axPath":         .object(["type": .string("string"),  "description": .string("Click the CENTRE of the AX element at this path (e.g. /AXApplication:The Bridge/AXWindow:The Bridge Settings/AXButton:Tools), same format ax_inspect/ax_tree emit. Resolves the element's logical-point rect and clicks its centre — coordinate-space-safe, no x/y needed. Overrides x/y/windowRelative.")]),
+                    "pid":            .object(["type": .string("integer"), "description": .string("Process ID for axPath resolution. Omit to use the focused app.")])
                 ]),
-                "required": .array([.string("x"), .string("y")])
+                "required": .array([])
             ]),
             handler: { arguments in
                 let params = unwrap(arguments)
-                guard let xv = doubleParam(params, "x") else {
-                    return MouseError.invalidInput("x is required (number)").toResponse()
-                }
-                guard let yv = doubleParam(params, "y") else {
-                    return MouseError.invalidInput("y is required (number)").toResponse()
-                }
+                let axPath = stringParam(params, "axPath")
                 let buttonName = stringParam(params, "button") ?? "left"
                 guard let button = cgButton(from: buttonName) else {
                     return MouseError.invalidInput("button must be 'left' | 'right' | 'middle' | 'center', got '\(buttonName)'").toResponse()
@@ -200,11 +293,34 @@ public enum MouseClickModule {
                 let clickCount = max(1, min(intParam(params, "clickCount", default: 1), 3))
                 let windowRel  = boolParam(params, "windowRelative", default: false)
 
+                // axPath mode is coordinate-free; x/y only required otherwise.
+                var xv: Double = 0
+                var yv: Double = 0
+                if axPath == nil {
+                    guard let x = doubleParam(params, "x") else {
+                        return MouseError.invalidInput("x is required (number) unless axPath is provided").toResponse()
+                    }
+                    guard let y = doubleParam(params, "y") else {
+                        return MouseError.invalidInput("y is required (number) unless axPath is provided").toResponse()
+                    }
+                    xv = x; yv = y
+                }
+
+                let pidParam: pid_t? = {
+                    switch params["pid"] {
+                    case .int(let i):    return pid_t(i)
+                    case .double(let d): return pid_t(d)
+                    default:             return nil
+                    }
+                }()
+
                 do {
                     try ensureTrusted()
 
                     let target: CGPoint
-                    if windowRel {
+                    if let axPath {
+                        target = try axElementCenter(axPath: axPath, pid: pidParam)
+                    } else if windowRel {
                         let frame = try focusedWindowFrame()
                         target = CGPoint(x: frame.origin.x + xv, y: frame.origin.y + yv)
                     } else {
@@ -213,14 +329,16 @@ public enum MouseClickModule {
 
                     try postClick(at: target, button: button, clickCount: clickCount)
 
-                    return .object([
+                    var result: [String: Value] = [
                         "success":        .bool(true),
                         "x":              .double(target.x),
                         "y":              .double(target.y),
                         "button":         .string(buttonName.lowercased()),
                         "clickCount":     .int(clickCount),
                         "windowRelative": .bool(windowRel)
-                    ])
+                    ]
+                    if let axPath { result["axPath"] = .string(axPath) }
+                    return .object(result)
                 } catch let e as MouseError {
                     return e.toResponse()
                 } catch {

@@ -16,6 +16,7 @@
 // Cleanup: On each screen_capture call, delete files >1hr old, cap at 20.
 
 import MCP
+import AppKit
 import ScreenCaptureKit
 import Vision
 import ImageIO
@@ -73,6 +74,36 @@ public enum ScreenModule {
         } catch {
             // Best-effort — never block capture
         }
+    }
+
+    // MARK: - Frontmost Guard
+
+    /// The bundle identifier of the frontmost (active) application, if any.
+    /// Read on the main actor — `NSWorkspace.frontmostApplication` is
+    /// main-actor-isolated and stale reads off-main are unreliable.
+    @MainActor
+    private static func frontmostBundleId() -> String? {
+        NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    }
+
+    /// FB-AUTOMATION: optional guard for `screen_capture`. When the caller
+    /// passes `requireFrontmostBundleId`, the capture only proceeds if that
+    /// bundle id is currently frontmost. Lets an agent assert the expected app
+    /// (e.g. The Bridge after bridge_focus_settings) is actually in front before
+    /// spending a capture — and surface a clear error if focus was stolen.
+    /// Returns the structured-error `Value` to short-circuit with, or nil to
+    /// proceed.
+    @MainActor
+    private static func frontmostGuardFailure(required: String?) -> Value? {
+        guard let required, !required.isEmpty else { return nil }
+        let actual = frontmostBundleId()
+        if actual == required { return nil }
+        return .object([
+            "error": .string("frontmost_mismatch"),
+            "message": .string("Required frontmost app '\(required)' is not active (frontmost: '\(actual ?? "unknown")'). Capture aborted. Bring the app forward (e.g. bridge_focus_settings) and retry."),
+            "requiredBundleId": .string(required),
+            "frontmostBundleId": actual.map { Value.string($0) } ?? .null
+        ])
     }
 
     // MARK: - Capture Helpers
@@ -263,6 +294,10 @@ public enum ScreenModule {
                     "displayIndex": .object([
                         "type": .string("integer"),
                         "description": .string("Display index to capture (default: 0 = main display). Use to target a specific monitor. Ignored when target is 'window' or 'all_displays'.")
+                    ]),
+                    "requireFrontmostBundleId": .object([
+                        "type": .string("string"),
+                        "description": .string("Optional guard: only capture if this app bundle id is currently frontmost (e.g. 'com.keepr.NotionBridge'). Returns error='frontmost_mismatch' and skips the capture otherwise. Pair with bridge_focus_settings to assert The Bridge is in front before capturing it.")
                     ])
                 ]),
                 "required": .array([])
@@ -299,6 +334,16 @@ public enum ScreenModule {
                     if case .int(let d) = args["displayIndex"] { return d }
                     return nil
                 }()
+                let requireFrontmost: String? = {
+                    if case .string(let b) = args["requireFrontmostBundleId"] { return b }
+                    return nil
+                }()
+
+                // FB-AUTOMATION: frontmost-app guard (opt-in). Short-circuit
+                // before any capture work if the required app is not in front.
+                if let guardFailure = await frontmostGuardFailure(required: requireFrontmost) {
+                    return guardFailure
+                }
 
                 // Cleanup old capture files (best-effort, never blocks)
                 cleanupCaptureFiles()

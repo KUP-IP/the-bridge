@@ -854,6 +854,17 @@ set -euo pipefail
 # Floor raised by the +8 net additive count (1777→1785), staying below the
 # measured 1849 so the GUI/TCC + EnableCloudAccessFlow provisionTimeout flake
 # headroom is preserved while the 8 new tests cannot be silently dropped.
+# FB-AUTOMATION (2026-06-04): on-device automation kit. New `automation` module
+# (bridge_settings_navigate + bridge_focus_settings), mouse_click axPath click
+# (coordinate-space-safe AX-element-centre resolution), and screen_capture
+# requireFrontmostBundleId guard. +17 net-new test() blocks (15 in
+# BridgeAutomationModuleTests covering section resolution / nav selection-model
+# mutation / focus outcome / axPath x-y-optionality; +2 in ScreenModuleTests for
+# the frontmost-mismatch abort + empty-guard no-op). Measured integrated green
+# 1859 locally (0 failed). FLOOR raised by the +17 net additive count over the
+# prior floor (1777 + 17 = 1794) per the order-inversion rule, staying well
+# below the measured 1859 so existing GUI/TCC + flake headroom is preserved
+# while the 17 new tests cannot be silently dropped.
 FLOOR="${BRIDGE_TEST_FLOOR:-1803}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.

@@ -151,4 +151,40 @@ func runScreenModuleTests() async {
         }.value
         try expect(result != nil, "chrome_tabs dispatch should produce a value off-main, not hang")
     }
+
+    // --- FB-AUTOMATION: requireFrontmostBundleId guard ---
+    // An impossible bundle id can never be frontmost, so the guard MUST short-
+    // circuit with error='frontmost_mismatch' and perform NO capture (no
+    // filePath in the response). This holds regardless of TCC/display state.
+    await test("screen_capture aborts with frontmost_mismatch when required app is not frontmost") {
+        let result = try await router.dispatch(
+            toolName: "screen_capture",
+            arguments: .object(["requireFrontmostBundleId": .string("com.example.never.frontmost.\(UUID().uuidString)")])
+        )
+        guard case .object(let dict) = result else {
+            throw TestError.assertion("expected object response")
+        }
+        guard case .string(let err) = dict["error"] else {
+            throw TestError.assertion("expected error key on mismatch, got keys: \(dict.keys)")
+        }
+        try expect(err == "frontmost_mismatch", "expected frontmost_mismatch, got \(err)")
+        try expect(dict["filePath"] == nil, "guard must abort BEFORE capture — no filePath expected")
+        try expect(dict["requiredBundleId"] != nil, "mismatch response should echo requiredBundleId")
+    }
+
+    // Empty / absent requireFrontmostBundleId must NOT engage the guard — the
+    // call proceeds exactly as before (returns promptly, content state-dependent).
+    await test("screen_capture with empty requireFrontmostBundleId does not engage the guard") {
+        let result = try await router.dispatch(
+            toolName: "screen_capture",
+            arguments: .object(["requireFrontmostBundleId": .string("")])
+        )
+        guard case .object(let dict) = result else {
+            throw TestError.assertion("expected object response")
+        }
+        // Must not be a frontmost_mismatch (guard skipped on empty string).
+        if case .string(let err) = dict["error"] {
+            try expect(err != "frontmost_mismatch", "empty guard string must not trigger frontmost_mismatch")
+        }
+    }
 }
