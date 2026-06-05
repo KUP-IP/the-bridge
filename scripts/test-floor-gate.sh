@@ -840,6 +840,20 @@ set -euo pipefail
 # fb-securitygate-revoke-ui (2026-06-05): Tool Registry now lists module-scoped
 # "Always Allow" grants with a per-module revoke + a module-aware effective-tier
 # source annotation. +10 ToolTierResolution tests (pure precedence/source/revoke).
+# fb-axcrash (2026-06-04): fixed the off-main-thread NSAccessibility crash —
+# deep ax_tree / ax_inspect(find_element) traversal hit NSAccessibility (e.g.
+# NSThemeZoomWidgetCell) off the main thread and crashed the whole Bridge
+# process. Fix: every AX read now runs on @MainActor (readers + traversal +
+# payloads are @MainActor; the MCP handlers hop via MainActor.run so AXUIElement
+# values never cross an actor boundary) AND a TraversalBudget enforces a hard
+# depth ceiling, node cap, wall-clock time budget, and cooperative cancellation
+# so a deep/large/slow tree can no longer hang or exhaust memory (responses are
+# marked `truncated` with the reason). +8 AccessibilityModuleTests pin the
+# bounded-traversal contract (depth-ceiling clamp, negative-depth clamp, depth
+# stop, node-cap stop, time-deadline stop, cancellation, within-limits no-trunc).
+# Floor raised by the +8 net additive count (1777→1785), staying below the
+# measured 1849 so the GUI/TCC + EnableCloudAccessFlow provisionTimeout flake
+# headroom is preserved while the 8 new tests cannot be silently dropped.
 FLOOR="${BRIDGE_TEST_FLOOR:-1803}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
