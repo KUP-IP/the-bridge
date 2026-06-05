@@ -212,6 +212,37 @@ check-stale-build:
 		exit 1; \
 	fi
 
+# ── Local-install safety (2026-06-04 incident) ─────────────────────────
+# `install`/`install-copy` write directly into the Sparkle-managed
+# /Applications bundle. If the app is running or Sparkle has a staged update
+# pending, the manual rm-rf+ditto can race Sparkle's installer and leave a
+# corrupted bundle (mixed versions) that crash-loops at launch in
+# Bundle.module / loadMenuBarIcon(). These canned recipes make local installs
+# race-safe: quit the app + clear pending Sparkle staging before writing, and
+# verify bundle consistency after. (The shipped DMG is unaffected — the `app`
+# target packages the SPM resource bundle correctly.)
+define PREINSTALL_SAFETY
+@echo "⏏️  Quitting any running $(APP_NAME) (prevents install/Sparkle race)..."
+@osascript -e 'tell application "The Bridge" to quit' >/dev/null 2>&1 || true
+@pkill -f "The Bridge.app/Contents/MacOS/NotionBridge" 2>/dev/null || true
+@pkill -f "NBJobRunner" 2>/dev/null || true
+@i=0; while pgrep -f "The Bridge.app/Contents/MacOS/NotionBridge" >/dev/null 2>&1 && [ $$i -lt 20 ]; do sleep 0.5; i=$$((i+1)); done
+@echo "🧹 Clearing any pending Sparkle staged update (prevents revert-over-install)..."
+@rm -rf "$$HOME/Library/Caches/$(BUNDLE_ID)/org.sparkle-project.Sparkle/Installation/"* "$$HOME/Library/Caches/$(BUNDLE_ID)/org.sparkle-project.Sparkle/PersistentDownloads/"* 2>/dev/null || true
+endef
+
+define VERIFY_INSTALL
+@SRC_VER=$$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$(APP_BUNDLE)/Contents/Info.plist" 2>/dev/null); \
+	DST_VER=$$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "/Applications/The Bridge.app/Contents/Info.plist" 2>/dev/null); \
+	if [ -z "$$DST_VER" ] || [ "$$SRC_VER" != "$$DST_VER" ]; then \
+		echo "❌ install verify: version mismatch (source '$$SRC_VER' != installed '$$DST_VER') — bundle may be raced/corrupt"; exit 1; \
+	fi; \
+	if [ ! -d "/Applications/The Bridge.app/Contents/Resources/NotionBridge_NotionBridge.bundle" ]; then \
+		echo "❌ install verify: SPM resource bundle missing — app would crash at launch (Bundle.module)"; exit 1; \
+	fi; \
+	echo "✅ install verify: version $$DST_VER + SPM resource bundle present"
+endef
+
 # ── Install ────────────────────────────────────────────────────────────
 # PKT-1 v3.5: destination renamed to "/Applications/The Bridge.app".
 # Cleanup removes the new path AND both legacy variants ("Notion Bridge.app"
@@ -219,21 +250,26 @@ check-stale-build:
 # name installs) so re-installs land cleanly regardless of prior state.
 install: check-stale-build notarize
 	@echo "📲 Installing notarized app to /Applications..."
+	$(PREINSTALL_SAFETY)
 	@rm -rf "/Applications/The Bridge.app" "/Applications/Notion Bridge.app" "/Applications/NotionBridge.app"
 	@ditto "$(APP_BUNDLE)" "/Applications/The Bridge.app"
 	@spctl --assess --verbose "/Applications/The Bridge.app"
 	@echo "🔄 Re-registering with Launch Services..."
 	@/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f "/Applications/The Bridge.app"
 	@killall Dock 2>/dev/null || true
+	$(VERIFY_INSTALL)
 	@echo "✅ Installed: /Applications/The Bridge.app"
 
 # v1.7.0: Copy-only install (no notarize dep, no killall) (F3)
 install-copy: check-stale-build sign
+	@echo "⚠️  install-copy replaces the Sparkle-managed /Applications/The Bridge.app — the running app is quit automatically below to avoid an install/Sparkle race."
 	@echo "Installing app to /Applications (copy-only)..."
+	$(PREINSTALL_SAFETY)
 	@rm -rf "/Applications/The Bridge.app" "/Applications/Notion Bridge.app" "/Applications/NotionBridge.app"
 	@ditto "$(APP_BUNDLE)" "/Applications/The Bridge.app"
 	@echo "🔄 Re-registering with Launch Services..."
 	@/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f "/Applications/The Bridge.app"
+	$(VERIFY_INSTALL)
 	@echo "Installed: /Applications/The Bridge.app"
 	@echo "Restart The Bridge manually to pick up changes."
 
