@@ -155,6 +155,12 @@ struct ToolRegistryView: View {
                         Button {
                             tierOverrides.removeAll()
                             persistTierOverrides()
+                            // fb-securitygate: also clear module-scoped
+                            // "Always Allow" grants so a reset is complete —
+                            // otherwise a module grant would silently outlive
+                            // the per-tool overrides the user just cleared.
+                            UserDefaults.standard.removeObject(forKey: BridgeDefaults.moduleTierOverrides)
+                            NotificationCenter.default.post(name: .notionBridgeTierOverridesDidChange, object: nil)
                         } label: {
                             HStack {
                                 Image(systemName: "arrow.counterclockwise")

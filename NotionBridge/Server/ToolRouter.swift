@@ -226,18 +226,26 @@ public actor ToolRouter {
 
         // F1: Resolve effective tier — user override takes precedence over registered default.
         // Overrides are stored as [String: String] in UserDefaults by ToolRegistryView.
-        let overrides = UserDefaults.standard.dictionary(
-            forKey: BridgeDefaults.tierOverrides
-        ) as? [String: String] ?? [:]
-        let overriddenTier = overrides[toolName].flatMap { SecurityTier(rawValue: $0) } ?? tool.tier
-        let effectiveTier: SecurityTier = tool.neverAutoApprove ? .request : overriddenTier
+        //
+        // fb-securitygate (point 2): resolution precedence is
+        //   per-tool override  >  per-module override  >  registered default.
+        // The per-module override is written when the user picks "Always Allow"
+        // on a Request-tier tool, so the grant covers sibling tools in the same
+        // module rather than only the one that was prompted.
+        let effectiveTier = ToolRouter.resolveEffectiveTier(
+            toolName: toolName,
+            module: tool.module,
+            registeredTier: tool.tier,
+            neverAutoApprove: tool.neverAutoApprove
+        )
 
         // SecurityGate enforcement (async for request-tier approvals)
         let decision = await securityGate.enforce(
             toolName: toolName,
             tier: effectiveTier,
             neverAutoApprove: tool.neverAutoApprove,
-            arguments: arguments
+            arguments: arguments,
+            module: tool.module
         )
 
         switch decision {
@@ -328,6 +336,44 @@ public actor ToolRouter {
     }
 
     // PKT-373 P1-5: batchGate removed (was dead code, never wired into dispatch pipeline)
+
+    // MARK: fb-securitygate: Effective-Tier Resolution
+
+    /// Resolve a tool's effective security tier from the registered default and
+    /// the two override layers, with precedence:
+    ///   per-tool override  >  per-module override  >  registered default.
+    ///
+    /// `neverAutoApprove` tools always resolve to `.request` — no override (tool
+    /// or module) can lower a step-up-consent tool below an explicit prompt.
+    ///
+    /// Pure (reads UserDefaults snapshots passed in) so it is unit-testable
+    /// without a live router or notification center.
+    public static func resolveEffectiveTier(
+        toolName: String,
+        module: String,
+        registeredTier: SecurityTier,
+        neverAutoApprove: Bool,
+        toolOverrides: [String: String]? = nil,
+        moduleOverrides: [String: String]? = nil
+    ) -> SecurityTier {
+        if neverAutoApprove { return .request }
+
+        let tools = toolOverrides ?? (UserDefaults.standard.dictionary(
+            forKey: BridgeDefaults.tierOverrides
+        ) as? [String: String] ?? [:])
+        if let raw = tools[toolName], let t = SecurityTier(rawValue: raw) {
+            return t
+        }
+
+        let modules = moduleOverrides ?? (UserDefaults.standard.dictionary(
+            forKey: BridgeDefaults.moduleTierOverrides
+        ) as? [String: String] ?? [:])
+        if !module.isEmpty, let raw = modules[module], let t = SecurityTier(rawValue: raw) {
+            return t
+        }
+
+        return registeredTier
+    }
 
     // MARK: PKT-552: Notify-tier Deep Link Construction
 

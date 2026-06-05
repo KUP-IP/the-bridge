@@ -14,6 +14,18 @@ public enum BridgeDefaults {
     /// Written by SecurityGate (Always Allow), read by ToolRouter and ToolRegistryView.
     public static let tierOverrides = "com.notionbridge.tierOverrides"
 
+    /// fb-securitygate: Per-MODULE tier overrides. Dictionary<String /* module
+    /// name */, String /* SecurityTier rawValue */>. Written by SecurityGate
+    /// when the user picks "Always Allow" on a Request-tier tool — the grant is
+    /// scoped to the whole module so it covers sibling tools, not just the one
+    /// tool that happened to be prompted (e.g. an Always-Allow during a
+    /// 3-way-parallel snippets operation now covers all snippets_* siblings).
+    /// Read by ToolRouter when resolving a tool's effective tier: a per-tool
+    /// override (more specific) wins over a per-module override, which wins over
+    /// the registered default. `neverAutoApprove` tools always force `.request`
+    /// regardless of any override. ABSENT ⇒ no module overrides.
+    public static let moduleTierOverrides = "com.notionbridge.moduleTierOverrides"
+
     /// User-disabled tool names. Array<String>.
     /// Written by ToolRegistryView, read by CredentialsFeature and ListTools handlers.
     public static let disabledTools = "com.notionbridge.disabledTools"

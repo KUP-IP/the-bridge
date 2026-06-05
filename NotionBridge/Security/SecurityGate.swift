@@ -195,11 +195,17 @@ public actor SecurityGate {
     /// 2. Safe command auto-allow for shell/cli tools
     /// 3. Sensitive path check
     /// 4. Tier-based logic — Open = allow, Notify = allow, Request = approval
+    ///
+    /// - Parameter module: the owning module name (fb-securitygate). Used so an
+    ///   "Always Allow" decision can be persisted module-scoped — covering
+    ///   sibling tools — instead of only the single prompted tool. Defaults to
+    ///   `""` (no module scope) for the rare caller without a registration.
     public func enforce(
         toolName: String,
         tier: SecurityTier,
         neverAutoApprove: Bool = false,
-        arguments: Value
+        arguments: Value,
+        module: String = ""
     ) async -> GateDecision {
         let allStrings = extractStrings(from: arguments)
         let combined = allStrings.joined(separator: " ")
@@ -235,6 +241,7 @@ public actor SecurityGate {
             // category NO_ALWAYS (no Always Allow action); alert fallback is Allow/Deny only.
             return await requestToolTierApproval(
                 toolName: toolName,
+                module: module,
                 detail: detail,
                 neverAutoApprove: neverAutoApprove
             )
@@ -344,9 +351,18 @@ public actor SecurityGate {
 
     // MARK: Notification Approval (Request-tier tools)
 
-    /// Request-tier tool prompt. **Always Allow** persists `tierOverrides[toolName] = notify` (same as Tool Registry), never learned prefixes.
+    /// Request-tier tool prompt.
+    ///
+    /// **Always Allow** (fb-securitygate) now persists a *module-scoped* override
+    /// (`moduleTierOverrides[module] = notify`) so the grant covers every sibling
+    /// tool in the same module — not just the one tool that happened to be
+    /// prompted. The legacy per-tool `tierOverrides[toolName]` is written too so
+    /// the Tool Registry UI keeps showing the change on the prompted tool. When
+    /// the registration carries no module name (rare), it falls back to the
+    /// per-tool override only.
     private func requestToolTierApproval(
         toolName: String,
+        module: String,
         detail: String,
         neverAutoApprove: Bool
     ) async -> GateDecision {
@@ -361,18 +377,29 @@ public actor SecurityGate {
         case .allow:
             return .allow
         case .alwaysAllow:
-            persistNotifyTierOverride(toolName: toolName)
+            persistNotifyTierOverride(toolName: toolName, module: module)
             return .allow
         case .deny:
-            return .reject(reason: "User denied via notification (or 30s timeout)")
+            return .reject(reason: "User denied via notification (or approval timeout)")
         }
     }
 
-    private func persistNotifyTierOverride(toolName: String) {
-        let key = BridgeDefaults.tierOverrides
-        var dict = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
-        dict[toolName] = SecurityTier.notify.rawValue
-        UserDefaults.standard.set(dict, forKey: key)
+    /// Persist an Always-Allow grant. Writes the legacy per-tool override and,
+    /// when a module name is present, a module-scoped override so sibling tools
+    /// in the same module are covered (fb-securitygate point 2).
+    private func persistNotifyTierOverride(toolName: String, module: String) {
+        let perTool = BridgeDefaults.tierOverrides
+        var toolDict = UserDefaults.standard.dictionary(forKey: perTool) as? [String: String] ?? [:]
+        toolDict[toolName] = SecurityTier.notify.rawValue
+        UserDefaults.standard.set(toolDict, forKey: perTool)
+
+        if !module.isEmpty {
+            let perModule = BridgeDefaults.moduleTierOverrides
+            var modDict = UserDefaults.standard.dictionary(forKey: perModule) as? [String: String] ?? [:]
+            modDict[module] = SecurityTier.notify.rawValue
+            UserDefaults.standard.set(modDict, forKey: perModule)
+        }
+
         NotificationCenter.default.post(name: .notionBridgeTierOverridesDidChange, object: nil)
     }
 
@@ -468,6 +495,54 @@ public actor SecurityGate {
     }
 }
 
+// MARK: - ApprovalCoalescer (fb-securitygate point 2)
+
+/// Pure bookkeeping for in-flight approval coalescing, extracted so the
+/// concurrency-collapsing contract is unit-testable without a live
+/// notification center or continuations.
+///
+/// Concurrent Request-tier calls that share the same `coalesceKey` (same
+/// prompt) must collapse into ONE notification: the first caller posts the
+/// prompt; later callers park as *waiters* and are all resolved with the same
+/// decision when the user answers (or the prompt times out). This type tracks
+/// only the relationships (key → servicing identifier, identifier → key, key →
+/// waiter tokens). The owning manager maps tokens/identifiers to the actual
+/// continuations.
+public struct ApprovalCoalescer: Sendable {
+    private var keyToIdentifier: [String: String] = [:]
+    private var identifierToKey: [String: String] = [:]
+    private var keyToWaiters: [String: [String]] = [:]
+
+    public init() {}
+
+    /// Register interest in `coalesceKey`.
+    /// - Returns `true` iff this is the FIRST caller — it owns the prompt under
+    ///   `identifier` and must post the notification. `false` means an identical
+    ///   prompt is already in flight; the caller parked as a waiter and must NOT
+    ///   post a second notification.
+    public mutating func begin(coalesceKey: String, identifier: String, waiterToken: String) -> Bool {
+        if keyToIdentifier[coalesceKey] != nil {
+            keyToWaiters[coalesceKey, default: []].append(waiterToken)
+            return false
+        }
+        keyToIdentifier[coalesceKey] = identifier
+        identifierToKey[identifier] = coalesceKey
+        return true
+    }
+
+    /// Drain and clear all waiter tokens parked behind the prompt that
+    /// `identifier` was servicing. Returns `[]` if the identifier is unknown
+    /// (already resolved) — making the resolve path idempotent.
+    public mutating func drain(forIdentifier identifier: String) -> [String] {
+        guard let key = identifierToKey.removeValue(forKey: identifier) else { return [] }
+        keyToIdentifier.removeValue(forKey: key)
+        return keyToWaiters.removeValue(forKey: key) ?? []
+    }
+
+    /// Number of distinct prompts currently in flight (test introspection).
+    public var inFlightPromptCount: Int { keyToIdentifier.count }
+}
+
 // MARK: - NotificationApprovalManager
 
 /// Manages UNUserNotificationCenter-based approval flow.
@@ -483,11 +558,26 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
 
     private let center: UNUserNotificationCenter?
     private var hasPermission: Bool = false
-    private let approvalTimeout: TimeInterval = 30
+    /// fb-securitygate (point 3): the silent 30s auto-deny was too easy to miss.
+    /// Default raised to 90s so the prompt does not vanish out from under a user
+    /// who steps away briefly. Injectable for deterministic tests.
+    private let approvalTimeout: TimeInterval
     private let isTestProcess: Bool
 
     private let lock = NSLock()
     private var pendingApprovals: [String: CheckedContinuation<ApprovalDecision, Never>] = [:]
+
+    // fb-securitygate (point 2): in-flight coalescing. Concurrent Request-tier
+    // calls that share the same prompt (same title+body, e.g. a 3-way-parallel
+    // snippets_delete) collapse into ONE notification. The first caller posts
+    // the prompt; later callers with the same coalesce key park here and are all
+    // resumed with the SAME decision when the user answers (or it times out).
+    // This fixes the "3 separate prompts that time out" failure: the user
+    // answers once and every coalesced caller honors that single answer.
+    // Relationship bookkeeping lives in the pure `ApprovalCoalescer`; this map
+    // resolves the opaque waiter tokens back to their parked continuations.
+    private var coalescer = ApprovalCoalescer()
+    private var waiterContinuations: [String: CheckedContinuation<ApprovalDecision, Never>] = [:]
 
     static let categoryIdentifier = "SECURITY_APPROVAL"
     static let categoryIdentifierNoAlways = "SECURITY_APPROVAL_NO_ALWAYS"
@@ -516,7 +606,14 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
         return CommandLine.arguments.joined(separator: " ").lowercased().contains("notionbridgetests")
     }
 
-    public override init() {
+    public override convenience init() {
+        self.init(approvalTimeout: 90)
+    }
+
+    /// fb-securitygate: timeout-injecting designated initializer (test seam).
+    /// Production uses the 90s default via the convenience `init()`.
+    public init(approvalTimeout: TimeInterval) {
+        self.approvalTimeout = approvalTimeout
         self.isTestProcess = Self.runningInTestProcess
         if Self.canUseUserNotifications {
             self.center = UNUserNotificationCenter.current()
@@ -582,6 +679,61 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
         lock.lock()
         defer { lock.unlock() }
         return pendingApprovals.removeValue(forKey: key)
+    }
+
+    // MARK: Coalescing Helpers (fb-securitygate point 2)
+
+    /// Synchronously claim or join the prompt identified by `coalesceKey`.
+    ///
+    /// - If no prompt with that key is in flight, records `identifier` as the
+    ///   servicing notification: `isFirst == true`. The caller owns the prompt
+    ///   and must post the notification + store its pending continuation under
+    ///   `identifier`.
+    /// - If a prompt is already in flight, allocates a `waiterToken`:
+    ///   `isFirst == false`. The caller must park its continuation via
+    ///   `parkCoalescedWaiter(token:continuation:)` and must NOT post a second
+    ///   notification.
+    ///
+    /// No continuation crosses this boundary, so the decision happens with no
+    /// `await` in between — a concurrent burst elects exactly one owner.
+    private nonisolated func reserveCoalesced(
+        coalesceKey: String,
+        identifier: String
+    ) -> (isFirst: Bool, waiterToken: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        let waiterToken = UUID().uuidString
+        let isFirst = coalescer.begin(
+            coalesceKey: coalesceKey,
+            identifier: identifier,
+            waiterToken: waiterToken
+        )
+        return (isFirst, waiterToken)
+    }
+
+    /// Park a joined waiter's continuation under its opaque token, to be resumed
+    /// when the owner's prompt resolves (`drainCoalescedWaiters`).
+    private nonisolated func parkCoalescedWaiter(
+        token: String,
+        continuation: CheckedContinuation<ApprovalDecision, Never>
+    ) {
+        lock.lock()
+        defer { lock.unlock() }
+        waiterContinuations[token] = continuation
+    }
+
+    /// Drain all extra waiters parked under the coalesce key that `identifier`
+    /// was servicing, returning their continuations so the caller can resume
+    /// each with the resolved decision. The FIRST caller's own continuation is
+    /// NOT included — it is resumed via the regular `pendingApprovals` path
+    /// keyed by `identifier`. Idempotent: returns `[]` for an unknown identifier.
+    private nonisolated func drainCoalescedWaiters(
+        forIdentifier identifier: String
+    ) -> [CheckedContinuation<ApprovalDecision, Never>] {
+        lock.lock()
+        defer { lock.unlock() }
+        let tokens = coalescer.drain(forIdentifier: identifier)
+        return tokens.compactMap { waiterContinuations.removeValue(forKey: $0) }
     }
 
     // MARK: Setup
@@ -778,6 +930,29 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
         guard let center else {
             return await requestViaAlert(title: title, body: body)
         }
+
+        let identifier = UUID().uuidString
+        // fb-securitygate (point 2): coalesce identical concurrent prompts. The
+        // key folds in whether the prompt offers Always Allow so a NO_ALWAYS
+        // prompt never silently inherits an Always-Allow-capable one's answer.
+        let coalesceKey = "\(allowAlwaysAllowAction ? "1" : "0")\u{1}\(title)\u{1}\(body)"
+
+        // Phase 1 (synchronous): claim or join the prompt BEFORE any await so a
+        // concurrent burst deterministically elects exactly one owner.
+        let reservation = reserveCoalesced(coalesceKey: coalesceKey, identifier: identifier)
+
+        guard reservation.isFirst else {
+            // Joined an in-flight prompt — do NOT post a second notification.
+            // Park and await the shared decision (resolved by the owner's
+            // delegate/timeout path via drainCoalescedWaiters).
+            print("[SecurityGate] Coalesced into in-flight approval prompt: \(title)")
+            return await withCheckedContinuation { continuation in
+                parkCoalescedWaiter(token: reservation.waiterToken, continuation: continuation)
+            }
+        }
+
+        // Phase 2 (owner): post the notification (await OUTSIDE any spawned Task
+        // so the non-Sendable `center` is never captured into a child closure).
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
@@ -785,30 +960,39 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
         content.categoryIdentifier = allowAlwaysAllowAction
             ? Self.categoryIdentifier
             : Self.categoryIdentifierNoAlways
-
-        let identifier = UUID().uuidString
-        let request = UNNotificationRequest(
-            identifier: identifier,
-            content: content,
-            trigger: nil
-        )
+        // fb-securitygate (point 3): a pre-execution approval is not
+        // informational — raise it to time-sensitive so macOS surfaces it even
+        // under Focus / Do Not Disturb, making the silent-timeout failure mode
+        // far harder to miss.
+        content.interruptionLevel = .timeSensitive
+        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
 
         do {
             try await center.add(request)
         } catch {
             print("[SecurityGate] Failed to deliver notification: \(error.localizedDescription)")
-            return await requestViaAlert(title: title, body: body)
+            // Owner + every joined waiter fall back to the synchronous alert so
+            // none of them hang. The owner's decision is shared with the group.
+            let decision = await requestViaAlert(title: title, body: body)
+            let waiters = drainCoalescedWaiters(forIdentifier: identifier)
+            for w in waiters { w.resume(returning: decision) }
+            return decision
         }
 
+        // Phase 3 (owner): await the user's answer, with a timeout that denies
+        // the whole coalesced group. `self` is the only capture in the timeout
+        // Task — `center`/`request` are not — so it is concurrency-clean.
         return await withCheckedContinuation { continuation in
             storePending(forKey: identifier, continuation: continuation)
-
             Task { [weak self] in
                 guard let self else { return }
                 try? await Task.sleep(for: .seconds(self.approvalTimeout))
-                if let pending = self.removePending(forKey: identifier) {
-                    pending.resume(returning: .deny)
-                    print("[SecurityGate] Approval timed out (30s) — denied by default")
+                // Only acts if still pending — a user answer already removed it.
+                if let owner = self.removePending(forKey: identifier) {
+                    let waiters = self.drainCoalescedWaiters(forIdentifier: identifier)
+                    owner.resume(returning: .deny)
+                    for w in waiters { w.resume(returning: .deny) }
+                    print("[SecurityGate] Approval timed out (\(Int(self.approvalTimeout))s) — denied by default (\(waiters.count + 1) caller(s))")
                 }
             }
         }
@@ -888,11 +1072,19 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
             decision = .deny
         }
 
+        // fb-securitygate (point 2): a single user answer resolves the first
+        // caller AND every coalesced waiter parked behind the same prompt.
+        let waiters = drainCoalescedWaiters(forIdentifier: identifier)
         if let continuation = removePending(forKey: identifier) {
             continuation.resume(returning: decision)
         }
+        for w in waiters { w.resume(returning: decision) }
 
-        print("[SecurityGate] Notification response: \(decision) for \(identifier)")
+        if waiters.isEmpty {
+            print("[SecurityGate] Notification response: \(decision) for \(identifier)")
+        } else {
+            print("[SecurityGate] Notification response: \(decision) for \(identifier) (+\(waiters.count) coalesced)")
+        }
 
         completionHandler()
     }
