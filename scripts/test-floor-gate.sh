@@ -970,7 +970,18 @@ set -euo pipefail
 # over the prior floor (1777 + 15 = 1792), staying below the measured 1857 so the
 # existing GUI/TCC + flake headroom is preserved while the 15 new tests cannot be
 # silently dropped.
-FLOOR="${BRIDGE_TEST_FLOOR:-1804}"
+# v3.7.7 integration (2026-06-05): 14-branch gated integration into
+# integration/v3.7.7. FLOOR reconciled to the NET integrated green per the
+# order-inversion rule. Sum of the 11 code branches' net-additive test() counts
+# over the prior 1777 floor: securitygate +16, securitygate-revoke-ui +10,
+# axcrash +8, automation +17, buildtools +22, notionwrite +11, resultsize +17,
+# permissions +13, credentials +27, session +17, sparkle +15 = +173 → 1950.
+# (3 docs-only branches — playbook, design-decouple, operator-runbooks — add 0
+# tests.) Measured integrated green 2014 passed / 0 failed locally across the
+# full suite; FLOOR set to 1950 stays 64 below the measured 2014 so the existing
+# GUI/TCC + flake headroom is preserved while none of the +173 new tests can be
+# silently dropped. Never lowered below origin/main's 1777.
+FLOOR="${BRIDGE_TEST_FLOOR:-1950}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
