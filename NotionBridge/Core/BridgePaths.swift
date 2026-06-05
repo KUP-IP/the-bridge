@@ -55,6 +55,7 @@ public enum BridgePaths {
         case pasteboard     = "pasteboard"
         case screen         = "screen"
         case config         = "config"
+        case sessions       = "sessions"        // MCP session durability snapshots
     }
 
     // MARK: - Logs
