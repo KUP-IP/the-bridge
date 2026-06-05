@@ -679,6 +679,7 @@ await runFlagVisibilityMigrationTests()  // cmd-ux W4 (3.4.1): flag-based visibi
 await runW4ComponentAndStorageTests()    // cmd-ux W4 (3.4.1): kbd-chip splitter + per-path file-source flag storage + effective routing/palette resolution
 await runSkillsMCPFlagRoundTripTests()    // 3.4.2 W3 H1 fix: SkillConfig MCP reconstruction preserves combined-state flag pair
 await runHotkeyRecorderFocusTests()        // 3.4.2 W4 H5 fix: RecorderFocusModel contract locks the button-binding focus path
+await runHotkeyRebindUITests()             // v3.7.6: mount the Commands "Global shortcut" card — HotkeyConfig.from validation + persist round-trip + status-row mapping
 await runFrontmatterParserTests()   // W2 D8: SKILL.md YAML frontmatter parser
 await runSkillSourceTests()         // W2 D2: SkillSource enum + legacy notionPageId backward-compat
 await runFilesystemSkillIndexTests() // W2 D3: SKILL.md filesystem index actor

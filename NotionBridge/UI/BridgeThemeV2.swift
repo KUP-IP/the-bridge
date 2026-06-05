@@ -143,27 +143,11 @@ public struct BridgeDepLink: View {
                 Text("↗").opacity(0.7)
             }
             .font(.system(size: 11, weight: .medium))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 2)
-            .background(background, in: Capsule())
-            .overlay(Capsule().strokeBorder(border, lineWidth: 0.5))
             .foregroundStyle(foreground)
         }
         .buttonStyle(.plain)
     }
 
-    private var background: Color {
-        switch variant {
-        case .info: return BridgeTokens.accent.opacity(0.10)
-        case .bad:  return BridgeTokens.bad.opacity(0.10)
-        }
-    }
-    private var border: Color {
-        switch variant {
-        case .info: return BridgeTokens.accent.opacity(0.20)
-        case .bad:  return BridgeTokens.bad.opacity(0.28)
-        }
-    }
     private var foreground: Color {
         switch variant {
         case .info: return BridgeTokens.infoText
@@ -272,9 +256,13 @@ public struct BridgeGlassBubble<Content: View>: View {
         let domeColors: [Color] = isDark
             ? [Color.white.opacity(0.42), Color.white.opacity(0.10), Color.white.opacity(0.02)]
             : [Color.white.opacity(0.70), Color.white.opacity(0.22), Color.white.opacity(0.0)]
-        // Surface tint under the sheen. DARK: white@.06 (unchanged). LIGHT: a
-        // faint neutral well so the dome sits on a cooler, slightly-recessed base.
-        let surfaceTint = isDark ? Color.white.opacity(0.06) : BridgeTokens.chipFill
+        // Surface tint under the sheen. DARK: white@.12 (v3.7.6 Command-Bridge
+        // legibility bump from .06 — the tray bubbles now sit on a transparent
+        // panel that hugs the bar, so a heavier well keeps the favorite domes
+        // reading as solid glass rather than washing out against the desktop).
+        // LIGHT: a faint neutral well so the dome sits on a cooler, slightly-
+        // recessed base.
+        let surfaceTint = isDark ? Color.white.opacity(0.12) : BridgeTokens.chipFill
         // Rim. DARK: white@.18 (unchanged). LIGHT: a darker hairline edge.
         let rim = isDark ? Color.white.opacity(0.18) : BridgeTokens.hairlineStrong
         return ZStack {

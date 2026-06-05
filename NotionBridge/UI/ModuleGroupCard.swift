@@ -428,10 +428,17 @@ public struct ModuleGroupList: View {
     }
 
     private var groups: [ModuleGroup] {
+        // Display the grouped cards alphabetically by group name (case-
+        // insensitive), mirroring the legacy ToolRegistryView's
+        // `dict.keys.sorted()`. The dispatch-side `deriveGroups` order is
+        // left untouched (it feeds the safety gate); only the UI list sorts.
         ModuleGroupDerivation.deriveGroups(
             registeredToolNames: tools.map(\.name),
             disabledNames: disabledTools
         )
+        .sorted {
+            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        }
     }
 
     public var body: some View {

@@ -53,6 +53,8 @@ import Foundation
 import AppKit
 import SwiftUI
 import Carbon.HIToolbox
+import CoreGraphics
+import ApplicationServices
 
 // ============================================================
 // MARK: - 1. CommandBridgePanel (borderless non-activating)
@@ -201,11 +203,18 @@ public enum CommandBridgePanelMode: Sendable, Equatable {
 //     • On commit: writes the resolved command body to the system
 //       pasteboard via the `ClipboardWriting` seam and closes.
 //
-//   PERMISSION MODEL (unchanged from cmd-sb): Carbon
-//   `RegisterEventHotKey` is a HOT-KEY REGISTRATION, not an event tap —
-//   no Input Monitoring and no Accessibility TCC grant. NSPasteboard
-//   write needs no TCC grant. There is no CGEvent synthesis anywhere
-//   in this controller (no paste-back, no key replay).
+//   PERMISSION MODEL (v3.7.6 — paste-back ADDED): Carbon
+//   `RegisterEventHotKey` is still a HOT-KEY REGISTRATION, not an event
+//   tap — no Input Monitoring grant. NSPasteboard write still needs no
+//   TCC grant and stays UNCONDITIONAL on every commit. What is NEW: after
+//   the clipboard write, the fire path optionally synthesizes ⌘V into the
+//   previously-frontmost app via CGEvent (mirroring `CGEventModule.postKey`).
+//   That single synthesis is GATED on `AXIsProcessTrusted()`; when the
+//   Accessibility grant is absent we skip the keystroke entirely (the
+//   clipboard already holds the body — a graceful manual-paste fallback)
+//   and surface the system grant prompt once. The pure `applyCommit`
+//   primitive is unchanged (clipboard-only) so its headless contract
+//   stays byte-for-byte; paste-back lives on `fireSlot` / `fireSlug`.
 // ============================================================
 
 @MainActor
@@ -216,8 +225,13 @@ public final class CommandBridgeController: NSObject {
     /// Pill width (matches the design mock's --pill-w: 640px).
     public static let pillWidth: CGFloat = 640
     /// Hosting panel size — wide enough for the 10-slot tray + pill +
-    /// the secondary slide-in panel. Height grows when results show.
-    public static let panelSize = NSSize(width: 640, height: 460)
+    /// the secondary slide-in panel. v3.7.6: the height was dropped from the
+    /// legacy 460 to 360 so the transparent envelope HUGS the bar + favorites
+    /// instead of leaving a tall empty box around them. The SwiftUI content is
+    /// TOP-anchored inside this envelope (see `CommandBridgeRootView.body`) so
+    /// any slack sits below the bar as fully-transparent space that never
+    /// paints — only the tray + pill (+ optional results panel) draw.
+    public static let panelSize = NSSize(width: 640, height: 360)
 
     // MARK: Stored state
 
@@ -233,6 +247,28 @@ public final class CommandBridgeController: NSObject {
     private var hostingController: NSHostingController<CommandBridgeRootView>?
     private var model: CommandBridgeViewModel?
     private var focusLossObserver: Any?
+    /// (v3.7.6) Becomes-key observer — focuses the query field every time the
+    /// reused panel becomes the key window (so typing lands immediately).
+    private var becomeKeyObserver: Any?
+    /// (v3.7.6) Global mouse-down monitor installed while the palette is open.
+    /// Fires on a click OUTSIDE the panel and dismisses (Spotlight behaviour).
+    private var globalClickMonitor: Any?
+
+    /// (v3.7.6) The app that was frontmost the instant before we showed, so
+    /// paste-into-app can re-activate it and synthesize ⌘V. Captured in
+    /// `show()` BEFORE `orderFrontRegardless()`.
+    private var priorApp: NSRunningApplication?
+
+    /// (v3.7.6) Presents the standalone Dashboard popover anchored off the
+    /// bar's leading bridge-mark. Injected by the App layer (it owns the
+    /// `StatusBarController` / `PermissionManager` the dashboard needs); `nil`
+    /// in tests / shells that don't wire it. Returns whether it presented.
+    public var presentDashboard: (() -> Void)?
+
+    /// (v3.7.6) Whether paste-into-app is enabled. Default ON per the brief.
+    /// The clipboard write is ALWAYS performed regardless of this flag; this
+    /// only governs the post-write ⌘V synthesis.
+    public var pasteIntoAppEnabled: Bool = true
 
     public private(set) var isRegistered = false
     public private(set) var lastRegisterStatus: HotkeyRegisterStatus = .unattempted
@@ -393,6 +429,14 @@ public final class CommandBridgeController: NSObject {
     }
 
     private func show() {
+        // (v3.7.6) Capture the frontmost app BEFORE we order the panel front,
+        // so paste-into-app can re-activate it on commit. The panel is a
+        // `.nonactivatingPanel`, so the prior app normally stays frontmost —
+        // but we record it explicitly to be robust across Spaces / ⌘-Tab.
+        let me = NSRunningApplication.current
+        let front = NSWorkspace.shared.frontmostApplication
+        priorApp = (front?.processIdentifier == me.processIdentifier) ? nil : front
+
         let panel = self.panel ?? makePanel()
         self.panel = panel
 
@@ -418,9 +462,20 @@ public final class CommandBridgeController: NSObject {
         model?.reload()
         model?.queryDidChange("")
 
-        panel.orderFrontRegardless()
-        panel.makeFirstResponder(panel.contentView)
+        // (v3.7.6) Make the panel KEY (not just ordered front) so the hosted
+        // query field can take first responder and the user types immediately.
+        // We intentionally DO NOT grab `panel.contentView` as first responder
+        // any more — that competed with the SwiftUI `@FocusState` field and
+        // left the bar unfocused. `makeKeyAndOrderFront` lets the field win.
+        panel.makeKeyAndOrderFront(nil)
         installFocusLossObserver()
+        installBecomeKeyObserver()
+        installGlobalClickMonitor()
+        // Re-assert field focus on EVERY show() — the panel is reused, so the
+        // SwiftUI `.onAppear` only fires the first time. Nudging the model's
+        // focus token + asking the view-model to reset to the tray makes the
+        // field claim first responder again on subsequent opens.
+        focusQueryField()
 
         // The 180ms ease-out is driven inside the SwiftUI view (its
         // root applies the scale+opacity transition); the controller
@@ -440,6 +495,8 @@ public final class CommandBridgeController: NSObject {
         guard lifecycle == .open || lifecycle == .opening else { return }
         lifecycle = .closing
         removeFocusLossObserver()
+        removeBecomeKeyObserver()
+        removeGlobalClickMonitor()
         model?.didOpen = false
         panel?.orderOut(nil)
         lifecycle = .closed
@@ -468,6 +525,60 @@ public final class CommandBridgeController: NSObject {
         }
     }
 
+    // MARK: - Auto-focus (v3.7.6)
+
+    /// Focus the query field whenever the (reused) panel becomes key. The
+    /// SwiftUI `.onAppear` only fires the first time the view is mounted; the
+    /// panel is reused across opens, so this re-asserts focus on every show().
+    private func installBecomeKeyObserver() {
+        removeBecomeKeyObserver()
+        becomeKeyObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.focusQueryField() }
+        }
+    }
+
+    private func removeBecomeKeyObserver() {
+        if let obs = becomeKeyObserver {
+            NotificationCenter.default.removeObserver(obs)
+            becomeKeyObserver = nil
+        }
+    }
+
+    /// Ask the SwiftUI view to claim first responder on the query field. The
+    /// view binds its `@FocusState` to `model.focusToken`; bumping the token
+    /// drives `QueryField.updateNSView` → `makeFirstResponder`.
+    private func focusQueryField() {
+        model?.requestFieldFocus()
+    }
+
+    // MARK: - Click-outside-to-dismiss (v3.7.6)
+
+    /// While the palette is open, a click ANYWHERE outside the panel dismisses
+    /// it (the Spotlight/Alfred pattern). A GLOBAL monitor sees clicks in OTHER
+    /// apps; clicks inside our own panel are LOCAL events the global monitor
+    /// never receives, so no extra hit-test is required. `didResignKey` already
+    /// covers ⌘-Tab / clicking another app's window that takes key; this adds
+    /// the "clicked the desktop / a non-activating spot" case.
+    private func installGlobalClickMonitor() {
+        removeGlobalClickMonitor()
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] _ in
+            Task { @MainActor in self?.hide() }
+        }
+    }
+
+    private func removeGlobalClickMonitor() {
+        if let m = globalClickMonitor {
+            NSEvent.removeMonitor(m)
+            globalClickMonitor = nil
+        }
+    }
+
     // MARK: - Commit (number key / Enter / row click)
     //
     //   Three commit shapes, all routing through the single
@@ -478,20 +589,85 @@ public final class CommandBridgeController: NSObject {
     /// empty this is a no-op (no clipboard clobber, panel stays open).
     public func fireSlot(_ slot: Int) {
         guard let cmd = (try? store.command(forKeySlot: slot)) ?? nil else { return }
-        applyCommit(.paste(cmd.body))
-        try? store.recordUse(slug: cmd.slug)
-        recents.record(cmd.slug)
-        hide()
+        commitBody(cmd.body, slug: cmd.slug)
     }
 
     /// Fire the command whose slug matches `slug` (used by Enter on a
     /// selected row + by the row click handler).
     public func fireSlug(_ slug: String) {
         guard let cmd = (try? store.get(slug: slug)) ?? nil else { return }
-        applyCommit(.paste(cmd.body))
-        try? store.recordUse(slug: cmd.slug)
-        recents.record(cmd.slug)
+        commitBody(cmd.body, slug: cmd.slug)
+    }
+
+    /// (v3.7.6) Shared fire path for `fireSlot` / `fireSlug`. Writes the body
+    /// to the clipboard (UNCONDITIONAL — same `applyCommit` primitive the
+    /// headless test pins), records the use, closes the panel, then optionally
+    /// pastes into the previously-frontmost app. The clipboard half is
+    /// unchanged from the prior two call sites; only the paste-back tail is new.
+    private func commitBody(_ body: String, slug: String) {
+        applyCommit(.paste(body))              // unconditional clipboard write
+        try? store.recordUse(slug: slug)
+        recents.record(slug)
+        let target = priorApp                  // snapshot the target before we close
         hide()
+        if pasteIntoAppEnabled, !body.isEmpty {
+            pasteIntoPriorApp(target)
+        }
+    }
+
+    // MARK: - Paste-into-app (v3.7.6 — CGEvent ⌘V, AX-gated)
+
+    /// Re-activate the previously-frontmost app and synthesize ⌘V so the just-
+    /// copied body lands in its focused field. GATED on `AXIsProcessTrusted()`:
+    ///   • No prior app, or the prior app IS us → skip (nothing to paste into).
+    ///   • Not AX-trusted → skip the keystroke (clipboard already holds the
+    ///     body, so manual ⌘V is the graceful fallback) and surface the system
+    ///     grant prompt ONCE via `AXIsProcessTrustedWithOptions(prompt:true)`.
+    ///   • Trusted → activate the target, then after ~100ms post a ⌘V key
+    ///     press through `.cghidEventTap` (mirrors `CGEventModule.postKey`).
+    /// Secure text fields silently swallow synthetic paste — that degrades to
+    /// the clipboard fallback, which is acceptable.
+    private func pasteIntoPriorApp(_ target: NSRunningApplication?) {
+        guard let target else { return }
+        let me = NSRunningApplication.current
+        guard target.processIdentifier != me.processIdentifier else { return }
+
+        guard AXIsProcessTrusted() else {
+            // Not trusted — clipboard fallback stands; nudge the one-time grant
+            // prompt so the user can enable real paste-back next time. The
+            // option key is the string literal "AXTrustedCheckOptionPrompt" (not
+            // the `kAXTrustedCheckOptionPrompt` global, which Swift 6 strict
+            // concurrency flags as shared-mutable — same workaround as
+            // PermissionManager.requestAccessibilityAccess()).
+            _ = AXIsProcessTrustedWithOptions(
+                ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+            )
+            return
+        }
+
+        // Re-activate the target so the keystroke is routed to its key window.
+        target.activate(options: [])
+
+        // Let the activation settle, then post ⌘V. ~100ms mirrors the brief.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
+            Self.postCommandV()
+        }
+    }
+
+    /// Synthesize a ⌘V key press via CGEvent. Mirrors `CGEventModule.postKey`:
+    /// `.hidSystemState` source, `kVK_ANSI_V` virtual key, `.maskCommand`
+    /// flag, posted to `.cghidEventTap`. Static + side-effect-only.
+    private nonisolated static func postCommandV() {
+        guard let src = CGEventSource(stateID: .hidSystemState) else { return }
+        let v = CGKeyCode(kVK_ANSI_V)
+        guard
+            let down = CGEvent(keyboardEventSource: src, virtualKey: v, keyDown: true),
+            let up   = CGEvent(keyboardEventSource: src, virtualKey: v, keyDown: false)
+        else { return }
+        down.flags = .maskCommand
+        up.flags = .maskCommand
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
     }
 
     /// Clipboard-only commit: on `.paste(body)` write the resolved body
@@ -522,6 +698,10 @@ public final class CommandBridgeController: NSObject {
         model.onFireSlug = { [weak self] slug in self?.fireSlug(slug) }
         model.onEscape   = { [weak self] in self?.hide() }
         model.onSettings = { [weak self] in self?.openCommandsSettings() }
+        // (v3.7.6) Leading bridge-mark → present the Dashboard popover. We hide
+        // the palette first so the two surfaces don't overlap, then hand off to
+        // the App-layer presenter (which owns the StatusBar / PermissionManager).
+        model.onBridgeMark = { [weak self] in self?.openDashboard() }
         self.model = model
 
         let root = CommandBridgeRootView(model: model)
@@ -546,6 +726,19 @@ public final class CommandBridgeController: NSObject {
         }
         hide()
     }
+
+    /// (v3.7.6) Leading bridge-mark → standalone Dashboard popover. Closes the
+    /// palette, then defers to the App-layer presenter (set via
+    /// `presentDashboard`). No-op when no presenter is wired (tests / shells).
+    public func openDashboard() {
+        hide()
+        guard let present = presentDashboard else { return }
+        // Defer one tick so the palette's orderOut completes before the popover
+        // is anchored (avoids a flash of both surfaces).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.001) {
+            present()
+        }
+    }
 }
 
 // ============================================================
@@ -566,6 +759,10 @@ public final class CommandBridgeViewModel: ObservableObject {
     @Published public var slotRows: [SlotRow] = []
     @Published public var recentRows: [Row] = []
     @Published public var searchRows: [Row] = []
+    /// (v3.7.6) Monotonic focus token. The controller bumps this on EVERY
+    /// show() (the panel is reused, so `.onAppear` only fires once); the view
+    /// observes it and re-claims first responder on the query field.
+    @Published public var focusToken: Int = 0
 
     /// `keySlot` is 1…0 (display order). `command` is nil when the slot
     /// is unassigned (the bubble renders as a transparent placeholder).
@@ -590,6 +787,8 @@ public final class CommandBridgeViewModel: ObservableObject {
     public var onFireSlug: (String) -> Void = { _ in }
     public var onEscape: () -> Void = {}
     public var onSettings: () -> Void = {}
+    /// (v3.7.6) Leading bridge-mark tap → open the Dashboard popover.
+    public var onBridgeMark: () -> Void = {}
 
     private let store: CommandStore
     private let recents: CommandBridgeRecents
@@ -598,6 +797,12 @@ public final class CommandBridgeViewModel: ObservableObject {
         self.store = store
         self.recents = recents
         reload()
+    }
+
+    /// (v3.7.6) Controller-driven re-focus. Bumps `focusToken` so the SwiftUI
+    /// view re-asserts first responder on the query field on every show().
+    public func requestFieldFocus() {
+        focusToken &+= 1
     }
 
     /// Re-read the store + recompute tray rows. Called when the panel
@@ -687,10 +892,26 @@ public final class CommandBridgeViewModel: ObservableObject {
 public struct CommandBridgeRootView: View {
     @ObservedObject var model: CommandBridgeViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion: Bool
+    // v3.7.6 system-tethered: the pill/panel sheen must adapt — a raw white
+    // sheen over the heavier tint would wash out on the titanium (light)
+    // canvas. DARK keeps the locked white sheen; LIGHT mirrors it dark.
+    @Environment(\.colorScheme) private var colorScheme: ColorScheme
     @FocusState private var queryFocused: Bool
 
     private var anim: CommandBridgeAnimation {
         reduceMotion ? .reduced : .locked
+    }
+
+    /// Adaptive sheen stops for the glass pill / results panel. DARK keeps the
+    /// brief's white values; LIGHT uses a faint dark gradient so the surface
+    /// still reads as raised glass on #ECEDEF without blowing out to white.
+    private func sheenTop(_ darkAlpha: Double) -> Color {
+        colorScheme == .dark ? Color.white.opacity(darkAlpha)
+                             : Color.black.opacity(darkAlpha * 0.45)
+    }
+    private func sheenBottom(_ darkAlpha: Double) -> Color {
+        colorScheme == .dark ? Color.white.opacity(darkAlpha)
+                             : Color.black.opacity(darkAlpha * 0.20)
     }
 
     public init(model: CommandBridgeViewModel) {
@@ -698,7 +919,12 @@ public struct CommandBridgeRootView: View {
     }
 
     public var body: some View {
-        ZStack {
+        // v3.7.6 transparency: TOP-anchor the content so only the tray + pill
+        // (+ optional results panel) paint near the top of the envelope and the
+        // unused height falls below as fully-transparent space. Combined with
+        // the shrunken `panelSize` height + the cut pill shadow, the palette no
+        // longer reads as a dark square halo — transparency HUGS the bar.
+        ZStack(alignment: .top) {
             // Clear backing — BridgeGlass surfaces draw their own
             // background. Lets the panel's NSWindow shape through.
             Color.clear
@@ -713,14 +939,16 @@ public struct CommandBridgeRootView: View {
                 }
             }
             .padding(.horizontal, 0)
-            .padding(.vertical, 28)
+            .padding(.top, 16)
+            .padding(.bottom, 28)
             .scaleEffect(model.didOpen ? 1.0 : anim.openStartScale)
             .opacity(model.didOpen ? 1.0 : anim.openStartOpacity)
             .animation(.easeOut(duration: anim.openDuration), value: model.didOpen)
             .animation(.easeOut(duration: anim.recentsSlideDuration), value: panelModeKey)
         }
         .frame(width: CommandBridgeController.pillWidth + 24,
-               height: CommandBridgeController.panelSize.height)
+               height: CommandBridgeController.panelSize.height,
+               alignment: .top)
         .background(KeyHandler(
             onNumber: { n in model.onFireSlot(n) },
             onArrowDown: { model.openRecents() },
@@ -728,6 +956,9 @@ public struct CommandBridgeRootView: View {
             onEscape: { model.onEscape() }
         ))
         .onAppear { queryFocused = true }
+        // Re-assert field focus whenever the controller bumps the token (the
+        // panel is reused, so `.onAppear` fires only once across opens).
+        .onChange(of: model.focusToken) { _, _ in queryFocused = true }
     }
 
     private var panelModeKey: String {
@@ -787,9 +1018,17 @@ public struct CommandBridgeRootView: View {
 
     private var pill: some View {
         HStack(spacing: 14) {
-            Image(systemName: "command.circle")
-                .font(.system(size: 22, weight: .light))
-                .foregroundStyle(BridgeTokens.fg3)
+            // v3.7.6: the LEADING glyph is now the clickable bridge-mark →
+            // opens the standalone Dashboard popover. Falls back to an SF
+            // Symbol when the asset can't be loaded (e.g. headless / Lib bundle).
+            Button {
+                model.onBridgeMark()
+            } label: {
+                bridgeMark
+                    .frame(width: 26, height: 26)
+            }
+            .buttonStyle(.plain)
+            .help("Open Bridge dashboard")
             QueryField(
                 text: Binding(
                     get: { model.query },
@@ -817,10 +1056,12 @@ public struct CommandBridgeRootView: View {
         .frame(width: CommandBridgeController.pillWidth, height: 66)
         .background(
             ZStack {
-                BridgeTokens.glassWindowTint.opacity(0.34)
+                // v3.7.6 legibility: tint 0.34→0.62 + top sheen 0.14→0.22 so
+                // ONLY the bar paints — and reads as solid glass on a now-
+                // transparent envelope (no square halo to lean on).
+                BridgeTokens.glassWindowTint.opacity(0.62)
                 LinearGradient(
-                    colors: [Color.white.opacity(0.14),
-                             Color.white.opacity(0.02)],
+                    colors: [sheenTop(0.22), sheenBottom(0.02)],
                     startPoint: .top, endPoint: .bottom
                 )
             }
@@ -830,8 +1071,40 @@ public struct CommandBridgeRootView: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5)
         )
-        .shadow(color: .black.opacity(0.55), radius: 30, y: 18)
+        // v3.7.6: shadow cut from .black@0.55 / r30 / y18 (which read as a dark
+        // square halo around the transparent panel) to a soft contact shadow.
+        .shadow(color: .black.opacity(0.30), radius: 16, y: 10)
     }
+
+    /// The leading bridge-mark glyph. Loads `MenuBarIcon` from the app bundle
+    /// (template-rendered so it tints with the adaptive foreground), and falls
+    /// back to the prior `command.circle` SF Symbol when the asset is absent.
+    @ViewBuilder
+    private var bridgeMark: some View {
+        if let icon = Self.bridgeMarkImage {
+            Image(nsImage: icon)
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(BridgeTokens.fg2)
+        } else {
+            Image(systemName: "command.circle")
+                .font(.system(size: 22, weight: .light))
+                .foregroundStyle(BridgeTokens.fg3)
+        }
+    }
+
+    /// `MenuBarIcon` lives in the executable's resource bundle (it is excluded
+    /// from `NotionBridgeLib`, where this view compiles). At runtime the
+    /// packaged `.app` deposits it in the main bundle's Resources + Assets.car,
+    /// so `Bundle.main` resolves it; `NSImage(named:)` is the final fallback.
+    /// Loaded once and cached. `nil` headlessly → the SF Symbol fallback shows.
+    private static let bridgeMarkImage: NSImage? = {
+        let img = Bundle.main.image(forResource: "MenuBarIcon")
+            ?? NSImage(named: "MenuBarIcon")
+        img?.isTemplate = true
+        return img
+    }()
 
     // MARK: Secondary panel (recents / search)
 
@@ -863,10 +1136,11 @@ public struct CommandBridgeRootView: View {
         .frame(width: CommandBridgeController.pillWidth)
         .background(
             ZStack {
-                BridgeTokens.glassWindowTint.opacity(0.32)
+                // v3.7.6 legibility: results-panel tint 0.32→0.58 to match the
+                // more-opaque pill now that the envelope is transparent.
+                BridgeTokens.glassWindowTint.opacity(0.58)
                 LinearGradient(
-                    colors: [Color.white.opacity(0.12),
-                             Color.white.opacity(0.02)],
+                    colors: [sheenTop(0.12), sheenBottom(0.02)],
                     startPoint: .top, endPoint: .bottom
                 )
             }

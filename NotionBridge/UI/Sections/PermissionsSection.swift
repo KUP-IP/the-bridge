@@ -284,10 +284,6 @@ public struct PermissionsSection: View {
         }()
         Text(text)
             .font(.system(size: 11, weight: .semibold))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.15), in: Capsule())
-            .overlay(Capsule().strokeBorder(color.opacity(0.28), lineWidth: 0.5))
             .foregroundStyle(color)
     }
 

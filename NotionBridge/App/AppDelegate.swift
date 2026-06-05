@@ -14,6 +14,7 @@
 //   defer non-critical init by 5s to let app stabilize
 
 import AppKit
+import SwiftUI
 import ServiceManagement
 import Sparkle
 
@@ -84,6 +85,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// unit-tested headlessly; the hot-key firing / panel / cross-app
     /// paste are an explicit operator manual-smoke (W3 GUI ceiling).
     private var commandBridge: CommandBridgeController?
+
+    /// v3.7.6: standalone Dashboard popover presented by the Command Bridge
+    /// palette's leading bridge-mark. A small borderless panel (Option A —
+    /// reuses `DashboardView`), anchored at the same bottom-centre placement
+    /// the palette uses. Held so it can be re-shown / dismissed.
+    private var commandBridgeDashboardPanel: NSPanel?
+    private var commandBridgeDashboardResignObserver: Any?
 
     /// cmd-ux W1: the single `@Observable` source of truth for the
     /// Settings → Commands section. The AppDelegate owns exactly one
@@ -669,6 +677,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let manager = CommandsManager()
         let coordinator = CommandPaletteCoordinator(provider: provider, manager: manager)
         let box = CommandBridgeController(hotkey: hotkey, coordinator: coordinator)
+        // v3.7.6: the palette's leading bridge-mark presents the Dashboard
+        // popover. The App layer owns the StatusBar / PermissionManager the
+        // dashboard reads, so we inject the presenter here.
+        box.presentDashboard = { [weak self, weak box] in
+            self?.presentCommandBridgeDashboard(anchoredTo: box)
+        }
         let registered = box.registerHotkey()
         self.commandBridge = box
         // Publish the TRUE launch-registration outcome into the single
@@ -680,6 +694,91 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             hotkey: box.hotkeyConfig
         )
         print("[The Bridge] Commands palette enabled — registry-backed, clipboard-only — hot-key \(registered ? "registered" : "registration FAILED") (\(hotkey.displayString))")
+    }
+
+    /// v3.7.6: present the standalone Dashboard popover for the Command Bridge
+    /// palette's leading bridge-mark (Option A — reuse `DashboardView` in a
+    /// small borderless `NSPanel`). Anchored at the same bottom-centre placement
+    /// the palette uses so it appears "off the bar". Toggles closed if already
+    /// open; dismisses on resign-key (click-away).
+    private func presentCommandBridgeDashboard(anchoredTo box: CommandBridgeController?) {
+        // Toggle: a second bridge-mark tap (or re-entry while open) closes it.
+        if let existing = commandBridgeDashboardPanel, existing.isVisible {
+            dismissCommandBridgeDashboard()
+            return
+        }
+
+        let host = NSHostingController(
+            rootView: DashboardView(
+                statusBar: statusBar,
+                permissionManager: permissionManager,
+                onOpenSettings: { [weak self] section in
+                    self?.dismissCommandBridgeDashboard()
+                    self?.openSettings(section: section)
+                }
+            )
+        )
+        // Size to the SwiftUI content (DashboardView is a fixed 300pt-wide,
+        // content-height popover).
+        let fitting = host.view.fittingSize
+        let size = NSSize(width: max(fitting.width, 300),
+                          height: max(fitting.height, 200))
+
+        let panel = NSPanel(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.nonactivatingPanel, .borderless],
+            backing: .buffered,
+            defer: true
+        )
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.hidesOnDeactivate = false
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = true
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        host.view.frame = NSRect(origin: .zero, size: size)
+        host.view.wantsLayer = true
+        // Rounded card backing so the borderless panel reads as a popover.
+        host.view.layer?.cornerRadius = 14
+        host.view.layer?.masksToBounds = true
+        host.view.layer?.backgroundColor = BridgeTokens.canvasNSColor.cgColor
+        panel.contentView = host.view
+
+        // Same bottom-centre placement the palette uses (reuses the controller's
+        // PURE, unit-tested screen-pick + origin math).
+        let screenFrames = NSScreen.screens.map { $0.visibleFrame }
+        if let target = CommandBridgeController.pickScreenFrame(
+            screens: screenFrames,
+            keyWindowFrame: NSApp.keyWindow?.frame,
+            mouseLocation: NSEvent.mouseLocation,
+            mainScreenFrame: NSScreen.main?.visibleFrame
+        ) {
+            panel.setFrameOrigin(
+                CommandBridgeController.placementOrigin(
+                    screenVisibleFrame: target, panelSize: size
+                )
+            )
+        }
+
+        commandBridgeDashboardPanel = panel
+        commandBridgeDashboardResignObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.dismissCommandBridgeDashboard() }
+        }
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    private func dismissCommandBridgeDashboard() {
+        if let obs = commandBridgeDashboardResignObserver {
+            NotificationCenter.default.removeObserver(obs)
+            commandBridgeDashboardResignObserver = nil
+        }
+        commandBridgeDashboardPanel?.orderOut(nil)
+        commandBridgeDashboardPanel = nil
     }
 
     /// Whether the Commands-palette global hot-key is currently

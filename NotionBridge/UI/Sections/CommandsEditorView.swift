@@ -82,13 +82,8 @@ public struct CommandsEditorView: View {
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(BridgeTokens.accentLink)
-                        .frame(width: 30, height: 30)
-                        .background(BridgeTokens.accent.opacity(0.28), in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.accent.opacity(0.45), lineWidth: 0.5))
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(AddCommandButtonStyle())
                 .help("New command")
             }
             .padding(.horizontal, 12)
@@ -616,5 +611,26 @@ public struct CommandsEditorView: View {
         } catch {
             saveMessage = error.localizedDescription
         }
+    }
+}
+
+// MARK: - Add-command button style
+
+/// The "+" new-command button: GREEN (signal-ok) at rest, neutral GRAY while
+/// pressed. Keyed on `configuration.isPressed` so the fill/icon/border swap to
+/// a muted gray on press, then snap back to green on release — adaptive in both
+/// themes (all tokens via BridgeTokens, no hardcoded white/black).
+private struct AddCommandButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed
+        let icon = pressed ? BridgeTokens.fg4 : BridgeTokens.ok
+        let fill = pressed ? BridgeTokens.wellFill : BridgeTokens.ok.opacity(0.28)
+        let border = pressed ? BridgeTokens.hairline : BridgeTokens.ok.opacity(0.45)
+        return configuration.label
+            .foregroundStyle(icon)
+            .frame(width: 30, height: 30)
+            .background(fill, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(border, lineWidth: 0.5))
+            .contentShape(Rectangle())
     }
 }
