@@ -105,6 +105,12 @@ public enum ToolAnnotationCatalog {
         "bg_process_logs": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: false),
         "bg_process_start": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: false),
         "bg_process_status": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: false),
+        // FB-AUTOMATION: drives the in-app Settings nav selection model.
+        // Deep-links to a section (and may open the window) but mutates no
+        // user data and is fully idempotent (re-selecting a section is a no-op).
+        // Touches only this app's own UI — not an open world.
+        "bridge_focus_settings": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
+        "bridge_settings_navigate": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
         // WS-D (PKT-921): cloud-gated health probe. Reads the local
         // BridgeCloudManager state machine; touches nothing — pure read.
         "bridge_status": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),

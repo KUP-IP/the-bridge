@@ -92,7 +92,9 @@ public enum BridgeConstants {
     ///   install exposes exactly these 200 module tools (195 Wave-1 + 5 calendar).
     /// Unified Memory foundation (Wave 1): 200 + 2 (memory_remember +
     ///   memory_recall) = 202.
-    public static let staticFeatureModuleToolCount = 202
+    /// FB-AUTOMATION (on-device automation kit): + 2 (bridge_settings_navigate +
+    ///   bridge_focus_settings, new `automation` family) = 204.
+    public static let staticFeatureModuleToolCount = 204
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.
@@ -109,5 +111,7 @@ public enum BridgeConstants {
     /// v3.7 Wave-1 integration: 21 + 1 (shortcuts) + 1 (mail) + 1 (notes) = 24.
     /// v3.7·I (PKT-962): + calendar family = 25.
     /// Unified Memory foundation (Wave 1): + memory family = 26.
-    public static let staticFeatureModuleFamilyCount = 26
+    /// FB-AUTOMATION: + automation family (bridge_settings_navigate +
+    ///   bridge_focus_settings) = 27.
+    public static let staticFeatureModuleFamilyCount = 27
 }

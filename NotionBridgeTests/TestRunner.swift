@@ -654,6 +654,7 @@ await runDevSuiteEdgeTests()           // dev-suite audit: edge / attack surface
 await runSpotlightModuleTests()        // PKT-747 (v2.2 · 3.3)
 await runSyntheticInputModuleTests()   // PKT-747 (v2.2 · 3.3)
 await runMouseClickModuleTests()        // PKT-765 (v2.2 · 3.3.1)
+await runBridgeAutomationModuleTests()  // FB-AUTOMATION: bridge_settings_navigate + bridge_focus_settings + axPath/frontmost-guard
 await runCGEventModuleTests()           // PKT-765 (v2.2 · 3.3.1)
 await runPasteboardHistoryModuleTests() // PKT-765 (v2.2 · 3.3.1)
 await runJobsModuleTests()
