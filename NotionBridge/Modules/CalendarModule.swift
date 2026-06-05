@@ -446,13 +446,15 @@ public enum CalendarModule {
             name: "calendar_events",
             module: moduleName,
             tier: .open,
-            description: "List calendar events within a date range. Requires start + end (ISO-8601); optional calendarId scopes to one calendar (default: all). Returns id, title, start, end, allDay, calendar, location, notes. Read-only.",
+            description: "List calendar events within a date range. Requires start + end (ISO-8601); optional calendarId scopes to one calendar (default: all). Returns id, title, start, end, allDay, calendar, location, notes. `compact: true` trims each event to id/title/start/end; `limit` caps the count (default 50) to stay under token caps — `has_more`/`truncated` flag when the range held more. Read-only.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "start": .object(["type": .string("string"), "description": .string("ISO-8601 range lower bound (required)")]),
                     "end": .object(["type": .string("string"), "description": .string("ISO-8601 range upper bound (required)")]),
-                    "calendarId": .object(["type": .string("string"), "description": .string("EKCalendar.calendarIdentifier to scope to a single calendar (default: all event calendars)")])
+                    "calendarId": .object(["type": .string("string"), "description": .string("EKCalendar.calendarIdentifier to scope to a single calendar (default: all event calendars)")]),
+                    "compact": .object(["type": .string("boolean"), "description": .string("When true, each event is id/title/start/end only (drops allDay, calendar, location, notes) — the smallest shape for dense ranges. Default false.")]),
+                    "limit": .object(["type": .string("integer"), "description": .string("Max events to return (default 50, max 500). Earliest-first; surplus is dropped and flagged via has_more/truncated. Narrow start/end or raise limit for more.")])
                 ]),
                 "required": .array([.string("start"), .string("end")])
             ]),
@@ -469,11 +471,27 @@ public enum CalendarModule {
                     end: end,
                     calendarId: stringArg(args, "calendarId")
                 )
-                let events = try await store.events(query)
-                return .object([
-                    "count": .int(events.count),
-                    "events": .array(events.map(formatEvent))
-                ])
+                let compact = boolArg(args, "compact") ?? false
+                // fb-resultsize: cap the result set so a wide range can't blow
+                // token caps. Default 50, clamped to [1, 500].
+                let limit = max(1, min(intArg(args, "limit") ?? 50, 500))
+
+                let allEvents = try await store.events(query)
+                // Earliest-first so the cap keeps the most relevant window.
+                let ordered = allEvents.sorted { $0.start < $1.start }
+                let truncated = ordered.count > limit
+                let page = Array(ordered.prefix(limit))
+
+                var resultObj: [String: Value] = [
+                    "count": .int(page.count),
+                    "events": .array(page.map { compact ? formatEventCompact($0) : formatEvent($0) })
+                ]
+                if truncated {
+                    resultObj["totalInRange"] = .int(ordered.count)
+                    resultObj["has_more"] = .bool(true)
+                    resultObj["truncated"] = .bool(true)
+                }
+                return .object(resultObj)
             }
         ))
 
@@ -619,6 +637,18 @@ public enum CalendarModule {
         return .object(entry)
     }
 
+    /// fb-resultsize: minimal event shape — id/title/start/end only — for
+    /// `calendar_events` compact mode. Drops allDay/calendar/location/notes
+    /// so dense ranges stay well under token caps.
+    static func formatEventCompact(_ event: CalendarEvent) -> Value {
+        .object([
+            "id": .string(event.id),
+            "title": .string(event.title),
+            "start": .string(event.start),
+            "end": .string(event.end)
+        ])
+    }
+
     // MARK: - Argument helpers
 
     private static func objectArgs(_ value: Value) -> [String: Value] {
@@ -633,6 +663,12 @@ public enum CalendarModule {
 
     private static func boolArg(_ args: [String: Value], _ key: String) -> Bool? {
         if case .bool(let b)? = args[key] { return b }
+        return nil
+    }
+
+    private static func intArg(_ args: [String: Value], _ key: String) -> Int? {
+        if case .int(let n)? = args[key] { return n }
+        if case .double(let d)? = args[key] { return Int(d) }
         return nil
     }
 }

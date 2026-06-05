@@ -29,6 +29,55 @@ public enum NotionQueryProjection {
     }
 }
 
+/// Pure, testable builder for the notion_query PROJECT-relation server-side
+/// filter (fb-resultsize). Evidence (05-20/22, 06-02): PACKETS queries that
+/// can't filter by their parent PROJECT relation dump every workspace packet
+/// and blow token caps. Passing `relationProperty` + `relationContainsId`
+/// builds a Notion relation `contains` filter so the API returns only the
+/// matching rows inline — no client-side fan-out, no whole-database dump.
+///
+/// When the caller ALSO supplies a `filter`, the two are AND-merged (the
+/// relation predicate is appended to the existing `and` array, or both are
+/// wrapped in a fresh `and`) so the server-side narrowing composes with any
+/// status/date predicate the agent already has.
+public enum NotionRelationFilter {
+    /// Build the relation `contains` predicate object for one relation column.
+    public static func relationContains(property: String, pageId: String) -> [String: Any] {
+        ["property": property, "relation": ["contains": pageId]]
+    }
+
+    /// AND-merge a relation predicate into an OPTIONAL existing filter (the
+    /// raw JSON string from the `filter` arg). Returns the merged filter as a
+    /// dictionary ready to re-serialize. Pure; never throws.
+    ///
+    /// - existing `nil`/empty → just the relation predicate.
+    /// - existing is `{ "and": [...] }` → relation appended to the array.
+    /// - existing is any other single predicate / `{ "or": [...] }` → both
+    ///   wrapped in a new `{ "and": [existing, relation] }`.
+    public static func merge(existingJSON: String?, property: String, pageId: String) -> [String: Any] {
+        let relation = relationContains(property: property, pageId: pageId)
+        guard let existingJSON,
+              !existingJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let data = existingJSON.data(using: .utf8),
+              let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              !existing.isEmpty else {
+            return relation
+        }
+        if var andArray = existing["and"] as? [[String: Any]] {
+            andArray.append(relation)
+            return ["and": andArray]
+        }
+        return ["and": [existing, relation]]
+    }
+
+    /// `merge` + re-serialize to the JSON Data the client's `filter` argument
+    /// expects. Returns `nil` only if serialization fails (never in practice).
+    public static func mergeData(existingJSON: String?, property: String, pageId: String) -> Data? {
+        let merged = merge(existingJSON: existingJSON, property: property, pageId: pageId)
+        return try? JSONSerialization.data(withJSONObject: merged)
+    }
+}
+
 // MARK: - NotionModule
 
 /// Provides Notion workspace integration tools.
@@ -358,9 +407,12 @@ public enum NotionModule {
                     "dataSourceId": .object(["type": .string("string"), "description": .string("Data source ID to query")]),
                     "filter": .object(["type": .string("string"), "description": .string("Optional JSON string of filter object")]),
                     "sorts": .object(["type": .string("string"), "description": .string("Optional JSON string of sorts array")]),
-                    "pageSize": .object(["type": .string("integer"), "description": .string("Max results (default: 100)")]),
+                    "pageSize": .object(["type": .string("integer"), "description": .string("Max results (default: 25, max: 100). Lowered default keeps large data sources under token caps — page with startCursor for more.")]),
                     "startCursor": .object(["type": .string("string"), "description": .string("Pagination cursor from previous query")]),
                     "properties": .object(["type": .string("array"), "description": .string("Optional column names to project into each result row (raw Notion property JSON). Avoids N follow-up reads to bucket by Status/etc.")]),
+                    "compact": .object(["type": .string("boolean"), "description": .string("When true, each row is id + title only (drops url and any projection) — the smallest result shape, for high-volume scans that only need to enumerate/identify rows. Default false.")]),
+                    "relationProperty": .object(["type": .string("string"), "description": .string("Relation column name (e.g. 'Project') to filter on server-side. Pair with relationContainsId — the API returns only rows whose relation contains that page, so e.g. a PACKETS query scoped to one PROJECT comes back inline instead of dumping every packet. AND-merges with `filter` if both are given.")]),
+                    "relationContainsId": .object(["type": .string("string"), "description": .string("Related page ID the relationProperty must contain (the PROJECT page id). Requires relationProperty.")]),
                     "workspace": workspaceParam
                 ]),
                 "required": .array([.string("dataSourceId")])
@@ -368,7 +420,9 @@ public enum NotionModule {
             metadata: ToolMetadata(
                 title: "Notion: Query Data Source",
                 whenToUse: ["filtering/sorting rows of a Notion database",
-                            "need specific columns back — pass `properties` to avoid N follow-up reads"],
+                            "need specific columns back — pass `properties` to avoid N follow-up reads",
+                            "scope a PACKETS-style query to one PROJECT — pass `relationProperty` + `relationContainsId` so it returns inline",
+                            "high-volume scan that only needs id + title — pass `compact: true`"],
                 whenNotToUse: ["reading one page's body (use notion_page_markdown_read)",
                                "discovering column names first (use notion_datasource_get)"],
                 relatedTools: ["notion_datasource_get", "notion_page_read", "notion_page_markdown_read"]
@@ -379,8 +433,11 @@ public enum NotionModule {
                     throw ToolRouterError.invalidArguments(toolName: "notion_query", reason: "missing 'dataSourceId'")
                 }
 
-                let pageSize: Int = { if case .int(let ps) = args["pageSize"] { return min(ps, 100) }; return 100 }()
+                // fb-resultsize: default lowered 100 → 25 so high-volume data
+                // sources don't blow token caps; clamped to 100, floored at 1.
+                let pageSize: Int = { if case .int(let ps) = args["pageSize"] { return max(1, min(ps, 100)) }; return 25 }()
                 let startCursor: String? = { if case .string(let c) = args["startCursor"] { return c }; return nil }()
+                let compact: Bool = { if case .bool(let b) = args["compact"] { return b }; return false }()
                 let projection: [String] = {
                     if case .array(let arr)? = args["properties"] {
                         return arr.compactMap { if case .string(let s) = $0 { return s }; return nil }
@@ -388,8 +445,23 @@ public enum NotionModule {
                     return []
                 }()
 
+                // fb-resultsize: optional PROJECT-relation server-side filter.
+                let relationProperty: String? = { if case .string(let s) = args["relationProperty"] { return s }; return nil }()
+                let relationContainsId: String? = { if case .string(let s) = args["relationContainsId"] { return s }; return nil }()
+                let rawFilterString: String? = { if case .string(let f) = args["filter"] { return f }; return nil }()
+
                 var filterData: Data? = nil
-                if case .string(let f) = args["filter"] { filterData = f.data(using: .utf8) }
+                if let prop = relationProperty, let relId = relationContainsId,
+                   !prop.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   !relId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    // AND-merge the relation predicate with any explicit filter
+                    // so PACKETS-by-PROJECT comes back inline, not the whole DB.
+                    filterData = NotionRelationFilter.mergeData(
+                        existingJSON: rawFilterString, property: prop, pageId: relId
+                    )
+                } else if let f = rawFilterString {
+                    filterData = f.data(using: .utf8)
+                }
                 var sortsData: Data? = nil
                 if case .string(let s) = args["sorts"] { sortsData = s.data(using: .utf8) }
 
@@ -436,6 +508,12 @@ public enum NotionModule {
                     var title = "Untitled"
                     if let properties = result["properties"] as? [String: Any] {
                         title = NotionJSON.extractTitle(from: properties)
+                    }
+                    // fb-resultsize: compact mode → id + title only (smallest
+                    // shape). Drops url and any projection.
+                    if compact {
+                        items.append(.object(["id": .string(id), "title": .string(title)]))
+                        continue
                     }
                     var row: [String: Value] = [
                         "id": .string(id),

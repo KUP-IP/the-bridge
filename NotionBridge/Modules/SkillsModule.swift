@@ -177,6 +177,11 @@ public enum SkillsModule {
             never errors — the envelope carries the parent body plus a \
             `specialist-not-found` annotation. Use `name` alone for the bare parent \
             body when you genuinely want the index page itself.
+
+            GRANULAR FETCH: pass `section="<heading>"` to return ONLY that heading's \
+            slice instead of the whole body — use this when you need one part of a \
+            large skill and want to stay under token caps. No match → full body + a \
+            `section-not-found` annotation.
             """,
             inputSchema: .object([
                 "type": .string("object"),
@@ -200,6 +205,10 @@ public enum SkillsModule {
                     "maxDepth": .object([
                         "type": .string("number"),
                         "description": .string("Max nesting depth from page (default 10).")
+                    ]),
+                    "section": .object([
+                        "type": .string("string"),
+                        "description": .string("Optional heading name to return ONLY that section's slice (case-insensitive, '#' markers ignored) instead of the whole body — a granular partial fetch to avoid blowing token caps. Nested subsections are included; a sibling/shallower heading ends the slice. No match → full body + a `section-not-found` annotation.")
                     ])
                 ]),
                 "required": .array([.string("name")])
@@ -245,6 +254,14 @@ public enum SkillsModule {
                     if case .double(let d) = args["maxDepth"], d > 0 { return Int(d) }
                     return 10
                 }()
+                // fb-resultsize: optional section selector for granular fetch.
+                let sectionArg: String? = {
+                    if case .string(let s) = args["section"],
+                       !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                    return nil
+                }()
 
                 // Look up skill in UserDefaults config (cache key includes metadata fingerprint)
                 guard let skillConfig = lookupSkill(named: name) else {
@@ -259,11 +276,14 @@ public enum SkillsModule {
                             ])
                         }
                         // PKT-907: file-source path/intent dispatch.
-                        return await Self.dispatchFileSpecialist(
+                        let fileEnvelope = await Self.dispatchFileSpecialist(
                             parent: fileSkill,
                             parsedPath: parsedPath,
                             intent: intentArg
                         )
+                        // fb-resultsize: apply the optional section selector
+                        // to the file-source envelope's rendered `content`.
+                        return Self.applySectionToEnvelope(fileEnvelope, section: sectionArg)
                     }
                     let closeMatches = closestSkillMatches(for: name)
                     let allSkills = listAvailableSkillNames()
@@ -286,7 +306,8 @@ public enum SkillsModule {
                     if let i = intentArg { return "|i=\(i.lowercased())" }
                     return ""
                 }()
-                let cacheKey = "\(name.lowercased())|n=\(includeNested)|mb=\(maxBlocks)|md=\(maxDepth)|meta=\(skillConfig.metadataCacheToken)\(pathSelectorKey)"
+                let sectionKey = sectionArg.map { "|s=\($0.lowercased())" } ?? ""
+                let cacheKey = "\(name.lowercased())|n=\(includeNested)|mb=\(maxBlocks)|md=\(maxDepth)|meta=\(skillConfig.metadataCacheToken)\(pathSelectorKey)\(sectionKey)"
 
                 if let cached = await cache.get(cacheKey) {
                     return cached
@@ -361,6 +382,17 @@ public enum SkillsModule {
                     let markdownData = try await client.getPageMarkdown(pageId: envelopePageId)
                     let rawMarkdown = Self.skillMarkdownString(fromMarkdownJSON: markdownData)
 
+                    // fb-resultsize: when a `section` is requested, slice the
+                    // rendered markdown down to that heading's content before
+                    // mention-resolution + envelope build — a granular partial
+                    // fetch. No match → full body, and we record it so the
+                    // envelope carries a `section-not-found` annotation.
+                    let sectionBody = sectionArg.flatMap {
+                        Self.extractMarkdownSection(rawMarkdown, section: $0)
+                    }
+                    let bodyForEnvelope = sectionBody ?? rawMarkdown
+                    let sectionMissed = (sectionArg != nil) && (sectionBody == nil)
+
                     // Skill-body <mention-page> tags now render as
                     // [Title](url) via the shared MentionResolver (cmd-w2),
                     // resolved through the cached getPage title lookup;
@@ -369,9 +401,16 @@ public enum SkillsModule {
                         skill: skillConfig,
                         title: envelopeTitle,
                         url: envelopeURL,
-                        markdownJSONOrText: rawMarkdown,
+                        markdownJSONOrText: bodyForEnvelope,
                         titleLookup: Self.makeSkillMentionTitleLookup(),
                         pageProperties: envelopeProperties
+                    )
+                    // fb-resultsize: surface the section-selector outcome.
+                    result = Self.annotateSection(
+                        result,
+                        requested: sectionArg,
+                        matched: sectionBody != nil,
+                        missed: sectionMissed
                     )
                     // PKT-907: surface the resolution outcome in the envelope.
                     result = Self.annotateEnvelope(
@@ -1749,6 +1788,97 @@ public enum SkillsModule {
         return ""
     }
 
+    // MARK: - fb-resultsize: section selector (granular / partial fetch)
+
+    /// Pure, network-free markdown section slicer for the `fetch_skill`
+    /// `section` selector (fb-resultsize). Large skill bodies blow token
+    /// caps and spill to disk; passing `section="<heading>"` returns ONLY
+    /// that heading's slice (the heading line through the line before the
+    /// next heading at the SAME or a SHALLOWER level), so an agent can do a
+    /// granular partial fetch instead of pulling the whole document.
+    ///
+    /// Matching is case-insensitive and ignores leading `#` markers and
+    /// surrounding whitespace, so `section="Setup"` matches `## Setup`,
+    /// `### setup`, etc. The FIRST matching heading wins. A nested
+    /// subsection (deeper level) is included in its parent's slice; a
+    /// sibling or shallower heading terminates it.
+    ///
+    /// Returns `nil` when no heading matches — the caller then falls back
+    /// to the full body and annotates the envelope so the result is never
+    /// silently empty.
+    public static func extractMarkdownSection(_ markdown: String, section rawSection: String) -> String? {
+        let target = rawSection
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !target.isEmpty else { return nil }
+
+        // Split preserving structure; a markdown heading is a line whose
+        // first non-space run is one-to-six `#` followed by a space.
+        let lines = markdown.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+            .map(String.init)
+
+        func headingLevel(_ line: String) -> Int? {
+            let t = line.drop(while: { $0 == " " })
+            var hashes = 0
+            for ch in t {
+                if ch == "#" { hashes += 1 } else { break }
+            }
+            guard hashes >= 1, hashes <= 6 else { return nil }
+            let after = t.dropFirst(hashes)
+            // ATX headings require a space after the hashes ("# Title").
+            guard after.first == " " else { return nil }
+            return hashes
+        }
+
+        func headingText(_ line: String, level: Int) -> String {
+            let t = line.drop(while: { $0 == " " })
+            return t.dropFirst(level)
+                .trimmingCharacters(in: .whitespaces)
+                .lowercased()
+        }
+
+        // A line that opens/closes a fenced code block (``` or ~~~). `#`
+        // lines INSIDE a fence are shell comments, not headings — tracking
+        // fence state stops a code comment from being mistaken for a section
+        // boundary (or an addressable section).
+        func isFence(_ line: String) -> Bool {
+            let t = line.drop(while: { $0 == " " })
+            return t.hasPrefix("```") || t.hasPrefix("~~~")
+        }
+
+        var startIndex: Int? = nil
+        var startLevel = 0
+        var inFence = false
+        for (i, line) in lines.enumerated() {
+            if isFence(line) { inFence.toggle(); continue }
+            guard !inFence, let level = headingLevel(line) else { continue }
+            if headingText(line, level: level) == target {
+                startIndex = i
+                startLevel = level
+                break
+            }
+        }
+
+        guard let start = startIndex else { return nil }
+
+        var endIndex = lines.count
+        if start + 1 < lines.count {
+            var endFence = false
+            for i in (start + 1)..<lines.count {
+                if isFence(lines[i]) { endFence.toggle(); continue }
+                if !endFence, let level = headingLevel(lines[i]), level <= startLevel {
+                    endIndex = i
+                    break
+                }
+            }
+        }
+
+        let slice = lines[start..<endIndex]
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return slice
+    }
+
     // MARK: - cmd-w4: /markdown body retrieval + mention resolution
 
     /// Decode the `markdown` string from a `GET /v1/pages/{id}/markdown`
@@ -2783,6 +2913,63 @@ public enum SkillsModule {
             dict["routingFooter"] = .string(footer)
         }
         return .object(dict)
+    }
+
+    /// fb-resultsize: annotate the `fetch_skill` envelope with the outcome
+    /// of a `section` selector. When a section matched, records
+    /// `section` (the requested name) + `sectionMatched: true` so the agent
+    /// knows the body is a partial slice. When the section was requested but
+    /// no heading matched, records `annotation: "section-not-found"` plus
+    /// the requested name and `sectionMatched: false` — the full body is
+    /// returned (never silently empty). No-op when no section was requested.
+    ///
+    /// Pure + nonisolated: mutates only its own envelope copy.
+    fileprivate nonisolated static func annotateSection(
+        _ envelope: Value,
+        requested: String?,
+        matched: Bool,
+        missed: Bool
+    ) -> Value {
+        guard let requested else { return envelope }
+        guard case .object(var dict) = envelope else { return envelope }
+        dict["section"] = .string(requested)
+        dict["sectionMatched"] = .bool(matched)
+        if missed {
+            dict["annotation"] = .string("section-not-found")
+        }
+        return .object(dict)
+    }
+
+    /// fb-resultsize: post-process an already-built envelope (file-source
+    /// path) to honour a `section` selector. Slices the envelope's
+    /// `content` markdown to the requested heading, recomputes the honest
+    /// `blockCount` (non-empty line count), and stamps the section
+    /// annotation. No section requested → returns the envelope untouched.
+    /// No match → full content kept + `section-not-found` annotation.
+    ///
+    /// Pure + nonisolated: reads/writes only its own envelope copy.
+    fileprivate nonisolated static func applySectionToEnvelope(
+        _ envelope: Value,
+        section: String?
+    ) -> Value {
+        guard let section else { return envelope }
+        guard case .object(var dict) = envelope,
+              case .string(let content)? = dict["content"] else {
+            // No content to slice — still record the request + miss so the
+            // result is never silently unannotated.
+            return Self.annotateSection(envelope, requested: section, matched: false, missed: true)
+        }
+        if let slice = Self.extractMarkdownSection(content, section: section), !slice.isEmpty {
+            dict["content"] = .string(slice)
+            let nonEmptyLineCount = slice
+                .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+                .reduce(into: 0) { acc, line in
+                    if !line.trimmingCharacters(in: .whitespaces).isEmpty { acc += 1 }
+                }
+            dict["blockCount"] = .int(nonEmptyLineCount)
+            return Self.annotateSection(.object(dict), requested: section, matched: true, missed: false)
+        }
+        return Self.annotateSection(.object(dict), requested: section, matched: false, missed: true)
     }
 
     /// Routing-reliability item 3: build a short footer naming the OTHER
