@@ -113,6 +113,36 @@ public final class PermissionManager {
             }
         }
 
+        /// fb-permissions: One-line, human-actionable hint pointing the operator
+        /// at the exact System Settings pane that grants this category. Returned
+        /// verbatim by the `permissions_status` MCP tool so an agent can tell the
+        /// user precisely where to flip the switch when a grant is missing.
+        public var settingsHint: String {
+            switch self {
+            case .accessibility:
+                return "System Settings → Privacy & Security → Accessibility → enable Notion Bridge."
+            case .screenRecording:
+                return "System Settings → Privacy & Security → Screen Recording → enable Notion Bridge (relaunch if status does not update)."
+            case .fullDiskAccess:
+                return "System Settings → Privacy & Security → Full Disk Access → enable Notion Bridge (relaunch to apply)."
+            case .automation:
+                return "System Settings → Privacy & Security → Automation → enable each target app under Notion Bridge."
+            case .notifications:
+                return "System Settings → Notifications → Notion Bridge → allow notifications."
+            case .contacts:
+                return "System Settings → Privacy & Security → Contacts → enable Notion Bridge."
+            case .reminders:
+                return "System Settings → Privacy & Security → Reminders → enable Notion Bridge."
+            case .calendar:
+                return "System Settings → Privacy & Security → Calendars → enable Notion Bridge."
+            }
+        }
+
+        /// fb-permissions: Stable machine-facing category identifier surfaced by
+        /// the `permissions_status` MCP tool (== the enum rawValue, pinned here so
+        /// a rename of the case cannot silently change the wire contract).
+        public var tccCategory: String { rawValue }
+
         /// PKT-362 D5: System Settings deep link URL per grant.
         public var systemSettingsURL: URL? {
             switch self {

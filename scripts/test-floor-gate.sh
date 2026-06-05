@@ -817,7 +817,18 @@ set -euo pipefail
 # over the prior floor (1737 + 39 = 1776), staying below the measured 1835 so
 # the existing GUI/TCC + flake headroom is preserved while the 39 new tests
 # cannot be silently dropped.
-FLOOR="${BRIDGE_TEST_FLOOR:-1777}"
+# fb-permissions (2026-06-05): unified permissions_status MCP tool + Reminders/
+# Calendar grant completeness. +13 test() blocks in PermissionsModuleTests.swift
+# — registration/tier/annotation off the live ToolRegistration, the
+# GrantStatus→(granted,state) mapping, full-matrix coverage (all 8 categories incl.
+# Reminders + Calendar — the invisible-grant fix), the {category, granted, status,
+# settingsHint} wire shape + summary rollup, and the Grant.settingsHint/tccCategory
+# SSOT pins. All pure (synthetic snapshots into the injectable PermissionsProbe
+# assembler — no live TCC, no host deps), run in CI + local alike. Measured green
+# 1842 -> 1855 locally (0 failed). Floor raised by the +13 net additive count
+# (1777 + 13 = 1790), staying below the measured 1855 so the existing GUI/TCC +
+# flake headroom is preserved while the 13 new tests cannot be silently dropped.
+FLOOR="${BRIDGE_TEST_FLOOR:-1790}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
