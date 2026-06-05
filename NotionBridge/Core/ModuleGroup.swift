@@ -273,6 +273,7 @@ public enum ModuleGroupOverride {
     ///   • `process_list`     → system         (top-level supervision)
     ///   • `port_inspect`     → system         (network primitive but read-only and system-level)
     ///   • `spotlight_query`  → system         (system search)
+    ///   • `permissions_status` → system       (TCC grant self-inspection; cross-cutting, read-only)
     ///   • `tree_sitter_query` → system        (parser utility — not LSP)
     ///   • `pasteboard_history` → clipboard    (pasteboard surface)
     ///   • `cgevent_send`     → synthetic      (synthetic-input primitive)
@@ -301,6 +302,7 @@ public enum ModuleGroupOverride {
         "process_list":         .system,
         "port_inspect":         .system,
         "spotlight_query":      .system,
+        "permissions_status":   .system,
         "tree_sitter_query":    .system,
         "pasteboard_history":   .clipboard,
         "cgevent_send":         .synthetic,

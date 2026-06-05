@@ -87,6 +87,7 @@ public enum BridgeModuleRegistry {
         await ShortcutsModule.register(on: router)
         await MemoryModule.register(on: router)
         await BridgeAutomationModule.register(on: router) // FB-AUTOMATION: bridge_settings_navigate + bridge_focus_settings
+        await PermissionsModule.register(on: router)       // fb-permissions: permissions_status
     }
 
     /// WS-D (PKT-921): register the cloud-gated `bridge_status` tool.

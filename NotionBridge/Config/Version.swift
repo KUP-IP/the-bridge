@@ -100,7 +100,9 @@ public enum BridgeConstants {
     ///   cap: 204 + 3 = 207.
     /// FB-notionwrite: + 1 (notion_page_edit — surgical in-place body edit,
     ///   joins the existing `notion` family) = 208.
-    public static let staticFeatureModuleToolCount = 208
+    /// fb-permissions: + 1 (permissions_status — unified TCC grant probe, new
+    ///   `permissions` family) = 209.
+    public static let staticFeatureModuleToolCount = 209
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.
@@ -120,5 +122,6 @@ public enum BridgeConstants {
     /// FB-AUTOMATION: + automation family (bridge_settings_navigate +
     ///   bridge_focus_settings) = 27.
     /// FB [buildtools]: + swift family (swift_build/swift_test/make_run) = 28.
-    public static let staticFeatureModuleFamilyCount = 28
+    /// fb-permissions: + permissions family (permissions_status) = 29.
+    public static let staticFeatureModuleFamilyCount = 29
 }
