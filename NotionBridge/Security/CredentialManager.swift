@@ -418,6 +418,12 @@ public final class CredentialManager: Sendable {
 
     /// Read a credential by service+account.
     /// No biometric — SecurityGate `.request` tier is sufficient.
+    ///
+    /// [credentials] hardening: reads are IDEMPOTENT, so a transient Keychain
+    /// transport drop (locked / mid-unlock keychain → errSecNotAvailable /
+    /// errSecInteractionNotAllowed) is auto-retried with short exponential
+    /// backoff per `CredentialRetryPolicy`. Definitive statuses
+    /// (errSecItemNotFound, auth/ACL) are NOT retried.
     public func read(service: String, account: String) throws -> CredentialEntry {
         guard isAppBundle else { throw CredentialError.notFound }
 
@@ -430,9 +436,25 @@ public final class CredentialManager: Sendable {
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
 
-        var result: AnyObject?
         // PKT-933: scope to our access group when entitled (no-op otherwise).
-        let status = SecItemCopyMatching(scoped(query) as CFDictionary, &result)
+        let scopedQuery = scoped(query) as CFDictionary
+
+        var result: AnyObject?
+        var status: OSStatus = errSecInternalError
+        var attemptsMade = 0
+        repeat {
+            attemptsMade += 1
+            result = nil
+            status = SecItemCopyMatching(scopedQuery, &result)
+            if status == errSecSuccess { break }
+            // Only sleep + retry on a transient transport-style status; bail on
+            // not-found / auth-failure immediately.
+            guard CredentialRetryPolicy.allowsAnotherAttempt(
+                attemptsMade: attemptsMade, lastStatus: status
+            ) else { break }
+            let backoff = CredentialRetryPolicy.backoff(forAttempt: attemptsMade)
+            Thread.sleep(forTimeInterval: backoff)
+        } while true
 
         guard status == errSecSuccess,
               let item = result as? [String: Any] else {

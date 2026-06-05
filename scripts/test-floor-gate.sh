@@ -817,7 +817,27 @@ set -euo pipefail
 # over the prior floor (1737 + 39 = 1776), staying below the measured 1835 so
 # the existing GUI/TCC + flake headroom is preserved while the 39 new tests
 # cannot be silently dropped.
-FLOOR="${BRIDGE_TEST_FLOOR:-1777}"
+FLOOR="${BRIDGE_TEST_FLOOR:-1804}"
+# [credentials] hardening (2026-06-05): credential_read/list hardening — env-var
+# alias normalization, sentinel/placeholder detection, idempotent-read transient-
+# drop retry. New pure logic in CredentialHardening.swift (CredentialAliasNormalizer
+# resolving e.g. CURSOR_API_KEY/STRIPE_API_KEY/NOTION_TOKEN → canonical
+# api_key:<provider>/<provider> shape verified against CredentialAddSheet +
+# ConnectionRegistry; CredentialSentinelDetector flagging empty/changeme//dev/stdin/
+# <your key>/too-short; CredentialRetryPolicy deciding whether+how-long to back off
+# on transient Keychain statuses only — auth/not-found never retried). Wired into
+# CredentialModule.credential_read (account now OPTIONAL when service is an alias;
+# surfaces resolved_from_alias + placeholder warning, secret never logged) and
+# credential_list (account-name placeholder flag + placeholder_count). The
+# CredentialManager.read loop is the only Keychain-touching change (retry on
+# transient OSStatus only). +27 test() blocks in CredentialHardeningTests.swift
+# (12 alias, 7 sentinel, 4 retry-policy, 4 MCP-surface wiring) — all pure (no
+# Keychain, no .app bundle, no live network), run in CI + local alike. The one
+# CredentialModuleTests schema assertion (account now optional) was UPDATED in
+# place, not added. Measured green 1869 (0 failed) locally. Floor raised by the
+# +27 net additive count over the prior floor (1777 + 27 = 1804), staying below
+# the measured 1869 so the GUI/TCC + flake headroom is preserved while the 27 new
+# tests cannot be silently dropped.
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

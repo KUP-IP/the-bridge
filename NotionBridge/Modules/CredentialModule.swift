@@ -147,34 +147,47 @@ public enum CredentialModule {
             name: "credential_read",
             module: moduleName,
             tier: .request,
-            description: "Read one credential from the Keychain by service + account. Requires user approval.",
+            description: "Read one credential from the Keychain by service + account. Accepts env-var-style aliases (e.g. CURSOR_API_KEY, STRIPE_API_KEY, NOTION_TOKEN) and resolves them to the canonical service:account shape. Flags sentinel/placeholder values. Requires user approval.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "service": .object([
                         "type": .string("string"),
-                        "description": .string("Service name to look up")
+                        "description": .string("Service name to look up. Also accepts an env-var-style alias such as CURSOR_API_KEY or NOTION_TOKEN, which is mapped to the canonical service:account.")
                     ]),
                     "account": .object([
                         "type": .string("string"),
-                        "description": .string("Account identifier to look up")
+                        "description": .string("Account identifier to look up. Optional when 'service' is a recognized alias (defaults to the provider).")
                     ])
                 ]),
-                "required": .array([.string("service"), .string("account")])
+                "required": .array([.string("service")])
             ]),
             handler: { arguments in
                 guard case .object(let args) = arguments,
-                      case .string(let service) = args["service"],
-                      case .string(let account) = args["account"] else {
+                      case .string(let service) = args["service"] else {
                     throw ToolRouterError.invalidArguments(
                         toolName: "credential_read",
-                        reason: "missing required 'service' or 'account' parameter"
+                        reason: "missing required 'service' parameter"
+                    )
+                }
+                // 'account' is optional when 'service' is a recognized alias.
+                let account: String = {
+                    if case .string(let a) = args["account"] { return a }
+                    return ""
+                }()
+                // [credentials] hardening: accept env-var-style aliases and map
+                // them to the canonical keychain service:account shape.
+                let resolved = CredentialAliasNormalizer.resolve(service: service, account: account)
+                guard !resolved.account.isEmpty else {
+                    throw ToolRouterError.invalidArguments(
+                        toolName: "credential_read",
+                        reason: "missing required 'account' parameter (could not be inferred from '\(service)')"
                     )
                 }
 
                 do {
                     let entry = try CredentialManager.shared.read(
-                        service: service, account: account
+                        service: resolved.service, account: resolved.account
                     )
 
                     var result: [String: Value] = [
@@ -183,6 +196,21 @@ public enum CredentialModule {
                         "type": .string(entry.type.rawValue),
                         "password_or_token": .string(entry.password ?? "")
                     ]
+
+                    // Surface that an alias was resolved so the caller can see
+                    // which canonical key was actually read.
+                    if resolved.wasAlias {
+                        result["resolved_from_alias"] = .string(service)
+                    }
+
+                    // [credentials] hardening: warn if the stored value is an
+                    // obvious sentinel/placeholder so the caller doesn't deploy
+                    // a non-secret. The secret value itself is never logged.
+                    if let reason = CredentialSentinelDetector.inspect(entry.password) {
+                        result["warning"] = .string("placeholder credential: \(reason.message)")
+                        result["is_placeholder"] = .bool(true)
+                        result["placeholder_reason"] = .string(reason.rawValue)
+                    }
 
                     var meta: [String: Value] = [:]
                     if let b = entry.metadata.brand { meta["brand"] = .string(b) }
@@ -247,6 +275,7 @@ public enum CredentialModule {
                         }
                     }
 
+                    var placeholderCount = 0
                     let items: [Value] = entries.map { entry in
                         var item: [String: Value] = [
                             "service": .string(entry.service),
@@ -261,6 +290,18 @@ public enum CredentialModule {
                             if let y = entry.metadata.expYear { item["exp_year"] = .int(y) }
                         }
 
+                        // [credentials] hardening: list returns metadata only
+                        // (no secret values), so flag entries whose ACCOUNT name
+                        // is itself an obvious placeholder (e.g. "changeme",
+                        // "test", "<your key>"). A real value can't be inspected
+                        // here; credential_read does the value-level check.
+                        if let reason = CredentialSentinelDetector.inspect(entry.account) {
+                            item["is_placeholder"] = .bool(true)
+                            item["placeholder_reason"] = .string(reason.rawValue)
+                            item["warning"] = .string("placeholder account: \(reason.message)")
+                            placeholderCount += 1
+                        }
+
                         if let created = entry.createdAt {
                             item["created"] = .string(ISO8601DateFormatter().string(from: created))
                         }
@@ -271,10 +312,14 @@ public enum CredentialModule {
                         return .object(item)
                     }
 
-                    return .object([
+                    var listResult: [String: Value] = [
                         "credentials": .array(items),
                         "count": .int(items.count)
-                    ])
+                    ]
+                    if placeholderCount > 0 {
+                        listResult["placeholder_count"] = .int(placeholderCount)
+                    }
+                    return .object(listResult)
                 } catch {
                     return .object(["error": .string(error.localizedDescription)])
                 }
