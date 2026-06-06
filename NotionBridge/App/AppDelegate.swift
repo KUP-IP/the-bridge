@@ -498,9 +498,32 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// log the updater's checkable state so a silent no-op (the historical
     /// PKT-932 bug) is diagnosable in the unified log rather than vanishing.
     public func checkForUpdates() {
+        // LSUIElement (menu-bar) app: become a regular app so Sparkle's update
+        // window/alert can surface as a focused window, then activate.
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         let u = updaterController.updater
         NSLog("[Bridge][Updater] checkForUpdates tapped — canCheckForUpdates=\(u.canCheckForUpdates) sessionInProgress=\(u.sessionInProgress) feedURL=\(u.feedURL?.absoluteString ?? "nil")")
+        // Guarantee user-visible feedback. Sparkle silently ignores a manual
+        // check when it cannot start one — most commonly because an automatic
+        // download/install session is already in progress (canCheckForUpdates ==
+        // false). Historically that produced a dead button with no UI at all.
+        // Surface an explicit alert in that state instead of no-op'ing.
+        guard u.canCheckForUpdates else {
+            let alert = NSAlert()
+            if u.sessionInProgress {
+                alert.messageText = "An update is already in progress"
+                alert.informativeText = "The Bridge is downloading or preparing an update in the background. Quit and reopen The Bridge to finish installing it."
+            } else {
+                alert.messageText = "Updates are unavailable right now"
+                alert.informativeText = "The updater isn’t ready to check at the moment. Please try again in a few seconds."
+            }
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            NSLog("[Bridge][Updater] manual check unavailable — surfaced alert (sessionInProgress=\(u.sessionInProgress))")
+            alert.runModal()
+            return
+        }
         updaterController.checkForUpdates(nil)
     }
 
