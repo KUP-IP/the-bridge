@@ -1,6 +1,25 @@
 # Changelog
 
-## [unreleased] — v3.7.6 — System-tethered Light/Dark theme
+## v3.7.7 — Integration: tool-grant management · automation tools · Sparkle/AX resilience
+
+Bundles the post-3.7.6 remediation work (14 branches), gated together (test floor 1950, 2014 passing).
+
+### Added
+- **Module-scoped tool grants**: "Always Allow" now covers sibling tools in a module; Settings → Tools gains a **Module Grants** section listing active grants with per-module **Revoke**, and affected tools show "tier via &lt;module&gt; grant".
+- **On-device automation tools**: `bridge_settings_navigate`, `bridge_focus_settings`, `permissions_status`, `swift_build` / `swift_test` / `make_run`.
+- **Notion ergonomics**: in-place page edit (`notion_page_edit`), bulk block delete, comment auto-chunk; result-size + projection controls on high-volume reads.
+- **Permissions**: Reminders / Calendar grant rows + `permissions_status` probe.
+- **Credentials**: env-var alias normalization, sentinel-value flagging, idempotent-read retry.
+
+### Fixed
+- **Sparkle resilience**: the menu-bar icon degrades to a system symbol instead of crash-looping when the SPM resource bundle is unloadable; a staged-update validator aborts install-on-corrupt-base (fixes the dev-only install/Sparkle bundle-corruption crash).
+- **Accessibility crash**: deep AX queries no longer crash the app (main-thread + bounded traversal).
+- **MCP session durability** (partial): server-side session persistence/resume across restart.
+
+### Notes
+- Tracked follow-ups: securitygate approval-coalescer lost-wakeup race; credentials NOTION-alias correction. See `docs/operator/INTEGRATION-v3.7.7-HANDOFF.md`.
+
+## v3.7.6 — System-tethered Light/Dark theme
 
 > The Bridge now follows the macOS **system appearance** across every surface. There is **no in-app theme toggle** — appearance is always tethered to the system and **live-adapts** when you flip System Settings → Appearance (no relaunch). **Dark mode is visually unchanged** (the carbon look); **Light mode** is a new titanium treatment.
 

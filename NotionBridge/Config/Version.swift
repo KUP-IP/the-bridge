@@ -11,7 +11,7 @@ import Foundation
 public enum AppVersion {
     /// Marketing version (CFBundleShortVersionString equivalent).
     /// Format: MAJOR.MINOR.PATCH (Semantic Versioning).
-    public static let marketing = "3.7.6"
+    public static let marketing = "3.7.7"
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
@@ -23,7 +23,10 @@ public enum AppVersion {
     ///   the 3.7.0 DMG predates).
     /// v3.7.6: 50 → 51 — system-tethered Light/Dark theme (adaptive BridgeTokens;
     ///   removed all 9 force-dark mechanisms; Dark unchanged, Light = titanium).
-    public static let build = "51"
+    /// v3.7.7: 51 → 52 — integration of 14 post-3.7.6 branches (module-scoped tool
+    ///   grants + revoke UI, on-device automation tools, Notion/credentials
+    ///   ergonomics, Sparkle + AX crash resilience).
+    public static let build = "52"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }
