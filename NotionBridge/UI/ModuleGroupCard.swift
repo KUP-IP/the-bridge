@@ -36,17 +36,22 @@ extension TripleStateLike {
 private struct ModuleGroupToolRow: View {
     let toolName: String
     let description: String
-    /// Registered security tier ("open" / "notify" / "request"). Drives the
-    /// "confirm" tier pill the design shows for tools that prompt before
-    /// running. `nil`/"open" renders no pill.
+    /// EFFECTIVE security tier ("open" / "notify" / "request"), incl. per-tool
+    /// and module-grant overrides. Drives the interactive gate pill below.
     let tier: String?
+    /// Cycle this tool's security gate (Open → Notify → Request → Open).
+    let onTierTap: () -> Void
     @Binding var isEnabled: Bool
 
-    /// The design's `.tl-pill.confirm` — anything past the plain `open`
-    /// tier confirms / notifies before dispatch.
-    private var isConfirmTier: Bool {
-        guard let tier else { return false }
-        return tier != "open"
+    /// Label + colours for the current effective security gate. Restores the
+    /// 3-state control (Open/Notify/Request) the flat ToolRegistryView had
+    /// before the grouped-card redesign dropped it to a static "confirm" pill.
+    private var tierTriple: (label: String, bg: Color, stroke: Color, fg: Color) {
+        switch (tier ?? "open") {
+        case "request": return ("REQUEST", BridgeTokens.bad.opacity(0.16), BridgeTokens.bad.opacity(0.30), BridgeTokens.badText)
+        case "notify":  return ("NOTIFY",  BridgeTokens.warn.opacity(0.16), BridgeTokens.warn.opacity(0.30), BridgeTokens.warnText)
+        default:        return ("OPEN",    BridgeTokens.ok.opacity(0.14),   BridgeTokens.ok.opacity(0.28),   BridgeTokens.okText)
+        }
     }
 
     var body: some View {
@@ -74,14 +79,22 @@ private struct ModuleGroupToolRow: View {
             }
             Spacer(minLength: 8)
 
-            // Tier / state pill (design `.tl-meta`): a "confirm" pill for
-            // notify/request-tier tools, an "off" pill when disabled.
-            if isConfirmTier {
-                toolPill("confirm",
-                         bg: BridgeTokens.warn.opacity(0.16),
-                         stroke: BridgeTokens.warn.opacity(0.30),
-                         fg: BridgeTokens.warnText)
+            // Interactive security-gate pill: tap to cycle Open → Notify →
+            // Request. Restores the per-tool gate control lost in the
+            // grouped-card redesign (was a static, non-tappable "confirm" pill).
+            Button(action: onTierTap) {
+                Text(tierTriple.label)
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.4)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(tierTriple.bg, in: Capsule())
+                    .overlay(Capsule().strokeBorder(tierTriple.stroke, lineWidth: 0.5))
+                    .foregroundStyle(tierTriple.fg)
             }
+            .buttonStyle(.plain)
+            .contentShape(Capsule())
+            .help("Security gate — tap to cycle Open → Notify → Request")
             if !isEnabled {
                 toolPill("off",
                          bg: BridgeTokens.bad.opacity(0.10),
@@ -131,6 +144,8 @@ public struct ModuleGroupCard: View {
     public let onPerToolChange: (String, Bool) -> Void
     public let onMasterChange: (Bool) -> Void
     public let onDepLinkTapped: (ModuleGroupDependency) -> Void
+    /// Cycle a member tool's security gate (Open → Notify → Request).
+    public let onTierTap: (String) -> Void
 
     /// Deep-link auto-expand signal. `true` when this card is the target of a
     /// Tools dep-link chip (its group == the resolved anchor); the card expands
@@ -154,7 +169,8 @@ public struct ModuleGroupCard: View {
         forceExpanded: Bool = false,
         onPerToolChange: @escaping (String, Bool) -> Void,
         onMasterChange: @escaping (Bool) -> Void,
-        onDepLinkTapped: @escaping (ModuleGroupDependency) -> Void
+        onDepLinkTapped: @escaping (ModuleGroupDependency) -> Void,
+        onTierTap: @escaping (String) -> Void
     ) {
         self.group = group
         self.toolDescriptions = toolDescriptions
@@ -163,6 +179,7 @@ public struct ModuleGroupCard: View {
         self.onPerToolChange = onPerToolChange
         self.onMasterChange = onMasterChange
         self.onDepLinkTapped = onDepLinkTapped
+        self.onTierTap = onTierTap
         let saved = ModuleGroupCard.savedExpandState(forGroupId: group.id.rawValue)
         let initial: Bool = {
             // Deep-link target → start expanded so the chip lands on an open card.
@@ -404,6 +421,7 @@ public struct ModuleGroupCard: View {
                     toolName: toolName,
                     description: toolDescriptions[toolName] ?? "",
                     tier: toolTiers[toolName],
+                    onTierTap: { onTierTap(toolName) },
                     isEnabled: Binding(
                         get: { !group.disabledNames.contains(toolName) },
                         set: { onPerToolChange(toolName, $0) }
@@ -429,6 +447,13 @@ public struct ModuleGroupList: View {
     @State private var disabledTools: Set<String> = Set(
         UserDefaults.standard.stringArray(forKey: BridgeDefaults.disabledTools) ?? []
     )
+    /// Per-tool gate overrides (BridgeDefaults.tierOverrides) — restored so the
+    /// grouped Tools page can manage security gates again.
+    @State private var tierOverrides: [String: String] =
+        (UserDefaults.standard.dictionary(forKey: BridgeDefaults.tierOverrides) as? [String: String]) ?? [:]
+    /// Per-module "Always Allow" grants (BridgeDefaults.moduleTierOverrides).
+    @State private var moduleTierOverrides: [String: String] =
+        (UserDefaults.standard.dictionary(forKey: BridgeDefaults.moduleTierOverrides) as? [String: String]) ?? [:]
 
     public init(tools: [ToolInfo], nav: SettingsNavigation = .shared) {
         self.tools = tools
@@ -441,9 +466,52 @@ public struct ModuleGroupList: View {
         Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0.description) })
     }
 
-    /// Tool name → security tier lookup, feeding the per-row "confirm" pill.
+    /// Tool name → EFFECTIVE security tier (per-tool override > module grant >
+    /// registered default), feeding the interactive per-row gate pill. Uses the
+    /// shared ToolTierResolution so the UI can never disagree with the router.
     private var tiers: [String: String] {
-        Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0.tier) })
+        Dictionary(uniqueKeysWithValues: tools.map { tool in
+            (tool.name, ToolTierResolution.effectiveTier(
+                toolName: tool.name,
+                module: tool.module,
+                registeredTier: tool.tier,
+                toolOverrides: tierOverrides,
+                moduleOverrides: moduleTierOverrides))
+        })
+    }
+
+    /// Tool name → (module, registered tier) for cycle/base resolution.
+    private var toolMeta: [String: (module: String, registered: String)] {
+        Dictionary(uniqueKeysWithValues: tools.map { ($0.name, ($0.module, $0.tier)) })
+    }
+
+    private func nextTier(after current: String) -> String {
+        switch current {
+        case "open": return "notify"
+        case "notify": return "request"
+        default: return "open"
+        }
+    }
+
+    /// Cycle a tool's security gate and persist. Landing back on the tool's base
+    /// (its module grant if one exists, else the registered default) clears the
+    /// per-tool override so it follows the grant/default. Mirrors the legacy
+    /// ToolRegistryView behaviour and posts the same change notification so the
+    /// router + other surfaces pick it up live.
+    private func cycleTier(_ toolName: String) {
+        guard let meta = toolMeta[toolName] else { return }
+        let current = ToolTierResolution.effectiveTier(
+            toolName: toolName, module: meta.module, registeredTier: meta.registered,
+            toolOverrides: tierOverrides, moduleOverrides: moduleTierOverrides)
+        let base = moduleTierOverrides[meta.module] ?? meta.registered
+        let next = nextTier(after: current)
+        if next == base {
+            tierOverrides.removeValue(forKey: toolName)
+        } else {
+            tierOverrides[toolName] = next
+        }
+        UserDefaults.standard.set(tierOverrides, forKey: BridgeDefaults.tierOverrides)
+        NotificationCenter.default.post(name: .notionBridgeTierOverridesDidChange, object: nil)
     }
 
     private var groups: [ModuleGroup] {
@@ -494,6 +562,9 @@ public struct ModuleGroupList: View {
                             },
                             onDepLinkTapped: { dep in
                                 handleDepLink(dep)
+                            },
+                            onTierTap: { toolName in
+                                cycleTier(toolName)
                             }
                         )
                         // Scroll anchor id — the resolved group id, so the
