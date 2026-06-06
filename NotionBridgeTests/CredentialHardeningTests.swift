@@ -32,16 +32,16 @@ func runCredentialHardeningTests() async {
         try expect(r.account == "stripe", "account was \(r.account)")
     }
 
-    await test("alias: NOTION_TOKEN maps to bare notion service") {
+    await test("alias: NOTION_TOKEN maps to the KeychainManager infra row") {
         let r = CredentialAliasNormalizer.resolve(service: "NOTION_TOKEN", account: "")
         try expect(r.wasAlias, "should be alias")
-        try expect(r.service == "notion", "notion uses bare service, got \(r.service)")
-        try expect(r.account == "notion", "account was \(r.account)")
+        try expect(r.service == "com.notionbridge", "notion uses the infra service, got \(r.service)")
+        try expect(r.account == "notion_api_token", "account was \(r.account)")
     }
 
-    await test("alias: NOTION_TOKEN preserves an explicit workspace account") {
+    await test("alias: NOTION_TOKEN preserves an explicit account") {
         let r = CredentialAliasNormalizer.resolve(service: "NOTION_TOKEN", account: "my-workspace")
-        try expect(r.service == "notion", "service was \(r.service)")
+        try expect(r.service == "com.notionbridge", "service was \(r.service)")
         try expect(r.account == "my-workspace", "explicit account should win, got \(r.account)")
     }
 

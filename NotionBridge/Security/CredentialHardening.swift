@@ -35,7 +35,7 @@ import Foundation
 ///
 /// CANONICAL SHAPE (matches CredentialAddSheet.saveApiKey / ConnectionRegistry):
 ///   • API keys  → service `api_key:<provider>`, account `<provider>`
-///   • Notion    → service `notion`,             account `<workspace/notion>`
+///   • Notion    → service `com.notionbridge`,   account `notion_api_token`
 ///   • Stripe    → service `api_key:stripe`,     account `stripe`
 ///
 /// The mapping is intentionally conservative: it only rewrites a lookup when
@@ -139,8 +139,12 @@ public enum CredentialAliasNormalizer {
         let canonicalService: String
         let canonicalAccount: String
         if provider == "notion" {
-            canonicalService = "notion"
-            canonicalAccount = trimmedAccount.isEmpty ? "notion" : trimmedAccount
+            // Notion's token is stored by KeychainManager under the infrastructure
+            // service `com.notionbridge` / account `notion_api_token` (NOT an
+            // api_key:<provider> row); credential_read surfaces com.notionbridge
+            // infrastructure keys via its fallback path.
+            canonicalService = "com.notionbridge"
+            canonicalAccount = trimmedAccount.isEmpty ? "notion_api_token" : trimmedAccount
         } else {
             canonicalService = "api_key:\(provider)"
             canonicalAccount = trimmedAccount.isEmpty ? provider : trimmedAccount

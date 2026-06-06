@@ -27,6 +27,27 @@ func runSecurityGateUXTests() async {
     print("\n🛡️  SecurityGate UX Tests (fb-securitygate)")
 
     // ============================================================
+    // MARK: - (race fix) drain-before-park lost-wakeup regression
+    // ============================================================
+
+    await test("Coalescer race: owner resolves before waiter parks → waiter still resumes") {
+        let mgr = NotificationApprovalManager()
+        _ = mgr.reserveCoalesced(coalesceKey: "kRace", identifier: "ownerRace")
+        let (isFirst, token) = mgr.reserveCoalesced(coalesceKey: "kRace", identifier: "ownerRace")
+        try expect(isFirst == false, "second caller for the same key is a coalesced waiter")
+        // Owner resolves BEFORE the waiter parks → must buffer the decision (nothing to resume yet).
+        let resumeNow = mgr.drainCoalescedWaiters(forIdentifier: "ownerRace", decision: .allow)
+        try expect(resumeNow.isEmpty, "no continuation parked yet, so nothing to resume synchronously")
+        // Waiter parks AFTER the drain → must resume immediately with the buffered decision (no hang).
+        let decision = await withCheckedContinuation { (c: CheckedContinuation<NotificationApprovalManager.ApprovalDecision, Never>) in
+            mgr.parkCoalescedWaiter(token: token, continuation: c)
+        }
+        if case .allow = decision {} else {
+            try expect(false, "drain-before-park must resume with the buffered .allow decision")
+        }
+    }
+
+    // ============================================================
     // MARK: - (2) ApprovalCoalescer — in-flight prompt collapsing
     // ============================================================
 
