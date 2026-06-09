@@ -287,7 +287,17 @@ public actor ServerManager {
                     intent: intent
                 )
             }
-            let arguments: Value = params.arguments.map { .object($0) } ?? .object([:])
+            var arguments: Value = params.arguments.map { .object($0) } ?? .object([:])
+            if params.name == "memory_remember" {
+                arguments = MemoryModule.argumentsWithClientSource(arguments, clientName: "stdio")
+            }
+            if params.name.hasPrefix("memory_") {
+                DeliveryLog.shared.recordMemoryToolCall(
+                    sessionID: Self.stdioSessionID,
+                    clientName: "stdio",
+                    toolName: params.name
+                )
+            }
             let (text, isError) = await router.dispatchFormatted(toolName: params.name, arguments: arguments)
             if !isError { await MainActor.run { onToolCall() } }
             return .init(content: [.text(.init(text))], isError: isError)

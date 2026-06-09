@@ -1,4 +1,4 @@
-// MemoryModule.swift — Unified Memory MCP tools · FOUNDATION (Wave 1)
+// MemoryModule.swift — Unified Memory MCP tools · Wave 1 + Wave 2
 // NotionBridge · Modules
 //
 // Registers `memory_remember` + `memory_recall` on the ToolRouter so BOTH
@@ -135,6 +135,80 @@ public enum MemoryModule {
                 ])
             }
         ))
+
+        // MARK: 3. memory_export — request (local backup seam)
+        await router.register(ToolRegistration(
+            name: "memory_export",
+            module: moduleName,
+            tier: .request,
+            description: "Export all live memories as a versioned JSON envelope for backup or migration. Local-only; does not include soft-tombstoned rows.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([:])
+            ]),
+            metadata: ToolMetadata(
+                title: "Memory Export",
+                whenToUse: ["backup memories before a reinstall", "migrate memory between Macs via export/import"],
+                whenNotToUse: ["reading memories for grounding (use memory_recall)"],
+                relatedTools: ["memory_import", "memory_recall"]
+            ),
+            handler: { _ in
+                let payload = try await store.exportJSON()
+                return .object([
+                    "ok": .bool(true),
+                    "format": .string("json"),
+                    "schemaVersion": .int(MemoryStore.ExportEnvelope.currentSchemaVersion),
+                    "payload": .string(payload)
+                ])
+            }
+        ))
+
+        // MARK: 4. memory_import — request (local restore seam)
+        await router.register(ToolRegistration(
+            name: "memory_import",
+            module: moduleName,
+            tier: .request,
+            description: "Import memories from a `memory_export` JSON envelope. Skips duplicates (same scope+entity+contentHash). Assigns fresh ids to imported rows.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "payload": .object(["type": .string("string"), "description": .string("JSON from memory_export")])
+                ]),
+                "required": .array([.string("payload")])
+            ]),
+            metadata: ToolMetadata(
+                title: "Memory Import",
+                whenToUse: ["restore a memory_export backup on this Mac"],
+                whenNotToUse: ["creating a single new memory (use memory_remember)"],
+                relatedTools: ["memory_export", "memory_remember"]
+            ),
+            handler: { arguments in
+                guard case .object(let obj) = arguments,
+                      case .string(let payload)? = obj["payload"], !payload.isEmpty else {
+                    throw ToolRouterError.invalidArguments(toolName: "memory_import", reason: "missing 'payload'")
+                }
+                let result = try await store.importJSON(payload)
+                return .object([
+                    "ok": .bool(true),
+                    "imported": .int(result.imported),
+                    "skipped": .int(result.skipped),
+                    "errors": .array(result.errors.map { .string($0) })
+                ])
+            }
+        ))
+    }
+
+    // MARK: - Client source threading (Wave 2 · Q3)
+
+    /// Inject the live MCP client name as `source` when the caller omitted it.
+    public static func argumentsWithClientSource(_ arguments: Value, clientName: String?) -> Value {
+        guard let name = clientName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
+            return arguments
+        }
+        guard case .object(var obj) = arguments else { return arguments }
+        if stringArg(obj, "source") != nil { return arguments }
+        obj["source"] = .string(name)
+        return .object(obj)
     }
 
     // MARK: - Helpers

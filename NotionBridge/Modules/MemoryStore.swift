@@ -408,6 +408,115 @@ public actor MemoryStore {
             .map(\.entry)
     }
 
+    // MARK: Wave 2 — export / import / consolidation
+
+    /// JSON envelope for `memory_export` / `memory_import` (local-only sync seam).
+    public struct ExportEnvelope: Codable, Sendable, Equatable {
+        public static let currentSchemaVersion = 1
+        public var schemaVersion: Int
+        public var exportedAt: Date
+        public var entries: [MemoryEntry]
+
+        public init(exportedAt: Date = Date(), entries: [MemoryEntry]) {
+            self.schemaVersion = Self.currentSchemaVersion
+            self.exportedAt = exportedAt
+            self.entries = entries
+        }
+    }
+
+    public struct ImportResult: Sendable, Equatable {
+        public var imported: Int
+        public var skipped: Int
+        public var errors: [String]
+    }
+
+    public struct ConsolidationReport: Sendable, Equatable {
+        public var referenceDemoted: Int
+        public var expiredTombstoned: Int
+    }
+
+    /// All live rows as JSON (pretty-printed). Does not include tombstoned rows.
+    public func exportJSON() throws -> String {
+        try ensureOpen()
+        let entries = try liveEntries(scope: nil, entity: nil)
+        let envelope = ExportEnvelope(entries: entries)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(envelope),
+              let json = String(data: data, encoding: .utf8) else {
+            throw MemoryStoreError.storageFailure("export encode failed")
+        }
+        return json
+    }
+
+    /// Import from a Wave-2 export envelope. Skips rows whose `contentHash` already
+    /// exists live in the same scope+entity; otherwise inserts with a fresh id.
+    public func importJSON(_ raw: String) throws -> ImportResult {
+        try ensureOpen()
+        guard let data = raw.data(using: .utf8) else {
+            throw MemoryStoreError.invalidArgument("import payload is not valid UTF-8")
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let envelope = try decoder.decode(ExportEnvelope.self, from: data)
+        guard envelope.schemaVersion == ExportEnvelope.currentSchemaVersion else {
+            throw MemoryStoreError.invalidArgument("unsupported export schemaVersion \(envelope.schemaVersion)")
+        }
+        var imported = 0
+        var skipped = 0
+        var errors: [String] = []
+        for entry in envelope.entries {
+            do {
+                if try liveDuplicateExists(scope: entry.scope, entity: entry.entity, hash: entry.contentHash) {
+                    skipped += 1
+                    continue
+                }
+                var row = entry
+                row.id = UUID().uuidString
+                row.supersedesId = nil
+                try insertRow(row)
+                imported += 1
+            } catch {
+                errors.append("\(entry.id): \(error.localizedDescription)")
+            }
+        }
+        return ImportResult(imported: imported, skipped: skipped, errors: errors)
+    }
+
+    /// On-launch catch-up: demote-not-delete stale `reference` rows and tombstone
+    /// any row whose explicit `expiresAt` is in the past. Pinned rows are never swept.
+    public func consolidationSweep(now: Date = Date()) throws -> ConsolidationReport {
+        try ensureOpen()
+        var referenceDemoted = 0
+        var expiredTombstoned = 0
+        let all = try liveEntries(scope: nil, entity: nil)
+        for entry in all where !entry.pinned {
+            if let exp = entry.expiresAt, exp <= now {
+                try tombstone(id: entry.id, at: now)
+                expiredTombstoned += 1
+                continue
+            }
+            if entry.type == .reference {
+                let age = now.timeIntervalSince(entry.lastUsedAt)
+                if age >= Self.referenceStaleSeconds {
+                    try tombstone(id: entry.id, at: now)
+                    referenceDemoted += 1
+                }
+            }
+        }
+        return ConsolidationReport(referenceDemoted: referenceDemoted, expiredTombstoned: expiredTombstoned)
+    }
+
+    /// ~90 days without use: `reference` entries are soft-tombstoned on consolidation.
+    static let referenceStaleSeconds: TimeInterval = 60 * 60 * 24 * 90
+
+    private func liveDuplicateExists(scope: String, entity: String?, hash: String) throws -> Bool {
+        try liveEntry(matchingHash: hash).map { existing in
+            existing.scope == scope && existing.entity == entity
+        } ?? false
+    }
+
     // MARK: - Salience
 
     /// Salience = weighted sum of:

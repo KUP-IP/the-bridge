@@ -246,6 +246,8 @@ public enum ToolAnnotationCatalog {
         // false (a closed local store). recall is read-only — recall DOES bump
         // useCount/lastUsedAt (use-promotion), but that is metadata-only and
         // does not mutate content, so readOnlyHint stays true.
+        "memory_export": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: false),
+        "memory_import": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: false),
         "memory_recall": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "memory_remember": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "messages_chat": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),

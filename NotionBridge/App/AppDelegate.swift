@@ -255,6 +255,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             print("[PathMigration] WARNING: migration failed: \(error)")
         }
 
+        // PKT-977 Wave 2: demote stale reference memories on launch (best-effort).
+        Task {
+            do {
+                let report = try await MemoryStore.shared.consolidationSweep()
+                if report.referenceDemoted > 0 || report.expiredTombstoned > 0 {
+                    print("[Memory] consolidation: referenceDemoted=\(report.referenceDemoted) expired=\(report.expiredTombstoned)")
+                }
+            } catch {
+                print("[Memory] WARNING: consolidation sweep failed: \(error)")
+            }
+        }
+
         // PKT-909 (Sell/Distribute v3 · 1): bootstrap the licensing gate.
         // MUST come AFTER PathMigration — the grandfather detection looks
         // at PathMigration's sentinel file. First-launch users seed

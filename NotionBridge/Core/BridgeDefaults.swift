@@ -91,6 +91,15 @@ public enum BridgeDefaults {
     /// `ClientOverlayStore`.
     public static let standingOrdersClientOverlays = "com.notionbridge.standingOrdersClientOverlays"
 
+    /// Wave 2 (PKT-977): when true, append the memory handshake slice to
+    /// `initialize.instructions` for connecting MCP clients. Default OFF —
+    /// memory remains opt-in via `bridge://memory` until the operator enables this.
+    public static let memoryHandshakeAutoInject = "com.notionbridge.memory.handshakeAutoInject"
+
+    public static var memoryHandshakeAutoInjectEffective: Bool {
+        UserDefaults.standard.bool(forKey: memoryHandshakeAutoInject)
+    }
+
     // MARK: - Commands Palette (cmd-ux)
 
     /// Master on/off for the Commands palette (global-hotkey command box).
