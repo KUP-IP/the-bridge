@@ -143,10 +143,30 @@ public actor ServerManager {
                 expectedIssuer: issuer,
                 expectedAudience: resource
             )
+            // PKT-810: the RFC 9728 resource_metadata pointer in the
+            // WWW-Authenticate challenge MUST be reachable by the REMOTE
+            // client — derive it from the (possibly public) resolved
+            // resource origin, NOT a hardcoded 127.0.0.1:port. With
+            // BRIDGE_PUBLIC_RESOURCE set this becomes
+            // https://mcp.kup.solutions/.well-known/oauth-protected-resource;
+            // unset, it falls back to the local origin (dev/stdio default).
+            let prmURL: String = {
+                if let c = URLComponents(string: resource),
+                   let scheme = c.scheme, let host = c.host {
+                    let portPart = c.port.map { ":\($0)" } ?? ""
+                    return "\(scheme)://\(host)\(portPart)/.well-known/oauth-protected-resource"
+                }
+                return "http://127.0.0.1:\(ssePort)/.well-known/oauth-protected-resource"
+            }()
+            // PKT-810 coexistence: the loopback (local desktop) static bearer —
+            // the same Keychain secret existing local clients already send. nil
+            // when unset (prior local-trust). Remote requests are OAuth-gated
+            // above; this only governs direct-loopback requests.
+            let local = MCPHTTPValidation.resolveMCPBearerToken()
             return ConnectorAuthContext(
                 validator: validator,
-                resourceMetadataURL:
-                    "http://127.0.0.1:\(ssePort)/.well-known/oauth-protected-resource"
+                resourceMetadataURL: prmURL,
+                localBearer: local.isEmpty ? nil : local
             )
         }()
 

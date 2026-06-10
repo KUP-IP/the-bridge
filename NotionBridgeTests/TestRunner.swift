@@ -701,6 +701,7 @@ await runRemoteOAuthHTTPTests()     // PKT-800 (S1): RFC 9728 PRM + transport ga
 await runRemoteOAuthBearerTests()   // PKT-800 (S2): JWTKit bearer + ScopeGate + 401/WWW-Auth
 await runRemoteOAuthHardeningTests() // PKT-800 (S3): step-up + confused-deputy + leak-sweep + gating
 await runRemoteOAuthHardeningS4Tests() // PKT-800 (S4): contacts.read split + TransportRouter seam + step-up scope-only
+await runRemoteOAuthOriginGatingTests() // PKT-810: local↔cloud coexistence (loopback static-bearer fallback, tunnel OAuth)
 await runBridgeFeatureFlagsTests()  // PKT-798 (v2.3 · WS-C): fail-closed capability gates
 await runBridgeModuleRegistryTests() // PKT v3.0·0.4: single-source module registrar
 await runMCPToolFactoryTests()       // PKT v3.0·0.5: metadata contract + unified Tool factory

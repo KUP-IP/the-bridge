@@ -511,37 +511,75 @@ public actor SSEServer {
 
     // MARK: - Request Routing (Streamable HTTP — POST /mcp)
 
+    /// PKT-810: a request is "remote" iff Cloudflare stamped a tunnel header on
+    /// it. cloudflared adds `Cf-Connecting-Ip` / `Cf-Ray` to every proxied
+    /// request reaching the origin; a direct-loopback request (local desktop
+    /// stdio-proxy, or any process on 127.0.0.1) carries neither. `header(_:)`
+    /// is case-insensitive (MCP SDK), so wire-case variance is a non-issue.
+    public static func isRemoteTunnelRequest(_ request: HTTPRequest) -> Bool {
+        request.header("Cf-Connecting-Ip") != nil || request.header("Cf-Ray") != nil
+    }
+
+    /// PKT-810 coexistence: the loopback (local desktop) static-bearer fallback.
+    /// Returns a served response ONLY when the request is direct-loopback (no
+    /// Cloudflare tunnel header), a local bearer is configured, and the
+    /// presented bearer matches it. Returns `nil` otherwise so the caller falls
+    /// back to the OAuth rejection. A remote (tunnel) request never matches —
+    /// the static bearer can never be a cloud OAuth bypass.
+    private func loopbackStaticBearerFallback(
+        _ request: HTTPRequest, authHeader: String?, auth: ConnectorAuthContext
+    ) async -> HTTPResponse? {
+        guard !Self.isRemoteTunnelRequest(request),
+              let expected = auth.localBearer, !expected.isEmpty,
+              let presented = authHeader.map({
+                  $0.lowercased().hasPrefix("bearer ") ? String($0.dropFirst(7)) : $0
+              }),
+              presented == expected
+        else { return nil }
+        await auth.diagnostics.record(outcome: "local.accepted", detail: "loopback")
+        return await processStreamableHTTP(request)
+    }
+
     public func handleHTTPRequest(_ request: HTTPRequest) async -> HTTPResponse {
-        // PKT-800 S2 — connector bearer gate. ADDITIVE ISOLATION: this
-        // block is a no-op (early-returns nothing, falls straight through)
-        // whenever `connectorAuth == nil`, which is the case for every
-        // default configuration. It is reached ONLY on the Streamable-HTTP
-        // `/mcp` funnel (the NIO handler routes `/health`, `/sse`,
-        // `/messages`, the job callback, and the PRM doc *before* ever
-        // calling `httpRequestHandler` → `handleHTTPRequest`), so no other
-        // transport or endpoint can hit it. stdio never constructs an
-        // `SSEServer` request at all.
+        // PKT-800 S2 / PKT-810 — connector auth gate. ADDITIVE ISOLATION: this
+        // block is a no-op (falls straight through) whenever
+        // `connectorAuth == nil` (every default, stdio-only config). It is
+        // reached ONLY on the Streamable-HTTP `/mcp` funnel (the NIO handler
+        // routes `/health`, `/sse`, `/messages`, the job callback, and the PRM
+        // doc *before* `handleHTTPRequest`), so no other transport hits it.
+        //
+        // PKT-810 coexistence — OAuth-first, loopback-static-bearer fallback:
+        // a valid AuthKit JWT is ALWAYS OAuth-validated (cloud + any origin).
+        // If the bearer is NOT a valid JWT, a direct-loopback request may fall
+        // back to the local static bearer (so the local desktop path keeps
+        // working when cloud OAuth is on). The static bearer is loopback-scoped
+        // — a tunnel request never reaches the fallback, so it can never bypass
+        // OAuth. `localBearer == nil` ⇒ fallback inert (pure prior behavior).
         if let auth = connectorAuth {
             let authHeader = request.header(HTTPHeaderName.authorization)
             do {
                 let token = try await auth.validator.validate(authorizationHeader: authHeader)
-                // Diagnostic: bearer accepted. `detail` is redacted by the
-                // sink; we deliberately pass NO token material here.
                 await auth.diagnostics.record(
                     outcome: "bearer.accepted",
                     detail: "method=\(request.method) sub-len=\(token.subject.count)"
                 )
                 return await dispatchAuthorizedConnectorRequest(request, token: token, auth: auth)
             } catch let err as BearerValidationError {
+                if let local = await loopbackStaticBearerFallback(request, authHeader: authHeader, auth: auth) {
+                    return local
+                }
                 await auth.diagnostics.record(
                     outcome: "bearer.rejected",
-                    detail: "reason=\(err.wwwAuthenticateError) header=\(authHeader ?? "<none>")"
+                    detail: "reason=\(err.wwwAuthenticateError)"
                 )
                 return Self.unauthorizedResponse(for: err, auth: auth)
             } catch {
+                if let local = await loopbackStaticBearerFallback(request, authHeader: authHeader, auth: auth) {
+                    return local
+                }
                 await auth.diagnostics.record(
                     outcome: "bearer.rejected",
-                    detail: "reason=opaque \(error)"
+                    detail: "reason=opaque"
                 )
                 return Self.unauthorizedResponse(
                     for: .malformedToken("\(error)"), auth: auth

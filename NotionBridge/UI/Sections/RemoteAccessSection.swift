@@ -109,10 +109,20 @@ public struct RemoteAccessSection: View {
     /// Backing store for the `hasSeenCloudAccessFirstRun` one-time gate.
     private let defaults: UserDefaults
 
-    /// Whether the cloud tenant is provisioned (`WorkOSConfig.isConfigured`).
-    /// When false the Enable toggle is disabled + shows "Coming soon" rather
-    /// than launching a sign-in flow that can only error on WorkOS's "Invalid
-    /// client ID" page (the placeholder client id; PKT-810 not yet live).
+    /// PKT-810: Model A (the bespoke kup-worker "Enable Cloud Access" flow) is
+    /// DISABLED pending multi-tenant reconciliation. Toggling it provisioned a
+    /// tenant and advertised a non-resolving `*.bridge.kup.solutions` URL that
+    /// conflicted with — and broke setup of — the directory OAuth connector
+    /// (Model B: `mcp.kup.solutions/mcp`, the single blessed cloud path that
+    /// works on web + mobile + desktop). Flip to `true` to re-enable once WS-B
+    /// multi-tenant routing actually ships. Until then the toggle is disabled +
+    /// shows the "coming soon" state.
+    public static let modelAEnabled = false
+
+    /// Whether the cloud tenant is provisioned (`WorkOSConfig.isConfigured`)
+    /// AND Model A is enabled (`modelAEnabled`). When false the Enable toggle
+    /// is disabled + shows "Coming soon" rather than launching a flow that can
+    /// only error or hand out a dead tenant URL.
     private let cloudConfigured: Bool
 
     /// WS-F: factory for the live Enable flow. Injectable so tests / previews
@@ -123,7 +133,7 @@ public struct RemoteAccessSection: View {
     public init(
         displayState: DisplayState = .disabled,
         defaults: UserDefaults = .standard,
-        cloudConfigured: Bool = WorkOSConfig.resolved().isConfigured,
+        cloudConfigured: Bool = RemoteAccessSection.modelAEnabled && WorkOSConfig.resolved().isConfigured,
         makeFlow: @escaping @MainActor () -> EnableCloudAccessFlow = { RemoteAccessSection.defaultFlow() }
     ) {
         self._displayState = State(initialValue: displayState)
