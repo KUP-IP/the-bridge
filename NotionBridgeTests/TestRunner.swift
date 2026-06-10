@@ -147,6 +147,22 @@ struct NotionBridgeTestRunner {
             try? seed.data(using: .utf8)?.write(to: tmpConfig, options: .atomic)
         }
 
+        // HERMETIC TEST ISOLATION (PKT-810): the connector/cloud env vars are
+        // meaningful ONLY to the live app, never to the suite — but several
+        // gating tests read `ProcessInfo.processInfo.environment` directly and
+        // assert the DEFAULT (off) state. A dev session that exported these via
+        // `launchctl setenv` (running the live cloud connector) leaks them into
+        // the test process and false-fails those default-state assertions. Unset
+        // them up front so the suite is deterministic regardless of the dev
+        // session's launchd environment.
+        for leaky in [
+            "BRIDGE_ENABLE_HTTP", "BRIDGE_PUBLIC_RESOURCE", "BRIDGE_OAUTH_ISSUER",
+            "BRIDGE_OAUTH_JWKS", "BRIDGE_CLOUD_BASE_URL", "NOTION_BRIDGE_PORT",
+            "WORKOS_CLIENT_ID", "WORKOS_BASE_URL", "WORKOS_REDIRECT_URI",
+        ] {
+            unsetenv(leaky)
+        }
+
         // Credential / payment MCP tests assume the Keychain credentials feature is enabled.
         UserDefaults.standard.set(true, forKey: CredentialsFeature.userDefaultsKey)
 
