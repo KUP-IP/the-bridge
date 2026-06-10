@@ -290,16 +290,13 @@ public struct BridgeGlassBubble<Content: View>: View {
 public enum BridgeSectionIcon {
     public static func systemImage(for section: SettingsSection) -> String {
         switch section {
-        case .standingOrders: return "scroll"
-        case .commands:       return "command"
-        case .connections:    return "network"
-        case .remoteAccess:   return "cloud"
-        case .skills:         return "sparkles"
-        case .permissions:    return "lock.shield"
-        case .credentials:    return "key.fill"
-        case .tools:          return "hammer"
-        case .jobs:           return "clock.badge.checkmark"
-        case .advanced:       return "wrench.and.screwdriver"
+        case .orders:     return "scroll"
+        case .skills:     return "sparkles"
+        case .jobs:       return "clock.badge.checkmark"
+        case .tools:      return "hammer"
+        case .security:   return "lock.shield"
+        case .connection: return "network"
+        case .advanced:   return "wrench.and.screwdriver"
         }
     }
 }

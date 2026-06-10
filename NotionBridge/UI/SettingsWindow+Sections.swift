@@ -9,6 +9,67 @@ import ServiceManagement
 import SwiftUI
 
 extension SettingsView {
+    // MARK: - Merged composite sections (Settings Redesign PKT-A)
+    //
+    // The 10→7 collapse folds five legacy panes into three merged sections.
+    // PKT-A lands MINIMAL-BUT-FUNCTIONAL composites of the EXISTING section
+    // views (each child keeps its own scroll + state); the polished single-
+    // surface merges are later per-page packets (B/F/G). A lightweight
+    // segmented tab switches between the two child surfaces, and the deep-link
+    // `anchor` selects which tab opens first.
+
+    /// Orders = Standing Orders doctrine + Commands palette config.
+    /// Anchor `commands` opens the Commands tab.
+    @ViewBuilder
+    var ordersSection: some View {
+        BridgeMergedSection(
+            anchor: nav.anchor,
+            tabs: [
+                .init(id: "orders",   title: "Orders",   anchors: ["orders", "doctrine", "standing"]) {
+                    AnyView(StandingOrdersSection())
+                },
+                .init(id: "commands", title: "Commands", anchors: ["commands", "command", "palette"]) {
+                    AnyView(CommandsSection())
+                },
+            ]
+        )
+    }
+
+    /// Security = Credentials (Vault) + Permissions (Gates).
+    /// Anchor `gates`/`permissions` opens the Gates tab; everything else
+    /// (incl. a credential-row slug like "notion") opens Vault.
+    @ViewBuilder
+    var securitySection: some View {
+        BridgeMergedSection(
+            anchor: nav.anchor,
+            tabs: [
+                .init(id: "vault", title: "Vault", anchors: ["vault", "credentials", "credential"]) {
+                    AnyView(credentialsSection)
+                },
+                .init(id: "gates", title: "Gates", anchors: ["gates", "permissions", "permission", "privacy"]) {
+                    AnyView(permissionsSection)
+                },
+            ]
+        )
+    }
+
+    /// Connection = Connections (Local clients) + Remote Access.
+    /// Anchor `remote` opens the Remote tab; everything else opens Local.
+    @ViewBuilder
+    var connectionSection: some View {
+        BridgeMergedSection(
+            anchor: nav.anchor,
+            tabs: [
+                .init(id: "local",  title: "Local",  anchors: ["local", "connections", "connection"]) {
+                    AnyView(connectionsSection)
+                },
+                .init(id: "remote", title: "Remote", anchors: ["remote", "remoteaccess", "cloud"]) {
+                    AnyView(RemoteAccessSection())
+                },
+            ]
+        )
+    }
+
     /// Factory Reset confirmation — skills defaults, env-based Notion token, restart guidance.
     var factoryResetConfirmationMessage: String {
         """
@@ -432,6 +493,91 @@ extension SettingsView {
     @ViewBuilder
     var jobsSection: some View {
         JobsSection()
+    }
+}
+
+// MARK: - Merged-section tab host (Settings Redesign PKT-A)
+
+/// Minimal segmented host for the three merged Settings sections (Orders,
+/// Security, Connection). It renders a compact picker over N tabs and shows
+/// the selected tab's existing child view verbatim — the polished single-
+/// surface composites are later per-page packets. A deep-link `anchor`
+/// selects the starting tab (e.g. `gates` → Security's Gates tab); when the
+/// anchor doesn't name a tab it is passed through unchanged to the child via
+/// `SettingsNavigation` (so e.g. a credential-row slug still lands inside the
+/// Vault view). The leading inset matches the title bar's traffic-light
+/// gutter so the picker doesn't sit under the section title.
+struct BridgeMergedSection: View {
+    struct Tab: Identifiable {
+        let id: String
+        let title: String
+        /// Normalized anchor strings (lowercased, no spaces) that open this tab.
+        let anchors: [String]
+        let content: () -> AnyView
+    }
+
+    let anchor: String?
+    let tabs: [Tab]
+
+    @State private var selection: String
+
+    init(anchor: String?, tabs: [Tab]) {
+        self.anchor = anchor
+        self.tabs = tabs
+        // Resolve the starting tab from the deep-link anchor (if any).
+        let initial = BridgeMergedSection.tab(for: anchor, in: tabs) ?? tabs.first?.id ?? ""
+        self._selection = State(initialValue: initial)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $selection) {
+                ForEach(tabs) { tab in
+                    Text(tab.title).tag(tab.id)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 320)
+            .padding(.horizontal, BridgeTokens.Space.paneH)
+            .padding(.top, BridgeTokens.Space.cardGap)
+            .padding(.bottom, BridgeTokens.Space.cardGap)
+            .accessibilityLabel("Section tabs")
+
+            Divider().background(BridgeTokens.hairlineFaint)
+
+            ForEach(tabs) { tab in
+                if tab.id == selection {
+                    tab.content()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // React to a deep-link landing while the section is already on screen.
+        .onChange(of: anchor) { _, newAnchor in
+            if let id = BridgeMergedSection.tab(for: newAnchor, in: tabs) {
+                selection = id
+            }
+        }
+    }
+
+    /// Resolve which tab a deep-link anchor opens. Returns nil when the anchor
+    /// is nil or names something other than a tab (e.g. a credential slug),
+    /// in which case the caller keeps the default/first tab and the child view
+    /// still receives the raw anchor through `SettingsNavigation`.
+    static func tab(for anchor: String?, in tabs: [Tab]) -> String? {
+        guard let raw = anchor?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: ""),
+            !raw.isEmpty else { return nil }
+        for tab in tabs where tab.id == raw || tab.anchors.contains(raw) {
+            return tab.id
+        }
+        return nil
     }
 }
 

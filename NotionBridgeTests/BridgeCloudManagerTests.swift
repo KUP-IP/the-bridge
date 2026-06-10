@@ -333,19 +333,31 @@ func runBridgeCloudManagerTests() async {
         }
     }
 
-    // MARK: - WS-E: Remote Access section + sidebar enum
+    // MARK: - WS-E → PKT-A: Remote Access folded into Connection
 
-    await test("WS-E: the Remote Access sidebar case exists with icon + header preset") {
-        try expect(SettingsSection.allCases.contains(.remoteAccess),
-                   "the sidebar enum must include .remoteAccess")
-        try expect(SettingsSection.remoteAccess.rawValue == "Remote Access",
-                   "raw value drift: \(SettingsSection.remoteAccess.rawValue)")
-        try expect(!SettingsSection.remoteAccess.icon.isEmpty, "remoteAccess must have a sidebar icon")
-        try expect(BridgeSectionIcon.systemImage(for: .remoteAccess) == "cloud",
-                   "remoteAccess SF Symbol drift")
-        let spec = BridgeSettingsHeaderPreset.spec(for: .remoteAccess)
+    await test("PKT-A: Remote Access folds into the merged Connection section") {
+        // The standalone .remoteAccess sidebar case was retired in the 10→7
+        // redesign; Remote Access is now a sub-area of Connection. The merged
+        // Connection section exists with a fully-populated header preset...
+        try expect(SettingsSection.allCases.contains(.connection),
+                   "the sidebar enum must include .connection")
+        try expect(SettingsSection.connection.rawValue == "Connection",
+                   "raw value drift: \(SettingsSection.connection.rawValue)")
+        try expect(!SettingsSection.connection.icon.isEmpty, "connection must have a sidebar icon")
+        try expect(BridgeSectionIcon.systemImage(for: .connection) == "network",
+                   "connection SF Symbol drift")
+        let spec = BridgeSettingsHeaderPreset.spec(for: .connection)
         try expect(!spec.title.isEmpty && !spec.subtitle.isEmpty && !spec.systemImage.isEmpty,
-                   "remoteAccess header preset must be fully populated")
+                   "connection header preset must be fully populated")
+        // ...and the retired "Remote Access" name still resolves (back-compat)
+        // to Connection on the `remote` anchor (market safety, spec V2).
+        let resolved = await MainActor.run {
+            BridgeSettingsAutomation.resolveSectionWithAnchor("Remote Access")
+        }
+        try expect(resolved?.section == .connection,
+                   "legacy 'Remote Access' must resolve to .connection")
+        try expect(resolved?.anchor == "remote",
+                   "legacy 'Remote Access' must anchor 'remote', got \(String(describing: resolved?.anchor))")
     }
 
     await test("WS-E: RemoteAccessSection instantiates for each display state") {

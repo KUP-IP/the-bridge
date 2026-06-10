@@ -107,36 +107,57 @@ public final class SettingsWindowController {
 /// Top-level section identity for the Settings window. Hoisted out of
 /// SettingsView (WS-H, PKT-804) so the menu-bar quick-page can deep-link
 /// directly to a section.
-/// PKT-3 v3.5: 9-section sidebar reordered by most-visited-first, with
-/// Standing Orders pinned top and Skills promoted to its own section
-/// (was previously inline under Commands). Order matches design/shell.js
-/// and the locked HTML mocks.
+///
+/// Settings Redesign PKT-A (2026-06-10): collapsed 10 → 7 sections in
+/// conceptual-flow order (Orders → Skills → Jobs → Tools → Security →
+/// Connection → Advanced). The merges fold:
+///   • Commands           → Orders   (sub-area, anchor `commands`)
+///   • Credentials        → Security (Vault tab,  anchor `vault`)
+///   • Permissions        → Security (Gates tab,  anchor `gates`)
+///   • Connections        → Connection (anchor `local`)
+///   • Remote Access      → Connection (anchor `remote`)
+///
+/// **rawValue is decoupled from the display label.** rawValue is the STABLE
+/// deep-link / MCP `bridge_settings_navigate` identifier and must not churn
+/// (e.g. `orders` keeps the legacy "Standing Orders" id so existing
+/// automations still resolve via the MCP back-compat aliases). The UI
+/// (sidebar + title bar) renders `displayName` instead — "Orders",
+/// "Security", "Connection".
 public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
-    case standingOrders = "Standing Orders"
-    case commands       = "Commands"
-    case connections    = "Connections"
-    case remoteAccess   = "Remote Access"
-    case skills         = "Skills"
-    case permissions    = "Permissions"
-    case credentials    = "Credentials"
-    case tools          = "Tools"
-    case jobs           = "Jobs"
-    case advanced       = "Advanced"
+    case orders     = "Standing Orders"   // display "Orders"; stable legacy MCP id
+    case skills     = "Skills"
+    case jobs       = "Jobs"
+    case tools      = "Tools"
+    case security   = "Security"          // Credentials + Permissions merged
+    case connection = "Connection"        // Connections + Remote Access merged
+    case advanced   = "Advanced"
 
     public var id: String { rawValue }
 
+    /// The human label shown in the sidebar + title bar. Decoupled from
+    /// `rawValue` so the deep-link/MCP ids stay stable while the chrome can
+    /// show the snappier redesign names.
+    public var displayName: String {
+        switch self {
+        case .orders:     return "Orders"
+        case .skills:     return "Skills"
+        case .jobs:       return "Jobs"
+        case .tools:      return "Tools"
+        case .security:   return "Security"
+        case .connection: return "Connection"
+        case .advanced:   return "Advanced"
+        }
+    }
+
     public var icon: String {
         switch self {
-        case .standingOrders: return "scroll"
-        case .commands:       return "command"
-        case .connections:    return "network"
-        case .remoteAccess:   return "cloud"
-        case .skills:         return "sparkles"
-        case .permissions:    return "lock.shield"
-        case .credentials:    return "key.fill"
-        case .tools:          return "hammer"
-        case .jobs:           return "clock.badge.checkmark"
-        case .advanced:       return "wrench.and.screwdriver"
+        case .orders:     return "scroll"
+        case .skills:     return "sparkles"
+        case .jobs:       return "clock.badge.checkmark"
+        case .tools:      return "hammer"
+        case .security:   return "lock.shield"
+        case .connection: return "network"
+        case .advanced:   return "wrench.and.screwdriver"
         }
     }
 }
@@ -144,14 +165,15 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
 /// Shared selection model so the menu-bar quick-page can drive which Settings
 /// section is shown even when the window is already open (WS-H, PKT-804).
 ///
-/// PKT-3 v3.5: opens by default to .standingOrders (top of the new
-/// most-visited sidebar order). The deep-link API also accepts an
-/// optional `anchor` string so cross-page nav can land on a sub-section
-/// (e.g. credential row by slug).
+/// PKT-A: opens by default to .orders (top of the conceptual-flow sidebar
+/// order). The deep-link API also accepts an optional `anchor` string so
+/// cross-page nav can land on a sub-section (e.g. Commands inside Orders,
+/// Vault/Gates inside Security, Local/Remote inside Connection, or a
+/// credential row by slug).
 @MainActor
 public final class SettingsNavigation: ObservableObject {
     public static let shared = SettingsNavigation()
-    @Published public var section: SettingsSection = .standingOrders
+    @Published public var section: SettingsSection = .orders
     @Published public var anchor: String? = nil
     public init() {}
 
@@ -214,7 +236,7 @@ public struct SettingsView: View {
         ZStack {
             BridgeStage()
             VStack(spacing: 0) {
-                BridgeTitleBar(title: nav.section.rawValue)
+                BridgeTitleBar(title: nav.section.displayName)
                 HStack(spacing: 0) {
                     BridgeSectionNav(selection: $nav.section)
                     detailContent
@@ -230,15 +252,12 @@ public struct SettingsView: View {
     @ViewBuilder
     private var detailContent: some View {
         switch nav.section {
-        case .standingOrders: StandingOrdersSection()
-        case .commands: CommandsSection()
-        case .connections: connectionsSection
-        case .remoteAccess: RemoteAccessSection()
+        case .orders: ordersSection
         case .skills: SkillsSection()
-        case .permissions: permissionsSection
-        case .credentials: credentialsSection
-        case .tools: toolsSection
         case .jobs: jobsSection
+        case .tools: toolsSection
+        case .security: securitySection
+        case .connection: connectionSection
         case .advanced: advancedSection
         }
     }

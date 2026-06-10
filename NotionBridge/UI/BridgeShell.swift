@@ -213,14 +213,14 @@ struct BridgeSectionNavItem: View {
                 icon
                     .frame(width: 18, height: 18)
                     .foregroundStyle(isSelected ? BridgeTokens.fg1 : BridgeTokens.fg4)
-                Text(section.rawValue)
+                Text(section.displayName)
                     .font(.system(size: 13))
                     .foregroundStyle(isSelected ? BridgeTokens.fg1 : BridgeTokens.fg3)
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 9)
-            .frame(height: 30)
+            .frame(height: BridgeTokens.Space.navItemH)
             .background(background)
             .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             .overlay {
@@ -233,17 +233,19 @@ struct BridgeSectionNavItem: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .accessibilityLabel(section.rawValue)
+        .accessibilityLabel(section.displayName)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 
     @ViewBuilder private var icon: some View {
+        // PKT-A: keep SF Symbols this pass; the three surviving custom vector
+        // glyphs (skills / tools / advanced) stay. The merged Security +
+        // Connection sections render their SF Symbols (lock.shield / network).
         switch section {
-        case .skills:      BridgeVectorIcon(.skills)
-        case .tools:       BridgeVectorIcon(.tools)
-        case .advanced:    BridgeVectorIcon(.advanced)
-        case .credentials: BridgeVectorIcon(.credentials)
-        default:           Image(systemName: section.icon).font(.system(size: 14))
+        case .skills:   BridgeVectorIcon(.skills)
+        case .tools:    BridgeVectorIcon(.tools)
+        case .advanced: BridgeVectorIcon(.advanced)
+        default:        Image(systemName: section.icon).font(.system(size: 14))
         }
     }
 
@@ -260,30 +262,33 @@ struct BridgeSectionNavItem: View {
 
 // MARK: - Hero titlebar + footbar
 
-/// 44px titlebar: leaves room for the native traffic lights, centers the
-/// breadcrumb title. Sits inside the full-size-content window.
+/// 38px titlebar (Settings Redesign PKT-A, B2.2): section name only,
+/// LEADING-aligned beside the native traffic lights, NO bottom hairline.
+/// Transparent + draggable; sits inside the full-size-content window. The
+/// leading inset clears the traffic-light cluster (`Space.trafficGutter`),
+/// and the section name is the canonical page H1 (was a centered
+/// "The Bridge › {section}" breadcrumb at 44px).
 public struct BridgeTitleBar: View {
     public let title: String
     public init(title: String) { self.title = title }
 
     public var body: some View {
-        ZStack {
-            HStack(spacing: 6) {
-                Text("The Bridge").foregroundStyle(BridgeTokens.fg4)
-                Text("›").foregroundStyle(BridgeTokens.fg5)
-                Text(title).foregroundStyle(BridgeTokens.fg2)
-            }
-            .font(.system(size: 13, weight: .semibold))
+        HStack(spacing: 0) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(BridgeTokens.fg2)
+                .allowsHitTesting(false)   // keep the titlebar draggable
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 44)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(BridgeTokens.hairline).frame(height: 0.5)
-        }
+        .padding(.leading, BridgeTokens.Space.trafficGutter)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: BridgeTokens.Space.titleBar)
     }
 }
 
-/// 30px footbar with a subtle version readout + neutral status dot.
+/// 30px footbar (Settings Redesign PKT-A, B2.3): integrated into the canvas —
+/// NO `chipFill` slab background, NO top hairline. Keeps the slim version
+/// readout + status dot on the trailing edge.
 public struct BridgeFootBar: View {
     public let version: String
     public init(version: String) { self.version = version }
@@ -298,10 +303,6 @@ public struct BridgeFootBar: View {
         }
         .font(.system(size: 11))
         .padding(.horizontal, 14)
-        .frame(height: 30)
-        .background(BridgeTokens.chipFill)
-        .overlay(alignment: .top) {
-            Rectangle().fill(BridgeTokens.hairline).frame(height: 0.5)
-        }
+        .frame(height: BridgeTokens.Space.footBar)
     }
 }

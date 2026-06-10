@@ -127,9 +127,9 @@ public struct DashboardView: View {
             }
             Spacer(minLength: 8)
             HStack(spacing: 3) {
-                quickLink(.commands,    systemImage: "command",   help: "Command Bridge")
-                quickLink(.tools,       systemImage: "wrench.and.screwdriver", help: "Open Tools")
-                quickLink(.connections, systemImage: "gearshape", help: "Open Settings (\u{2318},)")
+                quickLink(.orders,     systemImage: "command",   help: "Command Bridge", anchor: "commands")
+                quickLink(.tools,      systemImage: "wrench.and.screwdriver", help: "Open Tools")
+                quickLink(.connection, systemImage: "gearshape", help: "Open Settings (\u{2318},)")
             }
         }
         .padding(.horizontal, 14)
@@ -144,10 +144,11 @@ public struct DashboardView: View {
         return "v\(appVersion) \u{00B7} build \(buildNumber)"
     }
 
-    private func quickLink(_ section: SettingsSection, systemImage: String, help: String) -> some View {
+    private func quickLink(_ section: SettingsSection, systemImage: String, help: String, anchor: String? = nil) -> some View {
         // kit.css .ql — 28×28, radius 7, fg .6 at rest brightening on hover.
         Button {
             onOpenSettings(section)
+            if let anchor { SettingsNavigation.shared.anchor = anchor }
         } label: {
             Image(systemName: systemImage)
                 .symbolRenderingMode(.monochrome)
@@ -175,7 +176,7 @@ public struct DashboardView: View {
         // kit.css .status-row — margin 0 6px, padding 8px 10px, radius 8,
         // emerald pulse dot, .92 label, .5 sub, .34 chevron.
         Button {
-            onOpenSettings(.connections)
+            onOpenSettings(.connection)
         } label: {
             HStack(spacing: 10) {
                 StatusPulseDot(color: statusBar.isServerRunning ? BridgeTokens.ok : BridgeTokens.bad,
@@ -199,14 +200,14 @@ public struct DashboardView: View {
         }
         .buttonStyle(PKT879HoverRowStyle())
         .padding(.horizontal, 6)
-        .accessibilityLabel("Server " + (statusBar.isServerRunning ? "running" : "stopped") + ". Open Connections.")
+        .accessibilityLabel("Server " + (statusBar.isServerRunning ? "running" : "stopped") + ". Open Connection.")
     }
 
     private var statusSubtitle: String {
         if statusBar.isServerRunning {
             return "Streamable HTTP \u{00B7} uptime \(statusBar.uptimeString)"
         }
-        return "Tap to open Connections"
+        return "Tap to open Connection"
     }
 
     // MARK: - Connected Clients
@@ -217,7 +218,7 @@ public struct DashboardView: View {
             captionRow(
                 title: "Connected clients \u{00B7} \(statusBar.connectedClients.count)",
                 actionTitle: "View all",
-                action: { onOpenSettings(.connections) }
+                action: { onOpenSettings(.connection) }
             )
             if statusBar.connectedClients.isEmpty {
                 Text("No clients connected")
@@ -268,7 +269,10 @@ public struct DashboardView: View {
             captionRow(
                 title: "Permissions \u{00B7} \(grantedCount)/\(PermissionManager.Grant.v1Cases.count)",
                 actionTitle: "Review",
-                action: { onOpenSettings(.permissions) }
+                action: {
+                    onOpenSettings(.security)
+                    SettingsNavigation.shared.anchor = "gates"
+                }
             )
 
             LazyVGrid(
@@ -297,8 +301,11 @@ public struct DashboardView: View {
     private func permissionCell(grant: PermissionManager.Grant) -> some View {
         let status = permissionManager.status(for: grant)
         return Button {
-            onOpenSettings(.permissions)
-            SettingsNavigation.shared.anchor = grant.rawValue
+            // PKT-A: Permissions folded into Security → Gates tab. Open
+            // Security on the Gates anchor so the merged section lands there
+            // (the per-grant deep-scroll is a later per-page packet).
+            onOpenSettings(.security)
+            SettingsNavigation.shared.anchor = "gates"
         } label: {
             HStack(spacing: 6) {
                 StatusPulseDot(color: dotColor(status), radius: 7)
@@ -313,7 +320,7 @@ public struct DashboardView: View {
         }
         .buttonStyle(PKT879HoverRowStyle(cornerRadius: 5, restForeground: BridgeTokens.fg2))
         .help(permissionManager.statusLabel(for: grant))
-        .accessibilityLabel("\(grant.displayName), \(permissionManager.statusLabel(for: grant)). Open Permissions.")
+        .accessibilityLabel("\(grant.displayName), \(permissionManager.statusLabel(for: grant)). Open Security gates.")
     }
 
     private func dotColor(_ status: PermissionManager.GrantStatus) -> Color {

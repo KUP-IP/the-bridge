@@ -272,7 +272,7 @@ public struct ConnectionsSection: View {
                     BridgeCardLabel("Integrated tools")
                     Spacer()
                     BridgeDepLink("Manage credentials") {
-                        SettingsNavigation.shared.go(.credentials, anchor: nil)
+                        SettingsNavigation.shared.go(.security, anchor: "vault")
                     }
                 }
                 HStack(alignment: .top, spacing: 10) {
@@ -347,7 +347,9 @@ public struct ConnectionsSection: View {
                     .foregroundStyle(BridgeTokens.fg3)
                 Spacer()
                 Button {
-                    SettingsNavigation.shared.go(.credentials, anchor: anchor)
+                    // PKT-A: Credentials folded into Security/Vault; the
+                    // per-service slug passes through to the Vault child.
+                    SettingsNavigation.shared.go(.security, anchor: anchor)
                 } label: {
                     HStack(spacing: 3) {
                         Text("Manage")

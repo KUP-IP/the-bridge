@@ -87,8 +87,7 @@ extension BridgeSettingsSectionHeader where Accessory == EmptyView {
 /// Centralized tint/icon/copy for each section the header renders. The
 /// header itself doesn't switch on `SettingsSection` — this enum provides
 /// the inputs callers feed in, and the snapshot tests assert that every
-/// real section (Connections, Credentials, Permissions, Jobs, Advanced)
-/// has a preset defined.
+/// real section (the 7 PKT-A sections) has a preset defined.
 public enum BridgeSettingsHeaderPreset {
     public struct Spec: Sendable {
         public let title: String
@@ -106,56 +105,12 @@ public enum BridgeSettingsHeaderPreset {
 
     public static func spec(for section: SettingsSection) -> Spec {
         switch section {
-        case .connections:
+        case .orders:
             return Spec(
-                title: "Connections",
-                subtitle: "Server, integrated tools, and active MCP clients.",
-                systemImage: BridgeSectionIcon.systemImage(for: .connections),
-                tint: NotionPalette.green
-            )
-        case .credentials:
-            return Spec(
-                title: "Credentials",
-                subtitle: "Tokens stored in your macOS Keychain. Bridge never writes plaintext to disk.",
-                systemImage: BridgeSectionIcon.systemImage(for: .credentials),
-                tint: NotionPalette.orange
-            )
-        case .permissions:
-            return Spec(
-                title: "Permissions",
-                subtitle: "System grants (TCC) and sensitive paths.",
-                systemImage: BridgeSectionIcon.systemImage(for: .permissions),
-                tint: NotionPalette.blue
-            )
-        case .jobs:
-            return Spec(
-                title: "Jobs",
-                subtitle: "Scheduled background automations triggered by launchd.",
-                systemImage: BridgeSectionIcon.systemImage(for: .jobs),
+                title: "Orders",
+                subtitle: "Standing orders & operating doctrine, plus the command palette.",
+                systemImage: BridgeSectionIcon.systemImage(for: .orders),
                 tint: NotionPalette.purple
-            )
-        case .advanced:
-            return Spec(
-                title: "Advanced",
-                subtitle: "Network ports, local endpoints, system paths, and maintenance.",
-                systemImage: BridgeSectionIcon.systemImage(for: .advanced),
-                tint: NotionPalette.gray
-            )
-        // Non-target sections still get a preset so the header stays a
-        // single, unbranched component if a future caller adopts it.
-        case .standingOrders:
-            return Spec(
-                title: "Standing Orders",
-                subtitle: "Loaded by every MCP client at session start.",
-                systemImage: BridgeSectionIcon.systemImage(for: .standingOrders),
-                tint: NotionPalette.purple
-            )
-        case .commands:
-            return Spec(
-                title: "Commands",
-                subtitle: "Global command palette and shortcuts.",
-                systemImage: BridgeSectionIcon.systemImage(for: .commands),
-                tint: NotionPalette.blue
             )
         case .skills:
             return Spec(
@@ -164,6 +119,13 @@ public enum BridgeSettingsHeaderPreset {
                 systemImage: BridgeSectionIcon.systemImage(for: .skills),
                 tint: NotionPalette.yellow
             )
+        case .jobs:
+            return Spec(
+                title: "Jobs",
+                subtitle: "Scheduled background automations triggered by launchd.",
+                systemImage: BridgeSectionIcon.systemImage(for: .jobs),
+                tint: NotionPalette.purple
+            )
         case .tools:
             return Spec(
                 title: "Tools",
@@ -171,19 +133,33 @@ public enum BridgeSettingsHeaderPreset {
                 systemImage: BridgeSectionIcon.systemImage(for: .tools),
                 tint: NotionPalette.brown
             )
-        case .remoteAccess:
+        case .security:
             return Spec(
-                title: "Remote Access",
-                subtitle: "Reach this Mac from the cloud — capability-scoped, passkey-gated.",
-                systemImage: BridgeSectionIcon.systemImage(for: .remoteAccess),
-                tint: NotionPalette.blue
+                title: "Security",
+                subtitle: "Credential vault and access gates — Touch-ID protected.",
+                systemImage: BridgeSectionIcon.systemImage(for: .security),
+                tint: NotionPalette.orange
+            )
+        case .connection:
+            return Spec(
+                title: "Connection",
+                subtitle: "How agents reach this Mac — local clients and remote access.",
+                systemImage: BridgeSectionIcon.systemImage(for: .connection),
+                tint: NotionPalette.green
+            )
+        case .advanced:
+            return Spec(
+                title: "Advanced",
+                subtitle: "Network ports, local endpoints, system paths, and maintenance.",
+                systemImage: BridgeSectionIcon.systemImage(for: .advanced),
+                tint: NotionPalette.gray
             )
         }
     }
 
-    /// Sections this packet (PKT-876) actually reskins. Used by the
-    /// snapshot tests to lock the "one header, 5 callers" contract.
-    public static let targetSections: [SettingsSection] = [
-        .connections, .credentials, .permissions, .jobs, .advanced
-    ]
+    /// Sections that adopt the shared header. Settings Redesign PKT-A adopts
+    /// it across all 7 — the "one shared header, one preset per case"
+    /// contract the SettingsSectionsLGTests pin (was the dead "5 callers"
+    /// list under PKT-876).
+    public static let targetSections: [SettingsSection] = SettingsSection.allCases
 }

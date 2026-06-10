@@ -59,9 +59,29 @@ public enum BridgeSettingsAutomation {
 
     /// Resolve a user-supplied section string to a `SettingsSection`.
     /// Accepts the human raw value ("Standing Orders"), the enum case name
-    /// ("standingOrders"), and a few common aliases — all case-insensitively
-    /// and ignoring spaces — so agents need not know the exact casing.
+    /// ("orders"), and a range of aliases — including the FIVE retired
+    /// pre-redesign section names (Credentials, Permissions, Remote Access,
+    /// Connections, Commands) which must keep resolving so existing external
+    /// automations driving `bridge_settings_navigate` don't silently break
+    /// (market-safety back-compat, spec V2). Case-insensitive and
+    /// space/underscore/dash-insensitive.
     public static func resolveSection(_ raw: String) -> SettingsSection? {
+        resolveSectionWithAnchor(raw)?.section
+    }
+
+    /// Resolve a section string to its `SettingsSection` AND the sub-area
+    /// `anchor` the legacy name folded into. For the merged sections a retired
+    /// name maps to its new home + the anchor that opens the right tab
+    /// (Settings Redesign PKT-A):
+    ///   • Credentials   → .security   anchor "vault"
+    ///   • Permissions   → .security   anchor "gates"
+    ///   • Remote Access → .connection anchor "remote"
+    ///   • Connections   → .connection anchor "local"
+    ///   • Commands      → .orders     anchor "commands"
+    /// Current-name resolutions return a nil anchor (no forced sub-area).
+    public static func resolveSectionWithAnchor(
+        _ raw: String
+    ) -> (section: SettingsSection, anchor: String?)? {
         let norm = raw
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -70,31 +90,57 @@ public enum BridgeSettingsAutomation {
             .replacingOccurrences(of: "-", with: "")
         guard !norm.isEmpty else { return nil }
 
+        // 1) Exact match against the live 7 cases (rawValue or case name).
         for s in SettingsSection.allCases {
             let rawNorm = s.rawValue.lowercased().replacingOccurrences(of: " ", with: "")
             let caseNorm = String(describing: s).lowercased()
-            if norm == rawNorm || norm == caseNorm { return s }
+            if norm == rawNorm || norm == caseNorm { return (s, nil) }
         }
-        // Common shorthands.
+
+        // 2) Legacy + shorthand aliases. The five retired pre-redesign
+        //    section names map to their merged home + the tab anchor.
         switch norm {
-        case "orders", "standing":     return .standingOrders
-        case "command":                return .commands
-        case "connection":             return .connections
-        case "remote":                 return .remoteAccess
-        case "skill":                  return .skills
-        case "permission", "privacy":  return .permissions
-        case "credential", "vault":    return .credentials
-        case "tool":                   return .tools
-        case "job":                    return .jobs
-        case "settings", "preferences": return nil // ambiguous: not a section
+        // Orders
+        case "orders", "standing", "standingorders", "doctrine":
+            return (.orders, nil)
+        case "commands", "command", "palette":
+            return (.orders, "commands")            // retired → Orders/Commands
+        // Security (Credentials + Permissions)
+        case "security":
+            return (.security, nil)
+        case "credentials", "credential", "vault":
+            return (.security, "vault")             // retired → Security/Vault
+        case "permissions", "permission", "privacy", "gates":
+            return (.security, "gates")             // retired → Security/Gates
+        // Connection (Connections + Remote Access)
+        case "connection":
+            return (.connection, nil)
+        case "connections", "local":
+            return (.connection, "local")           // retired → Connection/Local
+        case "remoteaccess", "remote", "cloud":
+            return (.connection, "remote")          // retired → Connection/Remote
+        // Singular shorthands for surviving sections
+        case "skill":                  return (.skills, nil)
+        case "tool":                   return (.tools, nil)
+        case "job":                    return (.jobs, nil)
+        case "settings", "preferences": return nil  // ambiguous: not a section
         default:                       return nil
         }
     }
 
     /// The list of valid section identifiers (raw values) for error messages
-    /// and the tool's enum schema.
+    /// and the tool's enum schema. These are the STABLE deep-link ids (e.g.
+    /// `orders` keeps the legacy "Standing Orders" id) — the resolver also
+    /// accepts the friendly display names + the five retired legacy names.
     public static var sectionRawValues: [String] {
         SettingsSection.allCases.map(\.rawValue)
+    }
+
+    /// The friendly display names advertised to agents (Settings Redesign
+    /// PKT-A) — "Orders", "Skills", "Jobs", "Tools", "Security",
+    /// "Connection", "Advanced". The resolver accepts these too.
+    public static var sectionDisplayNames: [String] {
+        SettingsSection.allCases.map(\.displayName)
     }
 
     /// Drive the in-app navigation to `section`, opening the Settings window if
@@ -191,8 +237,8 @@ public enum BridgeAutomationModule {
                 "properties": .object([
                     "section": .object([
                         "type": .string("string"),
-                        "description": .string("Settings section to navigate to. One of: \(BridgeSettingsAutomation.sectionRawValues.joined(separator: ", ")). Case-insensitive; the enum case name (e.g. 'standingOrders') is also accepted."),
-                        "enum": .array(BridgeSettingsAutomation.sectionRawValues.map { .string($0) })
+                        "description": .string("Settings section to navigate to. One of: \(BridgeSettingsAutomation.sectionDisplayNames.joined(separator: ", ")). Case-insensitive; the enum case name (e.g. 'orders') and the five retired legacy names (Credentials, Permissions, Remote Access, Connections, Commands) are also accepted for back-compat."),
+                        "enum": .array(BridgeSettingsAutomation.sectionDisplayNames.map { .string($0) })
                     ]),
                     "anchor": .object([
                         "type": .string("string"),
@@ -210,16 +256,19 @@ public enum BridgeAutomationModule {
                         "validSections": .array(await BridgeSettingsAutomation.sectionRawValues.map { .string($0) })
                     ])
                 }
-                let anchor = stringParam(params, "anchor")
+                let explicitAnchor = stringParam(params, "anchor")
 
-                let resolved = await BridgeSettingsAutomation.resolveSection(rawSection)
-                guard let section = resolved else {
+                let resolved = await BridgeSettingsAutomation.resolveSectionWithAnchor(rawSection)
+                guard let (section, aliasAnchor) = resolved else {
                     return .object([
                         "error": .string("Unknown section '\(rawSection)'."),
                         "code":  .string("invalid_input"),
                         "validSections": .array(await BridgeSettingsAutomation.sectionRawValues.map { .string($0) })
                     ])
                 }
+                // An explicit anchor arg wins; otherwise a legacy alias's
+                // folded-in tab anchor (e.g. Credentials → security/vault).
+                let anchor = explicitAnchor ?? aliasAnchor
 
                 let windowDriven = await BridgeSettingsAutomation.navigate(to: section, anchor: anchor)
                 var result: [String: Value] = [

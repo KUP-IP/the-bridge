@@ -686,10 +686,13 @@ public struct ModuleGroupList: View {
     }
 
     private func handleDepLink(_ dep: ModuleGroupDependency) {
+        // PKT-A: the legacy routes now fold into the merged sections —
+        // Permissions → Security/Gates · Credentials → Security/Vault ·
+        // Connections → Connection/Local.
         switch dep.route {
-        case "permissions":  nav.go(.permissions)
-        case "credentials":  nav.go(.credentials)
-        case "connections":  nav.go(.connections)
+        case "permissions":  nav.go(.security, anchor: "gates")
+        case "credentials":  nav.go(.security, anchor: "vault")
+        case "connections":  nav.go(.connection, anchor: "local")
         default: break
         }
     }
