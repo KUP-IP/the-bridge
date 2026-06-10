@@ -563,6 +563,25 @@ func runRemoteOAuthBearerTests() async {
         try expect(r == "http://127.0.0.1:5555/mcp", "got \(r)")
     }
 
+    await test("PKT-810 Model B: BRIDGE_PUBLIC_RESOURCE overrides the localhost derivation") {
+        // The public tunnel URL must be the advertised resource + expected
+        // audience for the directory OAuth connector — even when an explicit
+        // local port is passed (ServerManager passes ssePort).
+        let env = ["BRIDGE_PUBLIC_RESOURCE": "https://mcp.kup.solutions/mcp"]
+        let withPort = ProtectedResourceMetadataProvider.resolvedResource(port: 9700, environment: env)
+        try expect(withPort == "https://mcp.kup.solutions/mcp", "public override must win over port; got \(withPort)")
+        let noPort = ProtectedResourceMetadataProvider.resolvedResource(environment: env)
+        try expect(noPort == "https://mcp.kup.solutions/mcp", "public override must win in PRM path; got \(noPort)")
+        // PRM document carries it through to the resource field.
+        let md = ProtectedResourceMetadataProvider.metadata(environment: env)
+        try expect(md.resource == "https://mcp.kup.solutions/mcp", "PRM resource must be the public URL; got \(md.resource)")
+    }
+
+    await test("PKT-810 Model B: blank/whitespace BRIDGE_PUBLIC_RESOURCE falls through to local") {
+        let r = ProtectedResourceMetadataProvider.resolvedResource(port: 9700, environment: ["BRIDGE_PUBLIC_RESOURCE": "   "])
+        try expect(r == "http://127.0.0.1:9700/mcp", "blank override must not poison; got \(r)")
+    }
+
     await test("PRM fix: invalid NOTION_BRIDGE_PORT ignored (falls through resolver)") {
         // Non-numeric / out-of-range env value must NOT poison the URL;
         // resolver falls through to ConfigManager (default 9700 in test env).

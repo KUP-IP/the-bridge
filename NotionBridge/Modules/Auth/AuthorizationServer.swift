@@ -100,10 +100,23 @@ public enum ProtectedResourceMetadataProvider {
     /// the connector actually listens on. `port` is injectable so tests
     /// can drive the `NOTION_BRIDGE_PORT` override + default deterministically
     /// without touching `ConfigManager`'s shared singleton.
+    /// Env key for the canonical PUBLIC resource identifier (PKT-810 / Model B
+    /// directory connector). When the connector is reached over a public tunnel
+    /// (e.g. `https://mcp.kup.solutions/mcp`), the advertised PRM `resource` and
+    /// the bearer-validator's expected audience must be that public URL — NOT
+    /// the local `http://127.0.0.1:<port>/mcp`, which is meaningless to a remote
+    /// OAuth client. Absent ⇒ fall back to the local-port derivation (stdio /
+    /// loopback dev).
+    public static let publicResourceEnvKey = "BRIDGE_PUBLIC_RESOURCE"
+
     public static func resolvedResource(
         port: Int? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> String {
+        if let pub = environment[publicResourceEnvKey]?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !pub.isEmpty {
+            return pub
+        }
         let resolvedPort: Int
         if let port {
             resolvedPort = port
