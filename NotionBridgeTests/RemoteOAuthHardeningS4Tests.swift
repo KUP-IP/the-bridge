@@ -187,23 +187,24 @@ func runRemoteOAuthHardeningS4Tests() async {
                    "contacts.read missing from ConnectorScopeName.all")
     }
 
-    await test("A1: PRM scopes_supported includes contacts.read (corrected 5-element contract)") {
+    await test("A1 → PKT-810: PRM scopes_supported is empty (directory model supersedes the 5-element contract)") {
+        // Superseded the pre-PKT-810 5-element contract. WorkOS AuthKit rejects
+        // an authorize requesting app-custom scopes (`invalid_scope`, proven by
+        // live probe), so the connector advertises NONE. The named scopes still
+        // exist in ConnectorScopeName for the scoped-token path; they are just
+        // not advertised. Authorization is server-side (ConnectorScopeGate +
+        // SecurityGate). contacts.read remains a canonical scope name (asserted
+        // by the sibling "contacts.read is in the canonical scope name list").
         let m = ProtectedResourceMetadataProvider.metadata(environment: [:])
-        try expect(m.scopesSupported.contains("contacts.read"),
-                   "PRM scopes_supported must advertise contacts.read: \(m.scopesSupported)")
-        try expect(
-            m.scopesSupported == [
-                "snippets.read", "snippets.write", "voice.resolve",
-                "runners.exec", "contacts.read",
-            ],
-            "exact PRM scope contract drifted: \(m.scopesSupported)"
-        )
-        // Wire form must carry it too.
+        try expect(m.scopesSupported.isEmpty,
+                   "PRM scopes_supported must be empty (directory model): \(m.scopesSupported)")
+        // Wire form must carry an (empty) scopes_supported array, not drop it.
         let body = ProtectedResourceMetadataProvider.jsonBody(environment: [:])
         let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
-        let scopes = json?["scopes_supported"] as? [String] ?? []
-        try expect(scopes.contains("contacts.read"),
-                   "serialized PRM must include contacts.read: \(scopes)")
+        try expect(json?["scopes_supported"] != nil,
+                   "serialized PRM must still include the scopes_supported key")
+        let scopes = json?["scopes_supported"] as? [String] ?? ["<missing>"]
+        try expect(scopes.isEmpty, "serialized scopes_supported must be empty: \(scopes)")
     }
 
     await test("A1: default-deny preserved — a non-connector tool is still denied with all scopes") {

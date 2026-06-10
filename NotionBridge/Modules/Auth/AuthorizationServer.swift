@@ -69,19 +69,17 @@ public enum ProtectedResourceMetadataProvider {
     /// to a real host — this slice ships no live authorization server.
     public static let defaultIssuer = "https://auth.example.invalid"
 
-    /// Connector scopes advertised in `scopes_supported`. Stable wire
-    /// identifiers consumed by the ScopeGate conformer. S4 (PKT-800)
-    /// added `contacts.read`: a dedicated scope for contact-record /
-    /// personal-data tools (`contacts_get`/`contacts_search`), split out
-    /// of the previously over-broad `voice.resolve` so a voice-handle
-    /// grant can no longer read the full address book (least-privilege).
-    public static let connectorScopes: [String] = [
-        "snippets.read",
-        "snippets.write",
-        "voice.resolve",
-        "runners.exec",
-        "contacts.read",
-    ]
+    /// Advertised `scopes_supported`. PKT-810 directory-connector model:
+    /// EMPTY. WorkOS AuthKit rejects an authorize that requests app-custom
+    /// scopes (`invalid_scope`), so the connector must not ask clients for any
+    /// — Claude/ChatGPT read this list and request exactly these scopes at
+    /// authorize time. Authorization moves server-side: ConnectorScopeGate
+    /// grants the connector-reachable allowlist to a validly-authenticated
+    /// token that carries no connector scopes, and SecurityGate tiers +
+    /// step-up consent remain the per-call safety layer. The named scope
+    /// identifiers still live in `ConnectorScopeName` for the scoped-token
+    /// path (back-compatible).
+    public static let connectorScopes: [String] = []
 
     /// Resolves the authorization-server issuer: `BRIDGE_OAUTH_ISSUER`
     /// (trimmed, non-empty) if set, else the documented default.

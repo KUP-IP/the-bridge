@@ -162,6 +162,17 @@ public struct ConnectorScopeGate: ScopeGating {
             )
         }
         let grantedSet = Set(grantedScopes.map(\.name))
+        // PKT-810 directory-connector model: WorkOS AuthKit cannot mint the
+        // connector's custom scopes (an authorize that requests them is
+        // rejected with `invalid_scope`), so a validly-authenticated directory
+        // token arrives carrying NO connector scopes. Treat authentication as
+        // the grant for the connector-reachable ALLOWLIST: the tool is already
+        // known-reachable (`required` is non-empty above), tools outside the
+        // allowlist are still denied, and SecurityGate (open/notify/confirm) +
+        // step-up consent on destructive tools remain the real per-call safety
+        // layer. A token that DOES carry connector scopes keeps the strict
+        // per-scope intersection below (back-compatible with scoped grants).
+        if grantedSet.isEmpty { return .allow }
         let satisfied = required.contains { grantedSet.contains($0.name) }
         if satisfied { return .allow }
 

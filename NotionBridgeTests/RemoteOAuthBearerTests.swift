@@ -279,6 +279,28 @@ func runRemoteOAuthBearerTests() async {
 
     let gate = ConnectorScopeGate()
 
+    await test("ScopeGate PKT-810: scope-less (authenticated directory) token ALLOWED on any reachable tool") {
+        // The AuthKit directory token carries no connector scopes. Each
+        // connector-reachable tool — across every bucket — must be allowed:
+        // authentication is the grant, SecurityGate/step-up are the per-call guard.
+        for tool in ["snippets_list", "snippets_create", "snippets_delete",
+                     "shell_exec", "job_run", "contacts_get", "contacts_resolve_handle"] {
+            let d = await gate.evaluate(toolName: tool, grantedScopes: [])
+            guard case .allow = d else {
+                throw TestError.assertion("scope-less token must reach reachable tool \(tool)")
+            }
+        }
+    }
+
+    await test("ScopeGate PKT-810: scope-less token STILL denied on a non-connector tool (allowlist intact)") {
+        for tool in ["file_read", "notion_query", "messages_send", "screen_capture"] {
+            let d = await gate.evaluate(toolName: tool, grantedScopes: [])
+            guard case .deny = d else {
+                throw TestError.assertion("scope-less token must NOT reach off-allowlist tool \(tool)")
+            }
+        }
+    }
+
     await test("ScopeGate: read-scope token BLOCKED from a write tool") {
         let d = await gate.evaluate(
             toolName: "snippets_create",
@@ -372,10 +394,14 @@ func runRemoteOAuthBearerTests() async {
         try expect(reason.contains("not exposed"), "deny reason should explain non-exposure")
     }
 
-    await test("ScopeGate: empty granted scopes denies a connector-reachable tool") {
+    await test("ScopeGate PKT-810: empty granted scopes ALLOWS a connector-reachable tool (directory model)") {
+        // Superseded the pre-PKT-810 "no scopes ⇒ deny" invariant. WorkOS
+        // AuthKit can't mint the connector's custom scopes, so an authenticated
+        // directory token carries none; authentication is the grant for the
+        // reachable allowlist (off-allowlist tools still denied — covered above).
         let d = await gate.evaluate(toolName: "snippets_list", grantedScopes: [])
-        guard case .deny = d else {
-            throw TestError.assertion("no scopes ⇒ deny")
+        guard case .allow = d else {
+            throw TestError.assertion("scope-less authenticated token must reach a reachable tool")
         }
     }
 

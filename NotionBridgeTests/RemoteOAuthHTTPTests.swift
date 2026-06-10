@@ -29,7 +29,8 @@ func runRemoteOAuthHTTPTests() async {
         let m = ProtectedResourceMetadataProvider.metadata(environment: [:])
         try expect(!m.resource.isEmpty, "resource must be non-empty")
         try expect(!m.authorizationServers.isEmpty, "authorization_servers must be non-empty")
-        try expect(!m.scopesSupported.isEmpty, "scopes_supported must be non-empty")
+        // PKT-810: scopes_supported is intentionally EMPTY (directory model —
+        // WorkOS AuthKit rejects app-custom scopes; auth is server-side).
         try expect(m.bearerMethodsSupported == ["header"], "bearer_methods_supported must be [header]")
     }
 
@@ -68,20 +69,15 @@ func runRemoteOAuthHTTPTests() async {
         try expect(v == "https://issuer.example", "expected trimmed issuer, got '\(v)'")
     }
 
-    await test("PRM: scopes_supported equals the connector scopes contract") {
-        // S4 (PKT-800): the contract grew by `contacts.read` — a dedicated
-        // scope for contact-record tools split out of the over-broad
-        // `voice.resolve` (least-privilege). This S2 test asserted the
-        // pre-S4 4-element list; REWRITTEN (not deleted — count preserved)
-        // to assert the corrected stronger 5-element contract.
+    await test("PRM: scopes_supported is empty (PKT-810 directory model)") {
+        // PKT-810: WorkOS AuthKit rejects an authorize that requests app-custom
+        // scopes (`invalid_scope`), proven by a live authorize probe. The
+        // connector therefore advertises NO scopes; Claude/ChatGPT request none
+        // and the authorize proceeds. Authorization moves server-side
+        // (ConnectorScopeGate grants the reachable allowlist to an authenticated
+        // scope-less token; SecurityGate + step-up consent guard each call).
         let m = ProtectedResourceMetadataProvider.metadata(environment: [:])
-        try expect(
-            m.scopesSupported == [
-                "snippets.read", "snippets.write", "voice.resolve",
-                "runners.exec", "contacts.read",
-            ],
-            "connector scopes drifted: \(m.scopesSupported)"
-        )
+        try expect(m.scopesSupported.isEmpty, "scopes_supported must be empty; got \(m.scopesSupported)")
         try expect(
             ProtectedResourceMetadataProvider.connectorScopes == m.scopesSupported,
             "provider constant must match emitted scopes"
