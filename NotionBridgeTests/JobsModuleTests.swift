@@ -205,5 +205,34 @@ func runJobsModuleTests() async {
         try expect(back.jobs[0].actionChain[0].tool == "x")
     }
 
+    await test("Jobs validation: accepts confirmed messages_send with chatIdentifier") {
+        try JobsManager.validateUnattended(tool: "messages_send", args: [
+            "chatIdentifier": .string("677927082d92462b9e1ddc5450b9ae10"),
+            "body": .string("Fasting window started."),
+            "confirm": .string("SEND")
+        ])
+    }
+
+    await test("Jobs validation: canonicalizes messages.messages_send") {
+        try expect(JobsManager.canonicalActionToolName("messages.messages_send") == "messages_send")
+        try JobsManager.validateUnattended(tool: "messages.messages_send", args: [
+            "chatIdentifier": .string("677927082d92462b9e1ddc5450b9ae10"),
+            "body": .string("Fasting window ended."),
+            "confirm": .string("SEND")
+        ])
+    }
+
+    await test("Jobs validation: rejects messages_send without SEND confirmation") {
+        do {
+            try JobsManager.validateUnattended(tool: "messages_send", args: [
+                "chatIdentifier": .string("677927082d92462b9e1ddc5450b9ae10"),
+                "body": .string("Fasting window started.")
+            ])
+            throw TestError.assertion("expected messages_send without confirm to be rejected")
+        } catch JobsModuleError.invalidActionChain(let message) {
+            try expect(message.contains("confirm"), "expected confirm error, got \(message)")
+        }
+    }
+
 
 }

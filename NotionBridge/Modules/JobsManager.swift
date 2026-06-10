@@ -890,9 +890,10 @@ public actor JobsManager {
             guard case .object(let step) = v else {
                 throw JobsModuleError.invalidActionChain("each action must be an object")
             }
-            guard let toolV = step["tool"], case .string(let tool) = toolV else {
+            guard let toolV = step["tool"], case .string(let rawTool) = toolV else {
                 throw JobsModuleError.invalidActionChain("action missing 'tool'")
             }
+            let tool = Self.canonicalActionToolName(rawTool)
             var argsMap: [String: JSONValue] = [:]
             if case .object(let a)? = step["arguments"] {
                 for (k, v) in a { argsMap[k] = JSONValue.fromMCP(v) }
@@ -1049,10 +1050,12 @@ public actor JobsManager {
         for (idx, step) in job.actionChain.enumerated() {
             let mcpArgs = Self.substitutePrev(step.arguments, prev: stepResults.last)
             do {
-                let result = try await router.dispatch(toolName: step.tool, arguments: .object(mcpArgs))
+                let toolName = Self.canonicalActionToolName(step.tool)
+                let result = try await router.dispatch(toolName: toolName, arguments: .object(mcpArgs))
                 stepResults.append(JSONValue.fromMCP(result))
             } catch {
-                let msg = "step \(idx) (\(step.tool)): \(error.localizedDescription)"
+                let toolName = Self.canonicalActionToolName(step.tool)
+                let msg = "step \(idx) (\(toolName)): \(error.localizedDescription)"
                 firstError = firstError ?? msg
                 stepResults.append(.object(["error": .string(msg)]))
                 switch step.onFail {
@@ -1066,7 +1069,8 @@ public actor JobsManager {
                     // One retry with a short backoff.
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
                     do {
-                        let result = try await router.dispatch(toolName: step.tool, arguments: .object(mcpArgs))
+                        let toolName = Self.canonicalActionToolName(step.tool)
+                        let result = try await router.dispatch(toolName: toolName, arguments: .object(mcpArgs))
                         stepResults[stepResults.count - 1] = JSONValue.fromMCP(result)
                         firstError = nil
                         continue
@@ -1156,11 +1160,30 @@ public actor JobsManager {
     /// Reject action chains that would trigger auto-escalation in unattended
     /// execution. Keep this list short and focused — SecurityGate is the primary
     /// gate; this is defense-in-depth at creation time.
-    private static func validateUnattended(tool: String, args: [String: JSONValue]) throws {
-        // Block messages_send and other known-destructive interactive tools.
-        let forbiddenTools: Set<String> = ["messages_send", "messages_send_attachment"]
-        if forbiddenTools.contains(tool) {
-            throw JobsModuleError.invalidActionChain("tool '\(tool)' is not schedulable (interactive-only)")
+    public static func canonicalActionToolName(_ tool: String) -> String {
+        tool.split(separator: ".").last.map(String.init) ?? tool
+    }
+
+    public static func validateUnattended(tool rawTool: String, args: [String: JSONValue]) throws {
+        let tool = canonicalActionToolName(rawTool)
+
+        if tool == "messages_send" {
+            guard case .string("SEND") = args["confirm"] ?? .null else {
+                throw JobsModuleError.invalidActionChain("messages_send jobs require confirm: 'SEND'")
+            }
+            guard Self.hasNonEmptyString(args["body"]) else {
+                throw JobsModuleError.invalidActionChain("messages_send jobs require non-empty 'body'")
+            }
+            guard Self.hasNonEmptyString(args["recipient"]) || Self.hasNonEmptyString(args["chatIdentifier"]) else {
+                throw JobsModuleError.invalidActionChain("messages_send jobs require 'recipient' or 'chatIdentifier'")
+            }
+        } else {
+            // Other known-destructive interactive tools remain blocked unless they
+            // gain their own explicit unattended confirmation contract.
+            let forbiddenTools: Set<String> = ["messages_send_attachment"]
+            if forbiddenTools.contains(tool) {
+                throw JobsModuleError.invalidActionChain("tool '\(tool)' is not schedulable (interactive-only)")
+            }
         }
         // For shell_exec, reject obviously dangerous commands.
         if tool == "shell_exec", case .string(let cmd) = args["command"] ?? .null {
@@ -1170,6 +1193,13 @@ public actor JobsManager {
                 throw JobsModuleError.invalidActionChain("shell_exec blocked pattern: \(p)")
             }
         }
+    }
+
+    private static func hasNonEmptyString(_ value: JSONValue?) -> Bool {
+        guard case .string(let string) = value, !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return false
+        }
+        return true
     }
 
     // MARK: Value helpers

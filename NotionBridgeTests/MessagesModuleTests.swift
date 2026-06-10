@@ -123,6 +123,23 @@ func runMessagesModuleTests() async {
         }
     }
 
+    await test("messages_send accepts chatIdentifier before confirm gate") {
+        let result = try await router.dispatch(
+            toolName: "messages_send",
+            arguments: .object([
+                "chatIdentifier": .string("677927082d92462b9e1ddc5450b9ae10"),
+                "body": .string("test"),
+                "confirm": .string("NO")
+            ])
+        )
+        if case .object(let dict) = result,
+           case .bool(let sent) = dict["sent"] {
+            try expect(sent == false, "Expected sent=false without SEND confirm")
+        } else {
+            throw TestError.assertion("Expected object with sent=false")
+        }
+    }
+
     // messages_search rejects missing query
     await test("messages_search rejects missing query") {
         do {
@@ -183,6 +200,21 @@ func runMessagesModuleTests() async {
                 arguments: .object([:])
             )
             throw TestError.assertion("Expected error for missing params")
+        } catch is ToolRouterError {
+            // Expected
+        }
+    }
+
+    await test("messages_send rejects body+confirm without recipient or chatIdentifier") {
+        do {
+            _ = try await router.dispatch(
+                toolName: "messages_send",
+                arguments: .object([
+                    "body": .string("test"),
+                    "confirm": .string("SEND")
+                ])
+            )
+            throw TestError.assertion("Expected error for missing target")
         } catch is ToolRouterError {
             // Expected
         }

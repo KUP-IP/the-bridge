@@ -69,9 +69,10 @@ extension JobsManager {
                 guard case .object(let step) = v else {
                     throw JobsModuleError.invalidActionChain("each action must be an object")
                 }
-                guard case .string(let tool)? = step["tool"] else {
+                guard case .string(let rawTool)? = step["tool"] else {
                     throw JobsModuleError.invalidActionChain("action missing 'tool'")
                 }
+                let tool = JobsManager.canonicalActionToolName(rawTool)
                 var argsMap: [String: JSONValue] = [:]
                 if case .object(let a)? = step["arguments"] {
                     for (k, vv) in a { argsMap[k] = JSONValue.fromMCP(vv) }
@@ -81,6 +82,7 @@ extension JobsManager {
                        let p = ActionStep.OnFail(rawValue: s) { return p }
                     return .stop
                 }()
+                try JobsManager.validateUnattended(tool: tool, args: argsMap)
                 return ActionStep(tool: tool, arguments: argsMap, onFail: onFail)
             }
         }

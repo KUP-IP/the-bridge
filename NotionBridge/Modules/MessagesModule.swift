@@ -538,6 +538,12 @@ public enum MessagesModule {
         return !rows.isEmpty
     }
 
+    private static func escapeAppleScriptString(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
     /// Register all MessagesModule tools on the given router.
     public static func register(on router: ToolRouter) async {
 
@@ -764,30 +770,46 @@ public enum MessagesModule {
             name: "messages_send",
             module: moduleName,
             tier: .request,
-            description: "Send an iMessage/SMS to a recipient. Requires confirm: 'SEND' (exact, uppercase). Service auto-detected from chat history unless specified.",
+            description: "Send an iMessage/SMS to a recipient or an existing Messages chat. Requires confirm: 'SEND' (exact, uppercase). Service auto-detected from chat history unless specified.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "recipient": .object(["type": .string("string"), "description": .string("Recipient phone number or email (NOT a raw chatNNN id — resolve those with messages_participants first)")]),
+                    "chatIdentifier": .object(["type": .string("string"), "description": .string("Existing Messages chat identifier/group id; targets an existing chat only")]),
                     "body": .object(["type": .string("string"), "description": .string("Message body text")]),
                     "confirm": .object(["type": .string("string"), "description": .string("Must be exactly 'SEND' to proceed")]),
                     "service": .object(["type": .string("string"), "description": .string("Optional: 'iMessage' or 'SMS'. Auto-detected from chat history if omitted. RCS recipients use 'SMS'.")])
                 ]),
-                "required": .array([.string("recipient"), .string("body"), .string("confirm")])
+                "required": .array([.string("body"), .string("confirm")])
             ]),
             metadata: ToolMetadata(
                 title: "Messages: Send",
-                whenToUse: ["sending an iMessage/SMS to a known phone or email — pass confirm:'SEND'"],
-                whenNotToUse: ["recipient is a raw chatNNN group id (resolve via messages_participants first)",
+                whenToUse: ["sending an iMessage/SMS to a known phone or email — pass confirm:'SEND'",
+                            "sending to an existing group chat by chatIdentifier without creating separate 1:1 messages"],
+                whenNotToUse: ["recipient is a raw chatNNN group id; use chatIdentifier for existing chats or resolve via messages_participants",
                                "you only have a contact name (resolve via contacts_resolve_handle first)"],
                 relatedTools: ["messages_participants", "contacts_resolve_handle", "messages_chat"]
             ),
             handler: { arguments in
                 guard case .object(let args) = arguments,
-                      case .string(let recipient) = args["recipient"],
                       case .string(let body) = args["body"],
                       case .string(let confirm) = args["confirm"] else {
                     throw ToolRouterError.invalidArguments(toolName: "messages_send", reason: "missing required parameters")
+                }
+                let recipient: String? = {
+                    if case .string(let value) = args["recipient"], !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        return value
+                    }
+                    return nil
+                }()
+                let chatIdentifier: String? = {
+                    if case .string(let value) = args["chatIdentifier"], !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        return value
+                    }
+                    return nil
+                }()
+                guard recipient != nil || chatIdentifier != nil else {
+                    throw ToolRouterError.invalidArguments(toolName: "messages_send", reason: "missing recipient or chatIdentifier")
                 }
 
                 guard confirm == "SEND" else {
@@ -795,6 +817,62 @@ public enum MessagesModule {
                         "error": .string("messages_send requires confirm: 'SEND'"),
                         "sent": .bool(false)
                     ])
+                }
+
+                if let chatIdentifier {
+                    let preRows = (try? performQuery(
+                        "SELECT MAX(ROWID) as max_id FROM message", params: []
+                    )) ?? []
+                    let preSendMaxId = (preRows.first?["max_id"] as? Int) ?? 0
+
+                    let safeChatIdentifier = escapeAppleScriptString(chatIdentifier)
+                    let safeBody = escapeAppleScriptString(body)
+                    let script = """
+                        tell application "Messages"
+                            set targetChat to missing value
+                            repeat with targetService in services
+                                repeat with candidateChat in chats of targetService
+                                    set candidateId to id of candidateChat as text
+                                    set candidateName to ""
+                                    try
+                                        set candidateName to name of candidateChat as text
+                                    end try
+                                    if candidateId contains "\(safeChatIdentifier)" or candidateName contains "\(safeChatIdentifier)" then
+                                        set targetChat to candidateChat
+                                        exit repeat
+                                    end if
+                                end repeat
+                                if targetChat is not missing value then exit repeat
+                            end repeat
+                            if targetChat is missing value then error "No existing Messages chat matched chatIdentifier \(safeChatIdentifier)"
+                            send "\(safeBody)" to targetChat
+                        end tell
+                        """
+                    let appleScript = NSAppleScript(source: script)
+                    var errorInfo: NSDictionary?
+                    _ = appleScript?.executeAndReturnError(&errorInfo)
+                    if let errorInfo = errorInfo {
+                        let errorMessage = errorInfo[NSAppleScript.errorMessage] as? String ?? "AppleScript execution failed"
+                        let errorNumber = errorInfo[NSAppleScript.errorNumber] as? Int ?? -1
+                        return .object([
+                            "sent": .bool(false),
+                            "error": .string(errorMessage),
+                            "errorNumber": .int(errorNumber),
+                            "chatIdentifier": .string(chatIdentifier)
+                        ])
+                    }
+                    let verified = verifySend(recipient: chatIdentifier, afterId: preSendMaxId)
+                    return .object([
+                        "sent": .bool(verified),
+                        "chatIdentifier": .string(chatIdentifier),
+                        "bodyLength": .int(body.utf8.count),
+                        "target": .string("chatIdentifier"),
+                        "verified": .bool(verified)
+                    ])
+                }
+
+                guard let recipient else {
+                    throw ToolRouterError.invalidArguments(toolName: "messages_send", reason: "missing recipient or chatIdentifier")
                 }
 
                 // A3: Reject raw chat identifiers (e.g. "chat123456789")
@@ -852,12 +930,8 @@ public enum MessagesModule {
                 let preSendMaxId = (preRows.first?["max_id"] as? Int) ?? 0
 
                 // Sanitize inputs for AppleScript
-                let safeRecipient = recipient
-                    .replacingOccurrences(of: "\\", with: "\\\\")
-                    .replacingOccurrences(of: "\"", with: "\\\"")
-                let safeBody = body
-                    .replacingOccurrences(of: "\\", with: "\\\\")
-                    .replacingOccurrences(of: "\"", with: "\\\"")
+                let safeRecipient = escapeAppleScriptString(recipient)
+                let safeBody = escapeAppleScriptString(body)
 
                 // Build and execute AppleScript with detected service type
                 let script = """

@@ -230,6 +230,24 @@ func runMessagesSuiteAuditTests() async {
             "Messages canonical keys must not collide with the alias map")
     }
 
+    await test("messages_send schema accepts recipient or chatIdentifier target") {
+        let regs = await router.registrations(forModule: "messages")
+        guard let send = regs.first(where: { $0.name == "messages_send" }),
+              case .object(let schema) = send.inputSchema,
+              case .object(let props)? = schema["properties"],
+              case .array(let required)? = schema["required"] else {
+            throw TestError.assertion("messages_send schema not inspectable")
+        }
+        try expect(props["recipient"] != nil, "messages_send schema missing recipient")
+        try expect(props["chatIdentifier"] != nil, "messages_send schema missing chatIdentifier")
+        let requiredStrings = Set(required.compactMap { value -> String? in
+            if case .string(let string) = value { return string }
+            return nil
+        })
+        try expect(requiredStrings == Set(["body", "confirm"]),
+                   "messages_send should require body+confirm globally; target is recipient OR chatIdentifier")
+    }
+
     // ============================================================
     // MARK: D. Annotation + tier coherence
     // ============================================================
@@ -275,6 +293,17 @@ func runMessagesSuiteAuditTests() async {
             "recipient": .string("+15551234567"), "body": .string("hi"), "confirm": .string("send")]))
         if case .object(let d) = r, case .bool(let sent) = d["sent"] {
             try expect(sent == false, "lowercase 'send' must NOT pass the confirm gate")
+        } else { throw TestError.assertion("expected object with sent=false") }
+    }
+
+    await test("messages_send: chatIdentifier confirm guard returns sent=false before AppleScript") {
+        let r = try await router.dispatch(toolName: "messages_send", arguments: .object([
+            "chatIdentifier": .string("677927082d92462b9e1ddc5450b9ae10"),
+            "body": .string("hi"),
+            "confirm": .string("send")
+        ]))
+        if case .object(let d) = r, case .bool(let sent) = d["sent"] {
+            try expect(sent == false, "lowercase 'send' must NOT pass the chatIdentifier confirm gate")
         } else { throw TestError.assertion("expected object with sent=false") }
     }
 
