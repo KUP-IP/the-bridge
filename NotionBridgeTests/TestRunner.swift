@@ -800,6 +800,13 @@ await runBridgeCloudManagerTests()
 // rename.)
 await runEnableCloudAccessFlowTests()
 
+// WS-F remediation (2026-06-10): WorkerTokenExchange — the production
+// code→token exchange now POSTs the one-time code to the kup-worker
+// /auth/exchange route (the worker holds the WorkOS secret; the Mac ships
+// none). URLProtocol-stubbed: request shape (POST {base}/auth/exchange, body
+// {code} only) + response parse (access_token → token; non-2xx / missing → throw).
+await runWorkerTokenExchangeTests()
+
 // WS-D (PKT-921, Bridge Cloud Access): heartbeat loop over the WS-C
 // BridgeCloudManager (start/stop on toggle, idempotent start), the
 // cloud-gated `bridge_status` MCP tool (gated registration + canonical

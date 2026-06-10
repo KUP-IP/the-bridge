@@ -138,13 +138,58 @@ public enum CloudAuthCallback: Sendable, Equatable {
     }
 }
 
-/// The injectable code→token exchange seam (POST WorkOS `/oauth/token`).
-/// Production wraps `URLSession`; tests inject a deterministic fake so no
-/// live WorkOS call is made (per the packet's hard "mocks only" rule).
+/// The injectable code→token exchange seam. Production posts the one-time
+/// code to the kup-worker `/auth/exchange` route (the worker holds the WorkOS
+/// secret); tests inject a deterministic fake so no network call is made.
 public protocol CloudTokenExchanging: Sendable {
     /// Exchange a one-time auth `code` for a session token string. Throws on
     /// any non-success / transport failure.
     func exchange(code: String, config: WorkOSConfig) async throws -> String
+}
+
+/// Production exchange (WS-F remediation 2026-06-10). The WorkOS
+/// authorization_code grant requires the client SECRET, which must never ship
+/// in the app, so the Mac POSTs its one-time `code` to the kup-worker
+/// `/auth/exchange` route; the worker holds `WORKOS_API_KEY` and performs the
+/// upstream exchange, returning only the session token. `baseURL` is the
+/// Worker control-plane host (`BRIDGE_CLOUD_BASE_URL`, e.g.
+/// `https://bridge.kup.solutions`).
+public struct WorkerTokenExchange: CloudTokenExchanging {
+    private let baseURL: String
+    private let session: URLSession
+
+    public init(
+        baseURL: String? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        session: URLSession = .shared
+    ) {
+        self.baseURL = baseURL
+            ?? environment["BRIDGE_CLOUD_BASE_URL"]?.nonEmpty
+            ?? "https://bridge.kup.solutions"
+        self.session = session
+    }
+
+    public func exchange(code: String, config: WorkOSConfig) async throws -> String {
+        guard let url = URL(string: baseURL.appendingPathComponentSafe("auth/exchange")) else {
+            throw CloudError.authURLUnavailable
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["code": code])
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw CloudError.tokenExchangeFailed
+        }
+        guard
+            let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let token = (obj["access_token"] as? String) ?? (obj["token"] as? String),
+            !token.isEmpty
+        else {
+            throw CloudError.tokenExchangeFailed
+        }
+        return token
+    }
 }
 
 /// Production `URLSession`-backed exchange. NOT used by unit tests. Left

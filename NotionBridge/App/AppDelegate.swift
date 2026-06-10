@@ -469,19 +469,20 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `EnableCloudAccessFlow` observes `.cloudAuthCallbackReceived` to
     /// advance from `.signingIn` to `.provisioning`.
     ///
-    /// The live code→token exchange requires the operator's WorkOS tenant
-    /// (PKT-810) + a real client id; until then `URLSessionTokenExchange`
-    /// is wired but no live tenant will mint a token (live-QA gate).
+    /// The code→token exchange runs server-side in the kup-worker
+    /// (`/auth/exchange`), which holds the WorkOS secret; the Mac only relays
+    /// its one-time code (WS-F remediation 2026-06-10).
     public func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls where url.scheme?.lowercased() == "bridge-auth" {
+            NSLog("[WS-F] bridge-auth callback received: host=\(url.host ?? "nil")")
             cloudAuthCallbackHandler.handle(url)
         }
     }
 
     /// The WS-F callback handler, assembled over the production seams
-    /// (URLSession exchange + Keychain persistence).
+    /// (worker-backed exchange + Keychain persistence).
     private lazy var cloudAuthCallbackHandler = CloudAuthCallbackHandler(
-        exchange: URLSessionTokenExchange()
+        exchange: WorkerTokenExchange()
     )
 
     // MARK: - Public API (V1-QUALITY-C2)
