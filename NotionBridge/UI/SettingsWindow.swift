@@ -210,8 +210,6 @@ public struct SettingsView: View {
     @State var showFactoryResetConfirmation = false
     @State var isRecheckingPermissions = false
     @State var permissionActionMessage: String?
-    @State var launchAtLoginError: String?
-    @State var isApplyingLaunchAtLoginChange = false
     @State var ssePortInput = String(ConfigManager.shared.ssePort)
     @State var ssePortError: String?
     @State var ssePortSaveSuccess = false
@@ -267,8 +265,6 @@ public struct SettingsView: View {
     var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? AppVersion.marketing
     }
-
-    @AppStorage("launchAtLogin") var launchAtLogin: Bool = false
 
     /// cmd-ux: the persisted Commands-palette master toggle. Default
     /// `true` (palette ships ON) — matches `CommandsPaletteGate`'s
