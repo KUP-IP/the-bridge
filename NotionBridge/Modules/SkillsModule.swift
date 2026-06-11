@@ -335,6 +335,59 @@ public enum SkillsModule {
                 // returns one server-rendered document in a single call.
                 _ = includeNested; _ = maxBlocks; _ = maxDepth
 
+                // body-cache: ZERO-NETWORK plain-hit fast path.
+                //
+                // A PLAIN request — no path, no intent, no section, not a
+                // depth-guard — resolves to the parent page itself: the live
+                // path's `dispatchNotionSpecialist` would take its bare-parent
+                // fast path (no specialist swap, no sibling enumeration → no
+                // routingFooter / annotation keys), so the served envelope is
+                // exactly `buildSkillResult(parent body)`. We can therefore
+                // build that envelope ENTIRELY from the persisted body cache
+                // (keyed by the parent page id, since no specialist is
+                // resolved) WITHOUT ever constructing a NotionClient — so a
+                // warm plain fetch succeeds offline, as fast as a local file.
+                //
+                // The lookup + envelope build run BEFORE `try NotionClient()`.
+                // Selector requests (path / intent / section / depth-guard)
+                // skip this and fall through to the live path below, where
+                // they still benefit from the cached body inside the `do`.
+                let isPlainRequest = parsedPath.child == nil
+                    && intentArg == nil
+                    && sectionArg == nil
+                    && !parsedPath.depthExceeded
+                if isPlainRequest,
+                   let cachedBody = await SkillBodyCacheStore.shared.read(pageId: pageIdRaw) {
+                    // Build the envelope with ZERO network — no client is
+                    // constructed or awaited on this branch.
+                    let result = await Self.buildPlainCacheHitEnvelope(
+                        skill: skillConfig,
+                        cachedBody: cachedBody
+                    )
+                    await cache.set(cacheKey, content: result)
+
+                    // Off the return path: bump callCount; on every 5th call
+                    // kick a DETACHED freshness check (stale-while-revalidate).
+                    // The revalidation is the ONLY place this branch may ever
+                    // touch the network, and it runs detached AFTER we return.
+                    let store = SkillBodyCacheStore.shared
+                    let n = await store.incrementCallCount(pageId: pageIdRaw)
+                    if n > 0, n % 5 == 0 {
+                        let revalPageId = pageIdRaw
+                        let knownEdited = cachedBody.lastEditedTime
+                        let memCache = cache
+                        Task.detached {
+                            await Self.revalidateBodyCache(
+                                pageId: revalPageId,
+                                knownLastEdited: knownEdited,
+                                store: store,
+                                memCache: memCache
+                            )
+                        }
+                    }
+                    return result
+                }
+
                 // Fetch from Notion API
                 do {
                     let client = try NotionClient()
@@ -2038,6 +2091,35 @@ public enum SkillsModule {
         titleLookup: MentionResolver.TitleLookup,
         pageProperties: [String: Any] = [:]
     ) async -> Value {
+        // cu-sa: flatten the verbatim getPage properties into the additive
+        // `properties` envelope key, then hand to the shared builder.
+        return await buildSkillResult(
+            skill: skill,
+            title: title,
+            url: url,
+            markdownJSONOrText: markdownJSONOrText,
+            titleLookup: titleLookup,
+            flattenedProperties: .object(flattenProperties(pageProperties))
+        )
+    }
+
+    /// Shared envelope builder taking the ALREADY-FLATTENED `properties`
+    /// map (the `.object(...)` form `flattenProperties` produces) instead
+    /// of the verbatim getPage blob. The network path flattens then calls
+    /// this; the offline body-cache HIT path passes the pre-flattened
+    /// `properties` straight off the `CachedSkillBody` (no re-flatten, and
+    /// — critically — no `getPage` blob to re-flatten). The resulting
+    /// envelope is byte-identical to the network path for the same input
+    /// because the cache PERSISTED exactly `flattenProperties(props)` at
+    /// miss time.
+    private static func buildSkillResult(
+        skill: SkillConfig,
+        title: String,
+        url: String,
+        markdownJSONOrText: String,
+        titleLookup: MentionResolver.TitleLookup,
+        flattenedProperties: Value
+    ) async -> Value {
         let markdown = looksLikeMarkdownJSON(markdownJSONOrText)
             ? skillMarkdownString(fromMarkdownJSON: markdownJSONOrText)
             : markdownJSONOrText
@@ -2066,11 +2148,66 @@ public enum SkillsModule {
             "content": .string(contentValue)
         ]
         resultObj.merge(mcpMetadataObject(skill)) { _, new in new }
-        // cu-sa: additive — a single NEW `properties` key carrying the
-        // simplified flatten of the already-fetched getPage properties.
-        // Empty / non-DB page → `{}`. No pre-existing key is touched.
-        resultObj["properties"] = .object(flattenProperties(pageProperties))
+        // cu-sa: additive — a single NEW `properties` key. On the network
+        // path this is `flattenProperties(getPage.properties)`; on the
+        // cache-hit path it is the verbatim persisted flatten. No
+        // pre-existing key is touched.
+        resultObj["properties"] = flattenedProperties
         return .object(resultObj)
+    }
+
+    // MARK: - body-cache: offline plain-hit envelope (ZERO network)
+
+    /// Build the `fetch_skill` return envelope ENTIRELY from a cached body,
+    /// with NO NotionClient construction and NO network call. Used only for
+    /// a PLAIN request (no path, no intent, no section, no depth-guard): on
+    /// such a request the live path's `dispatchNotionSpecialist` takes its
+    /// bare-parent fast path (no sibling enumeration → no `routingFooter`,
+    /// no annotation keys), so the network plain envelope is exactly
+    /// `buildSkillResult(...)` with no extra keys. This reproduces that
+    /// envelope from `CachedSkillBody` so the two are byte-identical for the
+    /// same input — modulo `<mention-page>` resolution, which depends on the
+    /// injected `titleLookup` (the offline default resolves nothing → the
+    /// shared `[link](url)` fallback, same as the network path when its own
+    /// per-fetch lookup misses).
+    ///
+    /// The cached `body.properties` is the verbatim flatten persisted at
+    /// miss time (`.object(flattenProperties(getPageProperties))`), so it is
+    /// passed straight through — never re-flattened — and the title/url come
+    /// from the cache too. The result is then run through `annotateEnvelope`
+    /// with an EMPTY `SpecialistDispatch` purely to prove equivalence with
+    /// the live plain path: for a plain request that dispatch contributes
+    /// no keys, so this is a structural no-op that keeps the two code paths
+    /// provably aligned.
+    ///
+    /// `titleLookup` defaults to a network-free resolver (always nil) so an
+    /// OFFLINE plain hit succeeds even when NotionClient construction would
+    /// throw. Callers wanting live mention enrichment may inject a lookup,
+    /// but the plain-hit handler path uses the offline default to stay
+    /// strictly zero-network.
+    static func buildPlainCacheHitEnvelope(
+        skill: SkillConfig,
+        cachedBody: CachedSkillBody,
+        titleLookup: @escaping MentionResolver.TitleLookup = { _ in nil }
+    ) async -> Value {
+        let envelope = await buildSkillResult(
+            skill: skill,
+            title: cachedBody.title,
+            url: cachedBody.url,
+            markdownJSONOrText: cachedBody.markdown,
+            titleLookup: titleLookup,
+            flattenedProperties: cachedBody.properties
+        )
+        // Plain request → empty dispatch (bare-parent fast path shape):
+        // no resolvedSpecialist, no annotation, no siblings → adds nothing.
+        let emptyDispatch = SpecialistDispatch(
+            resolvedSpecialist: nil,
+            resolvedPath: nil,
+            annotation: nil,
+            matchScore: nil,
+            matchReason: nil
+        )
+        return annotateEnvelope(envelope, parentName: skill.name, dispatch: emptyDispatch)
     }
 
     /// Public, network-free entry point mirroring `buildSkillResult` but
@@ -2112,6 +2249,37 @@ public enum SkillsModule {
             markdownJSONOrText: markdownJSONOrText,
             titleLookup: titleLookup,
             pageProperties: pageProperties
+        )
+    }
+
+    /// Public, network-free entry point exercising the PRODUCTION
+    /// `buildPlainCacheHitEnvelope` from the cross-target test suite (which
+    /// only sees the public surface, not the internal `SkillConfig`). Builds
+    /// the SkillConfig from primitives — matching `buildSkillResultForTesting`
+    /// — then runs the EXACT offline plain-hit builder the handler uses. No
+    /// NotionClient is constructed or awaited anywhere on this path, so a
+    /// passing assertion proves the warm plain hit is zero-network.
+    public static func buildPlainCacheHitEnvelopeForTesting(
+        name: String,
+        cachedBody: CachedSkillBody,
+        summary: String = "",
+        triggerPhrases: [String] = [],
+        antiTriggerPhrases: [String] = [],
+        titleLookup: @escaping MentionResolver.TitleLookup = { _ in nil }
+    ) async -> Value {
+        let cfg = SkillConfig(
+            name: name,
+            notionPageId: "00000000000000000000000000000000",
+            enabled: true,
+            visibility: .standard,
+            summary: summary,
+            triggerPhrases: triggerPhrases,
+            antiTriggerPhrases: antiTriggerPhrases
+        )
+        return await buildPlainCacheHitEnvelope(
+            skill: cfg,
+            cachedBody: cachedBody,
+            titleLookup: titleLookup
         )
     }
 
