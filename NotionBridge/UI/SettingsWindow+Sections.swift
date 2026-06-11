@@ -328,7 +328,8 @@ extension SettingsView {
 // MARK: - Security composite (bespoke merged page — replaces BridgeMergedSection)
 
 /// The merged **Security** Settings page: ONE bespoke posture header (replacing
-/// both legacy orb-heroes) over a segmented `Vault | Gates` strip.
+/// both legacy orb-heroes) over a segmented `Vault | Gates` strip, with the
+/// account-level **License** card pinned beneath the header.
 ///
 /// Posture header (left→right): a 44 `lock.shield` gold orb · "Security" title +
 /// subtitle · stat tiles STORED / ATTENTION + read-only tool tier counts
@@ -336,9 +337,17 @@ extension SettingsView {
 /// edit here) · a Touch-ID-to-reveal chip. It subscribes to BOTH the credentials-
 /// changed and tier-overrides-changed notifications so the counts live-update.
 ///
+/// PKT-W3-license: License (entitlement / billing posture) was relocated here
+/// from Advanced. It sits directly under the posture header — above the tab bar
+/// — because the activation state machine governs the whole app, not one tab.
+/// Its `LicenseCardHost` state machine is carried verbatim (self-hosted via the
+/// `@StateObject` below, the `.task` initial load, and the
+/// `.licenseStateDidChange` refresh); the license-activation contract is
+/// unchanged.
+///
 /// The two tab bodies (`CredentialsSection`, `PermissionsSection`) are hero-less
-/// and self-contained; this composite only owns the header, the tab bar, and the
-/// deep-link anchor → starting-tab resolution.
+/// and self-contained; this composite only owns the header, the License card,
+/// the tab bar, and the deep-link anchor → starting-tab resolution.
 struct SecuritySection: View {
     let anchor: String?
     let liveTools: [ToolInfo]
@@ -348,6 +357,11 @@ struct SecuritySection: View {
     private enum Tab: String, Hashable, CaseIterable { case vault, gates }
 
     @State private var selection: Tab
+
+    /// PKT-W3-license — License card lives under the posture header inside
+    /// Security. Self-hosted state via LicenseCardHost so the SecuritySection
+    /// signature is unchanged.
+    @StateObject private var licenseHost = LicenseCardHost()
 
     // Posture metrics — recomputed on the change notifications below.
     @State private var storedCount: Int = 0
@@ -376,6 +390,9 @@ struct SecuritySection: View {
             postureHeader
                 .padding(.horizontal, BridgeTokens.Space.paneH)
                 .padding(.top, BridgeTokens.Space.cardGap)
+            licenseCard
+                .padding(.horizontal, BridgeTokens.Space.paneH)
+                .padding(.top, BridgeTokens.Space.cardGap)
             tabBar
                 .padding(.horizontal, BridgeTokens.Space.paneH)
                 .padding(.top, 12)
@@ -389,15 +406,38 @@ struct SecuritySection: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.clear)
         .task { refreshMetrics() }
+        .task { await licenseHost.load() }
         .onReceive(NotificationCenter.default.publisher(for: .notionBridgeCredentialsFeatureDidChange)) { _ in
             refreshMetrics()
         }
         .onReceive(NotificationCenter.default.publisher(for: .notionBridgeTierOverridesDidChange)) { _ in
             refreshTierCounts()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .licenseStateDidChange)) { _ in
+            Task { await licenseHost.load() }
+        }
         .onChange(of: anchor) { _, newAnchor in
             if let t = SecuritySection.tab(for: newAnchor) { selection = t }
         }
+    }
+
+    // MARK: License (PKT-W3-license — relocated from Advanced)
+
+    /// Account-level entitlement posture. Pinned under the posture header so the
+    /// activation state machine (trial / licensed / expired / grandfathered) is
+    /// visible from either tab. The LicenseCard API and its host are unchanged —
+    /// this is the same component that previously rendered inside Advanced.
+    private var licenseCard: some View {
+        LicenseCard(
+            state: licenseHost.uiState,
+            pasteField: Binding(
+                get: { licenseHost.pasteField },
+                set: { licenseHost.pasteField = $0 }
+            ),
+            onActivate: { Task { await licenseHost.activate() } },
+            onDeactivate: { Task { await licenseHost.deactivate() } },
+            onBuy: { licenseHost.openBuyPage() }
+        )
     }
 
     // MARK: Posture header

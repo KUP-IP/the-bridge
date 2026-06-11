@@ -12,12 +12,13 @@
 //                diagnostic row; the three reset/wipe actions stay grouped as
 //                a Danger zone (role:.destructive + confirmation dialogs).
 //
-// License keeps its own card this wave (relocation to Security is deferred).
+// License has been relocated to the Security page (PKT-W3-license) — it is an
+// account/entitlement posture concern, not a system internal.
 //
 // VIEW LAYER ONLY — every binding is preserved verbatim: version/about
 // strings, SSE port edit + validation, copy endpoint rows, reveal-in-Finder
-// path rows, maintenance/danger tiles (export, reset onboarding, reset
-// background items, factory reset), and the LicenseCard state machine.
+// path rows, and the maintenance/danger tiles (export, reset onboarding, reset
+// background items, factory reset).
 
 import SwiftUI
 import AppKit
@@ -85,11 +86,6 @@ public struct AdvancedSection: View {
         self.screenOutputDir = screenOutputDir
     }
 
-    /// PKT-909 W3 — License card lives as a sibling card inside
-    /// Advanced. Self-hosted state via LicenseCardHost so the
-    /// AdvancedSection signature is unchanged.
-    @StateObject private var licenseHost = LicenseCardHost()
-
     /// Transient "copied" flash, keyed by the copied row's value so the
     /// check-mark lands on the row the user actually clicked.
     @State private var copiedKey: String? = nil
@@ -105,14 +101,9 @@ public struct AdvancedSection: View {
             VStack(alignment: .leading, spacing: cardGap) {
                 intro
                 systemCard
-                licenseCard
                 maintenanceCard
             }
             .padding(paneInset)
-        }
-        .task { await licenseHost.load() }
-        .onReceive(NotificationCenter.default.publisher(for: .licenseStateDidChange)) { _ in
-            Task { await licenseHost.load() }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
@@ -304,21 +295,6 @@ public struct AdvancedSection: View {
                 .font(.system(size: 11.5))
                 .foregroundStyle(BridgeTokens.fg3)
         }
-    }
-
-    // MARK: - License (PKT-909 W3 — relocation to Security deferred to Wave 3)
-
-    private var licenseCard: some View {
-        LicenseCard(
-            state: licenseHost.uiState,
-            pasteField: Binding(
-                get: { licenseHost.pasteField },
-                set: { licenseHost.pasteField = $0 }
-            ),
-            onActivate: { Task { await licenseHost.activate() } },
-            onDeactivate: { Task { await licenseHost.deactivate() } },
-            onBuy: { licenseHost.openBuyPage() }
-        )
     }
 
     // MARK: - Unified meta row (read-only · copyable mono chip · path+reveal)
