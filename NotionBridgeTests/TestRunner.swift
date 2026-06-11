@@ -703,6 +703,7 @@ await runSkillsMCPFlagRoundTripTests()    // 3.4.2 W3 H1 fix: SkillConfig MCP re
 await runHotkeyRecorderFocusTests()        // 3.4.2 W4 H5 fix: RecorderFocusModel contract locks the button-binding focus path
 await runHotkeyRebindUITests()             // v3.7.6: mount the Commands "Global shortcut" card — HotkeyConfig.from validation + persist round-trip + status-row mapping
 await runFrontmatterParserTests()   // W2 D8: SKILL.md YAML frontmatter parser
+await runSkillIconAndKindTests()    // WS-3/WS-4: Skill emoji icon (Codable + extract) + derived skillKind/sourceKind accessors
 await runSkillSourceTests()         // W2 D2: SkillSource enum + legacy notionPageId backward-compat
 await runFilesystemSkillIndexTests() // W2 D3: SKILL.md filesystem index actor
 await runFetchSkillFileSourceTests() // W2 D5: file-source fetch_skill envelope shape
