@@ -578,6 +578,10 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
     // resolves the opaque waiter tokens back to their parked continuations.
     private var coalescer = ApprovalCoalescer()
     private var waiterContinuations: [String: CheckedContinuation<ApprovalDecision, Never>] = [:]
+    /// fb-securitygate (race fix): decisions for waiter tokens that were drained
+    /// by the owner BEFORE they parked their continuation. `parkCoalescedWaiter`
+    /// consumes this and resumes immediately, so a lost wakeup can't hang a waiter.
+    private var resolvedWaiters: [String: ApprovalDecision] = [:]
 
     static let categoryIdentifier = "SECURITY_APPROVAL"
     static let categoryIdentifierNoAlways = "SECURITY_APPROVAL_NO_ALWAYS"
@@ -696,7 +700,7 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
     ///
     /// No continuation crosses this boundary, so the decision happens with no
     /// `await` in between — a concurrent burst elects exactly one owner.
-    private nonisolated func reserveCoalesced(
+    public nonisolated func reserveCoalesced(
         coalesceKey: String,
         identifier: String
     ) -> (isFirst: Bool, waiterToken: String) {
@@ -713,13 +717,20 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
 
     /// Park a joined waiter's continuation under its opaque token, to be resumed
     /// when the owner's prompt resolves (`drainCoalescedWaiters`).
-    private nonisolated func parkCoalescedWaiter(
+    public nonisolated func parkCoalescedWaiter(
         token: String,
         continuation: CheckedContinuation<ApprovalDecision, Never>
     ) {
         lock.lock()
-        defer { lock.unlock() }
+        if let decision = resolvedWaiters.removeValue(forKey: token) {
+            lock.unlock()
+            // fb-securitygate (race fix): the owner already resolved this key
+            // before we parked — resume now instead of parking forever.
+            continuation.resume(returning: decision)
+            return
+        }
         waiterContinuations[token] = continuation
+        lock.unlock()
     }
 
     /// Drain all extra waiters parked under the coalesce key that `identifier`
@@ -727,13 +738,24 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
     /// each with the resolved decision. The FIRST caller's own continuation is
     /// NOT included — it is resumed via the regular `pendingApprovals` path
     /// keyed by `identifier`. Idempotent: returns `[]` for an unknown identifier.
-    private nonisolated func drainCoalescedWaiters(
-        forIdentifier identifier: String
+    public nonisolated func drainCoalescedWaiters(
+        forIdentifier identifier: String,
+        decision: ApprovalDecision
     ) -> [CheckedContinuation<ApprovalDecision, Never>] {
         lock.lock()
         defer { lock.unlock() }
         let tokens = coalescer.drain(forIdentifier: identifier)
-        return tokens.compactMap { waiterContinuations.removeValue(forKey: $0) }
+        var parked: [CheckedContinuation<ApprovalDecision, Never>] = []
+        for token in tokens {
+            if let continuation = waiterContinuations.removeValue(forKey: token) {
+                parked.append(continuation)
+            } else {
+                // fb-securitygate (race fix): owner resolved before this waiter
+                // parked — buffer the decision so parkCoalescedWaiter resumes it.
+                resolvedWaiters[token] = decision
+            }
+        }
+        return parked
     }
 
     // MARK: Setup
@@ -974,7 +996,7 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
             // Owner + every joined waiter fall back to the synchronous alert so
             // none of them hang. The owner's decision is shared with the group.
             let decision = await requestViaAlert(title: title, body: body)
-            let waiters = drainCoalescedWaiters(forIdentifier: identifier)
+            let waiters = drainCoalescedWaiters(forIdentifier: identifier, decision: decision)
             for w in waiters { w.resume(returning: decision) }
             return decision
         }
@@ -989,7 +1011,7 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
                 try? await Task.sleep(for: .seconds(self.approvalTimeout))
                 // Only acts if still pending — a user answer already removed it.
                 if let owner = self.removePending(forKey: identifier) {
-                    let waiters = self.drainCoalescedWaiters(forIdentifier: identifier)
+                    let waiters = self.drainCoalescedWaiters(forIdentifier: identifier, decision: .deny)
                     owner.resume(returning: .deny)
                     for w in waiters { w.resume(returning: .deny) }
                     print("[SecurityGate] Approval timed out (\(Int(self.approvalTimeout))s) — denied by default (\(waiters.count + 1) caller(s))")
@@ -1074,7 +1096,7 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
 
         // fb-securitygate (point 2): a single user answer resolves the first
         // caller AND every coalesced waiter parked behind the same prompt.
-        let waiters = drainCoalescedWaiters(forIdentifier: identifier)
+        let waiters = drainCoalescedWaiters(forIdentifier: identifier, decision: decision)
         if let continuation = removePending(forKey: identifier) {
             continuation.resume(returning: decision)
         }

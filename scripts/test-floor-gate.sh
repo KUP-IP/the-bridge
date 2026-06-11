@@ -981,7 +981,10 @@ set -euo pipefail
 # full suite; FLOOR set to 1950 stays 64 below the measured 2014 so the existing
 # GUI/TCC + flake headroom is preserved while none of the +173 new tests can be
 # silently dropped. Never lowered below origin/main's 1777.
-FLOOR="${BRIDGE_TEST_FLOOR:-1950}"
+# fb-securitygate-credentials-followup (2026-06-06): coalescer drain-before-park
+# race fix (+1 regression test); credentials NOTION-alias corrected to the real
+# com.notionbridge/notion_api_token keychain row (2 tests updated, not added). 1950→1951.
+FLOOR="${BRIDGE_TEST_FLOOR:-1951}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
