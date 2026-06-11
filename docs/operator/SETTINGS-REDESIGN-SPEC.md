@@ -1,8 +1,13 @@
-# The Bridge — Settings Redesign Spec (LIVING — do NOT implement until instructed)
+# The Bridge — Settings Redesign Spec (IMPLEMENTED 2026-06-10)
 
-> Status: gathering. Operator feeds ideas in batches; this sheet accumulates + refines them.
-> No code changes until the operator says "implement all items."
-> Started 2026-06-10.
+> Status: **IMPLEMENTED** on branch `feat/settings-redesign`. Foundation (PKT-A, nav 10→7)
+> + 7 per-page redesigns (PKT-B…H) + Wave-3 relocations (License→Security, launch-at-login/
+> check-for-updates→Advanced) + dead-code cleanups all landed and verified: full suite
+> **2024 passed / 0 failed**, release strict-concurrency build clean, bundle packaged.
+> Commit range `9b28975` (spec + audits) … `1adf5b1` (orphan sweep). Started + shipped 2026-06-10.
+> Retained as the execution SSOT of record. Items marked "deferred" below were validated as
+> already-satisfied in Wave 2 (version single-source, port→Connection) or out of scope
+> (full Stripe removal = separate tool-surface-pruning effort).
 
 ## Current sidebar (SettingsWindow.swift L115–124) — 10 sections
 Standing Orders · Commands · Connections · Remote Access · Skills · Permissions · Credentials · Tools · Jobs · Advanced
