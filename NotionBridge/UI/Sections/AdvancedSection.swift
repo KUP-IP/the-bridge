@@ -3,11 +3,13 @@
 // section name, so the bespoke 50×50 glass hero is gone — a single subtitle
 // intro line opens the page. The seven stacked cards collapse to two:
 //
-//   • System  — About / Network / Local endpoints / System paths as labeled
-//                sub-groups, all built from ONE `metaRow` primitive (read-only
-//                value · copyable mono chip · path-with-reveal). Version is
-//                single-sourced here (the About "App version" row) — the old
-//                gold hero versionTile and its duplicate export icon are gone.
+//   • System  — Startup & Updates (Launch-at-login + Check-for-Updates) /
+//                About / Network / Local endpoints / System paths as labeled
+//                sub-groups; the metadata sub-groups all build from ONE
+//                `metaRow` primitive (read-only value · copyable mono chip ·
+//                path-with-reveal). Version is single-sourced here (the About
+//                "App version" row) — the old gold hero versionTile and its
+//                duplicate export icon are gone.
 //   • Maintenance — Export pulled OUT of the destructive grid into its own
 //                diagnostic row; the three reset/wipe actions stay grouped as
 //                a Danger zone (role:.destructive + confirmation dialogs).
@@ -15,12 +17,20 @@
 // License has been relocated to the Security page (PKT-W3-license) — it is an
 // account/entitlement posture concern, not a system internal.
 //
-// VIEW LAYER ONLY — every binding is preserved verbatim: version/about
-// strings, SSE port edit + validation, copy endpoint rows, reveal-in-Finder
-// path rows, and the maintenance/danger tiles (export, reset onboarding, reset
-// background items, factory reset).
+// Startup & Updates relocated FROM the Connection page (PKT-W3-lifecycle): the
+// Launch-at-login toggle (SMAppService registration) and the Check-for-Updates
+// button are app-lifecycle concerns, not connectivity. The SMAppService wiring
+// (`applyLaunchAtLoginChange`) and the `checkForUpdates()` call are preserved
+// verbatim — `launchAtLogin` remains the same @AppStorage key the AppDelegate
+// reads at startup, so this stays the single source of truth.
+//
+// VIEW LAYER ONLY — every binding is preserved verbatim: launch-at-login
+// registration, version/about strings, SSE port edit + validation, copy
+// endpoint rows, reveal-in-Finder path rows, and the maintenance/danger tiles
+// (export, reset onboarding, reset background items, factory reset).
 
 import SwiftUI
+import ServiceManagement
 import AppKit
 
 public struct AdvancedSection: View {
@@ -89,6 +99,13 @@ public struct AdvancedSection: View {
     /// Transient "copied" flash, keyed by the copied row's value so the
     /// check-mark lands on the row the user actually clicked.
     @State private var copiedKey: String? = nil
+
+    // Bridge lifecycle (relocated from Connection, PKT-W3-lifecycle).
+    // `launchAtLogin` is the same @AppStorage key the AppDelegate reads at
+    // startup, so this stays the single source of truth for the login item.
+    @AppStorage("launchAtLogin") private var launchAtLogin = false
+    @State private var launchAtLoginError: String?
+    @State private var isApplyingLaunchAtLoginChange = false
 
     // Advanced density targets (spec: pad 20→16, inter-card gap 14→10). Kept
     // local so they don't perturb the shared BridgeTokens.Space scale other
@@ -193,6 +210,12 @@ public struct AdvancedSection: View {
     private var systemCard: some View {
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 18) {
+                subGroup("Startup & Updates") {
+                    startupAndUpdates
+                }
+
+                Divider().overlay(BridgeTokens.hairlineFaint)
+
                 subGroup("About") {
                     metaGrid {
                         metaRow("App version", value: .text(appVersion))
@@ -229,6 +252,88 @@ public struct AdvancedSection: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - Startup & Updates (relocated from Connection, PKT-W3-lifecycle)
+    //
+    // App-lifecycle controls — Launch-at-login (SMAppService registration) and a
+    // manual Check-for-Updates trigger. NOT connectivity, so they live with the
+    // system internals rather than the loopback endpoint surface. The SMAppService
+    // wiring (`applyLaunchAtLoginChange`) and the `checkForUpdates()` call are
+    // preserved exactly as they ran on Connection.
+
+    private var startupAndUpdates: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            launchToggleRow(
+                title: "Launch at login",
+                subtitle: "Registers Bridge with macOS via SMAppService. Approve in System Settings → Login Items if blocked.",
+                isOn: $launchAtLogin
+            )
+            .onChange(of: launchAtLogin) { _, enabled in
+                applyLaunchAtLoginChange(enabled: enabled)
+            }
+            if let err = launchAtLoginError {
+                Text(err)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(BridgeTokens.warnText)
+            }
+            Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5)
+            Button {
+                (NSApp.delegate as? AppDelegate)?.checkForUpdates()
+            } label: {
+                Label("Check for Updates", systemImage: "arrow.down.circle")
+                    .font(.system(size: 12.5, weight: .medium))
+            }
+            .buttonStyle(.bordered)
+            .tint(BridgeTokens.accent)
+        }
+    }
+
+    private func launchToggleRow(title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
+        HStack(alignment: .center, spacing: 14) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(BridgeTokens.fg1)
+                Text(subtitle)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(BridgeTokens.fg4)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Toggle(title, isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .tint(BridgeTokens.accent)
+        }
+    }
+
+    private func applyLaunchAtLoginChange(enabled: Bool) {
+        guard !isApplyingLaunchAtLoginChange else { return }
+        launchAtLoginError = nil
+        let service = SMAppService.mainApp
+        do {
+            if enabled {
+                if service.status == .enabled { return }
+                try? service.unregister()
+                try service.register()
+            } else {
+                if service.status == .notRegistered { return }
+                try service.unregister()
+            }
+        } catch {
+            let ns = error as NSError
+            let notPermitted = (ns.domain == NSPOSIXErrorDomain && ns.code == EPERM)
+                || ns.localizedDescription.localizedCaseInsensitiveContains("operation not permitted")
+            launchAtLoginError = notPermitted
+                ? (enabled ? "Could not enable Launch at login. Operation not permitted."
+                           : "Could not disable Launch at login. Operation not permitted.")
+                : (enabled ? "Could not enable Launch at login."
+                           : "Could not disable Launch at login.")
+            isApplyingLaunchAtLoginChange = true
+            launchAtLogin.toggle()
+            isApplyingLaunchAtLoginChange = false
         }
     }
 

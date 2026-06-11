@@ -13,30 +13,21 @@
 //     COLLAPSED disclosure inside that card — not its own full card.
 //   • Per-client rows with last-seen, and a teach empty-state when none.
 //
-// What moved OUT (relocations are Wave-3 deep-link repoints, but the heavy
-// chrome is gone now): the server-status orb hero (→ status strip), the Stripe
-// integrations tile (Stripe is being cut from the product), and the lifecycle
-// card (Launch-at-login / Check-for-Updates → Advanced). Restart + Copy-loopback
-// live on the status strip. Every store call and async load is preserved.
+// What moved OUT: the server-status orb hero (→ status strip), the Stripe
+// integrations tile (Stripe is being cut from the product), and the Bridge
+// lifecycle controls — the Launch-at-login toggle and Check-for-Updates button
+// now live on the Advanced page (PKT-W3-lifecycle: app lifecycle, not
+// connectivity). Restart + Copy-loopback live on the status strip. Every store
+// call and async load is preserved.
 
 import SwiftUI
-import ServiceManagement
 import AppKit
-import Darwin
 
 public struct ConnectionsSection: View {
     let statusBar: StatusBarController
 
     @State private var copiedEndpoint = false
     @State private var showTransports = false
-
-    // Bridge lifecycle (self-contained: the merged Connection composite no longer
-    // threads these through). `launchAtLogin` is the same @AppStorage key the
-    // AppDelegate reads at startup, so this stays the single source of truth.
-    @AppStorage("launchAtLogin") private var launchAtLogin = false
-    @State private var launchAtLoginError: String?
-    @State private var isApplyingLaunchAtLoginChange = false
-    @State private var showLifecycle = false
 
     public init(statusBar: StatusBarController) {
         self.statusBar = statusBar
@@ -51,7 +42,6 @@ public struct ConnectionsSection: View {
         VStack(spacing: BridgeTokens.Space.cardGap) {
             loopbackCard
             clientsCard
-            lifecycleCard
         }
         .padding(.horizontal, BridgeTokens.Space.paneH)
         .padding(.top, 4)
@@ -325,109 +315,5 @@ public struct ConnectionsSection: View {
         if interval < 3600 { return "\(Int(interval / 60))m ago" }
         if interval < 86400 { return "\(Int(interval / 3600))h ago" }
         return "\(Int(interval / 86400))d ago"
-    }
-
-    // MARK: - Bridge lifecycle (collapsed — app lifecycle, not connectivity)
-    //
-    // Kept on this page (not relocated this pass — cross-page relocations are
-    // deferred). Demoted to a collapsed disclosure so it costs minimal vertical:
-    // Launch-at-login + Check-for-Updates. Restart lives on the status strip.
-
-    private var lifecycleCard: some View {
-        BridgeGlassCard {
-            VStack(alignment: .leading, spacing: 0) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.16)) { showLifecycle.toggle() }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(BridgeTokens.fg4)
-                            .rotationEffect(.degrees(showLifecycle ? 90 : 0))
-                        BridgeCardLabel("Bridge lifecycle")
-                        Spacer(minLength: 0)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Bridge lifecycle")
-                .accessibilityValue(showLifecycle ? "Expanded" : "Collapsed")
-
-                if showLifecycle {
-                    VStack(alignment: .leading, spacing: 12) {
-                        lifecycleToggleRow(
-                            title: "Launch at login",
-                            subtitle: "Registers Bridge with macOS via SMAppService. Approve in System Settings → Login Items if blocked.",
-                            isOn: $launchAtLogin
-                        )
-                        .onChange(of: launchAtLogin) { _, enabled in
-                            applyLaunchAtLoginChange(enabled: enabled)
-                        }
-                        if let err = launchAtLoginError {
-                            Text(err)
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(BridgeTokens.warnText)
-                        }
-                        Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5)
-                        Button {
-                            (NSApp.delegate as? AppDelegate)?.checkForUpdates()
-                        } label: {
-                            Label("Check for Updates", systemImage: "arrow.down.circle")
-                                .font(.system(size: 12.5, weight: .medium))
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(BridgeTokens.accent)
-                    }
-                    .padding(.top, 12)
-                }
-            }
-        }
-    }
-
-    private func lifecycleToggleRow(title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
-        HStack(alignment: .center, spacing: 14) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(BridgeTokens.fg1)
-                Text(subtitle)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(BridgeTokens.fg4)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer()
-            Toggle(title, isOn: isOn)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .tint(BridgeTokens.accent)
-        }
-    }
-
-    private func applyLaunchAtLoginChange(enabled: Bool) {
-        guard !isApplyingLaunchAtLoginChange else { return }
-        launchAtLoginError = nil
-        let service = SMAppService.mainApp
-        do {
-            if enabled {
-                if service.status == .enabled { return }
-                try? service.unregister()
-                try service.register()
-            } else {
-                if service.status == .notRegistered { return }
-                try service.unregister()
-            }
-        } catch {
-            let ns = error as NSError
-            let notPermitted = (ns.domain == NSPOSIXErrorDomain && ns.code == EPERM)
-                || ns.localizedDescription.localizedCaseInsensitiveContains("operation not permitted")
-            launchAtLoginError = notPermitted
-                ? (enabled ? "Could not enable Launch at login. Operation not permitted."
-                           : "Could not disable Launch at login. Operation not permitted.")
-                : (enabled ? "Could not enable Launch at login."
-                           : "Could not disable Launch at login.")
-            isApplyingLaunchAtLoginChange = true
-            launchAtLogin.toggle()
-            isApplyingLaunchAtLoginChange = false
-        }
     }
 }
