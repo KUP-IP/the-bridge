@@ -123,7 +123,14 @@ public struct CommandsSection: View {
     }
 
     private var lastRegisterStatus: HotkeyRegisterStatus {
-        commandsController?.lastRegisterStatus ?? .unattempted
+        // Observe the controller for reactivity, but trust the live box (via
+        // the AppDelegate) for the VALUE — the mirror can be transiently reset
+        // to .unattempted by a registrar-less setEnabled while the Carbon
+        // hot-key is in fact registered. Mirrors the hotkeyConfig fallback above
+        // (which previously had this fallback and lastRegisterStatus did not —
+        // that asymmetry is the "Shortcut not active" lie).
+        let observed = commandsController?.lastRegisterStatus
+        return (NSApp.delegate as? AppDelegate)?.commandsLastRegisterStatus ?? observed ?? .unattempted
     }
 
     private var settingsStatus: CommandsSettingsStatus {

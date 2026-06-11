@@ -376,11 +376,29 @@ public enum SkillsModule {
                     let envelopePageId = specialistDispatch.resolvedSpecialist?.pageId ?? pageId
                     let envelopeProperties = specialistDispatch.resolvedSpecialist?.properties ?? pageProperties
 
+                    // body-cache: a persistent per-skill BODY cache sits
+                    // BELOW the in-memory `cache` and ABOVE the network.
+                    // Keyed by the RESOLVED `envelopePageId` so parent and
+                    // parent/child get distinct bodies. On HIT we skip the
+                    // `getPageMarkdown` payload (the large body call) and
+                    // reuse the cached raw markdown — every downstream step
+                    // (section slice → buildSkillResult → annotate*) runs
+                    // IDENTICALLY to the network path, so the rebuilt
+                    // envelope is byte-identical for the same input.
+                    let bodyStore = SkillBodyCacheStore.shared
+                    let cachedBody = await bodyStore.read(pageId: envelopePageId)
+                    let bodyServedFromCache = (cachedBody != nil)
+
                     // cmd-w4: body via the server /markdown render (one call;
                     // preserves headings/lists/code/tables) instead of the
                     // depth-first block walk + extractPlainText join.
-                    let markdownData = try await client.getPageMarkdown(pageId: envelopePageId)
-                    let rawMarkdown = Self.skillMarkdownString(fromMarkdownJSON: markdownData)
+                    let rawMarkdown: String
+                    if let cachedBody {
+                        rawMarkdown = cachedBody.markdown
+                    } else {
+                        let markdownData = try await client.getPageMarkdown(pageId: envelopePageId)
+                        rawMarkdown = Self.skillMarkdownString(fromMarkdownJSON: markdownData)
+                    }
 
                     // fb-resultsize: when a `section` is requested, slice the
                     // rendered markdown down to that heading's content before
@@ -419,6 +437,46 @@ public enum SkillsModule {
                         dispatch: specialistDispatch
                     )
                     await cache.set(cacheKey, content: result)
+
+                    // body-cache: persist (miss) or bump + maybe revalidate
+                    // (hit). Off the return path — never blocks the result.
+                    if bodyServedFromCache {
+                        // HIT: bump callCount; on every 5th call kick a
+                        // DETACHED freshness check (stale-while-revalidate).
+                        let n = await bodyStore.incrementCallCount(pageId: envelopePageId)
+                        if n > 0, n % 5 == 0 {
+                            let revalPageId = envelopePageId
+                            let knownEdited = cachedBody?.lastEditedTime ?? ""
+                            let memCache = cache
+                            Task.detached {
+                                await Self.revalidateBodyCache(
+                                    pageId: revalPageId,
+                                    knownLastEdited: knownEdited,
+                                    store: bodyStore,
+                                    memCache: memCache
+                                )
+                            }
+                        }
+                    } else {
+                        // MISS / first fetch: write the RAW body keyed by the
+                        // resolved page id (callCount=1, lastEditedTime from
+                        // the getPage JSON). flattenProperties matches the
+                        // envelope's `properties` builder exactly.
+                        let lastEdited = pageJSON["last_edited_time"] as? String ?? ""
+                        let entry = CachedSkillBody(
+                            pageId: envelopePageId,
+                            markdown: rawMarkdown,
+                            title: envelopeTitle,
+                            url: envelopeURL,
+                            properties: .object(Self.flattenProperties(envelopeProperties)),
+                            lastEditedTime: lastEdited,
+                            writtenAt: Date(),
+                            ttlHours: BridgeDefaults.skillsCacheTTLHoursEffective,
+                            callCount: 1
+                        )
+                        try? await bodyStore.write(entry)
+                    }
+
                     return result
 
                 } catch let error as NotionClientError {
@@ -1897,6 +1955,47 @@ public enum SkillsModule {
     /// String overload of `skillMarkdownString(fromMarkdownJSON:)`.
     public static func skillMarkdownString(fromMarkdownJSON jsonString: String) -> String {
         skillMarkdownString(fromMarkdownJSON: Data(jsonString.utf8))
+    }
+
+    // MARK: - body-cache: stale-while-revalidate
+
+    /// Background freshness check for a cached skill body. Runs DETACHED
+    /// off the `fetch_skill` return path (every 5th cache hit), so it never
+    /// adds latency to the served result.
+    ///
+    /// Flow: `getPage(pageId)` → compare `last_edited_time` to the cached
+    /// value. If UNCHANGED → no-op (the cached body is still fresh). If
+    /// CHANGED → fetch `getPageMarkdown` + rewrite the body cache, then
+    /// clear the in-memory result cache so the next call rebuilds from the
+    /// new body. A 404 / page-not-found → evict the entry (the page is
+    /// gone). All failures degrade to no-op — the cache is a hint.
+    fileprivate static func revalidateBodyCache(
+        pageId: String,
+        knownLastEdited: String,
+        store: SkillBodyCacheStore,
+        memCache: SkillCache
+    ) async {
+        guard let client = try? NotionClient() else { return }
+        do {
+            let refreshed = try await SkillBodyCacheStore.fetchBody(pageId: pageId, client: client)
+            // Same edit timestamp → body unchanged; leave the cache as-is
+            // (do NOT rewrite — a rewrite would needlessly bump writtenAt
+            // and reset the callCount cadence).
+            guard refreshed.lastEditedTime != knownLastEdited else { return }
+            try? await store.write(refreshed)
+            // Body changed: invalidate the in-memory result cache so the
+            // next fetch_skill rebuilds from the new body. (Coarse clear —
+            // the in-memory cache is keyed by a composite string, not page
+            // id; a full clear is the safe, cheap invalidation.)
+            await memCache.clear()
+        } catch let error as NotionClientError {
+            if case .httpError(let code, _) = error, code == 404 {
+                await store.evict(pageId: pageId)
+            }
+        } catch {
+            // Degrade silently — a revalidation failure must never disturb
+            // the served path; the stale body remains usable.
+        }
     }
 
     /// Pure, network-free builder for the `fetch_skill` return envelope.

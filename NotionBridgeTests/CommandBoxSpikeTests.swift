@@ -65,29 +65,29 @@ func runCommandBoxSpikeTests() async {
         try expect(back == h, "Codable round-trip changed the config")
     }
 
-    // ---- cmd-ux Change C: SHIPPING default is ⌃⌥⌘C ------------------
+    // ---- WS-1: SHIPPING default is ⌃⌘B (Control+Command+B, "B for Bridge") --
 
-    await test("HotkeyConfig.productionDefault is ⌃⌥⌘C (kVK_ANSI_C + ctrl|opt|cmd)") {
+    await test("HotkeyConfig.productionDefault is ⌃⌘B (kVK_ANSI_B + ctrl|cmd)") {
         let h = HotkeyConfig.productionDefault
-        try expect(h.keyCode == UInt32(kVK_ANSI_C),
-                   "keyCode must be C (\(kVK_ANSI_C)), got \(h.keyCode)")
-        try expect(h.keyCode == 8, "kVK_ANSI_C is virtual key 8 (0x08), got \(h.keyCode)")
-        try expect(h.carbonModifiers == UInt32(controlKey | optionKey | cmdKey),
-                   "modifier must be controlKey|optionKey|cmdKey, got \(h.carbonModifiers)")
+        try expect(h.keyCode == UInt32(kVK_ANSI_B),
+                   "keyCode must be B (\(kVK_ANSI_B)), got \(h.keyCode)")
+        try expect(h.keyCode == 11, "kVK_ANSI_B is virtual key 11 (0x0B), got \(h.keyCode)")
+        try expect(h.carbonModifiers == UInt32(controlKey | cmdKey),
+                   "modifier must be controlKey|cmdKey, got \(h.carbonModifiers)")
         // It must NOT carry the spike's cmd|option-Space shape.
         try expect(h != HotkeyConfig.spikeDefault,
                    "productionDefault must differ from the retained spikeDefault")
     }
 
-    await test("HotkeyConfig.productionDefault.hasModifier is true (triple modifier)") {
+    await test("HotkeyConfig.productionDefault.hasModifier is true (⌃⌘ modifiers)") {
         try expect(HotkeyConfig.productionDefault.hasModifier,
-                   "⌃⌥⌘C must report hasModifier=true so the controller registers it")
+                   "⌃⌘B must report hasModifier=true so the controller registers it")
     }
 
-    await test("HotkeyConfig.productionDefault.displayString renders \"⌃⌥⌘C\"") {
-        // Canonical Apple order: ⌃ ⌥ ⇧ ⌘ then the key glyph. ⌃⌥⌘C has
-        // no shift, so the rendered string is exactly ⌃⌥⌘C.
-        try expect(HotkeyConfig.productionDefault.displayString == "⌃⌥⌘C",
+    await test("HotkeyConfig.productionDefault.displayString renders \"⌃⌘B\"") {
+        // Canonical Apple order: ⌃ ⌥ ⇧ ⌘ then the key glyph. ⌃⌘B has
+        // no option/shift, so the rendered string is exactly ⌃⌘B.
+        try expect(HotkeyConfig.productionDefault.displayString == "⌃⌘B",
                    "got '\(HotkeyConfig.productionDefault.displayString)'")
     }
 
@@ -296,18 +296,18 @@ func runCommandBoxSpikeTests() async {
                    "expected cmdKey, got \(h?.carbonModifiers ?? 999)")
     }
 
-    await test("recorder map: ⌃⌥⌘ → controlKey|optionKey|cmdKey (the new default shape)") {
+    await test("recorder map: ⌃⌘B reproduces the shipping default by hand") {
         let h = HotkeyConfig.from(
-            keyCode: UInt32(kVK_ANSI_C),
-            cocoaModifiers: [.control, .option, .command]
+            keyCode: UInt32(kVK_ANSI_B),
+            cocoaModifiers: [.control, .command]
         )
-        try expect(h != nil, "the triple-modifier chord is valid")
-        try expect(h?.carbonModifiers == UInt32(controlKey | optionKey | cmdKey),
-                   "Cocoa ⌃⌥⌘ must OR to the exact Carbon mask, got \(h?.carbonModifiers ?? 999)")
+        try expect(h != nil, "the ⌃⌘ chord is valid")
+        try expect(h?.carbonModifiers == UInt32(controlKey | cmdKey),
+                   "Cocoa ⌃⌘ must OR to the exact Carbon mask, got \(h?.carbonModifiers ?? 999)")
         // Identical to the shipping productionDefault (round-trip proof
         // that the recorder can reproduce the default by hand).
         try expect(h == HotkeyConfig.productionDefault,
-                   "recording ⌃⌥⌘C must equal productionDefault")
+                   "recording ⌃⌘B must equal productionDefault")
     }
 
     await test("recorder map: ⌃⇧⌘ all four-minus-option combine correctly") {

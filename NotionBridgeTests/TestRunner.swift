@@ -791,6 +791,11 @@ await runLicenseDispatchGateTests()
 // routing-skills backing (v3.6·5 TODO closure).
 await runSkillsCacheTests()
 
+// body-cache (feat/backend-remediation): persistent per-skill BODY cache
+// with stale-while-revalidate — CachedSkillBody + SkillBodyCacheStore +
+// envelope-equivalence between the cache-hit and network paths.
+await runSkillBodyCacheTests()
+
 // routing/specialist-relation (v3.7.4): specialists now sourced from the
 // parent's curated `Specialist` relation property (NotionJSON.extract-
 // SpecialistRelationIDs) instead of the child_page walk; SpecialistFilter

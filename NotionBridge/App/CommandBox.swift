@@ -44,22 +44,23 @@ public struct HotkeyConfig: Equatable, Sendable, Codable {
 
     /// The original spike default: ⌥⌘Space (Option+Command+Space).
     /// RETAINED only so historical references / Codable fixtures stay
-    /// valid — the SHIPPING default is `productionDefault` (⌃⌥⌘C). Chosen
+    /// valid — the SHIPPING default is `productionDefault` (⌃⌘B). Chosen
     /// originally to avoid Spotlight (⌘Space) and macOS dictation.
     public static let spikeDefault = HotkeyConfig(
         keyCode: UInt32(kVK_Space),
         carbonModifiers: UInt32(cmdKey | optionKey)
     )
 
-    /// The SHIPPING production default: ⌃⌥⌘C (Control+Option+Command+C).
-    /// Carbon `kVK_ANSI_C` (8) + `controlKey | optionKey | cmdKey`.
-    /// `hasModifier` is true so the controller will register it. The
-    /// triple-modifier combo is collision-resistant (no default macOS or
-    /// common-app binding owns ⌃⌥⌘C), and the in-Settings recorder
-    /// (Change B) lets the operator rebind it live if it ever conflicts.
+    /// The SHIPPING production default: ⌃⌘B (Control+Command+B) — "B for Bridge".
+    /// Carbon `kVK_ANSI_B` (11) + `controlKey | cmdKey`. A front-and-center,
+    /// two-modifier combo: ⌃⌘ is almost untouched by macOS/apps, so ⌃⌘B is
+    /// collision-resistant while staying memorable and easy to hit one-handed
+    /// from either side. `hasModifier` is true so the controller registers it,
+    /// and the in-Settings recorder lets the operator rebind it live if it ever
+    /// conflicts on their machine.
     public static let productionDefault = HotkeyConfig(
-        keyCode: UInt32(kVK_ANSI_C),
-        carbonModifiers: UInt32(controlKey | optionKey | cmdKey)
+        keyCode: UInt32(kVK_ANSI_B),
+        carbonModifiers: UInt32(controlKey | cmdKey)
     )
 
     /// Whether at least one modifier is set. A modifier-less global
@@ -195,7 +196,7 @@ public struct HotkeyConfig: Equatable, Sendable, Codable {
 
     /// Map a Carbon virtual key code to its display glyph. Pure +
     /// exhaustively unit-testable (no GUI). Covers Space and the ANSI
-    /// letter row used by the shipping default (⌃⌥⌘C → "C"); unknown codes
+    /// letter row used by the shipping default (⌃⌘B → "B"); unknown codes
     /// fall back to `key#N` so the string is never empty.
     public static func keyGlyph(for keyCode: UInt32) -> String {
         switch Int(keyCode) {

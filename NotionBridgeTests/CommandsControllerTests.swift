@@ -239,9 +239,9 @@ func runCommandsControllerTests() async {
                                           isRegistered: c.isRegistered,
                                           hotkey: c.hotkeyConfig.displayString)
         }
-        try expect(s == .active(hotkey: "\u{2303}\u{2325}\u{2318}C"),
+        try expect(s == .active(hotkey: "\u{2303}\u{2318}B"),
                    "registered ⇒ .active with the live glyph, got \(s)")
-        try expect(s.message == "Active — \u{2303}\u{2325}\u{2318}C", "exact copy")
+        try expect(s.message == "Active — \u{2303}\u{2318}B", "exact copy")
         try expect(s.isWarning == false, "active is not a warning")
     }
 
