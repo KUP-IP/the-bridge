@@ -300,4 +300,128 @@ func runSkillBodyCacheTests() async {
         try expect(netSlice == cacheSlice,
                    "section slice must be identical across cache + network paths")
     }
+
+    // -----------------------------------------------------------------
+    // 11. ZERO-NETWORK plain hit: the offline plain-hit envelope builder
+    //     (`buildPlainCacheHitEnvelope`, exercised via its public testing
+    //     entry point) serves the cached envelope WITHOUT touching the
+    //     network. We inject an ALWAYS-THROWING title lookup as the only
+    //     reachable network seam — for a mention-free body it is never
+    //     invoked, so the build succeeds and returns the cached content.
+    //     A passing assertion proves the warm plain fetch is zero-network
+    //     and offline-capable: the builder constructs no NotionClient and
+    //     awaits nothing on the network.
+    // -----------------------------------------------------------------
+    await test("plain cache HIT serves the envelope with ZERO network calls") {
+        // Hostile lookup: if the offline path ever tried to resolve a
+        // <mention-page> over the network, it would call this and fail the
+        // test. A mention-free body must never reach it.
+        struct ProbeError: Error {}
+        nonisolated(unsafe) var lookupCalls = 0
+        let throwingLookup: @Sendable (String) async -> String? = { _ in
+            lookupCalls += 1
+            // Can't `throw` from a non-throwing closure shape; signal via a
+            // sentinel the assertion below checks. Returning nil keeps the
+            // build going, but `lookupCalls > 0` would fail the test.
+            return nil
+        }
+
+        // A body with NO <mention-page> tags — the common offline case.
+        let body = "# Overview\n\nfirst para\n\n## Details\n\ndetail body\n"
+        let rawMarkdown = SkillsModule.skillMarkdownString(
+            fromMarkdownJSON: String(
+                data: try! JSONSerialization.data(withJSONObject: ["markdown": body]),
+                encoding: .utf8)!
+        )
+
+        let cached = sampleBody(
+            markdown: rawMarkdown,
+            title: "Demo",
+            url: "https://www.notion.so/p1",
+            properties: .object(["Status": .string("Active")])
+        )
+
+        // Build ENTIRELY from the cache — no client is constructed or used.
+        let envelope = await SkillsModule.buildPlainCacheHitEnvelopeForTesting(
+            name: "demo",
+            cachedBody: cached,
+            titleLookup: throwingLookup
+        )
+
+        // The network seam was never exercised (no mentions in the body).
+        try expect(lookupCalls == 0, "mention-free body must not touch the title lookup")
+
+        guard case .object(let dict) = envelope else {
+            throw TestError.assertion("expected an object envelope")
+        }
+        // Cached content surfaced verbatim through the production builder.
+        try expect(dict["title"] == .string("Demo"), "title from cache")
+        try expect(dict["url"] == .string("https://www.notion.so/p1"), "url from cache")
+        if case .string(let content)? = dict["content"] {
+            try expect(content.contains("detail body"), "body served from cache")
+        } else {
+            throw TestError.assertion("expected a content string")
+        }
+        // Properties carried straight off the cache (no re-flatten).
+        try expect(dict["properties"] == .object(["Status": .string("Active")]),
+                   "cached flattened properties served verbatim")
+        // Plain request → NO routing footer / annotation keys (matches the
+        // live bare-parent fast path, which enumerates no siblings).
+        try expect(dict["routingFooter"] == nil, "plain hit adds no routingFooter")
+        try expect(dict["annotation"] == nil, "plain hit adds no annotation")
+        try expect(dict["resolvedPath"] == nil, "plain hit adds no resolvedPath")
+    }
+
+    // -----------------------------------------------------------------
+    // 12. ENVELOPE EQUIVALENCE (plain): the offline plain-hit envelope
+    //     equals the live network plain envelope for the same input. For a
+    //     PLAIN request the live path's dispatch takes its bare-parent fast
+    //     path (no specialist swap, no sibling enumeration → no footer /
+    //     annotation), so the network envelope is exactly buildSkillResult.
+    //     The cache-hit builder must reproduce it byte-for-byte.
+    // -----------------------------------------------------------------
+    await test("plain cache HIT envelope equals the network plain envelope") {
+        let body = "# Overview\n\nfirst para\n\n## Details\n\ndetail body\n"
+        let rawMarkdown = SkillsModule.skillMarkdownString(
+            fromMarkdownJSON: String(
+                data: try! JSONSerialization.data(withJSONObject: ["markdown": body]),
+                encoding: .utf8)!
+        )
+        // Raw getPage properties blob → the network path flattens these.
+        let rawProps: [String: Any] = [
+            "Status": ["type": "status", "status": ["name": "Active", "id": "s1"]]
+        ]
+
+        // NETWORK plain envelope: buildSkillResult with flattened props and
+        // an offline (nil) mention lookup — equivalent to the live plain
+        // path whose own per-fetch lookup misses offline.
+        let networkEnvelope = await SkillsModule.buildSkillResultForTesting(
+            name: "demo", title: "Demo", url: "https://www.notion.so/p1",
+            markdownJSONOrText: rawMarkdown,
+            summary: "s", triggerPhrases: ["t"], antiTriggerPhrases: ["a"],
+            pageProperties: rawProps
+        ) { _ in nil }
+
+        // CACHE-HIT plain envelope: the body cache PERSISTS exactly the
+        // flatten the network path produced, so reconstruct that cached
+        // body and replay it through the offline plain-hit builder.
+        guard case .object(let netDict) = networkEnvelope,
+              let cachedProps = netDict["properties"] else {
+            throw TestError.assertion("network envelope should carry properties")
+        }
+        let cached = sampleBody(
+            markdown: rawMarkdown,
+            title: "Demo",
+            url: "https://www.notion.so/p1",
+            properties: cachedProps
+        )
+        let cacheEnvelope = await SkillsModule.buildPlainCacheHitEnvelopeForTesting(
+            name: "demo",
+            cachedBody: cached,
+            summary: "s", triggerPhrases: ["t"], antiTriggerPhrases: ["a"]
+        )
+
+        try expect(networkEnvelope == cacheEnvelope,
+                   "offline plain-hit envelope must equal the network plain envelope")
+    }
 }
