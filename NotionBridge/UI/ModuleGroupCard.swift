@@ -75,6 +75,9 @@ private struct ModuleGroupToolRow: View {
                         .foregroundStyle(BridgeTokens.fg4)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                        // Truncate-with-reveal (density tenet): the full
+                        // description surfaces on hover rather than wrapping.
+                        .help(description)
                 }
             }
             Spacer(minLength: 8)
@@ -95,39 +98,36 @@ private struct ModuleGroupToolRow: View {
             .buttonStyle(.plain)
             .contentShape(Capsule())
             .help("Security gate — tap to cycle Open → Notify → Request")
-            if !isEnabled {
-                toolPill("off",
-                         bg: BridgeTokens.bad.opacity(0.10),
-                         stroke: BridgeTokens.bad.opacity(0.20),
-                         fg: BridgeTokens.badText)
-            }
+            // VoiceOver: expose the gate as its own operable element with a
+            // value + cycle action, so the tier is both audible and changeable
+            // (the row's combined element otherwise drops it). a11y label binds
+            // the tool name per the legibility/accessibility floor.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(toolName) security gate")
+            .accessibilityValue(tierTriple.label.capitalized)
+            .accessibilityHint("Cycles Open, Notify, Request")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { onTierTap() }
 
             Toggle("", isOn: $isEnabled)
                 .toggleStyle(.switch)
                 .tint(BridgeTokens.ok)
                 .controlSize(.mini)
                 .labelsHidden()
+                // Bind the tool name as the switch's a11y label (the row's
+                // .contain element no longer narrates it for this control).
+                .accessibilityLabel("\(toolName) enabled")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .opacity(isEnabled ? 1.0 : 0.52)
-        .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Color.white.opacity(0.0001))  // hit-test only
-        )
-        .accessibilityElement(children: .combine)
+        // Full-row hit-test target (token-hygiene: no raw Color.white —
+        // contentShape gives the hover/tap area without a painted fill).
+        .contentShape(Rectangle())
+        // Keep the tool name/switch as a group but DON'T collapse children,
+        // so the tier chip's own a11y element + cycle action stay operable.
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("\(toolName) — \(isEnabled ? "enabled" : "disabled")")
-    }
-
-    private func toolPill(_ label: String, bg: Color, stroke: Color, fg: Color) -> some View {
-        Text(label.uppercased())
-            .font(.system(size: 10, weight: .semibold))
-            .tracking(0.4)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2)
-            .background(bg, in: Capsule())
-            .overlay(Capsule().strokeBorder(stroke, lineWidth: 0.5))
-            .foregroundStyle(fg)
     }
 }
 
@@ -340,10 +340,13 @@ public struct ModuleGroupCard: View {
             )
             .overlay(
                 // top rim highlight — matches the design's inset sheen.
+                // Token-hygiene: hairlineStrong is white@0.16 on carbon (≈ the
+                // prior 0.18 literal) and a subtle dark edge on titanium, so the
+                // sheen reads in BOTH themes instead of vanishing on light.
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .inset(by: 0.5)
                     .stroke(
-                        LinearGradient(colors: [Color.white.opacity(0.18), .clear],
+                        LinearGradient(colors: [BridgeTokens.hairlineStrong, .clear],
                                        startPoint: .top, endPoint: .bottom),
                         lineWidth: 0.5)
                     .allowsHitTesting(false)
@@ -357,23 +360,27 @@ public struct ModuleGroupCard: View {
     }
 
     private var countBadge: some View {
+        // Compact `N/M` glyph (was the verbose "N of M active") so the header
+        // stays legible at half-width in the 2-up grid; colour already encodes
+        // active vs partial vs off, and the master toggle echoes it. The word
+        // "active"/"of" are dropped — the colour + slash carry the meaning.
         let label: String
         let bg: Color
         let stroke: Color
         let fg: Color
         switch group.masterState {
         case .on:
-            label = "\(group.total) of \(group.total) active"
+            label = "\(group.total)/\(group.total)"
             bg = BridgeTokens.ok.opacity(0.14)
             stroke = BridgeTokens.ok.opacity(0.28)
             fg = BridgeTokens.okText
         case .off:
-            label = "0 of \(group.total) active"
+            label = "0/\(group.total)"
             bg = BridgeTokens.chipFill
             stroke = BridgeTokens.hairline
             fg = BridgeTokens.fg3
         case .partial:
-            label = "\(group.enabledCount) of \(group.total) active"
+            label = "\(group.enabledCount)/\(group.total)"
             bg = BridgeTokens.warn.opacity(0.14)
             stroke = BridgeTokens.warn.opacity(0.28)
             fg = BridgeTokens.warnText
@@ -386,6 +393,9 @@ public struct ModuleGroupCard: View {
             .overlay(Capsule().strokeBorder(stroke, lineWidth: 0.5))
             .foregroundStyle(fg)
             .monospacedDigit()
+            .fixedSize()
+            .help("\(group.enabledCount) of \(group.total) tools active")
+            .accessibilityHidden(true)  // header element narrates the full count
     }
 
     private var chevron: some View {
@@ -454,6 +464,11 @@ public struct ModuleGroupList: View {
     /// Per-module "Always Allow" grants (BridgeDefaults.moduleTierOverrides).
     @State private var moduleTierOverrides: [String: String] =
         (UserDefaults.standard.dictionary(forKey: BridgeDefaults.moduleTierOverrides) as? [String: String]) ?? [:]
+    /// Live content-pane width, captured from a zero-height width-reader, used to
+    /// choose 1 vs 2 grid columns. Seeded above the breakpoint so the very first
+    /// frame renders 2-up (the common case) before the reader fires; it corrects
+    /// to 1 immediately if the pane is actually narrow.
+    @State private var containerWidth: CGFloat = ModuleGroupList.twoColumnBreakpoint
 
     public init(tools: [ToolInfo], nav: SettingsNavigation = .shared) {
         self.tools = tools
@@ -539,40 +554,69 @@ public struct ModuleGroupList: View {
         )
     }
 
+    /// Container width at/above which the registry shows TWO group columns.
+    /// Midpoint of the locked 640–680 band: a default-size window's content
+    /// pane (right of the 188px nav) shows 2 columns; a pinched/half-width
+    /// window collapses to 1. Capped at 2 — never 3+ — so each card stays wide
+    /// enough for the row anatomy (dot · name · desc · chip · switch) above the
+    /// 11–12px legibility floor.
+    private static let twoColumnBreakpoint: CGFloat = 660
+
     public var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                // PKT-934 W1: card-stack spacing aligned to the BridgeSpacing
-                // grid (sm) so the Tools and Jobs card pages share one tier;
-                // was an off-grid literal 10.
+                // Content sizes naturally inside the ScrollView (vertical scroll).
+                // Column count is driven off the CONTAINER width, captured via a
+                // zero-height width-reader background — NOT a height-greedy
+                // GeometryReader wrapping the content (which would collapse the
+                // scroll). This tracks window resize + the nav rail correctly.
                 VStack(alignment: .leading, spacing: BridgeSpacing.sm) {
+                    // Hero spans full width at every breakpoint — it sits ABOVE
+                    // the grid, not as a grid cell.
                     hero
-                    ForEach(groups) { group in
-                        ModuleGroupCard(
-                            group: group,
-                            toolDescriptions: descriptions,
-                            toolTiers: tiers,
-                            // Deep-link: auto-expand the chip's target group.
-                            forceExpanded: group.id == anchoredGroupID,
-                            onPerToolChange: { toolName, enabled in
-                                setEnabled(toolName, enabled)
-                            },
-                            onMasterChange: { enabled in
-                                setGroupEnabled(group, enabled: enabled)
-                            },
-                            onDepLinkTapped: { dep in
-                                handleDepLink(dep)
-                            },
-                            onTierTap: { toolName in
-                                cycleTier(toolName)
-                            }
-                        )
-                        // Scroll anchor id — the resolved group id, so the
-                        // ScrollViewReader can jump straight to the target card.
-                        .id(group.id)
+                    // PKT-tools: responsive 2-up grid (was a full-width VStack).
+                    // Gutter + row spacing on BridgeSpacing.sm (12) keeps Tools
+                    // and Jobs on one tier.
+                    LazyVGrid(columns: gridColumns(forWidth: containerWidth),
+                              alignment: .leading,
+                              spacing: BridgeSpacing.sm) {
+                        ForEach(groups) { group in
+                            ModuleGroupCard(
+                                group: group,
+                                toolDescriptions: descriptions,
+                                toolTiers: tiers,
+                                // Deep-link: auto-expand the chip's target group.
+                                forceExpanded: group.id == anchoredGroupID,
+                                onPerToolChange: { toolName, enabled in
+                                    setEnabled(toolName, enabled)
+                                },
+                                onMasterChange: { enabled in
+                                    setGroupEnabled(group, enabled: enabled)
+                                },
+                                onDepLinkTapped: { dep in
+                                    handleDepLink(dep)
+                                },
+                                onTierTap: { toolName in
+                                    cycleTier(toolName)
+                                }
+                            )
+                            // Scroll anchor id — the resolved group id, so the
+                            // ScrollViewReader can jump straight to the target
+                            // card. Unaffected by the grid (id is on the card).
+                            .id(group.id)
+                        }
                     }
                 }
                 .padding(BridgeSpacing.md)
+                // Width-reader: a zero-height background measures the content
+                // pane width and reports it up via a preference, so the grid can
+                // pick 1 vs 2 columns off the real container width.
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(key: ToolsContentWidthKey.self,
+                                               value: geo.size.width)
+                    }
+                )
             }
             // Deep-link: scroll the chip's target group into view. Fires on first
             // appear (chip tapped from another page → Tools just rendered) and on
@@ -580,6 +624,7 @@ public struct ModuleGroupList: View {
             // cleared after consuming so re-selecting the same chip re-triggers.
             .onAppear { scrollToAnchorIfNeeded(proxy) }
             .onChange(of: nav.anchor) { _, _ in scrollToAnchorIfNeeded(proxy) }
+            .onPreferenceChange(ToolsContentWidthKey.self) { containerWidth = $0 }
         }
         .onReceive(NotificationCenter.default.publisher(
             for: UserDefaults.didChangeNotification
@@ -587,6 +632,20 @@ public struct ModuleGroupList: View {
             let fresh = Set(UserDefaults.standard.stringArray(forKey: BridgeDefaults.disabledTools) ?? [])
             if fresh != disabledTools { disabledTools = fresh }
         }
+    }
+
+    /// 2 flexible columns (top-aligned, ragged bottoms) at/above the breakpoint;
+    /// 1 below. Top alignment keeps a collapsed card from being stretched to a
+    /// tall expanded sibling's height — correct masonry-ish behaviour for
+    /// collapsibles. Capped at 2.
+    private func gridColumns(forWidth width: CGFloat) -> [GridItem] {
+        if width >= Self.twoColumnBreakpoint {
+            return [
+                GridItem(.flexible(), spacing: BridgeSpacing.sm, alignment: .top),
+                GridItem(.flexible(), spacing: BridgeSpacing.sm, alignment: .top)
+            ]
+        }
+        return [GridItem(.flexible(), alignment: .top)]
     }
 
     /// Scroll the anchored group's card to the top, then clear the consumed
@@ -695,5 +754,17 @@ public struct ModuleGroupList: View {
         case "connections":  nav.go(.connection, anchor: "local")
         default: break
         }
+    }
+}
+
+// MARK: - Layout plumbing
+
+/// Carries the content-pane width out of a zero-height width-reader so the Tools
+/// grid can choose 1 vs 2 columns off the real container width (without a
+/// height-greedy GeometryReader collapsing the scroll).
+private struct ToolsContentWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
