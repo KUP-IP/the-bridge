@@ -164,6 +164,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     // PKT-357 F15: Activity token to prevent App Nap
     private var activityToken: NSObjectProtocol?
 
+    // WS-5b: periodic + wake-aware credential auto-validate.
+    /// Hourly timer that runs the weekly auto-validate when due. A long-running
+    /// app would otherwise never re-validate until relaunch (the on-launch check
+    /// only fires once). Timers don't fire while the machine is asleep, so a
+    /// wake observer (below) re-checks on resume.
+    private var autoValidateTimer: Timer?
+    /// `NSWorkspace.didWakeNotification` observer token, removed on teardown.
+    private var didWakeObserver: NSObjectProtocol?
+    /// How often the timer fires to check the "is auto-validate due?" policy.
+    private static let autoValidatePollInterval: TimeInterval = 60 * 60 // 1 hour
+
     /// Observable state for the DashboardView popover.
     /// Owned here so it's available before the first SwiftUI render.
     public let statusBar = StatusBarController()
@@ -286,15 +297,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // "if toggle ON AND >7d since last run → validate" check (the documented
         // fallback). Real + observable: results persist to CredentialHealthStore
         // and surface as the rows' last-known badges + "checked <relative>" line.
-        Task {
-            if CredentialAutoValidatePolicy.isDue(
-                enabled: CredentialAutoValidatePolicy.isEnabled(),
-                lastRun: CredentialAutoValidatePolicy.lastRun()
-            ) {
-                _ = await CredentialValidator.shared.validateAll()
-                CredentialAutoValidatePolicy.recordRun()
-            }
-        }
+        //
+        // WS-5b: the on-launch check alone never re-fires for a long-running app.
+        // We additionally install an hourly timer + an NSWorkspace wake observer
+        // that re-run the SAME due-gated path (so they never double-run within a
+        // 7-day window). All three share `runCredentialAutoValidateIfDue()`.
+        runCredentialAutoValidateIfDue()
+        startCredentialAutoValidateScheduling()
 
         registerAutoLaunch()
 
@@ -414,6 +423,63 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         reopenSettingsIfRequested()
     }
 
+    // MARK: - WS-5b: periodic + wake-aware credential auto-validate
+
+    /// Run the weekly credential auto-validate IFF the policy says it is due
+    /// (toggle ON + never run, or >7d since last run). Reuses the existing
+    /// off-main, 10s-timeout, persist-only-real-results `CredentialValidator`.
+    /// Idempotent against rapid re-entry: it re-reads `isDue` (which is gated on
+    /// the persisted `lastRun`) so the timer + wake observer + launch path never
+    /// double-run within the 7-day window.
+    private func runCredentialAutoValidateIfDue() {
+        Task {
+            guard CredentialAutoValidatePolicy.isDue(
+                enabled: CredentialAutoValidatePolicy.isEnabled(),
+                lastRun: CredentialAutoValidatePolicy.lastRun()
+            ) else { return }
+            _ = await CredentialValidator.shared.validateAll()
+            CredentialAutoValidatePolicy.recordRun()
+        }
+    }
+
+    /// Install the hourly poll timer + the wake observer. A `Timer` does not
+    /// fire while the machine is asleep, so the `NSWorkspace.didWakeNotification`
+    /// observer re-checks on resume — together they guarantee a long-running app
+    /// re-validates on the weekly cadence without a relaunch.
+    private func startCredentialAutoValidateScheduling() {
+        autoValidateTimer?.invalidate()
+        let timer = Timer(
+            timeInterval: Self.autoValidatePollInterval,
+            repeats: true
+        ) { [weak self] _ in
+            // Timer fires on the main run loop; hop to the MainActor to touch
+            // AppDelegate state, then the async validate runs off-main.
+            Task { @MainActor in self?.runCredentialAutoValidateIfDue() }
+        }
+        // Tolerance lets the OS coalesce the fire for power efficiency.
+        timer.tolerance = 5 * 60
+        RunLoop.main.add(timer, forMode: .common)
+        autoValidateTimer = timer
+
+        didWakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.runCredentialAutoValidateIfDue() }
+        }
+    }
+
+    /// Tear down the WS-5b timer + wake observer.
+    private func stopCredentialAutoValidateScheduling() {
+        autoValidateTimer?.invalidate()
+        autoValidateTimer = nil
+        if let observer = didWakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+            didWakeObserver = nil
+        }
+    }
+
     public func applicationWillTerminate(_ notification: Notification) {
         print("[The Bridge] Shutting down MCP server...")
         // ITEM [session]: write the clean-shutdown marker SYNCHRONOUSLY here so
@@ -430,6 +496,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         if let manager = serverManager {
             Task { await manager.stopSSE() }
         }
+
+        // WS-5b: stop the periodic auto-validate timer + wake observer.
+        stopCredentialAutoValidateScheduling()
 
         // cmd-w3: tear down the palette hot-key if it was registered.
         // No-op when the gate was off (commandBridge == nil).

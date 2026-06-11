@@ -106,7 +106,7 @@ public struct CredentialsSection: View {
                 (
                     Text("Secrets live in your macOS Keychain under ")
                         .foregroundStyle(BridgeTokens.fg2)
-                    + Text("com.kupsolutions.notion-bridge")
+                    + Text("kup.solutions.notion-bridge")
                         .font(.system(size: 12.5, weight: .semibold, design: .monospaced))
                         .foregroundStyle(BridgeTokens.accentLink)
                     + Text(". Bridge never writes plaintext to disk.")

@@ -652,6 +652,7 @@ await runCredentialManagerTests()
 await runCredentialModuleTests()
 await runCredentialHardeningTests()   // [credentials] hardening: env-var alias normalization → canonical service:account, sentinel/placeholder detection, idempotent-read transient-drop retry policy. PURE — no Keychain / no live network.
 await runCredentialValidatorTests()   // v3.7.6 Wave 4a: premium vault validation core — pure service→method mapping (incl. unmappable→unchecked truthfulness invariant), health→badge-tone, status persistence round-trip, Touch-ID reveal gate, weekly-due decision, card expiry/form validators. NO live network.
+await runKeychainMigrationTests()     // WS-5c: keychain service rename com.notionbridge → kup.solutions.notion-bridge is ZERO-LOSS (legacy item still reads back; non-destructive old-copy retained; save mirrors both; delete clears both) + WS-5b cadence guard (recordRun flips isDue OFF → periodic timer/wake never double-run). Live round-trip auto-skips when the test process has no writable Keychain.
 await runStripeClientTests()
 await runPaymentModuleTests()
 await runConnectionsModuleTests()
