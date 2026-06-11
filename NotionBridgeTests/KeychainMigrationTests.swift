@@ -1,9 +1,10 @@
 // KeychainMigrationTests.swift — WS-5c migration safety + WS-5b cadence guard.
 // NotionBridge · Tests
 //
-// WS-5c: the Keychain service was renamed `com.notionbridge` →
-// `kup.solutions.notion-bridge`. The rename MUST be zero-loss: an item written
-// under the OLD service before the rename has to still read back. This test
+// WS-5c + the-bridge rename: the Keychain service chain is
+// `com.notionbridge` → `kup.solutions.notion-bridge` → `kup.solutions.the-bridge`.
+// Each rename MUST be zero-loss: an item written under ANY prior service has to
+// still read back. This test
 // proves the round-trip end-to-end against the REAL Keychain (the standalone
 // test executable is not an .app bundle, so KeychainManager normally no-ops; we
 // flip the documented test escape hatch to exercise real SecItem CRUD), then
@@ -21,7 +22,8 @@ func runKeychainMigrationTests() async {
     print("\n\u{1F510} WS-5c KeychainManager Migration Tests")
 
     let legacyService = "com.notionbridge"
-    let newService = "kup.solutions.notion-bridge"
+    let priorService = "kup.solutions.notion-bridge"   // prior canonical, now a legacy fallback
+    let newService = "kup.solutions.the-bridge"        // current canonical (product name)
     let enableKey = "com.notionbridge.tests.enableKeychainOpsOutsideApp"
 
     // Helper: raw write directly to the Keychain under an explicit service,
@@ -85,6 +87,12 @@ func runKeychainMigrationTests() async {
                    "Canonical service must be \(newService), got \(KeychainManager.service)")
         try expect(KeychainManager.legacyService == legacyService,
                    "Legacy service constant must remain \(legacyService) for migration + vault surfacing")
+        // the-bridge rename: the prior canonical AND the original infra service
+        // are both retained as legacy fallbacks (zero-loss migration chain).
+        try expect(KeychainManager.legacyServices.contains(priorService),
+                   "Prior canonical \(priorService) must be a legacy fallback after the the-bridge rename")
+        try expect(KeychainManager.legacyServices.contains(legacyService),
+                   "Original infra service \(legacyService) must stay in the chain (CredentialManager vault surfacing)")
     }
 
     if keychainWritable {

@@ -397,6 +397,15 @@ public final class CredentialManager: Sendable {
         if syncToiCloud {
             query[kSecAttrSynchronizable as String] = kCFBooleanTrue
             query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
+        } else if let access = KeychainManager.makeSelfTrustAccess() {
+            // the-bridge keychain UX: create vault items with an explicit
+            // always-allow-this-app ACL so the user is never re-prompted to
+            // authorize access — the same fix applied to KeychainManager, now
+            // covering the vault / credential_save path a NEW user hits.
+            // kSecAttrAccess and kSecAttrAccessible are mutually exclusive;
+            // local items only (synchronizable items use data protection above).
+            query[kSecAttrAccess as String] = access
+            query.removeValue(forKey: kSecAttrAccessible as String)
         }
 
         // Upsert: ADD, and if the item already exists, UPDATE it in place.

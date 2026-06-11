@@ -298,6 +298,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // the entitled build is installed; never destructive).
         Task { CredentialManager.shared.migrateToAccessGroupIfNeeded() }
 
+        // the-bridge keychain UX: one-time re-authorization so each stored item
+        // carries an explicit always-allow-self ACL — the fix for recurring
+        // "enter your password to allow access" prompts. Surfaces at most one
+        // prompt per stale item, then re-saves under the clean ACL so all future
+        // reads are silent. Guarded by a UserDefaults flag → runs once.
+        Task.detached { KeychainManager.shared.reauthorizeIfNeeded() }
+
         // PKT-441: One-time Stripe key migration to unified credential vault
         Task { await ConnectionRegistry.shared.migrateStripeKeyIfNeeded() }
 

@@ -4,33 +4,40 @@
 // Thread-safe — all operations are synchronous via Security framework.
 // UEP-003 K2: In-process token cache to reduce Keychain prompts on unsigned rebuilds.
 //
-// WS-5c: The canonical Keychain service is `kup.solutions.notion-bridge`
-// (matches the app's bundle id). A legacy service `com.notionbridge` is still
-// READ (fallback) and MIRROR-WRITTEN so the rename is fully migration-safe and
-// NON-DESTRUCTIVE: an item written under the old service is never lost, and the
-// vault's infra-key surfacing in CredentialManager (which filters on the old
-// service string and must not be touched) keeps working unchanged.
+// WS-5c / the-bridge rename: the canonical Keychain service is
+// `kup.solutions.the-bridge` (the product name). The prior services
+// `kup.solutions.notion-bridge` and `com.notionbridge` are still READ
+// (fallback) and MIRROR-WRITTEN so the rename is fully migration-safe and
+// NON-DESTRUCTIVE: an item written under any old service is never lost, and the
+// vault's infra-key surfacing in CredentialManager (which filters on the
+// `com.notionbridge` service string and must not be touched) keeps working.
 
 import Foundation
 import Security
 
 /// Provides CRUD operations for storing sensitive values in the macOS Keychain.
 /// Uses kSecClassGenericPassword with the canonical service
-/// "kup.solutions.notion-bridge", mirror-writing the legacy "com.notionbridge"
-/// service for migration safety.
+/// "kup.solutions.the-bridge", mirror-writing the legacy "kup.solutions.notion-bridge"
+/// and "com.notionbridge" services for migration safety.
 public final class KeychainManager: @unchecked Sendable {
 
     public static let shared = KeychainManager()
 
-    /// Canonical Keychain service identifier (matches the app bundle id).
-    /// WS-5c rename: was `com.notionbridge`.
-    public static let service = "kup.solutions.notion-bridge"
+    /// Canonical Keychain service identifier — the product name, "the-bridge".
+    /// Rename chain: `com.notionbridge` → `kup.solutions.notion-bridge` → this.
+    public static let service = "kup.solutions.the-bridge"
 
-    /// Legacy Keychain service identifier. Pre-WS-5c builds stored infra keys
-    /// here, and `CredentialManager` (which we must NOT modify) still surfaces
-    /// infra keys in the vault by filtering on this exact string. We READ it as
-    /// a fallback and MIRROR-WRITE it so the old copy always exists — a harmless
-    /// duplicate is far better than a lost credential.
+    /// Legacy Keychain service identifiers, newest-first. Pre-rename builds
+    /// stored items under these; every one is READ as a fallback and
+    /// MIRROR-WRITTEN so a credential is never lost across a rename — a harmless
+    /// duplicate is far better than an orphaned credential. `com.notionbridge`
+    /// additionally backs `CredentialManager`'s vault surfacing (it filters on
+    /// that exact string and must NOT be modified), so it must stay populated.
+    public static let legacyServices = ["kup.solutions.notion-bridge", "com.notionbridge"]
+
+    /// The original infra service — retained as a named constant because
+    /// `CredentialManager` and several call sites reference it directly. Always
+    /// the last entry in `legacyServices`.
     public static let legacyService = "com.notionbridge"
 
     /// In-process cache to avoid repeated Keychain prompts on unsigned rebuilds.
@@ -123,12 +130,37 @@ public final class KeychainManager: @unchecked Sendable {
         return value
     }
 
+    /// Build a Keychain ACL granting THIS app silent access (no password
+    /// prompt) to the item it creates. This explicit "always allow this app"
+    /// trusted-application ACL is the fix for recurring "enter your password to
+    /// allow access" prompts: without it, items get a default ACL that macOS
+    /// may re-confirm on each read. File-keychain only — the data-protection /
+    /// access-group path that would obviate this is refused by launchd for
+    /// Developer-ID apps distributed outside the App Store (NotionBridge.entitlements,
+    /// PKT-933). The SecTrustedApplication/SecAccess APIs are deprecated but are
+    /// the only file-keychain ACL mechanism; `nil` path == the current app.
+    /// Shared by `KeychainManager.rawWrite` AND `CredentialManager.save` so that
+    /// EVERY credential-creation path produces prompt-free items (new users
+    /// included). Static + public for reuse; builds a fresh SecAccess per call.
+    public static func makeSelfTrustAccess() -> SecAccess? {
+        var trustedApp: SecTrustedApplication?
+        guard SecTrustedApplicationCreateFromPath(nil, &trustedApp) == errSecSuccess,
+              let app = trustedApp else { return nil }
+        var access: SecAccess?
+        guard SecAccessCreate("The Bridge" as CFString, [app] as CFArray, &access) == errSecSuccess else {
+            return nil
+        }
+        return access
+    }
+
     /// Raw write (add-or-replace) of one account under an explicit service.
     /// Returns true on success. No cache, no gate.
     @discardableResult
     private func rawWrite(key: String, value: String, service: String) -> Bool {
         guard let data = value.data(using: .utf8) else { return false }
-        // Delete existing first (SecItemAdd fails on duplicate).
+        // Delete existing first (SecItemAdd fails on duplicate). This also drops
+        // any stale ACL the prior item carried — the re-add below installs the
+        // clean always-allow-self ACL.
         let deleteQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -136,15 +168,35 @@ public final class KeychainManager: @unchecked Sendable {
         ]
         SecItemDelete(deleteQuery as CFDictionary)
 
-        let addQuery: [String: Any] = [
+        var addQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-            kSecAttrLabel as String: "Notion Bridge"
+            kSecAttrLabel as String: "The Bridge"
         ]
-        let status = SecItemAdd(addQuery as CFDictionary, nil)
+        if let access = Self.makeSelfTrustAccess() {
+            // Explicit ACL → no recurring prompts. kSecAttrAccess (file-keychain
+            // ACL) and kSecAttrAccessible are mutually exclusive; we never set
+            // kSecAttrSynchronizable, so the login keychain still never syncs to
+            // iCloud without the ThisDeviceOnly accessibility.
+            addQuery[kSecAttrAccess as String] = access
+        } else {
+            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        }
+        var status = SecItemAdd(addQuery as CFDictionary, nil)
+        if status != errSecSuccess, addQuery[kSecAttrAccess as String] != nil {
+            // The explicit-ACL add failed (e.g. a SecAccess the runtime rejects
+            // in this context). NEVER leave the item deleted: retry with the
+            // default accessibility so the value is always persisted — a missing
+            // prompt-free ACL is strictly better than a lost credential.
+            addQuery.removeValue(forKey: kSecAttrAccess as String)
+            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            status = SecItemAdd(addQuery as CFDictionary, nil)
+            if status == errSecSuccess {
+                print("[KeychainManager] ℹ️ Saved '\(key)' (service=\(service)) WITHOUT explicit ACL (SecAccess rejected); value preserved.")
+            }
+        }
         if status != errSecSuccess {
             print("[KeychainManager] ⚠️ Save failed for '\(key)' (service=\(service)): OSStatus \(status)")
         }
@@ -215,8 +267,11 @@ public final class KeychainManager: @unchecked Sendable {
         guard value.data(using: .utf8) != nil else { return false }
 
         let ok = rawWrite(key: key, value: value, service: Self.service)
-        // Best-effort mirror to the legacy service (non-destructive duplicate).
-        _ = rawWrite(key: key, value: value, service: Self.legacyService)
+        // Best-effort mirror to every legacy service (non-destructive duplicate)
+        // so a credential written before a rename is never orphaned.
+        for legacy in Self.legacyServices {
+            _ = rawWrite(key: key, value: value, service: legacy)
+        }
 
         if ok {
             setCacheValue(value, for: key)
@@ -244,17 +299,56 @@ public final class KeychainManager: @unchecked Sendable {
             return value
         }
 
-        // Migration fallback: legacy service. Copy forward to the canonical
-        // service (non-destructive — leave the legacy copy in place).
-        if let legacyValue = rawRead(key: key, service: Self.legacyService) {
-            _ = rawWrite(key: key, value: legacyValue, service: Self.service)
-            setCacheValue(legacyValue, for: key)
-            print("[KeychainManager] Migrated '\(key)' from legacy service to \(Self.service) (legacy copy retained)")
-            return legacyValue
+        // Migration fallback: walk the legacy services newest-first. On a hit,
+        // copy forward to the canonical service (non-destructive — leave every
+        // legacy copy in place).
+        for legacy in Self.legacyServices {
+            if let legacyValue = rawRead(key: key, service: legacy) {
+                _ = rawWrite(key: key, value: legacyValue, service: Self.service)
+                setCacheValue(legacyValue, for: key)
+                print("[KeychainManager] Migrated '\(key)' from legacy service '\(legacy)' to \(Self.service) (legacy copy retained)")
+                return legacyValue
+            }
         }
 
         setCacheValue(nil, for: key)  // Cache the miss
         return nil
+    }
+
+    // MARK: - One-time ACL re-authorization (prompt heal)
+
+    /// UserDefaults flag marking that the one-time ACL heal has run.
+    private static let aclHealedKey = "kup.solutions.the-bridge.keychainACLHealedV1"
+
+    /// One-time heal for the recurring access-prompt issue. Items created by
+    /// older builds carry a default ACL that macOS re-confirms on each read;
+    /// re-saving them installs the explicit always-allow-self ACL (see
+    /// `makeSelfTrustAccess`). Reading each stale item surfaces ONE prompt
+    /// (unavoidable — the value must be read to be re-written), after which all
+    /// future reads are silent. Idempotent, UserDefaults-guarded → runs once.
+    public func reauthorizeIfNeeded() {
+        guard keychainEnabled else { return }
+        guard !UserDefaults.standard.bool(forKey: Self.aclHealedKey) else { return }
+        reauthorizeAllItems()
+        UserDefaults.standard.set(true, forKey: Self.aclHealedKey)
+    }
+
+    /// Re-save every stored item under the clean always-allow-self ACL. Public +
+    /// unguarded so a "Re-authorize credentials" affordance can invoke it on
+    /// demand. Enumerates accounts (metadata only, no prompt), then reads +
+    /// re-saves each (one prompt per stale item, silent thereafter).
+    @discardableResult
+    public func reauthorizeAllItems() -> Int {
+        guard keychainEnabled else { return 0 }
+        invalidateAllCache()
+        let keys = allKeys()
+        for key in keys {
+            if let value = read(key: key) {
+                _ = save(key: key, value: value)
+            }
+        }
+        print("[KeychainManager] Re-authorized \(keys.count) keychain item(s) under the always-allow-self ACL")
+        return keys.count
     }
 
     /// Delete a value from the Keychain. Returns true if deleted or not found.
@@ -266,7 +360,10 @@ public final class KeychainManager: @unchecked Sendable {
         guard keychainEnabled else { return true }
 
         let newOK = rawDelete(key: key, service: Self.service)
-        let legacyOK = rawDelete(key: key, service: Self.legacyService)
+        var legacyOK = true
+        for legacy in Self.legacyServices {
+            legacyOK = rawDelete(key: key, service: legacy) && legacyOK
+        }
         if newOK && legacyOK {
             invalidateCache(for: key)
         }
@@ -283,7 +380,7 @@ public final class KeychainManager: @unchecked Sendable {
             return cached != nil
         }
 
-        for service in [Self.service, Self.legacyService] {
+        for service in [Self.service] + Self.legacyServices {
             let query: [String: Any] = [
                 kSecClass as String: kSecClassGenericPassword,
                 kSecAttrService as String: service,
@@ -346,7 +443,7 @@ public final class KeychainManager: @unchecked Sendable {
     public func allKeys() -> [String] {
         guard keychainEnabled else { return [] }
         var keys = Set<String>()
-        for service in [Self.service, Self.legacyService] {
+        for service in [Self.service] + Self.legacyServices {
             let query: [String: Any] = [
                 kSecClass as String: kSecClassGenericPassword,
                 kSecAttrService as String: service,
@@ -373,7 +470,7 @@ public final class KeychainManager: @unchecked Sendable {
     public func deleteAll() -> Bool {
         guard keychainEnabled else { return true }
         var allOK = true
-        for service in [Self.service, Self.legacyService] {
+        for service in [Self.service] + Self.legacyServices {
             let query: [String: Any] = [
                 kSecClass as String: kSecClassGenericPassword,
                 kSecAttrService as String: service
