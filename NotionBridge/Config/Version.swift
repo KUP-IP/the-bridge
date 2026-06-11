@@ -11,7 +11,7 @@ import Foundation
 public enum AppVersion {
     /// Marketing version (CFBundleShortVersionString equivalent).
     /// Format: MAJOR.MINOR.PATCH (Semantic Versioning).
-    public static let marketing = "3.7.7"
+    public static let marketing = "3.7.8"
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
@@ -26,7 +26,12 @@ public enum AppVersion {
     /// v3.7.7: 51 → 52 — integration of 14 post-3.7.6 branches (module-scoped tool
     ///   grants + revoke UI, on-device automation tools, Notion/credentials
     ///   ergonomics, Sparkle + AX crash resilience).
-    public static let build = "52"
+    /// v3.7.8: 52 → 53 — two-chat integration: PKT-810 cloud connector (public PRM
+    ///   + server-side token exchange + local↔cloud coexistence), credential +
+    ///   securitygate fixes, memory Wave 2, migration-safe keychain service,
+    ///   ⌃⌘B default hotkey + true reg-state, skill body cache + offline fetch,
+    ///   emoji skill icons (Settings 10→7 redesign already on main).
+    public static let build = "53"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }

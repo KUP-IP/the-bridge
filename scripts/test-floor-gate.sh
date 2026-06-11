@@ -984,7 +984,11 @@ set -euo pipefail
 # fb-securitygate-credentials-followup (2026-06-06): coalescer drain-before-park
 # race fix (+1 regression test); credentials NOTION-alias corrected to the real
 # com.notionbridge/notion_api_token keychain row (2 tests updated, not added). 1950→1951.
-FLOOR="${BRIDGE_TEST_FLOOR:-1951}"
+# v3.7.8 (2026-06-11): two-chat integration of 7 branches (connector, memory Wave 2,
+# credentials/securitygate, hotkey ⌃⌘B, emoji icons, keychain clean-service, skill
+# body cache + offline fetch) + keychain UX (always-allow-self ACL, the-bridge
+# rename). Net-new across the integration: 1951→1992 (2079 passing).
+FLOOR="${BRIDGE_TEST_FLOOR:-1992}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

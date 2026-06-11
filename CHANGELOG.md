@@ -1,5 +1,27 @@
 # Changelog
 
+## v3.7.8 — Cloud connector live · keychain UX (prompt-free) · two-chat integration
+
+Integrates seven branches from two parallel agent sessions, gated together (test floor 1992, 2079 passing). Ships the post-3.7.7 work that accumulated unreleased on `main` (Settings redesign) plus the cloud directory connector, a keychain UX overhaul, and stability fixes.
+
+### Added
+- **Cloud directory connector (PKT-810)** — reachable as a remote MCP server over `https://mcp.kup.solutions/mcp`: server-side WorkOS token exchange, public Protected-Resource-Metadata (`BRIDGE_PUBLIC_RESOURCE`), directory OAuth scope model, local↔cloud coexistence (loopback static-bearer + tunnel OAuth).
+- **Settings redesign**: 10 pages → 7 (Connection, Security, Tools, Skills, Jobs, Orders, Advanced); Launch-at-login / Check-for-Updates → Advanced, License → Security.
+- **Global hotkey default → ⌃⌘B** ("B for Bridge"), replacing ⌃⌥⌘C; Settings reflects the true hot-key registration state.
+- **Skill body cache**: persistent stale-while-revalidate cache + zero-network offline `fetch_skill` on a warm cache.
+- **Emoji skill icons**: skills surface emoji icons + type/source for grouping.
+- **Memory Wave 2 (PKT-977)**: memory export / import and consolidation.
+
+### Fixed
+- **Keychain UX — recurring password prompts eliminated**: every credential is written with an explicit "always allow this app" ACL, so reads never re-prompt. A one-time, flag-guarded re-authorization heals pre-existing items; new users are prompt-free by design. A non-destructive write fallback guarantees a value is never lost. Both write paths (`KeychainManager` + `CredentialManager`) covered.
+- **Cloud "credentials rejected" on connect**: the OAuth Protected-Resource-Metadata advertised `127.0.0.1` instead of the public resource (wrong token audience); it now derives the public resource so remote OAuth completes.
+- **Credentials**: `credential_save` is an idempotent `SecItemUpdate` upsert; the NOTION provider alias maps to the real storage location.
+- **SecurityGate**: approval coalescer drain-before-park race (a waiter that parked after the owner resolved could miss its wake-up).
+
+### Changed
+- **Keychain service rename** → `kup.solutions.the-bridge` (label "The Bridge"), migration-safe through `kup.solutions.notion-bridge` and `com.notionbridge` (zero credential loss).
+- Test floor 1951 → 1992 (net-new from the two-chat integration); 2079 passing, 0 failed.
+
 ## v3.7.7 — Integration: tool-grant management · automation tools · Sparkle/AX resilience
 
 Bundles the post-3.7.6 remediation work (14 branches), gated together (test floor 1950, 2014 passing).
