@@ -11,7 +11,8 @@
 //     `visibility:hidden` so the keycap positions stay stable.
 //   • A central pill containing the leading bridge icon, an inline
 //     query field, and a trailing ⌘ chip that deep-links to
-//     Settings → Commands via `SettingsNavigation.shared.go(.commands)`.
+//     Settings → Orders/Commands via
+//     `SettingsNavigation.shared.go(.orders, anchor: "commands")`.
 //   • A panel below the pill that ONLY appears on ↓ (recents) or while
 //     typing (search results). Recents is in-memory session-only (locked
 //     decision Q1).
@@ -717,12 +718,13 @@ public final class CommandBridgeController: NSObject {
 
     // MARK: - Settings deep-link
 
-    /// Menu-bar ⌘ chip → SettingsNavigation to Commands. Public so the
+    /// Menu-bar ⌘ chip → SettingsNavigation to Orders/Commands. Public so the
     /// SwiftUI button can invoke without touching the AppDelegate.
+    /// PKT-A: Commands folded into Orders → open Orders on the `commands` tab.
     public func openCommandsSettings() {
-        SettingsNavigation.shared.go(.commands)
+        SettingsNavigation.shared.go(.orders, anchor: "commands")
         if let app = NSApp.delegate as? AppDelegate {
-            app.openSettings(section: .commands)
+            app.openSettings(section: .orders)
         }
         hide()
     }

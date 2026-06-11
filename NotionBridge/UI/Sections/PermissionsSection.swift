@@ -1,17 +1,25 @@
-// PermissionsSection.swift — Settings → Permissions pane (v3.7.2 redesign).
-// Mirrors design/design-system/project/ui_kits/the-bridge/Permissions.jsx +
-// permissions.css against the approved StandingOrdersSection reference:
-//   - so-hero glass header: gold orb + "X/Y granted" stat + re-check action
-//   - System grants (TCC): one LED-row per grant w/ health dot, remediation
-//     sub-text, "required by" dep-link chips, and an Allow/Open-Settings button
-//   - Sensitive-paths editor card (delegates to existing SensitivePathsEditor)
-//   - Permission management: Reset all (destructive)
+// PermissionsSection.swift — Security · Gates tab body (Settings-Redesign PKT-security).
 //
-// VIEW LAYER ONLY. Every binding is preserved verbatim: PermissionManager,
+// This is the **Gates** tab inside the merged Security page. The bespoke
+// `SecuritySection` composite owns the single posture header (replacing this
+// file's old gold orb-hero) and the tab bar; this view is hero-less and renders
+// the access gates that govern what tools can do:
+//   1. **Always-Allow grants** — module-scoped `moduleTierOverrides` (the literal
+//      "Always Allow"), each with its tier chip + a Revoke affordance that clears
+//      the grant so the module's tools fall back to their registered defaults.
+//      (Per-tool tiers are owned by the Tools page; the posture header shows their
+//      counts read-only with a "Manage in Tools" link — NOT duplicated here.)
+//   2. **System access (TCC)** — the re-homed macOS grants: one LED-row per grant
+//      w/ health dot, remediation, "required by" dep chips, Allow/Open-Settings;
+//      the sensitive-paths editor; and the destructive "Reset all permissions".
+//
+// VIEW LAYER ONLY. Every TCC binding is preserved verbatim: PermissionManager,
 // the ForEach(PermissionManager.Grant.v1Cases) iteration, status/recheck/grant
 // actions, statusBar.toolInfoList → liveTools, and the
 // systemIcon()/remediation()/statusColor() helpers. Dep-link chips are derived
-// live via ToolDepLinks.requiredByChips (locked decision Q1). Carbon canvas.
+// live via ToolDepLinks.requiredByChips. The Always-Allow grants read/write the
+// SAME `BridgeDefaults.moduleTierOverrides` the router + Tools use (revoke posts
+// `.notionBridgeTierOverridesDidChange`) — no fork of the tier model.
 
 import SwiftUI
 import AppKit
@@ -23,6 +31,12 @@ public struct PermissionsSection: View {
     @Binding var permissionActionMessage: String?
     @Binding var showTCCResetDialog: Bool
     let onResetTCC: () async -> (message: String, didFail: Bool)
+
+    /// Per-module "Always Allow" grants (BridgeDefaults.moduleTierOverrides) —
+    /// the SAME store the router + Tools read. Seeded from defaults; refreshed on
+    /// the tier-change notification so a grant added/revoked elsewhere reflects here.
+    @State private var moduleGrants: [String: String] =
+        (UserDefaults.standard.dictionary(forKey: BridgeDefaults.moduleTierOverrides) as? [String: String]) ?? [:]
 
     private let refreshTimer = Timer.publish(every: 20, on: .main, in: .common).autoconnect()
 
@@ -44,13 +58,14 @@ public struct PermissionsSection: View {
 
     public var body: some View {
         ScrollView {
-            VStack(spacing: 14) {
-                hero
+            VStack(spacing: BridgeSpacing.sm) {
+                alwaysAllowCard
+                systemAccessLabel
                 grantsCard
                 sensitivePathsCard
                 managementCard
             }
-            .padding(20)
+            .padding(BridgeTokens.Space.paneH)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
@@ -60,6 +75,9 @@ public struct PermissionsSection: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await permissionManager.checkAllAsync() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .notionBridgeTierOverridesDidChange)) { _ in
+            reloadGrants()
         }
         .confirmationDialog(
             "Reset all permissions for The Bridge?",
@@ -78,7 +96,7 @@ public struct PermissionsSection: View {
         }
     }
 
-    // MARK: - Hero (so-hero: orb + stat + actions)
+    // MARK: - Always-Allow grants (module-scoped, the literal "Always Allow")
 
     private var granted: Int {
         PermissionManager.Grant.v1Cases.filter {
@@ -87,70 +105,178 @@ public struct PermissionsSection: View {
     }
     private var total: Int { PermissionManager.Grant.v1Cases.count }
 
-    private var hero: some View {
-        let allGood = granted == total
-        return BridgeGlassCard {
-            HStack(spacing: 16) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(BridgeTokens.gold.opacity(0.20))
-                        .frame(width: 50, height: 50)
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(BridgeTokens.gold.opacity(0.42), lineWidth: 1))
-                    Image(systemName: "lock.shield")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(BridgeTokens.gold)
+    /// Module ids that currently hold an Always-Allow grant whose value parses to
+    /// a real `SecurityTier` — sorted for a stable list.
+    private var activeGrantModules: [String] {
+        moduleGrants.compactMap { (module, raw) in
+            SecurityTier(rawValue: raw) != nil ? module : nil
+        }
+        .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private var alwaysAllowCard: some View {
+        BridgeGlassCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    BridgeCardLabel("Always-Allow grants")
+                    Spacer()
+                    BridgeDepLink("MANAGE IN TOOLS", variant: .info) {
+                        SettingsNavigation.shared.go(.tools)
+                    }
+                    .accessibilityLabel("Manage per-tool gates in Tools")
                 }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Permissions")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(BridgeTokens.fg1)
-                    Text("macOS TCC grants Bridge holds. Each gates a group of tools \u{2014} revoke any and its tools go dark.")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(BridgeTokens.fg3)
+                if activeGrantModules.isEmpty {
+                    Text("No module is set to Always-Allow. Tools follow their per-tool gates (Open · Notify · Request), which you manage on the Tools page.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(BridgeTokens.fg4)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("These modules skip the gate prompt — every tool in the module is auto-approved at the granted tier. Revoke to return its tools to their per-tool gates.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(BridgeTokens.fg4)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ForEach(activeGrantModules, id: \.self) { module in
+                        grantModuleRow(module)
+                        if module != activeGrantModules.last {
+                            Rectangle()
+                                .fill(BridgeTokens.hairlineFaint)
+                                .frame(height: 0.5)
+                                .padding(.vertical, 1)
+                        }
+                    }
                 }
-                Spacer(minLength: 8)
-                statTile(
-                    value: "\(granted)/\(total)",
-                    label: "granted",
-                    color: allGood ? BridgeTokens.ok : BridgeTokens.warn
-                )
-                pmIconButton(
-                    isRecheckingPermissions ? "hourglass" : "arrow.counterclockwise",
-                    help: "Re-check all permissions"
-                ) {
-                    runRecheckAll()
-                }
-                .disabled(isRecheckingPermissions)
             }
         }
     }
 
-    private func statTile(value: String, label: String, color: Color) -> some View {
-        VStack(spacing: 3) {
-            Text(value)
-                .font(.system(size: 18, weight: .semibold, design: .monospaced))
-                .foregroundStyle(color)
-            Text(label.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(0.8)
-                .foregroundStyle(BridgeTokens.fg4)
+    @ViewBuilder
+    private func grantModuleRow(_ module: String) -> some View {
+        let tierRaw = moduleGrants[module] ?? ""
+        let tier = SecurityTier(rawValue: tierRaw) ?? .notify
+        let toolCount = liveTools.filter { ModuleGroupDerivation.resolve(toolName: $0.name).displayName == module }.count
+        HStack(spacing: 12) {
+            moduleIcon(module)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(module)
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundStyle(BridgeTokens.fg1)
+                Text(toolCount == 1 ? "1 tool auto-approved" : "\(toolCount) tools auto-approved")
+                    .font(.system(size: 11))
+                    .foregroundStyle(BridgeTokens.fg4)
+            }
+            Spacer(minLength: 8)
+            tierChip(tier)
+            Button {
+                revokeGrant(module)
+            } label: {
+                Text("Revoke")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(BridgeTokens.badText)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(BridgeTokens.bad.opacity(0.12), in: Capsule())
+                    .overlay(Capsule().strokeBorder(BridgeTokens.bad.opacity(0.30), lineWidth: 0.5))
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .help("Revoke the Always-Allow grant for \(module) — its tools return to their per-tool gates")
+            .accessibilityLabel("Revoke Always-Allow for \(module)")
         }
-        .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+        .padding(.vertical, 4)
     }
 
-    private func pmIconButton(_ systemImage: String, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 14))
-                .foregroundStyle(BridgeTokens.fg3)
-                .frame(width: 30, height: 30)
-                .contentShape(Rectangle())
+    /// Read-only tier capsule (OPEN/NOTIFY/REQUEST), matching the Tools grammar:
+    /// open=ok, notify=warn, request=bad — signal TEXT via *Text tokens.
+    @ViewBuilder
+    private func tierChip(_ tier: SecurityTier) -> some View {
+        let (label, fill, text): (String, Color, Color) = {
+            switch tier {
+            case .open:    return ("OPEN", BridgeTokens.ok, BridgeTokens.okText)
+            case .notify:  return ("NOTIFY", BridgeTokens.warn, BridgeTokens.warnText)
+            case .request: return ("REQUEST", BridgeTokens.bad, BridgeTokens.badText)
+            }
+        }()
+        Text(label)
+            .font(.system(size: 11, weight: .semibold))
+            .tracking(0.3)
+            .padding(.horizontal, 9).padding(.vertical, 3)
+            .background(fill.opacity(0.16), in: Capsule())
+            .overlay(Capsule().strokeBorder(fill.opacity(0.30), lineWidth: 0.5))
+            .foregroundStyle(text)
+            .fixedSize()
+            .accessibilityLabel("Always-Allow tier: \(label.lowercased())")
+    }
+
+    @ViewBuilder
+    private func moduleIcon(_ module: String) -> some View {
+        let symbol = ModuleGroupID(rawValue: module)?.systemImage
+            ?? ModuleGroupID.allCases.first(where: { $0.displayName == module })?.systemImage
+            ?? "shippingbox"
+        ZStack {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(BridgeTokens.chipFill)
+                .frame(width: 34, height: 34)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
+                )
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(BridgeTokens.fg2)
+        }
+        .frame(width: 34, height: 34)
+        .accessibilityHidden(true)
+    }
+
+    private func revokeGrant(_ module: String) {
+        moduleGrants.removeValue(forKey: module)
+        UserDefaults.standard.set(moduleGrants, forKey: BridgeDefaults.moduleTierOverrides)
+        NotificationCenter.default.post(name: .notionBridgeTierOverridesDidChange, object: nil)
+    }
+
+    private func reloadGrants() {
+        moduleGrants = (UserDefaults.standard.dictionary(forKey: BridgeDefaults.moduleTierOverrides) as? [String: String]) ?? [:]
+    }
+
+    // MARK: - System access (TCC) — re-homed section label
+
+    private var systemAccessLabel: some View {
+        HStack(spacing: 8) {
+            Text("SYSTEM ACCESS")
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(1.2)
+                .foregroundStyle(BridgeTokens.fg4)
+            Text("\(granted)/\(total) granted")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(granted == total ? BridgeTokens.okText : BridgeTokens.warnText)
+            Spacer()
+            recheckButton
+        }
+        .padding(.horizontal, 2)
+        .padding(.top, 2)
+    }
+
+    private var recheckButton: some View {
+        Button {
+            runRecheckAll()
+        } label: {
+            HStack(spacing: 4) {
+                if isRecheckingPermissions {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "arrow.counterclockwise").font(.system(size: 10, weight: .bold))
+                }
+                Text("Re-check").font(.system(size: 12, weight: .medium))
+            }
+            .foregroundStyle(BridgeTokens.fg2)
+            .padding(.horizontal, 10).padding(.vertical, 4)
+            .background(BridgeTokens.chipFill, in: Capsule())
+            .overlay(Capsule().strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .help(help)
+        .disabled(isRecheckingPermissions)
+        .help("Re-check all macOS system-access grants")
+        .accessibilityLabel("Re-check all system permissions")
     }
 
     private func runRecheckAll() {
@@ -169,7 +295,7 @@ public struct PermissionsSection: View {
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    BridgeCardLabel("System grants · TCC")
+                    BridgeCardLabel("TCC grants")
                     Spacer()
                     if let lastCheckedAt = permissionManager.lastCheckedAt {
                         Text("Last checked \(relativeTime(lastCheckedAt))")
@@ -231,6 +357,7 @@ public struct PermissionsSection: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .tint(BridgeTokens.accent)
+                .accessibilityLabel("\(actionLabel(grant: grant, status: status)) — \(grant.displayName)")
             }
         }
         .padding(.vertical, 11)

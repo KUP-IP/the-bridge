@@ -36,20 +36,22 @@ func runPKT879DashboardTests() async {
     // structurally even though the SwiftUI body is not directly
     // diffable.
 
-    await test("Dashboard navigates to .connections for the status row") {
+    await test("Dashboard navigates to .connection for the status row") {
+        // PKT-A: the status row deep-links to the merged Connection section.
         let nav = await MainActor.run { SettingsNavigation() }
-        await MainActor.run { nav.go(.connections) }
+        await MainActor.run { nav.go(.connection) }
         let s = await MainActor.run { nav.section }
-        try expect(s == .connections, "expected .connections, got \(s)")
+        try expect(s == .connection, "expected .connection, got \(s)")
     }
 
-    await test("Dashboard navigates to .permissions with grant anchor") {
+    await test("Dashboard navigates to .security on the gates anchor for permissions") {
+        // PKT-A: Permissions folded into Security → Gates tab.
         let nav = await MainActor.run { SettingsNavigation() }
-        await MainActor.run { nav.go(.permissions, anchor: "accessibility") }
+        await MainActor.run { nav.go(.security, anchor: "gates") }
         let s = await MainActor.run { nav.section }
         let a = await MainActor.run { nav.anchor }
-        try expect(s == .permissions, "expected .permissions, got \(s)")
-        try expect(a == "accessibility", "expected anchor 'accessibility', got \(a ?? "nil")")
+        try expect(s == .security, "expected .security, got \(s)")
+        try expect(a == "gates", "expected anchor 'gates', got \(a ?? "nil")")
     }
 
     await test("Dashboard stats row navigates to .tools / .jobs / .skills") {
@@ -60,11 +62,13 @@ func runPKT879DashboardTests() async {
         try expect(ids.contains("Skills"), "Skills section missing — dashboard stat-row 'skills' would 404")
     }
 
-    await test("Dashboard quick-link icons (commands/tools/connections) exist") {
+    await test("Dashboard quick-link targets (orders/tools/connection) exist") {
+        // PKT-A: the ⌘ quick-link now opens Orders (anchor commands); the
+        // gear opens the merged Connection section.
         let ids = Set(SettingsSection.allCases.map(\.rawValue))
-        try expect(ids.contains("Commands"), "commands quick-link target missing")
+        try expect(ids.contains("Standing Orders"), "orders quick-link target missing")
         try expect(ids.contains("Tools"), "tools quick-link target missing")
-        try expect(ids.contains("Connections"), "connections quick-link target missing")
+        try expect(ids.contains("Connection"), "connection quick-link target missing")
     }
 
     // ── Permission cells ──────────────────────────────────────────────
@@ -115,8 +119,8 @@ func runPKT879DashboardTests() async {
                 onOpenSettings: onOpen
             )
             // Pin the callback signature by invoking the closure directly.
-            onOpen(.connections)
-            assert(captured == .connections)
+            onOpen(.connection)
+            assert(captured == .connection)
         }
     }
 }

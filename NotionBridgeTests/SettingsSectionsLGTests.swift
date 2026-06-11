@@ -36,11 +36,15 @@ import NotionBridgeLib
 func runSettingsSectionsLGTests() async {
     print("\n\u{1F484} PKT-876 Settings Sections Liquid Glass Tests")
 
-    // 1. Target sections — exactly the 5 in the packet's IN list.
-    await test("PKT-876: header preset targetSections is the 5 reskinned sections") {
+    // 1. Target sections — PKT-A adopts the shared header across ALL 7
+    //    sections (the dead "5 callers" set is gone; one preset per case).
+    await test("PKT-A: header preset targetSections is all 7 sections") {
         let ids = BridgeSettingsHeaderPreset.targetSections.map(\.rawValue)
-        try expect(ids == ["Connections", "Credentials", "Permissions", "Jobs", "Advanced"],
+        try expect(ids == ["Standing Orders", "Skills", "Jobs", "Tools",
+                           "Security", "Connection", "Advanced"],
                    "targetSections drift: \(ids)")
+        try expect(BridgeSettingsHeaderPreset.targetSections.count == SettingsSection.allCases.count,
+                   "every section must adopt the shared header")
     }
 
     // 2. Every target section has a meaningful preset spec.
@@ -68,27 +72,20 @@ func runSettingsSectionsLGTests() async {
     // section returns the same Swift type. (Snapshot equivalent: every
     // section's hero renders via BridgeSettingsSectionHeader<EmptyView> or
     // <SomeAccessory> — never via a per-section header type.)
-    await test("PKT-876: BridgeSettingsSectionHeader is a single shared type across all 5 callers") {
+    await test("PKT-A: BridgeSettingsSectionHeader is a single shared type, one preset per case") {
+        // Construct the header generically for EVERY section from its preset.
+        // If any section had a bespoke header type it could not satisfy this.
         let names = await MainActor.run { () -> [String] in
-            let connections = BridgeSettingsSectionHeader(
-                title: "Connections", subtitle: "x", systemImage: "network", tint: .green
-            )
-            let credentials = BridgeSettingsSectionHeader(
-                title: "Credentials", subtitle: "x", systemImage: "key.fill", tint: .orange
-            )
-            let permissions = BridgeSettingsSectionHeader(
-                title: "Permissions", subtitle: "x", systemImage: "lock.shield", tint: .blue
-            )
-            let jobs = BridgeSettingsSectionHeader(
-                title: "Jobs", subtitle: "x", systemImage: "clock.badge.checkmark", tint: .purple
-            )
-            let advanced = BridgeSettingsSectionHeader(
-                title: "Advanced", subtitle: "x", systemImage: "wrench.and.screwdriver", tint: .gray
-            )
-            return [connections, credentials, permissions, jobs, advanced].map {
-                String(describing: type(of: $0))
+            SettingsSection.allCases.map { sec in
+                let p = BridgeSettingsHeaderPreset.spec(for: sec)
+                let header = BridgeSettingsSectionHeader(
+                    title: p.title, subtitle: p.subtitle,
+                    systemImage: p.systemImage, tint: p.tint
+                )
+                return String(describing: type(of: header))
             }
         }
+        try expect(names.count == 7, "expected 7 headers, got \(names.count)")
         for name in names {
             try expect(name.hasPrefix("BridgeSettingsSectionHeader<"),
                        "non-shared header type: \(name)")
@@ -201,11 +198,13 @@ func runSettingsSectionsLGTests() async {
     }
 
     // 11. Locked SF Symbols per section (pinned for visual contract).
-    await test("PKT-876: BridgeSectionIcon SF Symbols locked for target sections") {
-        try expect(BridgeSectionIcon.systemImage(for: .connections) == "network")
-        try expect(BridgeSectionIcon.systemImage(for: .credentials) == "key.fill")
-        try expect(BridgeSectionIcon.systemImage(for: .permissions) == "lock.shield")
+    await test("PKT-A: BridgeSectionIcon SF Symbols locked for the 7 sections") {
+        try expect(BridgeSectionIcon.systemImage(for: .orders) == "scroll")
+        try expect(BridgeSectionIcon.systemImage(for: .skills) == "sparkles")
         try expect(BridgeSectionIcon.systemImage(for: .jobs) == "clock.badge.checkmark")
+        try expect(BridgeSectionIcon.systemImage(for: .tools) == "hammer")
+        try expect(BridgeSectionIcon.systemImage(for: .security) == "lock.shield")
+        try expect(BridgeSectionIcon.systemImage(for: .connection) == "network")
         try expect(BridgeSectionIcon.systemImage(for: .advanced) == "wrench.and.screwdriver")
     }
 
@@ -220,7 +219,7 @@ func runSettingsSectionsLGTests() async {
             SettingsNavigation.shared.go(chip.section, anchor: chip.anchor)
             let result = (SettingsNavigation.shared.section, SettingsNavigation.shared.anchor)
             // restore default to avoid leaking into sibling tests
-            SettingsNavigation.shared.go(.standingOrders, anchor: nil)
+            SettingsNavigation.shared.go(.orders, anchor: nil)
             return result
         }
         try expect(section == .tools, "section did not route to .tools")

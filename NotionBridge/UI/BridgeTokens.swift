@@ -214,4 +214,28 @@ public enum BridgeTokens {
         public static let input:   CGFloat = 8
         public static let pill:    CGFloat = 999
     }
+
+    // MARK: - Spacing scale (Settings Redesign PKT-A)
+    //
+    // Named geometry so pane padding / gaps / chrome heights stop drifting
+    // (18↔20↔22 across sections). Mirrors the values locked in the chrome
+    // audit (design-audits/chrome.md §6) and the SSOT `.pane`/`.titlebar`/
+    // `.footbar` kit.css rules. Use these instead of magic numbers.
+
+    public enum Space {
+        /// Pane vertical padding (top/bottom of a section's content).
+        public static let paneV: CGFloat = 18
+        /// Pane horizontal padding (leading/trailing of a section's content).
+        public static let paneH: CGFloat = 20
+        /// Inter-card vertical gap within a pane.
+        public static let cardGap: CGFloat = 14
+        /// Sidebar nav-item row height.
+        public static let navItemH: CGFloat = 30
+        /// Title-bar height (trimmed from 44 — still clears the traffic lights).
+        public static let titleBar: CGFloat = 38
+        /// Foot-bar height.
+        public static let footBar: CGFloat = 30
+        /// Leading inset that clears the native traffic-light cluster.
+        public static let trafficGutter: CGFloat = 78
+    }
 }

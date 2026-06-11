@@ -5,10 +5,58 @@
 import AppKit
 import Darwin
 import Foundation
+import LocalAuthentication
 import ServiceManagement
 import SwiftUI
 
 extension SettingsView {
+    // MARK: - Merged composite sections (Settings Redesign PKT-A)
+    //
+    // The 10→7 collapse folds five legacy panes into three merged sections.
+    // PKT-A lands MINIMAL-BUT-FUNCTIONAL composites of the EXISTING section
+    // views (each child keeps its own scroll + state); the polished single-
+    // surface merges are later per-page packets (B/F/G). A lightweight
+    // segmented tab switches between the two child surfaces, and the deep-link
+    // `anchor` selects which tab opens first.
+
+    /// Orders = Standing Orders doctrine + Commands palette config.
+    /// Bespoke single-surface composite (replaces the generic BridgeMergedSection
+    /// for this section): one shared header, a segmented Orders | Commands strip,
+    /// a per-tab meta row, and unsaved-draft-safe tab switching. The deep-link
+    /// `anchor` selects the starting tab (e.g. `commands` → Commands).
+    @ViewBuilder
+    var ordersSection: some View {
+        OrdersSection(anchor: nav.anchor)
+    }
+
+    /// Security = the merged Vault (credentials) + Gates (access) page.
+    /// Bespoke single-surface composite (replaces the generic BridgeMergedSection
+    /// for this section): one posture header (Touch-ID reveal status · #stored ·
+    /// #attention · read-only tool tier counts OPEN/NOTIFY/REQUEST with a Manage-
+    /// in-Tools link) over a segmented Vault | Gates strip. Anchor `gates`/
+    /// `permissions` opens Gates; everything else (incl. a credential-row slug
+    /// like "notion") opens Vault.
+    @ViewBuilder
+    var securitySection: some View {
+        SecuritySection(
+            anchor: nav.anchor,
+            liveTools: statusBar.toolInfoList,
+            vault: { AnyView(credentialsSection) },
+            gates: { AnyView(permissionsSection) }
+        )
+    }
+
+    /// Connection = Connections (Local clients) + Remote Access.
+    /// Bespoke single-surface composite (replaces the generic BridgeMergedSection
+    /// for this section): a live status strip on top (server-running dot · clients
+    /// count · last-seen · calls-today · Restart + Copy-loopback) over a single
+    /// scroll that racks Local clients above Remote access. The deep-link `anchor`
+    /// (`remote`/`cloud`) auto-scrolls to the Remote-access block.
+    @ViewBuilder
+    var connectionSection: some View {
+        ConnectionSection(anchor: nav.anchor, statusBar: statusBar)
+    }
+
     /// Factory Reset confirmation — skills defaults, env-based Notion token, restart guidance.
     var factoryResetConfirmationMessage: String {
         """
@@ -40,13 +88,7 @@ extension SettingsView {
     // MARK: - Connections (PKT-876 v3.6.1 — Liquid Glass reskin)
 
     var connectionsSection: some View {
-        ConnectionsSection(
-            statusBar: statusBar,
-            permissionManager: permissionManager,
-            launchAtLogin: $launchAtLogin,
-            launchAtLoginError: $launchAtLoginError,
-            isApplyingLaunchAtLoginChange: $isApplyingLaunchAtLoginChange
-        )
+        ConnectionsSection(statusBar: statusBar)
     }
 
     // MARK: - Tools
@@ -274,164 +316,664 @@ extension SettingsView {
     }
 }
 
-// MARK: - Integrated Tools Content
-
-/// Displays Notion + Stripe integration status with provider labels,
-/// multi-state indicators, and detail text (masked credential / primary badge).
-private struct IntegratedToolsContent: View {
-    @State private var notionConnection: BridgeConnection?
-    @State private var stripeConnection: BridgeConnection?
-
-    var body: some View {
-        Group {
-            integrationRow(
-                icon: "network",
-                provider: "Notion Workspace",
-                connection: notionConnection
-            )
-            integrationRow(
-                icon: "creditcard",
-                provider: "Stripe API",
-                connection: stripeConnection
-            )
-        }
-        .task { await loadConnections() }
-    }
-
-    private func integrationRow(icon: String, provider: String, connection: BridgeConnection?) -> some View {
-        let status = connection?.status ?? .notConfigured
-        return LabeledContent {
-            HStack(spacing: 6) {
-                Image(systemName: status.systemImage)
-                    .font(.system(size: 8))
-                    .foregroundStyle(statusColor(status))
-                    .symbolEffect(.pulse, isActive: status == .checking)
-                if status != .disconnected {
-                    Text(status.label)
-                        .font(.caption)
-                        .foregroundStyle(statusColor(status))
-                }
-            }
-        } label: {
-            Label(provider, systemImage: icon)
-        }
-        .accessibilityLabel("\(provider): \(status.label)")
-    }
-
-    private func statusColor(_ status: BridgeConnectionStatus) -> Color {
-        switch status {
-        case .connected: return BridgeColors.success
-        case .warning: return BridgeTokens.warn
-        case .disconnected, .invalid: return BridgeColors.error
-        case .notConfigured: return BridgeColors.secondary
-        case .checking: return BridgeColors.secondary
-        }
-    }
-
-
-    private func loadConnections() async {
-        // PKT-440: Invalidate stale cache so re-validation fetches fresh results
-        await ConnectionHealthChecker.shared.invalidateAll()
-
-        do {
-            // Phase 1: Instant snapshot with last-known status (PKT-440)
-            let workspace = try await ConnectionRegistry.shared.listConnections(kind: .workspace, validateLive: false)
-            let api = try await ConnectionRegistry.shared.listConnections(kind: .api, validateLive: false)
-            let snapshotNotion = workspace.first { $0.provider == .notion }
-            let snapshotStripe = api.first { $0.provider == .stripe }
-            await MainActor.run {
-                notionConnection = snapshotNotion
-                stripeConnection = snapshotStripe
-            }
-
-            // Phase 2: Live validation — stream real statuses in as they resolve
-            await withTaskGroup(of: Void.self) { group in
-                if let conn = snapshotNotion {
-                    group.addTask {
-                        if let validated = try? await ConnectionRegistry.shared.validateConnection(id: conn.id) {
-                            await MainActor.run { notionConnection = validated }
-                        }
-                    }
-                }
-                if let conn = snapshotStripe {
-                    group.addTask {
-                        if let validated = try? await ConnectionRegistry.shared.validateConnection(id: conn.id) {
-                            await MainActor.run { stripeConnection = validated }
-                        }
-                    }
-                }
-            }
-        } catch {
-            // Silently handle — indicators stay as not configured
-        }
-    }
-}
-
-// MARK: - Connected Clients Content
-
-/// Displays connected MCP clients with resolved names and no version numbers.
-/// Resolves client identifiers against workspace connection names.
-private struct ConnectedClientsContent: View {
-    let clients: [ConnectedClient]
-    @State private var connectionNames: [String: String] = [:]
-
-    var body: some View {
-        ForEach(clients, id: \.name) { client in
-            LabeledContent(resolvedName(for: client)) {
-                Text("Since \(relativeTimestamp(from: client.connectedAt))")
-                    .font(.caption2)
-                    .foregroundStyle(BridgeColors.muted)
-            }
-        }
-        .task { await loadConnectionNames() }
-    }
-
-    private static let clientDisplayNames: [String: String] = [
-        "notion-mcp-client": "Notion API"
-    ]
-
-    private func resolvedName(for client: ConnectedClient) -> String {
-        if let mapped = Self.clientDisplayNames[client.name] {
-            return mapped
-        }
-        for (_, connName) in connectionNames {
-            if client.name.localizedCaseInsensitiveContains(connName)
-                || connName.localizedCaseInsensitiveContains(client.name) {
-                return connName
-            }
-        }
-        return client.name
-    }
-
-    private func loadConnectionNames() async {
-        do {
-            let connections = try await ConnectionRegistry.shared.listConnections(kind: .workspace, validateLive: false)
-            await MainActor.run {
-                var names: [String: String] = [:]
-                for conn in connections {
-                    names[conn.id] = conn.name
-                }
-                connectionNames = names
-            }
-        } catch {
-            // Fall back to raw client names
-        }
-    }
-
-    private func relativeTimestamp(from date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
-    }
-}
-
-
 // MARK: - Jobs Section (PKT-876 v3.6.1 — Liquid Glass reskin)
 
 extension SettingsView {
     @ViewBuilder
     var jobsSection: some View {
         JobsSection()
+    }
+}
+
+// MARK: - Security composite (bespoke merged page — replaces BridgeMergedSection)
+
+/// The merged **Security** Settings page: ONE bespoke posture header (replacing
+/// both legacy orb-heroes) over a segmented `Vault | Gates` strip, with the
+/// account-level **License** card pinned beneath the header.
+///
+/// Posture header (left→right): a 44 `lock.shield` gold orb · "Security" title +
+/// subtitle · stat tiles STORED / ATTENTION + read-only tool tier counts
+/// OPEN/NOTIFY/REQUEST (Tools owns those — a "Manage in Tools" link, never an
+/// edit here) · a Touch-ID-to-reveal chip. It subscribes to BOTH the credentials-
+/// changed and tier-overrides-changed notifications so the counts live-update.
+///
+/// PKT-W3-license: License (entitlement / billing posture) was relocated here
+/// from Advanced. It sits directly under the posture header — above the tab bar
+/// — because the activation state machine governs the whole app, not one tab.
+/// Its `LicenseCardHost` state machine is carried verbatim (self-hosted via the
+/// `@StateObject` below, the `.task` initial load, and the
+/// `.licenseStateDidChange` refresh); the license-activation contract is
+/// unchanged.
+///
+/// The two tab bodies (`CredentialsSection`, `PermissionsSection`) are hero-less
+/// and self-contained; this composite only owns the header, the License card,
+/// the tab bar, and the deep-link anchor → starting-tab resolution.
+struct SecuritySection: View {
+    let anchor: String?
+    let liveTools: [ToolInfo]
+    let vault: () -> AnyView
+    let gates: () -> AnyView
+
+    private enum Tab: String, Hashable, CaseIterable { case vault, gates }
+
+    @State private var selection: Tab
+
+    /// PKT-W3-license — License card lives under the posture header inside
+    /// Security. Self-hosted state via LicenseCardHost so the SecuritySection
+    /// signature is unchanged.
+    @StateObject private var licenseHost = LicenseCardHost()
+
+    // Posture metrics — recomputed on the change notifications below.
+    @State private var storedCount: Int = 0
+    @State private var attentionCount: Int = 0
+    @State private var tierCounts: (open: Int, notify: Int, request: Int) = (0, 0, 0)
+
+    /// Mirrored read-only in the header chip; the editable toggle lives in the
+    /// Vault policy card (same @AppStorage key — single source of truth).
+    @AppStorage(CredentialRevealGate.requireTouchIDKey) private var requireTouchID = true
+
+    init(
+        anchor: String?,
+        liveTools: [ToolInfo],
+        vault: @escaping () -> AnyView,
+        gates: @escaping () -> AnyView
+    ) {
+        self.anchor = anchor
+        self.liveTools = liveTools
+        self.vault = vault
+        self.gates = gates
+        self._selection = State(initialValue: SecuritySection.tab(for: anchor) ?? .vault)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            postureHeader
+                .padding(.horizontal, BridgeTokens.Space.paneH)
+                .padding(.top, BridgeTokens.Space.cardGap)
+            licenseCard
+                .padding(.horizontal, BridgeTokens.Space.paneH)
+                .padding(.top, BridgeTokens.Space.cardGap)
+            tabBar
+                .padding(.horizontal, BridgeTokens.Space.paneH)
+                .padding(.top, 12)
+                .padding(.bottom, 12)
+
+            Divider().background(BridgeTokens.hairlineFaint)
+
+            tabBody
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Color.clear)
+        .task { refreshMetrics() }
+        .task { await licenseHost.load() }
+        .onReceive(NotificationCenter.default.publisher(for: .notionBridgeCredentialsFeatureDidChange)) { _ in
+            refreshMetrics()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .notionBridgeTierOverridesDidChange)) { _ in
+            refreshTierCounts()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .licenseStateDidChange)) { _ in
+            Task { await licenseHost.load() }
+        }
+        .onChange(of: anchor) { _, newAnchor in
+            if let t = SecuritySection.tab(for: newAnchor) { selection = t }
+        }
+    }
+
+    // MARK: License (PKT-W3-license — relocated from Advanced)
+
+    /// Account-level entitlement posture. Pinned under the posture header so the
+    /// activation state machine (trial / licensed / expired / grandfathered) is
+    /// visible from either tab. The LicenseCard API and its host are unchanged —
+    /// this is the same component that previously rendered inside Advanced.
+    private var licenseCard: some View {
+        LicenseCard(
+            state: licenseHost.uiState,
+            pasteField: Binding(
+                get: { licenseHost.pasteField },
+                set: { licenseHost.pasteField = $0 }
+            ),
+            onActivate: { Task { await licenseHost.activate() } },
+            onDeactivate: { Task { await licenseHost.deactivate() } },
+            onBuy: { licenseHost.openBuyPage() }
+        )
+    }
+
+    // MARK: Posture header
+
+    private var postureHeader: some View {
+        let spec = BridgeSettingsHeaderPreset.spec(for: .security)
+        return BridgeGlassCard(cornerRadius: BridgeTokens.Radius.card, padding: 14) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(BridgeTokens.gold.opacity(0.20))
+                        .frame(width: 44, height: 44)
+                    Image(systemName: "lock.shield")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(BridgeTokens.gold.opacity(0.85))
+                }
+                .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(spec.title)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(BridgeTokens.fg1)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("Stored secrets and the gates that govern what tools can do.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(BridgeTokens.fg3)
+                }
+                Spacer(minLength: 8)
+                postureMetrics
+                touchIDChip
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var postureMetrics: some View {
+        HStack(spacing: 10) {
+            statTile(value: "\(storedCount)", label: "stored", color: BridgeTokens.okText)
+            statTile(
+                value: "\(attentionCount)",
+                label: "attention",
+                color: attentionCount > 0 ? BridgeTokens.warnText : BridgeTokens.fg4
+            )
+            tierCountTile
+        }
+    }
+
+    private func statTile(value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                .foregroundStyle(color)
+                .monospacedDigit()
+            Text(label.uppercased())
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(0.6)
+                .foregroundStyle(BridgeTokens.fg4)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 7)
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(value) \(label)")
+    }
+
+    /// Read-only tri-segment tile of tool tier counts (OPEN · NOTIFY · REQUEST),
+    /// tapping through to the Tools page where they are actually managed. Tools
+    /// owns the tier model — this is a posture mirror, never an editor.
+    private var tierCountTile: some View {
+        Button {
+            SettingsNavigation.shared.go(.tools)
+        } label: {
+            VStack(spacing: 3) {
+                HStack(spacing: 4) {
+                    Text("\(tierCounts.open)").foregroundStyle(BridgeTokens.okText)
+                    Text("·").foregroundStyle(BridgeTokens.fg5)
+                    Text("\(tierCounts.notify)").foregroundStyle(BridgeTokens.warnText)
+                    Text("·").foregroundStyle(BridgeTokens.fg5)
+                    Text("\(tierCounts.request)").foregroundStyle(BridgeTokens.badText)
+                }
+                .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                .monospacedDigit()
+                HStack(spacing: 3) {
+                    Text("GATES")
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(0.6)
+                        .foregroundStyle(BridgeTokens.fg4)
+                    Image(systemName: "arrow.up.forward")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(BridgeTokens.fg5)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .help("Open / Notify / Request tool counts — manage per-tool gates in Tools")
+        .accessibilityLabel("Tool gates: \(tierCounts.open) open, \(tierCounts.notify) notify, \(tierCounts.request) request. Manage in Tools.")
+    }
+
+    /// Touch-ID reveal status chip — surfaces the reveal gate BEFORE the user hits
+    /// Copy/Rotate. Reads `requireTouchID`; on a device without biometrics the
+    /// reveal passes through (matches CredentialRevealGate.shouldGate).
+    private var touchIDChip: some View {
+        let available = SecuritySection.biometricAvailable
+        let (text, tone): (String, Color) = {
+            if !available { return ("Touch ID unavailable", BridgeTokens.fg4) }
+            return requireTouchID
+                ? ("Touch ID to reveal: On", BridgeTokens.okText)
+                : ("Touch ID to reveal: Off", BridgeTokens.fg4)
+        }()
+        return HStack(spacing: 5) {
+            Image(systemName: "touchid")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(tone)
+            Text(text)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(tone)
+        }
+        .padding(.horizontal, 9).padding(.vertical, 5)
+        .background(BridgeTokens.chipFill, in: Capsule())
+        .overlay(Capsule().strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+        .fixedSize()
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(text)
+    }
+
+    // MARK: Tab bar
+
+    private var tabBar: some View {
+        HStack(spacing: 0) {
+            tabButton("Vault", .vault)
+            tabButton("Gates", .gates)
+        }
+        .padding(2)
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Security section tabs")
+    }
+
+    private func tabButton(_ label: String, _ value: Tab) -> some View {
+        let on = selection == value
+        return Button {
+            withAnimation(.easeInOut(duration: 0.16)) { selection = value }
+        } label: {
+            Text(label)
+                .font(.system(size: 12.5, weight: on ? .semibold : .regular))
+                .foregroundStyle(on ? BridgeTokens.fg1 : BridgeTokens.fg3)
+                .padding(.horizontal, 16).padding(.vertical, 6)
+                .frame(minHeight: 28)
+                .background {
+                    if on {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(BridgeTokens.accent.opacity(0.18))
+                            .overlay(RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(BridgeTokens.accent.opacity(0.45), lineWidth: 0.5))
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? [.isSelected] : [])
+    }
+
+    // MARK: Tab body
+
+    @ViewBuilder private var tabBody: some View {
+        switch selection {
+        case .vault: vault()
+        case .gates: gates()
+        }
+    }
+
+    // MARK: Metrics
+
+    private func refreshMetrics() {
+        refreshCredentialCounts()
+        refreshTierCounts()
+    }
+
+    private func refreshCredentialCounts() {
+        guard let entries = try? CredentialManager.shared.list() else {
+            storedCount = 0
+            attentionCount = 0
+            return
+        }
+        storedCount = entries.count
+        let store = CredentialHealthStore()
+        let health = store.load()
+        attentionCount = entries.filter { entry in
+            if entry.type == .card {
+                return CredentialCardExpiry.health(
+                    expMonth: entry.metadata.expMonth,
+                    expYear: entry.metadata.expYear
+                ).needsAttention
+            }
+            let key = CredentialHealthStore.key(service: entry.service, account: entry.account)
+            return (health[key] ?? .unchecked).health.needsAttention
+        }.count
+    }
+
+    /// Tool tier counts from the SAME resolution Tools/router use (per-tool
+    /// override > module grant > registered default). Read-only mirror.
+    private func refreshTierCounts() {
+        let toolOverrides = (UserDefaults.standard.dictionary(forKey: BridgeDefaults.tierOverrides) as? [String: String]) ?? [:]
+        let moduleOverrides = (UserDefaults.standard.dictionary(forKey: BridgeDefaults.moduleTierOverrides) as? [String: String]) ?? [:]
+        var open = 0, notify = 0, request = 0
+        for tool in liveTools {
+            let tier = ToolTierResolution.effectiveTier(
+                toolName: tool.name,
+                module: tool.module,
+                registeredTier: tool.tier,
+                toolOverrides: toolOverrides,
+                moduleOverrides: moduleOverrides
+            )
+            switch tier {
+            case "open": open += 1
+            case "notify": notify += 1
+            case "request": request += 1
+            default: break
+            }
+        }
+        tierCounts = (open, notify, request)
+    }
+
+    /// True when this device can evaluate a biometric (or passcode-fallback)
+    /// policy — drives the header chip's "Touch ID unavailable" state. When false
+    /// the reveal gate passes through (matches CredentialManager's fallback path).
+    static var biometricAvailable: Bool {
+        let context = LAContext()
+        var error: NSError?
+        return context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error)
+    }
+
+    // MARK: Deep-link anchor → tab
+
+    /// Resolve a deep-link anchor to a tab (gates/permissions aliases open Gates;
+    /// vault/credential aliases open Vault). Returns nil when the anchor names
+    /// neither (caller keeps the default Vault tab; a credential slug like
+    /// "notion" still reaches the Vault body via SettingsNavigation).
+    private static func tab(for anchor: String?) -> Tab? {
+        guard let raw = anchor?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: ""),
+            !raw.isEmpty else { return nil }
+        switch raw {
+        case "gates", "gate", "permissions", "permission", "privacy", "access": return .gates
+        case "vault", "credentials", "credential", "secrets": return .vault
+        default: return nil
+        }
+    }
+}
+
+// MARK: - Connection composite (bespoke merged page — replaces BridgeMergedSection)
+
+/// The merged **Connection** Settings page: a live STATUS STRIP on top over a
+/// single scroll that racks **Local clients** above **Remote access** — mirroring
+/// how trust narrows (loopback is trusted and token-exempt; cloud is gated).
+///
+/// Status strip (left→right): one dot+label vocabulary driven by
+/// `statusBar.isServerRunning` (Online/Stopped) · connected-client count ·
+/// last-seen (most-recent client) · calls-today as muted meta · trailing icon
+/// actions Restart + Copy-loopback. It replaces BOTH legacy orb-heroes
+/// (ConnectionsSection + RemoteAccessSection), reclaiming ~120pt above the fold.
+///
+/// The two bodies (`ConnectionsSection` = Local, `RemoteAccessSection` = Remote)
+/// are hero-less; this composite owns the strip and the deep-link anchor →
+/// scroll-target resolution (`remote`/`cloud` scrolls to the Remote block).
+struct ConnectionSection: View {
+    let anchor: String?
+    let statusBar: StatusBarController
+
+    @State private var copiedLoopback = false
+
+    private static let remoteAnchorID = "connection.remote"
+
+    private var port: Int { ConfigManager.shared.ssePort }
+    private var loopbackURL: String { "http://127.0.0.1:\(port)/mcp" }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            statusStrip
+                .padding(.horizontal, BridgeTokens.Space.paneH)
+                .padding(.top, BridgeTokens.Space.cardGap)
+                .padding(.bottom, 10)
+
+            Divider().background(BridgeTokens.hairlineFaint)
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: BridgeTokens.Space.cardGap) {
+                        ConnectionsSection(statusBar: statusBar)
+                            .frame(maxWidth: .infinity)
+                            .fixedSize(horizontal: false, vertical: true)
+                        remoteHeader
+                            .id(Self.remoteAnchorID)
+                        RemoteAccessSection()
+                            .frame(maxWidth: .infinity)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.bottom, BridgeTokens.Space.paneV)
+                }
+                .onAppear { scrollIfRemote(proxy) }
+                .onChange(of: anchor) { _, _ in scrollIfRemote(proxy) }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Color.clear)
+    }
+
+    // MARK: Status strip
+
+    private var statusStrip: some View {
+        let running = statusBar.isServerRunning
+        let dot = running ? BridgeTokens.ok : BridgeTokens.bad
+        let label = running ? "Online" : "Stopped"
+        let labelText = running ? BridgeTokens.okText : BridgeTokens.badText
+        return BridgeGlassCard(cornerRadius: BridgeTokens.Radius.card, padding: 12) {
+            HStack(spacing: 12) {
+                HStack(spacing: 7) {
+                    Circle().fill(dot).frame(width: 9, height: 9)
+                    Text(label)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(labelText)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Server \(label)")
+
+                metaSeparator
+                clientsMeta
+                if let seen = lastSeen {
+                    metaSeparator
+                    Text(seen)
+                        .font(.system(size: 12))
+                        .foregroundStyle(BridgeTokens.fg4)
+                        .accessibilityLabel("Last seen \(seen)")
+                }
+                metaSeparator
+                Text("\(statusBar.totalToolCalls.formatted()) calls today")
+                    .font(.system(size: 12))
+                    .foregroundStyle(BridgeTokens.fg4)
+                    .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                HStack(spacing: 4) {
+                    iconButton("arrow.clockwise", help: "Restart Bridge", label: "Restart Bridge") {
+                        NSApp.restartBridge()
+                    }
+                    iconButton(copiedLoopback ? "checkmark" : "doc.on.doc",
+                               help: "Copy loopback endpoint",
+                               label: copiedLoopback ? "Copied loopback endpoint" : "Copy loopback endpoint",
+                               tint: copiedLoopback ? BridgeTokens.okText : BridgeTokens.fg3) {
+                        copyLoopback()
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var clientsMeta: some View {
+        let n = statusBar.connectedClients.count
+        return Text(n == 0 ? "No clients" : "\(n) client\(n == 1 ? "" : "s")")
+            .font(.system(size: 12, weight: n == 0 ? .regular : .medium))
+            .foregroundStyle(n == 0 ? BridgeTokens.fg4 : BridgeTokens.fg2)
+            .lineLimit(1)
+            .accessibilityLabel(n == 0 ? "No clients connected" : "\(n) clients connected")
+    }
+
+    private var metaSeparator: some View {
+        Text("·")
+            .font(.system(size: 12))
+            .foregroundStyle(BridgeTokens.fg5)
+            .accessibilityHidden(true)
+    }
+
+    /// Most-recent client connection as a relative "last-seen" string. Nil when
+    /// no clients are connected (the field is hidden in that case).
+    private var lastSeen: String? {
+        guard let latest = statusBar.connectedClients.map(\.connectedAt).max() else { return nil }
+        let interval = Date().timeIntervalSince(latest)
+        if interval < 60 { return "just now" }
+        if interval < 3600 { return "\(Int(interval / 60))m ago" }
+        if interval < 86400 { return "\(Int(interval / 3600))h ago" }
+        return "\(Int(interval / 86400))d ago"
+    }
+
+    private func iconButton(_ systemImage: String, help: String, label: String,
+                            tint: Color = BridgeTokens.fg3, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(tint)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(label)
+    }
+
+    private func copyLoopback() {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(loopbackURL, forType: .string)
+        copiedLoopback = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_400_000_000)
+            copiedLoopback = false
+        }
+    }
+
+    // MARK: Remote-access separator header (scroll target)
+
+    private var remoteHeader: some View {
+        HStack(spacing: 8) {
+            Text("REMOTE ACCESS")
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(1.2)
+                .foregroundStyle(BridgeTokens.fg4)
+            Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5)
+        }
+        .padding(.horizontal, BridgeTokens.Space.paneH)
+        .padding(.top, 4)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    // MARK: Deep-link anchor → scroll target
+
+    private func scrollIfRemote(_ proxy: ScrollViewProxy) {
+        guard let raw = anchor?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: ""),
+            !raw.isEmpty else { return }
+        switch raw {
+        case "remote", "remoteaccess", "cloud":
+            withAnimation(.easeInOut(duration: 0.25)) {
+                proxy.scrollTo(Self.remoteAnchorID, anchor: .top)
+            }
+        default:
+            break
+        }
+    }
+}
+
+// MARK: - Merged-section tab host (Settings Redesign PKT-A)
+
+/// Minimal segmented host for the three merged Settings sections (Orders,
+/// Security, Connection). It renders a compact picker over N tabs and shows
+/// the selected tab's existing child view verbatim — the polished single-
+/// surface composites are later per-page packets. A deep-link `anchor`
+/// selects the starting tab (e.g. `gates` → Security's Gates tab); when the
+/// anchor doesn't name a tab it is passed through unchanged to the child via
+/// `SettingsNavigation` (so e.g. a credential-row slug still lands inside the
+/// Vault view). The leading inset matches the title bar's traffic-light
+/// gutter so the picker doesn't sit under the section title.
+struct BridgeMergedSection: View {
+    struct Tab: Identifiable {
+        let id: String
+        let title: String
+        /// Normalized anchor strings (lowercased, no spaces) that open this tab.
+        let anchors: [String]
+        let content: () -> AnyView
+    }
+
+    let anchor: String?
+    let tabs: [Tab]
+
+    @State private var selection: String
+
+    init(anchor: String?, tabs: [Tab]) {
+        self.anchor = anchor
+        self.tabs = tabs
+        // Resolve the starting tab from the deep-link anchor (if any).
+        let initial = BridgeMergedSection.tab(for: anchor, in: tabs) ?? tabs.first?.id ?? ""
+        self._selection = State(initialValue: initial)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $selection) {
+                ForEach(tabs) { tab in
+                    Text(tab.title).tag(tab.id)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 320)
+            .padding(.horizontal, BridgeTokens.Space.paneH)
+            .padding(.top, BridgeTokens.Space.cardGap)
+            .padding(.bottom, BridgeTokens.Space.cardGap)
+            .accessibilityLabel("Section tabs")
+
+            Divider().background(BridgeTokens.hairlineFaint)
+
+            ForEach(tabs) { tab in
+                if tab.id == selection {
+                    tab.content()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // React to a deep-link landing while the section is already on screen.
+        .onChange(of: anchor) { _, newAnchor in
+            if let id = BridgeMergedSection.tab(for: newAnchor, in: tabs) {
+                selection = id
+            }
+        }
+    }
+
+    /// Resolve which tab a deep-link anchor opens. Returns nil when the anchor
+    /// is nil or names something other than a tab (e.g. a credential slug),
+    /// in which case the caller keeps the default/first tab and the child view
+    /// still receives the raw anchor through `SettingsNavigation`.
+    static func tab(for anchor: String?, in tabs: [Tab]) -> String? {
+        guard let raw = anchor?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: ""),
+            !raw.isEmpty else { return nil }
+        for tab in tabs where tab.id == raw || tab.anchors.contains(raw) {
+            return tab.id
+        }
+        return nil
     }
 }
 

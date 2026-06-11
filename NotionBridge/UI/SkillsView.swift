@@ -24,6 +24,14 @@ struct SkillsView: View {
     /// F11: Whether `fetch_skill` is currently disabled in the Tools tab.
     var fetchSkillDisabled: Bool = false
 
+    // PKT-skills: skill-cache action demoted from a standalone card into the
+    // list-column overflow menu. The owning SkillsSection retains the real
+    // SkillsCacheWriter logic and drives these transient bindings.
+    var cacheBusy: Bool = false
+    var cacheMessage: String? = nil
+    var cacheIsError: Bool = false
+    var onRefreshCache: () -> Void = {}
+
     // MARK: - Selection (master → detail)
 
     /// A selected row is either a Notion-source skill (by name) or a
@@ -82,8 +90,9 @@ struct SkillsView: View {
                 detailColumn
                     .frame(maxWidth: .infinity)
             }
-            .frame(height: 560)
+            .frame(maxHeight: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             skillsManager.reloadFromUserDefaults()
             loadFileSourceSkills()
@@ -186,14 +195,16 @@ struct SkillsView: View {
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(showAddForm ? Color.white : BridgeTokens.fg2)
+                        .foregroundStyle(showAddForm ? BridgeTokens.onAccent : BridgeTokens.fg2)
                         .frame(width: 32, height: 32)
                         .background(showAddForm ? BridgeTokens.accent.opacity(0.85) : BridgeTokens.chipFill,
                                     in: RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5))
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Add a new skill")
+                .accessibilityLabel("Add a new skill")
             }
             .padding(.horizontal, 12).padding(.vertical, 11)
 
@@ -210,13 +221,13 @@ struct SkillsView: View {
                     if !filteredFileSkills.isEmpty {
                         HStack(spacing: 6) {
                             Image(systemName: "doc.text")
-                                .font(.system(size: 9))
+                                .font(.system(size: 10.5))
                             Text("FILE-SOURCE")
-                                .font(.system(size: 9, weight: .semibold))
-                                .tracking(1.0)
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .tracking(0.8)
                             Spacer()
                             Text("\(fileSourceSkills.count)")
-                                .font(.system(size: 9, weight: .semibold))
+                                .font(.system(size: 10.5, weight: .semibold))
                         }
                         .foregroundStyle(BridgeTokens.fg4)
                         .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 4)
@@ -235,28 +246,66 @@ struct SkillsView: View {
 
             Divider().overlay(BridgeTokens.hairline)
 
-            // footer count
-            HStack {
-                Text(listFooterText)
-                    .font(.system(size: 11))
-                    .foregroundStyle(BridgeTokens.fg4)
-                Spacer()
-                if !skillsManager.skills.isEmpty {
-                    Button {
-                        commitPendingEdit()
-                        skillsManager.sortAlphabetically()
-                    } label: {
-                        Image(systemName: "arrow.up.arrow.down")
-                            .font(.system(size: 11))
-                            .foregroundStyle(BridgeTokens.fg3)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Sort alphabetically")
+            // footer: counts + overflow (Sort · Refresh cache demoted here)
+            HStack(spacing: 8) {
+                if let cacheMessage, cacheBusy == false {
+                    Text(cacheMessage)
+                        .font(.system(size: 11))
+                        .foregroundStyle(cacheIsError ? BridgeTokens.badText : BridgeTokens.fg4)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(cacheMessage)
+                } else {
+                    Text(listFooterText)
+                        .font(.system(size: 11))
+                        .foregroundStyle(BridgeTokens.fg4)
+                        .lineLimit(1)
                 }
+                Spacer(minLength: 4)
+                listOverflowMenu
             }
             .padding(.horizontal, 14).padding(.vertical, 9)
         }
-        .background(Color.black.opacity(0.10))
+        .background(BridgeTokens.wellFill)
+    }
+
+    /// PKT-skills: list-column overflow — Sort alphabetically + the demoted
+    /// "Refresh skill cache" maintenance action (was its own full-width card).
+    private var listOverflowMenu: some View {
+        Menu {
+            Button {
+                commitPendingEdit()
+                skillsManager.sortAlphabetically()
+            } label: {
+                Label("Sort alphabetically", systemImage: "arrow.up.arrow.down")
+            }
+            .disabled(skillsManager.skills.isEmpty)
+
+            Divider()
+
+            Button {
+                onRefreshCache()
+            } label: {
+                Label("Refresh skill cache", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .disabled(cacheBusy)
+        } label: {
+            if cacheBusy {
+                ProgressView().controlSize(.small)
+                    .frame(width: 28, height: 28)
+            } else {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 13))
+                    .foregroundStyle(BridgeTokens.fg3)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("List options — sort, refresh skill cache")
+        .accessibilityLabel("List options")
     }
 
     private var emptyListState: some View {
@@ -286,7 +335,10 @@ struct SkillsView: View {
         return "\(enabled)/\(total) enabled · \(routing) routing"
     }
 
-    /// One master row: avatar + name + platform tag + status dot.
+    /// One master row (~36px): compact platform glyph + name + 4-state status
+    /// dot. The 28px avatar and the 9px uppercase platform tag are dropped —
+    /// platform lives in the leading glyph + the detail badge, status lives in
+    /// the dot. A11y label = name; a11y value = the status description.
     private func skillListRow(_ skill: SkillsManager.Skill) -> some View {
         let isSel = selection == .skill(skill.name)
         return Button {
@@ -295,28 +347,27 @@ struct SkillsView: View {
             selection = .skill(skill.name)
         } label: {
             HStack(spacing: 10) {
-                avatar(systemImage: skill.platform.systemImage, big: false,
-                       dimmed: !skill.enabled)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(skill.name)
-                        .font(.system(size: 13))
-                        .foregroundStyle(skill.enabled ? BridgeTokens.fg1 : BridgeTokens.fg4)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Text(skill.platform.displayName.uppercased())
-                        .font(.system(size: 9, weight: .semibold))
-                        .tracking(0.6)
-                        .foregroundStyle(BridgeTokens.fg5)
-                }
+                Image(systemName: skill.platform.systemImage)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(skill.enabled ? BridgeTokens.fg3 : BridgeTokens.fg5)
+                    .frame(width: 18, alignment: .center)
+                Text(skill.name)
+                    .font(.system(size: 13))
+                    .foregroundStyle(skill.enabled ? BridgeTokens.fg1 : BridgeTokens.fg4)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Spacer(minLength: 4)
                 statusDot(for: skill)
             }
-            .padding(.horizontal, 10).padding(.vertical, 8)
+            .padding(.horizontal, 10).padding(.vertical, 9)
             .background(rowBackground(selected: isSel))
             .overlay(rowRim(selected: isSel))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(skill.name)
+        .accessibilityValue(statusDescription(for: skill))
+        .accessibilityAddTraits(isSel ? [.isButton, .isSelected] : .isButton)
     }
 
     private func fileListRow(_ fs: ParsedSkill) -> some View {
@@ -328,29 +379,37 @@ struct SkillsView: View {
             selection = .file(fs.path.path)
         } label: {
             HStack(spacing: 10) {
-                avatar(systemImage: "doc.text", big: false, dimmed: !enabled)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(fs.name)
-                        .font(.system(size: 13))
-                        .foregroundStyle(enabled ? BridgeTokens.fg1 : BridgeTokens.fg4)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Text(fs.isUserSource ? "USER FILE" : "BUNDLED")
-                        .font(.system(size: 9, weight: .semibold))
-                        .tracking(0.6)
-                        .foregroundStyle(BridgeTokens.fg5)
-                }
+                Image(systemName: "doc.text")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(enabled ? BridgeTokens.fg3 : BridgeTokens.fg5)
+                    .frame(width: 18, alignment: .center)
+                Text(fs.name)
+                    .font(.system(size: 13))
+                    .foregroundStyle(enabled ? BridgeTokens.fg1 : BridgeTokens.fg4)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Spacer(minLength: 4)
                 Circle()
                     .fill(enabled ? BridgeTokens.ok : BridgeTokens.fg5)
                     .frame(width: 7, height: 7)
             }
-            .padding(.horizontal, 10).padding(.vertical, 8)
+            .padding(.horizontal, 10).padding(.vertical, 9)
             .background(rowBackground(selected: isSel))
             .overlay(rowRim(selected: isSel))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(fs.name)
+        .accessibilityValue((fs.isUserSource ? "User file" : "Bundled") + ", " + (enabled ? "enabled" : "disabled"))
+        .accessibilityAddTraits(isSel ? [.isButton, .isSelected] : .isButton)
+    }
+
+    /// VoiceOver-readable summary of the 4-state status dot.
+    private func statusDescription(for skill: SkillsManager.Skill) -> String {
+        if !skill.enabled { return "Disabled" }
+        if skill.routingDiscoverable { return "Enabled, routing-discoverable" }
+        if skill.inCommandPalette { return "Enabled, palette only" }
+        return "Enabled"
     }
 
     /// Status dot: emerald when routing-discoverable, amber when palette-only,
@@ -381,8 +440,10 @@ struct SkillsView: View {
             .strokeBorder(selected ? BridgeTokens.hairlineStrong : Color.clear, lineWidth: 0.5)
     }
 
-    private func avatar(systemImage: String, big: Bool, dimmed: Bool) -> some View {
-        let dim: CGFloat = big ? 48 : 28
+    /// Glass avatar disc. PKT-skills: the detail header avatar is shrunk from
+    /// 48 → 32; the empty-state placeholder keeps a larger disc via `dim`.
+    private func avatar(systemImage: String, dim: CGFloat = 32, dimmed: Bool) -> some View {
+        let glyph: CGFloat = dim >= 44 ? 19 : (dim >= 30 ? 15 : 12)
         return ZStack {
             Circle()
                 .fill(
@@ -394,7 +455,7 @@ struct SkillsView: View {
                 .background(Circle().fill(BridgeTokens.chipFill))
             Circle().strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5)
             Image(systemName: systemImage)
-                .font(.system(size: big ? 19 : 12, weight: .medium))
+                .font(.system(size: glyph, weight: .medium))
                 .foregroundStyle(dimmed ? BridgeTokens.fg4 : BridgeTokens.fg1)
         }
         .frame(width: dim, height: dim)
@@ -435,7 +496,7 @@ struct SkillsView: View {
 
     private var detailPlaceholder: some View {
         VStack(spacing: 14) {
-            avatar(systemImage: "sparkles", big: true, dimmed: false)
+            avatar(systemImage: "sparkles", dim: 48, dimmed: false)
             Text(skillsManager.skills.isEmpty && fileSourceSkills.isEmpty
                  ? "No skills yet"
                  : "Select a skill")
@@ -553,7 +614,7 @@ struct SkillsView: View {
 
     private func detailHeader(_ skill: SkillsManager.Skill) -> some View {
         HStack(alignment: .top, spacing: 14) {
-            avatar(systemImage: skill.platform.systemImage, big: true, dimmed: !skill.enabled)
+            avatar(systemImage: skill.platform.systemImage, dim: 32, dimmed: !skill.enabled)
 
             VStack(alignment: .leading, spacing: 4) {
                 // name + rename
@@ -572,7 +633,7 @@ struct SkillsView: View {
                 } else {
                     HStack(spacing: 6) {
                         Text(skill.name)
-                            .font(.system(size: 21, weight: .semibold))
+                            .font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(BridgeTokens.fg1)
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -585,9 +646,12 @@ struct SkillsView: View {
                             Image(systemName: "pencil")
                                 .font(.system(size: 12))
                                 .foregroundStyle(BridgeTokens.fg4)
+                                .frame(width: 28, height: 28)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .help("Rename")
+                        .accessibilityLabel("Rename skill")
                     }
                 }
 
@@ -631,7 +695,7 @@ struct SkillsView: View {
                             .foregroundStyle(BridgeTokens.warn)
                     } else {
                         HStack(spacing: 4) {
-                            Image(systemName: "link").font(.system(size: 9))
+                            Image(systemName: "link").font(.system(size: 11))
                             Text("ID …\(String(skill.notionPageId.suffix(6)))")
                                 .font(.system(size: 11, design: .monospaced))
                         }
@@ -639,6 +703,7 @@ struct SkillsView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(skill.notionPageId.isEmpty ? "Set Notion page URL" : "Edit Notion page ID")
                 .help(skill.notionPageId.isEmpty
                       ? "Add a Notion page URL or UUID for this skill"
                       : "Click to edit the URL or UUID")
@@ -667,16 +732,16 @@ struct SkillsView: View {
         }
     }
 
+    /// PKT-skills: 8-cell grid → 4 non-redundant cells. Status / In-palette /
+    /// In-routing / trigger-counts are already shown by the toggles + chip
+    /// sections below, so they are dropped here; the synthesized Visibility
+    /// value is elevated as one of the four kept cells.
     private func metadataGrid(_ skill: SkillsManager.Skill) -> some View {
         let cells: [(String, String)] = [
             ("Platform", skill.platform.displayName),
-            ("Status", skill.enabled ? "Enabled" : "Disabled"),
             ("Visibility", visibilityLabel(skill)),
-            ("Triggers", "\(skill.triggerPhrases.count)"),
-            ("Anti-triggers", "\(skill.antiTriggerPhrases.count)"),
             ("Page ID", skill.notionPageId.isEmpty ? "—" : "…\(String(skill.notionPageId.suffix(6)))"),
-            ("In palette", skill.inCommandPalette ? "Yes" : "No"),
-            ("In routing", skill.routingDiscoverable ? "Yes" : "No"),
+            ("Source", "Notion-linked"),
         ]
         return LazyVGrid(
             columns: Array(repeating: GridItem(.flexible(), spacing: 9), count: 4),
@@ -691,14 +756,15 @@ struct SkillsView: View {
     private func metaCell(cap: String, val: String) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(cap.uppercased())
-                .font(.system(size: 9, weight: .semibold))
-                .tracking(0.8)
+                .font(.system(size: 10.5, weight: .semibold))
+                .tracking(0.6)
                 .foregroundStyle(BridgeTokens.fg4)
             Text(val)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(BridgeTokens.fg1)
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .help(val)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
@@ -727,10 +793,10 @@ struct SkillsView: View {
 
         // header
         HStack(alignment: .top, spacing: 14) {
-            avatar(systemImage: "doc.text", big: true, dimmed: !enabled)
+            avatar(systemImage: "doc.text", dim: 32, dimmed: !enabled)
             VStack(alignment: .leading, spacing: 4) {
                 Text(fs.name)
-                    .font(.system(size: 21, weight: .semibold))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(BridgeTokens.fg1)
                     .lineLimit(1)
                 BridgeBadge(fs.isUserSource ? "User file" : "Bundled",
@@ -756,7 +822,7 @@ struct SkillsView: View {
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("PATH")
-                        .font(.system(size: 9, weight: .semibold)).tracking(0.8)
+                        .font(.system(size: 10.5, weight: .semibold)).tracking(0.6)
                         .foregroundStyle(BridgeTokens.fg4)
                     Text(fs.displayPath)
                         .font(.system(size: 11, design: .monospaced))
@@ -827,10 +893,10 @@ struct SkillsView: View {
     private var addSkillForm: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
-                avatar(systemImage: "plus", big: true, dimmed: false)
+                avatar(systemImage: "plus", dim: 32, dimmed: false)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Add a skill")
-                        .font(.system(size: 21, weight: .semibold))
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(BridgeTokens.fg1)
                     Text("Add a Notion or Google Docs URL to auto-detect the platform, or enter a UUID manually.")
                         .font(.system(size: 12))
@@ -918,7 +984,7 @@ struct SkillsView: View {
     private func formField<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(label.uppercased())
-                .font(.system(size: 9, weight: .semibold)).tracking(0.8)
+                .font(.system(size: 10.5, weight: .semibold)).tracking(0.6)
                 .foregroundStyle(BridgeTokens.fg4)
             content()
         }
@@ -937,20 +1003,24 @@ struct SkillsView: View {
 
     // MARK: - Shared detail bits
 
+    /// PKT-skills: read-only trigger / anti-trigger tags. Flattened from the
+    /// interactive `.chip` pill (which signals tappable) to a low-radius well
+    /// so static routing data no longer reads as clickable.
     private func chipFlow(_ phrases: [String], anti: Bool) -> some View {
         FlowLayout(spacing: 6, lineSpacing: 6) {
             ForEach(phrases, id: \.self) { p in
                 Text(p)
                     .font(.system(size: 12))
                     .foregroundStyle(anti ? BridgeTokens.badText : BridgeTokens.fg2)
-                    .padding(.horizontal, 11)
-                    .frame(height: 26)
+                    .padding(.horizontal, 9)
+                    .frame(height: 24)
                     .background(
-                        (anti ? BridgeTokens.bad.opacity(0.10) : BridgeTokens.chipFill),
-                        in: Capsule())
-                    .overlay(Capsule().strokeBorder(
-                        anti ? BridgeTokens.bad.opacity(0.26) : BridgeTokens.hairline,
+                        (anti ? BridgeTokens.bad.opacity(0.10) : BridgeTokens.wellFill),
+                        in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(
+                        anti ? BridgeTokens.bad.opacity(0.22) : BridgeTokens.hairline,
                         lineWidth: 0.5))
+                    .accessibilityLabel((anti ? "Anti-trigger: " : "Trigger: ") + p)
             }
         }
     }
@@ -985,6 +1055,8 @@ struct SkillsView: View {
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .tint(BridgeTokens.accent)
+                .accessibilityLabel(title)
+                .accessibilityHint(sub)
         }
     }
 

@@ -1,14 +1,19 @@
-// CredentialsSection.swift — Premium Credentials vault (v3.7.6 Wave 4a).
-// Mirrors the locked design at design/.../the-bridge/Credentials.jsx +
-// credentials.css:
-//   - Keychain "vault" hero (key orb · title · sub · stats stored/attention · +)
+// CredentialsSection.swift — Security · Vault tab body (Settings-Redesign PKT-security).
+//
+// This is the **Vault** tab inside the merged Security page (posture header +
+// Vault | Gates). The bespoke `SecuritySection` composite owns the single
+// posture header (replacing this file's old orb-hero) and the tab bar; this
+// view is now hero-less and renders only the Vault contents:
 //   - ONE keychain-safety banner (the single place "Keychain" is named)
+//   - ONE add pill (the old hero orb `+` is dropped — one add per surface)
 //   - Stored-credential rows: branded service mark · name · masked secret +
 //     "added <date>" · real "used by" dep chips · LIVE status badge · actions
-//     (Copy · Rotate · Delete; Reconnect when revoked/invalid)
+//     (Copy · Rotate · Delete; Reconnect when revoked/invalid). Rows are keyed
+//     by stable service+account so reorder/delete animations don't break.
 //   - Header "Validate all" + per-row "Revalidate" affordance
 //   - Credential policy card with TWO real toggles (Touch-ID-to-reveal,
-//     auto-validate weekly), both persisted
+//     auto-validate weekly), both persisted (Touch-ID is mirrored read-only in
+//     the posture header chip)
 //
 // TRUTHFUL UI (CLAUDE.md standing orders): every value comes from real state —
 // rows from CredentialManager.list(), dates from CredentialEntry.createdAt,
@@ -52,13 +57,12 @@ public struct CredentialsSection: View {
 
     public var body: some View {
         ScrollView {
-            VStack(spacing: 14) {
-                hero
+            VStack(spacing: BridgeSpacing.sm) {
                 keychainBanner
                 storedCredentialsCard
                 policyCard
             }
-            .padding(18)
+            .padding(BridgeTokens.Space.paneH)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
@@ -89,80 +93,6 @@ public struct CredentialsSection: View {
                 Text("Delete \"\(target.service) / \(target.account)\"? This cannot be undone.")
             }
         }
-    }
-
-    // MARK: - Hero (keychain vault)
-
-    /// Real attention count: revoked + expiring + error (NOT unchecked/valid).
-    private var attentionCount: Int {
-        stored.filter { resolvedHealth(for: $0).health.needsAttention }.count
-    }
-
-    private var hero: some View {
-        BridgeGlassCard {
-            HStack(spacing: 16) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(BridgeTokens.accent.opacity(0.22))
-                        .frame(width: 50, height: 50)
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(BridgeTokens.accent.opacity(0.45), lineWidth: 1))
-                    Image(systemName: "key.horizontal.fill")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(BridgeTokens.accentLink)
-                }
-                .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Credentials")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(BridgeTokens.fg1)
-                        .accessibilityAddTraits(.isHeader)
-                    Text("Connect a service once. Bridge stores the secret in your macOS Keychain and lends it to every tool that needs it.")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(BridgeTokens.fg3)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 8)
-                HStack(spacing: 10) {
-                    statTile(value: "\(stored.count)", label: "stored", color: BridgeTokens.okText)
-                    statTile(
-                        value: "\(attentionCount)",
-                        label: "attention",
-                        color: attentionCount > 0 ? BridgeTokens.warnText : BridgeTokens.fg4
-                    )
-                }
-                addCredentialButton
-            }
-        }
-    }
-
-    private func statTile(value: String, label: String, color: Color) -> some View {
-        VStack(spacing: 3) {
-            Text(value)
-                .font(.system(size: 18, weight: .semibold, design: .monospaced))
-                .foregroundStyle(color)
-            Text(label.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(0.8)
-                .foregroundStyle(BridgeTokens.fg4)
-        }
-        .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
-    }
-
-    private var addCredentialButton: some View {
-        Button {
-            sheetMode = .add
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(BridgeTokens.fg2)
-                .frame(width: 30, height: 30)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("Add credential")
     }
 
     // MARK: - Keychain banner (the ONE place keychain is named)
@@ -213,9 +143,11 @@ public struct CredentialsSection: View {
                 if stored.isEmpty && !isLoading {
                     emptyState
                 } else {
-                    ForEach(Array(stored.enumerated()), id: \.offset) { idx, entry in
+                    // Key by a STABLE service+account id (not array offset) so
+                    // reorder/delete animations keep row identity intact.
+                    ForEach(stored, id: \.rowID) { entry in
                         credentialRow(entry)
-                        if idx < stored.count - 1 {
+                        if entry.rowID != stored.last?.rowID {
                             Rectangle()
                                 .fill(BridgeTokens.hairlineFaint)
                                 .frame(height: 0.5)
@@ -333,19 +265,19 @@ public struct CredentialsSection: View {
             if isBusy {
                 ProgressView().controlSize(.small)
                 Text("Checking…")
-                    .font(.system(size: 10.5))
+                    .font(.system(size: 11))
                     .foregroundStyle(BridgeTokens.fg5)
             } else if let checkedAt = record.checkedAt {
                 Text("checked \(Self.relative(checkedAt))")
-                    .font(.system(size: 10.5))
+                    .font(.system(size: 11))
                     .foregroundStyle(BridgeTokens.fg5)
             } else if isValidatable(entry) {
                 Text("not yet validated")
-                    .font(.system(size: 10.5))
+                    .font(.system(size: 11))
                     .foregroundStyle(BridgeTokens.fg5)
             } else {
                 Text("no automatic check for this service")
-                    .font(.system(size: 10.5))
+                    .font(.system(size: 11))
                     .foregroundStyle(BridgeTokens.fg5)
             }
             if isValidatable(entry) && !isBusy {
@@ -353,7 +285,7 @@ public struct CredentialsSection: View {
                     Task { await revalidate(entry) }
                 } label: {
                     Text("Revalidate")
-                        .font(.system(size: 10.5, weight: .medium))
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(BridgeTokens.infoText)
                 }
                 .buttonStyle(.plain)
@@ -365,6 +297,9 @@ public struct CredentialsSection: View {
 
     @ViewBuilder
     private func actions(for entry: CredentialEntry, record: CredentialHealthRecord) -> some View {
+        // Bind the row title (credential name) as each control's VoiceOver label
+        // so an icon button announces e.g. "Rotate Notion", not a bare glyph.
+        let name = displayName(for: entry)
         HStack(spacing: 4) {
             if record.health.requiresReconnect {
                 // Revoked / invalid → primary action becomes Reconnect (re-auth).
@@ -384,8 +319,9 @@ public struct CredentialsSection: View {
                 }
                 .buttonStyle(.plain)
                 .help("Re-authenticate this credential")
+                .accessibilityLabel("Reconnect \(name)")
             } else {
-                iconButton(systemImage: "arrow.triangle.2.circlepath", help: "Rotate") {
+                iconButton(systemImage: "arrow.triangle.2.circlepath", help: "Rotate", a11yLabel: "Rotate \(name)") {
                     requestReveal {
                         sheetMode = .replace(
                             service: entry.service, account: entry.account,
@@ -394,10 +330,10 @@ public struct CredentialsSection: View {
                     }
                 }
             }
-            iconButton(systemImage: "doc.on.doc", help: "Copy") {
+            iconButton(systemImage: "doc.on.doc", help: "Copy", a11yLabel: "Copy \(name)") {
                 requestReveal { copyToClipboard(entry: entry) }
             }
-            iconButton(systemImage: "trash", help: "Delete", danger: true) {
+            iconButton(systemImage: "trash", help: "Delete", danger: true, a11yLabel: "Delete \(name)") {
                 entryToDelete = (service: entry.service, account: entry.account)
                 showDeleteConfirmation = true
             }
@@ -409,6 +345,7 @@ public struct CredentialsSection: View {
         systemImage: String,
         help: String,
         danger: Bool = false,
+        a11yLabel: String? = nil,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -421,9 +358,11 @@ public struct CredentialsSection: View {
                     RoundedRectangle(cornerRadius: 7)
                         .strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5)
                 )
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(help)
+        .accessibilityLabel(a11yLabel ?? help)
     }
 
     /// Branded service mark (REUSES NotionMark / StripeMark for those services
@@ -434,7 +373,7 @@ public struct CredentialsSection: View {
         ZStack {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(BridgeTokens.chipFill)
-                .frame(width: 36, height: 36)
+                .frame(width: 34, height: 34)
                 .overlay(
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
@@ -448,6 +387,7 @@ public struct CredentialsSection: View {
             serviceMark(provider: provider, type: entry.type)
                 .frame(width: 17, height: 17)
         }
+        .frame(width: 34, height: 34)
         .accessibilityHidden(true)
     }
 
@@ -707,6 +647,14 @@ public struct CredentialsSection: View {
     static func relative(_ date: Date) -> String {
         relativeFormatter.localizedString(for: date, relativeTo: Date())
     }
+}
+
+// MARK: - Stable row identity
+
+extension CredentialEntry {
+    /// Stable identity for ForEach (service+account) so reorder/delete
+    /// animations keep row identity intact (replaces the fragile array offset).
+    var rowID: String { "\(service)\u{001F}\(account)" }
 }
 
 // MARK: - Sheet identity

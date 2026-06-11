@@ -17,6 +17,13 @@ public struct CommandsEditorView: View {
     @Binding private var commands: [CommandStore.Command]
     @Binding private var selectedSlug: String?
 
+    // Adaptive key-cap / tray sheen: the raised "keycap" + tray surfaces used
+    // raw Color.white/black literals that wash out on titanium. We compute the
+    // sheen + drop-shadow per color-scheme so both themes read correctly (DARK
+    // keeps the original values; LIGHT uses a subtler neutral lift).
+    @Environment(\.colorScheme) private var colorScheme
+    private var isDark: Bool { colorScheme == .dark }
+
     @State private var loadError: String? = nil
     @State private var saveMessage: String? = nil
     @State private var searchQuery: String = ""
@@ -137,7 +144,7 @@ public struct CommandsEditorView: View {
                 }
             }
             .padding(.horizontal, 10)
-            .frame(height: 42)
+            .frame(height: 36)
             .background(rowBackground(selected: selectedSlug == c.slug),
                         in: RoundedRectangle(cornerRadius: 9))
             .overlay(
@@ -290,18 +297,18 @@ public struct CommandsEditorView: View {
         } label: {
             Text(String(slot))
                 .font(.system(size: 17, weight: .semibold).monospacedDigit())
-                .foregroundStyle(isMine ? Color.white
+                .foregroundStyle(isMine ? BridgeTokens.onAccent
                                  : (isTaken ? BridgeTokens.fg5 : BridgeTokens.fg2))
                 .frame(maxWidth: .infinity)
-                .frame(height: 46)
+                .frame(height: 40)
                 .background(slotKeyBackground(isMine: isMine, isTaken: isTaken))
-                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .strokeBorder(isMine ? BridgeTokens.accent.opacity(0.7) : BridgeTokens.hairline,
                                       lineWidth: isMine ? 1 : 0.5)
                 )
-                .shadow(color: Color.black.opacity(isTaken ? 0 : 0.14), radius: 2, y: 1.5)
+                .shadow(color: Color.black.opacity(isTaken ? 0 : (isDark ? 0.14 : 0.08)), radius: 2, y: 1.5)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -315,6 +322,9 @@ public struct CommandsEditorView: View {
         if isMine {
             ZStack {
                 BridgeTokens.accent.opacity(0.9)
+                // Selected keycap sits on royal-blue in BOTH themes, so a white
+                // top sheen is correct here (it reads on the saturated accent,
+                // not on the page canvas) — keep it.
                 LinearGradient(colors: [Color.white.opacity(0.28), Color.white.opacity(0.05)],
                                startPoint: .top, endPoint: .bottom)
             }
@@ -323,8 +333,14 @@ public struct CommandsEditorView: View {
         } else {
             ZStack {
                 BridgeTokens.bgRaised
-                LinearGradient(colors: [Color.white.opacity(0.10), Color.clear],
-                               startPoint: .top, endPoint: .bottom)
+                // Resting keycap sits on the page canvas — a white sheen washes
+                // out on titanium, so adapt: white lift in dark, faint dark
+                // top-edge in light to still read as raised.
+                LinearGradient(
+                    colors: isDark
+                        ? [Color.white.opacity(0.10), Color.clear]
+                        : [Color.white.opacity(0.55), Color.clear],
+                    startPoint: .top, endPoint: .bottom)
             }
         }
     }
@@ -400,16 +416,29 @@ public struct CommandsEditorView: View {
     }
 
     private var trayCanvas: some ShapeStyle {
+        // Adaptive tray surface lift: white sheen in dark, a near-white lift in
+        // light so the tray reads as a raised float in both themes (the old
+        // white@.08/.02 vanished on titanium).
         LinearGradient(
-            colors: [Color.white.opacity(0.08), Color.white.opacity(0.02)],
+            colors: isDark
+                ? [Color.white.opacity(0.08), Color.white.opacity(0.02)]
+                : [Color.white.opacity(0.55), Color.white.opacity(0.20)],
             startPoint: .top, endPoint: .bottom
         )
     }
 
+    /// Tray bubble — ALL favorites render at full opacity (the real Command
+    /// Bridge shows every favorite, not just the selected one). The currently
+    /// EDITED command is marked with an accent ring rather than by dimming the
+    /// rest (fix U8).
     private func trayBubble(_ c: CommandStore.Command) -> some View {
         let isSelected = c.slug == selectedSlug
-        return iconBubble(c.icon, color: c.color, diameter: 46, glyph: 24)
-            .opacity(isSelected ? 1.0 : 0.42)
+        return iconBubble(c.icon, color: c.color, diameter: 40, glyph: 21)
+            .overlay(
+                Circle().strokeBorder(
+                    isSelected ? BridgeTokens.accent.opacity(0.85) : Color.clear,
+                    lineWidth: 2)
+            )
     }
 
     // MARK: - Empty state

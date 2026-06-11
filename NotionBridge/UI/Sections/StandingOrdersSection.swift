@@ -1,111 +1,388 @@
-// StandingOrdersSection.swift — Settings → Standing Orders pane.
-// PKT-9 UI v3.5 · v3.7.6 redesign: single-panel Preview/Edit toggle editor with
-// an "Open" → centered full-panel overlay, bottom-pinned token meter, gold token
-// stat, adaptive titanium/carbon chrome. Real save/load/compose/routing logic
-// preserved verbatim.
+// StandingOrdersSection.swift — Settings → Orders (doctrine sub-area + composite host).
+// PKT-9 UI v3.5 · v3.7.6 redesign · Settings-Redesign PKT-orders:
+//
+// This file now hosts BOTH the bespoke `OrdersSection` composite (the merged
+// Orders | Commands page that replaces the generic BridgeMergedSection) AND the
+// doctrine sub-area body `StandingOrdersBody`. The composite owns the persistent
+// draft/selection state and feeds it to the two tab bodies as bindings, so a tab
+// switch NEVER tears down an unsaved doctrine draft or the Commands selection.
+//
+// Real save/load/compose/routing logic preserved verbatim. The on-disk path
+// (standing-orders/), the MCP standing_orders_* tools, and the "Standing Orders /
+// constitution" wording all stay — only the section/tab label is "Orders".
 
 import SwiftUI
 import AppKit
 
-public struct StandingOrdersSection: View {
+// MARK: - Orders composite (bespoke merged page — replaces BridgeMergedSection)
+
+/// The merged **Orders** Settings page: one shared header, a segmented
+/// `Orders | Commands` strip (anchor-driven + `@AppStorage`-persisted), a
+/// per-tab meta row, and the selected tab body filling the remaining height.
+///
+/// Persistent state for BOTH tabs lives HERE so switching tabs preserves an
+/// unsaved doctrine draft and the Commands selection (the bodies are recreated
+/// on switch but read their state from these bindings).
+public struct OrdersSection: View {
+    /// Deep-link anchor (e.g. `commands`) selecting the starting tab.
+    let anchor: String?
+
+    private enum Tab: String, Hashable, CaseIterable { case orders, commands }
+
+    @AppStorage("settings.orders.selectedTab") private var storedTab: String = Tab.orders.rawValue
+    @State private var selection: Tab
+
+    // ── Doctrine (Orders tab) persistent state ──────────────────────────────
     @State private var snapshot: StandingOrdersStore.Snapshot? = nil
     @State private var draft: String = ""
     @State private var loadError: String? = nil
+    @State private var cachedRouting: [RoutingSkillSummary] = []
+    @State private var loaded = false
+
+    // ── Commands tab persistent state ───────────────────────────────────────
+    @AppStorage(BridgeDefaults.commandsPaletteEnabled) private var paletteEnabled: Bool = true
+    @State private var commands: [CommandStore.Command] = []
+    @State private var selectedSlug: String? = nil
+
+    public init(anchor: String?) {
+        self.anchor = anchor
+        let initial = OrdersSection.tab(for: anchor)
+            ?? Tab(rawValue: UserDefaults.standard.string(forKey: "settings.orders.selectedTab") ?? "")
+            ?? .orders
+        self._selection = State(initialValue: initial)
+    }
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            header
+                .padding(.horizontal, BridgeTokens.Space.paneH)
+                .padding(.top, BridgeTokens.Space.cardGap)
+            tabBar
+                .padding(.horizontal, BridgeTokens.Space.paneH)
+                .padding(.top, 12)
+                .padding(.bottom, 12)
+
+            Divider().background(BridgeTokens.hairlineFaint)
+
+            tabBody
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Color.clear)
+        .task {
+            await loadDoctrine()
+            await refreshCachedRouting()
+        }
+        .onChange(of: anchor) { _, newAnchor in
+            if let t = OrdersSection.tab(for: newAnchor) { setTab(t) }
+        }
+    }
+
+    // MARK: Header (shared section header — replaces both bespoke heroes)
+
+    private var header: some View {
+        let spec = BridgeSettingsHeaderPreset.spec(for: .orders)
+        return BridgeSettingsSectionHeader(
+            title: spec.title,
+            subtitle: "Doctrine your clients load at session start, and the commands you fire from the Command Bridge.",
+            systemImage: spec.systemImage,
+            tint: spec.tint
+        )
+    }
+
+    // MARK: Tab strip + per-tab meta row
+
+    private var tabBar: some View {
+        HStack(spacing: 12) {
+            segmented
+            Spacer(minLength: 12)
+            metaRow
+        }
+    }
+
+    /// Segmented `Orders | Commands` control — mirrors the doctrine mode toggle
+    /// visual at full-section scope, focus-ring suppressed to match the sidebar.
+    private var segmented: some View {
+        HStack(spacing: 0) {
+            tabButton("Orders", .orders)
+            tabButton("Commands", .commands)
+        }
+        .padding(2)
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Orders section tabs")
+    }
+
+    private func tabButton(_ label: String, _ value: Tab) -> some View {
+        let on = selection == value
+        return Button {
+            withAnimation(.easeInOut(duration: 0.16)) { setTab(value) }
+        } label: {
+            Text(label)
+                .font(.system(size: 12.5, weight: on ? .semibold : .regular))
+                .foregroundStyle(on ? BridgeTokens.fg1 : BridgeTokens.fg3)
+                .padding(.horizontal, 16).padding(.vertical, 6)
+                .frame(minHeight: 28)
+                .background {
+                    if on {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(BridgeTokens.accent.opacity(0.18))
+                            .overlay(RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(BridgeTokens.accent.opacity(0.45), lineWidth: 0.5))
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? [.isSelected] : [])
+    }
+
+    /// Per-tab meta: Orders → token + skills stats; Commands → command/favorite
+    /// counts + the labeled Command Bridge master switch (was the unlabeled hero
+    /// toggle).
+    @ViewBuilder private var metaRow: some View {
+        switch selection {
+        case .orders:
+            HStack(spacing: 8) {
+                metaStat(value: "\(snapshot?.estimatedTokens ?? 0)", label: "tokens", color: BridgeTokens.gold)
+                metaStat(value: "\(cachedRouting.count)", label: "skills", color: BridgeTokens.okText)
+            }
+        case .commands:
+            HStack(spacing: 10) {
+                metaStat(value: "\(commands.count)", label: "commands", color: BridgeTokens.accentLink)
+                metaStat(value: "\(favoriteCount)", label: "favorites", color: BridgeTokens.gold)
+                commandBridgeSwitch
+            }
+        }
+    }
+
+    private func metaStat(value: String, label: String, color: Color) -> some View {
+        HStack(spacing: 6) {
+            Text(value)
+                .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                .foregroundStyle(color)
+                .monospacedDigit()
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(BridgeTokens.fg4)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 5)
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: BridgeTokens.Radius.control))
+        .overlay(RoundedRectangle(cornerRadius: BridgeTokens.Radius.control).strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(value) \(label)")
+    }
+
+    /// The Command Bridge master switch — now a LABELED control (the hero
+    /// toggle had only a tooltip). Destructive-global affordance deserves a
+    /// visible label + a11y label.
+    private var commandBridgeSwitch: some View {
+        HStack(spacing: 8) {
+            Text("Command Bridge")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(BridgeTokens.fg2)
+            Toggle("", isOn: $paletteEnabled)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .onChange(of: paletteEnabled) { _, newValue in
+                    (NSApp.delegate as? AppDelegate)?.setCommandsPaletteEnabled(newValue)
+                }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 5)
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: BridgeTokens.Radius.control))
+        .overlay(RoundedRectangle(cornerRadius: BridgeTokens.Radius.control).strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+        .help("Enable the global Command Bridge popup hot-key.")
+        .accessibilityLabel("Command Bridge global hot-key")
+        .accessibilityValue(paletteEnabled ? "on" : "off")
+    }
+
+    // MARK: Tab body
+
+    @ViewBuilder private var tabBody: some View {
+        switch selection {
+        case .orders:
+            StandingOrdersBody(
+                snapshot: $snapshot,
+                draft: $draft,
+                loadError: $loadError,
+                cachedRouting: $cachedRouting
+            )
+        case .commands:
+            CommandsSection(
+                commands: $commands,
+                selectedSlug: $selectedSlug
+            )
+        }
+    }
+
+    // MARK: Tab selection
+
+    private func setTab(_ t: Tab) {
+        selection = t
+        storedTab = t.rawValue
+    }
+
+    /// Resolve a deep-link anchor to a tab (Commands aliases open Commands;
+    /// doctrine/standing/orders open Orders). Returns nil when the anchor names
+    /// neither (caller keeps the persisted/default tab).
+    private static func tab(for anchor: String?) -> Tab? {
+        guard let raw = anchor?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: ""),
+            !raw.isEmpty else { return nil }
+        switch raw {
+        case "commands", "command", "palette": return .commands
+        case "orders", "doctrine", "standing", "standingorders": return .orders
+        default: return nil
+        }
+    }
+
+    private var favoriteCount: Int { commands.filter { $0.keySlot != nil }.count }
+
+    // MARK: Doctrine load + routing (lifted from the old StandingOrdersSection)
+
+    private func loadDoctrine() async {
+        guard !loaded else { return }
+        do {
+            try StandingOrdersStore.shared.seedIfEmpty()
+            let s = try StandingOrdersStore.shared.read()
+            await MainActor.run {
+                self.snapshot = s
+                // Never blow away an in-flight draft the user already started.
+                if self.draft.isEmpty { self.draft = s.markdown }
+                self.loadError = nil
+                self.loaded = true
+            }
+        } catch {
+            await MainActor.run { self.loadError = error.localizedDescription }
+        }
+    }
+
+    private func refreshCachedRouting() async {
+        let manager = await MainActor.run { SkillsManager() }
+        let parents = await SkillsCacheReader.shared.readAll()
+        let parentByName: [String: CachedParent] = Dictionary(
+            uniqueKeysWithValues: parents.map { ($0.parentTitle.lowercased(), $0) }
+        )
+        let summaries: [RoutingSkillSummary] = await MainActor.run {
+            manager.routingSkillsForDiscovery.map { skill in
+                let cached = parentByName[skill.name.lowercased()]
+                let summary = skill.summary.isEmpty ? (cached?.parentTitle ?? skill.name) : skill.summary
+                return RoutingSkillSummary(
+                    slug: skill.name.lowercased().replacingOccurrences(of: " ", with: "-"),
+                    name: skill.name,
+                    domain: nil,
+                    maturity: nil,
+                    description: summary,
+                    triggers: skill.triggerPhrases,
+                    antiTriggers: skill.antiTriggerPhrases
+                )
+            }
+        }
+        await MainActor.run { self.cachedRouting = summaries }
+    }
+}
+
+// MARK: - Standing Orders body (doctrine tab — no hero)
+
+/// The doctrine editor body for the Orders tab. Reads its persistent
+/// draft/snapshot/routing state from the composite via bindings so a tab switch
+/// preserves an unsaved draft. The single-panel Preview/Edit toggle, the "Open"
+/// full overlay, and the bottom-pinned token meter are kept; the editor is now
+/// FLEXIBLE-height (min 240, grows) and a card-footer Save with a dirty dot is
+/// visible in BOTH modes. Delivery-audit + Templates collapse into one
+/// default-collapsed disclosure.
+struct StandingOrdersBody: View {
+    @Binding var snapshot: StandingOrdersStore.Snapshot?
+    @Binding var draft: String
+    @Binding var loadError: String?
+    @Binding var cachedRouting: [RoutingSkillSummary]
+
     @State private var saveMessage: String? = nil
     @State private var saveIsError: Bool = false
     @State private var selectedTemplate: StandingOrdersStore.Template? = nil
-    @State private var cachedRouting: [RoutingSkillSummary] = []
 
-    /// Which view the single editor panel shows (Preview = rendered markdown,
-    /// Edit = raw mono TextEditor). Defaults to Preview, mirroring the design.
     private enum PanelMode: Hashable { case preview, edit }
     @State private var mode: PanelMode = .preview
-
-    /// Whether the editor is expanded into the centered full-panel overlay.
     @State private var expanded = false
 
-    /// The live delivery telemetry the "Delivery audit" card reads. Observing
-    /// the @Observable singleton makes the card live-update as the transports
-    /// record handshakes / resource reads / reminders calls.
+    /// The live delivery telemetry the "Delivery audit" sub-section reads.
     @State private var deliveryLog = DeliveryLog.shared
-    /// Whether the debug timeline (recent raw events) is expanded.
     @State private var timelineExpanded = false
+    /// The merged Audit & Templates disclosure — default collapsed (~200px back).
+    @State private var auditTemplatesExpanded = false
 
     private let tokenBudget = 4000
 
-    public init() {}
+    /// Unsaved-edits flag — drives the dirty dot + Save enable.
+    private var isDirty: Bool { snapshot != nil && draft != snapshot?.markdown }
 
-    public var body: some View {
+    var body: some View {
         ScrollView {
-            VStack(spacing: 14) {
-                hero
+            VStack(spacing: 10) {
                 if let err = loadError { errorBanner(err) }
                 editorCard
-                deliveryAuditCard
-                templatesCard
+                auditTemplatesDisclosure
             }
-            .padding(20)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
         .overlay { expandOverlay }
-        .task {
-            await load()
-            await refreshCachedRouting()
-        }
     }
 
-    // MARK: - Hero
+    // MARK: Editor card (single-panel Preview/Edit toggle + footer Save)
 
-    private var hero: some View {
+    private var editorCard: some View {
         BridgeGlassCard {
-            HStack(spacing: 16) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(BridgeTokens.accent.opacity(0.22))
-                        .frame(width: 50, height: 50)
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(BridgeTokens.accent.opacity(0.45), lineWidth: 1))
-                    Image(systemName: "scroll")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(BridgeTokens.accentLink)
-                }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Standing Orders")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(BridgeTokens.fg1)
-                    Text("Your portable identity. Loaded by every MCP client at session start — edit once, applied everywhere.")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(BridgeTokens.fg3)
-                }
-                Spacer(minLength: 8)
+            VStack(alignment: .leading, spacing: 11) {
                 HStack(spacing: 10) {
-                    statTile(value: "\(snapshot?.estimatedTokens ?? 0)", label: "tokens", color: BridgeTokens.gold)
-                    statTile(value: "\(cachedRouting.count)", label: "skills", color: BridgeTokens.ok)
-                }
-                HStack(spacing: 4) {
+                    modeToggle
+                    Spacer()
                     soIconButton("doc.on.doc", help: "Copy composed preview") { copyComposed() }
                     soIconButton("arrow.counterclockwise", help: "Revert to saved") {
                         draft = snapshot?.markdown ?? ""; saveMessage = nil
                     }
+                    openButton
                 }
+                panelBody(expandedStyle: false)
+                    .frame(minHeight: 240, maxHeight: .infinity)
+                tokenMeter
+                saveFooter
             }
         }
     }
 
-    private func statTile(value: String, label: String, color: Color) -> some View {
-        VStack(spacing: 3) {
-            Text(value)
-                .font(.system(size: 18, weight: .semibold, design: .monospaced))
-                .foregroundStyle(color)
-            Text(label.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(0.8)
-                .foregroundStyle(BridgeTokens.fg4)
+    /// Card-footer Save — visible in BOTH Preview and Edit (the old layout hid
+    /// Save in Preview, silently stranding edits). A dirty dot signals unsaved
+    /// changes; the inline message reuses the existing save/error copy.
+    private var saveFooter: some View {
+        HStack(spacing: 8) {
+            if isDirty {
+                Circle()
+                    .fill(BridgeTokens.warnText)
+                    .frame(width: 7, height: 7)
+                    .help("Unsaved changes")
+                    .accessibilityLabel("Unsaved changes")
+            }
+            Button("Save") { Task { await save() } }
+                .buttonStyle(.borderedProminent).tint(BridgeTokens.accent)
+                .disabled(snapshot == nil || !isDirty)
+                .accessibilityLabel("Save standing orders")
+            if let msg = saveMessage {
+                Text(msg)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(saveIsError ? BridgeTokens.badText : BridgeTokens.okText)
+                    .lineLimit(1)
+            }
+            Spacer()
         }
-        .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
     }
 
     private func soIconButton(_ systemImage: String, help: String, action: @escaping () -> Void) -> some View {
@@ -118,30 +395,10 @@ public struct StandingOrdersSection: View {
         }
         .buttonStyle(.plain)
         .help(help)
+        .accessibilityLabel(help)
     }
 
-    // MARK: - Editor card (single-panel Preview/Edit toggle)
-    //
-    // One panel, switched by a segmented [Preview | Edit] toggle on the left of
-    // the header; an "Open" button on the right expands the panel into a
-    // centered full overlay. The token meter is pinned to the bottom of the card.
-
-    private var editorCard: some View {
-        BridgeGlassCard {
-            VStack(alignment: .leading, spacing: 11) {
-                HStack(spacing: 10) {
-                    modeToggle
-                    Spacer()
-                    openButton
-                }
-                panelBody(expandedStyle: false)
-                    .frame(height: 286)
-                tokenMeter
-            }
-        }
-    }
-
-    /// Segmented [Preview | Edit] control — mirrors the design's `.cm-tabs`.
+    /// Segmented [Preview | Edit] control.
     private var modeToggle: some View {
         HStack(spacing: 0) {
             modeTab("Preview", .preview)
@@ -161,6 +418,7 @@ public struct StandingOrdersSection: View {
                 .font(.system(size: 12, weight: on ? .semibold : .regular))
                 .foregroundStyle(on ? BridgeTokens.fg1 : BridgeTokens.fg3)
                 .padding(.horizontal, 14).padding(.vertical, 5)
+                .frame(minHeight: 28)
                 .background {
                     if on {
                         RoundedRectangle(cornerRadius: 6)
@@ -172,6 +430,7 @@ public struct StandingOrdersSection: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? [.isSelected] : [])
     }
 
     /// "Open" → expand the panel into the centered full overlay.
@@ -186,16 +445,16 @@ public struct StandingOrdersSection: View {
             }
             .foregroundStyle(BridgeTokens.fg2)
             .padding(.horizontal, 11).padding(.vertical, 5)
+            .frame(minHeight: 28)
             .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 7))
             .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help("Open full panel")
+        .accessibilityLabel("Open full panel")
     }
 
-    /// The single panel body — renders whichever mode is active. `expandedStyle`
-    /// drives the larger typography used inside the full overlay.
     @ViewBuilder private func panelBody(expandedStyle: Bool) -> some View {
         switch mode {
         case .preview:
@@ -208,25 +467,14 @@ public struct StandingOrdersSection: View {
             .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(BridgeTokens.accent.opacity(0.24), lineWidth: 0.5))
             .frame(maxHeight: .infinity)
         case .edit:
-            VStack(alignment: .leading, spacing: 9) {
-                TextEditor(text: $draft)
-                    .font(.system(size: expandedStyle ? 13 : 12, design: .monospaced))
-                    .scrollContentBackground(.hidden)
-                    .padding(expandedStyle ? 13 : 10)
-                    .background(BridgeTokens.wellFillDeep, in: RoundedRectangle(cornerRadius: 9))
-                    .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
-                    .frame(maxHeight: .infinity)
-                HStack(spacing: 8) {
-                    Button("Save") { Task { await save() } }
-                        .buttonStyle(.borderedProminent).tint(BridgeTokens.accent)
-                        .disabled(snapshot == nil || draft == snapshot?.markdown)
-                    if let msg = saveMessage {
-                        Text(msg).font(.caption)
-                            .foregroundStyle(saveIsError ? BridgeTokens.bad : BridgeTokens.ok)
-                    }
-                    Spacer()
-                }
-            }
+            TextEditor(text: $draft)
+                .font(.system(size: expandedStyle ? 13 : 12.5, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .padding(expandedStyle ? 13 : 10)
+                .background(BridgeTokens.wellFillDeep, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+                .frame(maxHeight: .infinity)
+                .accessibilityLabel("Standing orders markdown editor")
         }
     }
 
@@ -241,9 +489,6 @@ public struct StandingOrdersSection: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(BridgeTokens.chipFill)
-                    // green → branded blue (mid) → gold (90%) → red (last 10%),
-                    // gradient mapped across the FULL track so the fill reveals
-                    // the colour at its current position (mirrors the design CSS).
                     Capsule()
                         .fill(LinearGradient(
                             stops: [
@@ -263,19 +508,21 @@ public struct StandingOrdersSection: View {
         }
     }
 
-    /// The meter count text goes red once over the budget — matching the
-    /// design's `.so-meter-num.danger`.
     private func meterTextColor(_ frac: Double) -> Color {
         frac >= 0.9 ? BridgeTokens.badText : BridgeTokens.fg3
     }
 
-    // MARK: - Expand overlay (centered full panel)
+    // MARK: Expand overlay (centered full panel)
 
     @ViewBuilder private var expandOverlay: some View {
         if expanded {
             ZStack {
-                BridgeTokens.bgCanvas.opacity(0.6)
+                // Material scrim so the float reads as modal in light/titanium
+                // (the old flat bgCanvas@0.6 was a pale wash in light mode).
+                Rectangle()
+                    .fill(.ultraThinMaterial)
                     .ignoresSafeArea()
+                    .overlay(BridgeTokens.bgCanvas.opacity(0.35).ignoresSafeArea())
                     .onTapGesture { collapse() }
                 floatPanel
                     .padding(EdgeInsets(top: 24, leading: 24, bottom: 24, trailing: 24))
@@ -308,6 +555,7 @@ public struct StandingOrdersSection: View {
             VStack(alignment: .leading, spacing: 11) {
                 panelBody(expandedStyle: true)
                 tokenMeter
+                saveFooter
             }
             .padding(.horizontal, 18).padding(.vertical, 16)
         }
@@ -320,45 +568,69 @@ public struct StandingOrdersSection: View {
         withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) { expanded = false }
     }
 
-    // MARK: - Delivery audit · active sessions
-    //
-    // Truthful telemetry of what the server actually DID per connected client:
-    // the handshake we DELIVERED (token count + when), the bridge:// resource
-    // it FETCHED (when), and a freshness dot (emerald = the last read served the
-    // current composition hash, amber = the orders changed since). We never
-    // claim "Honored" — the server cannot observe whether a client obeyed the
-    // orders, only what we shipped and what was read back.
+    // MARK: Audit & Templates (one default-collapsed disclosure — ~200px back)
 
-    private var deliveryAuditCard: some View {
+    private var auditTemplatesDisclosure: some View {
+        BridgeGlassCard {
+            VStack(alignment: .leading, spacing: auditTemplatesExpanded ? 14 : 0) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) { auditTemplatesExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: auditTemplatesExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(BridgeTokens.fg3)
+                        BridgeCardLabel("Audit & Templates")
+                        Spacer()
+                        Text("\(deliveryLog.sessions().count) connected")
+                            .font(.system(size: 11))
+                            .foregroundStyle(BridgeTokens.fg4)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Audit and Templates")
+                .accessibilityValue(auditTemplatesExpanded ? "expanded" : "collapsed")
+
+                if auditTemplatesExpanded {
+                    deliveryAuditSection
+                    Divider().overlay(BridgeTokens.hairline)
+                    templatesSection
+                }
+            }
+        }
+    }
+
+    // MARK: Delivery audit · active sessions
+
+    private var deliveryAuditSection: some View {
         let sessions = deliveryLog.sessions()
         let events = deliveryLog.timeline(limit: 30)
-        return BridgeGlassCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    BridgeCardLabel("Delivery audit · active sessions")
-                    Spacer()
-                    Text("\(sessions.count) connected")
-                        .font(.system(size: 11)).foregroundStyle(BridgeTokens.fg4)
-                }
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                BridgeCardLabel("Delivery audit · active sessions")
+                Spacer()
+                Text("\(sessions.count) connected")
+                    .font(.system(size: 11)).foregroundStyle(BridgeTokens.fg4)
+            }
 
-                if sessions.isEmpty {
-                    Text("No clients connected.")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(BridgeTokens.fg4)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 6)
-                } else {
-                    VStack(spacing: 8) {
-                        ForEach(sessions) { row in
-                            sessionRow(row)
-                        }
+            if sessions.isEmpty {
+                Text("No clients connected.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(BridgeTokens.fg4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 6)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(sessions) { row in
+                        sessionRow(row)
                     }
                 }
+            }
 
-                if !events.isEmpty {
-                    Divider().overlay(BridgeTokens.hairline)
-                    debugTimeline(events)
-                }
+            if !events.isEmpty {
+                Divider().overlay(BridgeTokens.hairline)
+                debugTimeline(events)
             }
         }
     }
@@ -372,18 +644,12 @@ public struct StandingOrdersSection: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(BridgeTokens.fg1)
                 HStack(spacing: 6) {
-                    // Labels come from the pure DeliveryAuditLabels helper so the
-                    // truthful-label rules ("Fetched ✓" only on a real read;
-                    // never "Honored") are unit-tested without a render; the
-                    // clock-dependent relative-time suffix stays in the view.
                     if let delivered = DeliveryAuditLabels.deliveredLabel(for: row),
                        let at = row.deliveredAt {
                         Text("\(delivered) · \(relativeTime(at))")
                             .font(.system(size: 11.5))
                             .foregroundStyle(BridgeTokens.fg3)
                     }
-                    // Truthful: only show "Fetched ✓" when a read actually
-                    // happened. Absence is NOT rendered as "not honored".
                     if let fetched = DeliveryAuditLabels.fetchedLabel(for: row),
                        let readAt = row.lastResourceReadAt {
                         Text("\(fetched) · \(relativeTime(readAt))")
@@ -400,9 +666,6 @@ public struct StandingOrdersSection: View {
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
     }
 
-    /// Freshness dot: emerald when the last read served the CURRENT composition
-    /// hash, amber when the orders changed since the last read. No read yet →
-    /// a muted neutral dot (we say nothing about freshness we can't assert).
     @ViewBuilder private func freshnessDot(_ isFresh: Bool?) -> some View {
         let color: Color = {
             switch isFresh {
@@ -438,7 +701,7 @@ public struct StandingOrdersSection: View {
                         .font(.system(size: 11, weight: .semibold))
                         .tracking(0.4)
                     Text("\(events.count) recent")
-                        .font(.system(size: 10))
+                        .font(.system(size: 11))
                         .foregroundStyle(BridgeTokens.fg4)
                 }
                 .foregroundStyle(BridgeTokens.fg3)
@@ -451,7 +714,7 @@ public struct StandingOrdersSection: View {
                     ForEach(events) { ev in
                         HStack(spacing: 8) {
                             Text(eventKindLabel(ev.kind))
-                                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
                                 .foregroundStyle(eventKindColor(ev.kind))
                                 .frame(width: 86, alignment: .leading)
                             Text(ev.clientName ?? "—")
@@ -459,13 +722,14 @@ public struct StandingOrdersSection: View {
                                 .lineLimit(1)
                             if let uri = ev.uri {
                                 Text(uri)
-                                    .font(.system(size: 10, design: .monospaced))
+                                    .font(.system(size: 11, design: .monospaced))
                                     .foregroundStyle(BridgeTokens.fg4)
                                     .lineLimit(1)
+                                    .help(uri)
                             }
                             Spacer(minLength: 4)
                             Text(relativeTime(ev.at))
-                                .font(.system(size: 10)).foregroundStyle(BridgeTokens.fg4)
+                                .font(.system(size: 11)).foregroundStyle(BridgeTokens.fg4)
                                 .monospacedDigit()
                         }
                     }
@@ -494,7 +758,6 @@ public struct StandingOrdersSection: View {
         }
     }
 
-    /// Compact relative time ("just now", "3m ago", "2h ago", "1d ago").
     private func relativeTime(_ date: Date) -> String {
         let s = Int(Date().timeIntervalSince(date))
         if s < 5 { return "just now" }
@@ -506,39 +769,41 @@ public struct StandingOrdersSection: View {
         return "\(h / 24)d ago"
     }
 
-    // MARK: - Templates
+    // MARK: Templates
 
-    private var templatesCard: some View {
-        BridgeGlassCard {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    BridgeCardLabel("Templates")
-                    Spacer()
-                    Text("Replace the body with a starter — copy your current orders first to keep a record.")
-                        .font(.system(size: 11)).foregroundStyle(BridgeTokens.fg4)
-                }
-                HStack(spacing: 10) {
-                    ForEach(StandingOrdersStore.Template.allCases, id: \.self) { t in
-                        Button {
-                            draft = t.body; selectedTemplate = t
-                        } label: {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(t.label).font(.system(size: 13, weight: .semibold)).foregroundStyle(BridgeTokens.fg1)
-                                Text(snippet(of: t.body))
-                                    .font(.system(size: 11.5)).foregroundStyle(BridgeTokens.fg3)
-                                    .lineLimit(3)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(13)
-                            .background(
-                                selectedTemplate == t ? BridgeTokens.accent.opacity(0.07) : BridgeTokens.wellFill,
-                                in: RoundedRectangle(cornerRadius: 10))
-                            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(
-                                selectedTemplate == t ? BridgeTokens.accent.opacity(0.45) : BridgeTokens.hairline,
-                                lineWidth: 0.5))
+    private var templatesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                BridgeCardLabel("Templates")
+                Spacer()
+                Text("Replace the body with a starter — copy your current orders first to keep a record.")
+                    .font(.system(size: 11)).foregroundStyle(BridgeTokens.fg4)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help("Replace the body with a starter — copy your current orders first to keep a record.")
+            }
+            HStack(spacing: 10) {
+                ForEach(StandingOrdersStore.Template.allCases, id: \.self) { t in
+                    Button {
+                        draft = t.body; selectedTemplate = t
+                    } label: {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(t.label).font(.system(size: 13, weight: .semibold)).foregroundStyle(BridgeTokens.fg1)
+                            Text(snippet(of: t.body))
+                                .font(.system(size: 11.5)).foregroundStyle(BridgeTokens.fg3)
+                                .lineLimit(3)
                         }
-                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(13)
+                        .background(
+                            selectedTemplate == t ? BridgeTokens.accent.opacity(0.07) : BridgeTokens.wellFill,
+                            in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(
+                            selectedTemplate == t ? BridgeTokens.accent.opacity(0.45) : BridgeTokens.hairline,
+                            lineWidth: 0.5))
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Apply \(t.label) template")
                 }
             }
         }
@@ -547,18 +812,18 @@ public struct StandingOrdersSection: View {
     private func errorBanner(_ message: String) -> some View {
         BridgeGlassCard {
             HStack {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(BridgeTokens.bad)
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(BridgeTokens.badText)
                 Text(message).font(.callout)
                 Spacer()
             }
         }
     }
 
-    // MARK: - Logic (unchanged)
+    // MARK: Logic (unchanged)
 
     private var composedText: String {
         let body = draft.isEmpty ? (snapshot?.markdown ?? "") : draft
-        let composed = StandingOrdersComposer.compose(standingOrders: body, skills: cachedRoutingSkills())
+        let composed = StandingOrdersComposer.compose(standingOrders: body, skills: cachedRouting)
         return composed.text
     }
 
@@ -577,20 +842,6 @@ public struct StandingOrdersSection: View {
             .joined(separator: " ")
     }
 
-    private func load() async {
-        do {
-            try StandingOrdersStore.shared.seedIfEmpty()
-            let s = try StandingOrdersStore.shared.read()
-            await MainActor.run {
-                self.snapshot = s
-                self.draft = s.markdown
-                self.loadError = nil
-            }
-        } catch {
-            await MainActor.run { self.loadError = error.localizedDescription }
-        }
-    }
-
     private func save() async {
         guard let s = snapshot else { return }
         do {
@@ -606,32 +857,6 @@ public struct StandingOrdersSection: View {
                 self.saveIsError = true
             }
         }
-    }
-
-    private func cachedRoutingSkills() -> [RoutingSkillSummary] { cachedRouting }
-
-    private func refreshCachedRouting() async {
-        let manager = await MainActor.run { SkillsManager() }
-        let parents = await SkillsCacheReader.shared.readAll()
-        let parentByName: [String: CachedParent] = Dictionary(
-            uniqueKeysWithValues: parents.map { ($0.parentTitle.lowercased(), $0) }
-        )
-        let summaries: [RoutingSkillSummary] = await MainActor.run {
-            manager.routingSkillsForDiscovery.map { skill in
-                let cached = parentByName[skill.name.lowercased()]
-                let summary = skill.summary.isEmpty ? (cached?.parentTitle ?? skill.name) : skill.summary
-                return RoutingSkillSummary(
-                    slug: skill.name.lowercased().replacingOccurrences(of: " ", with: "-"),
-                    name: skill.name,
-                    domain: nil,
-                    maturity: nil,
-                    description: summary,
-                    triggers: skill.triggerPhrases,
-                    antiTriggers: skill.antiTriggerPhrases
-                )
-            }
-        }
-        await MainActor.run { self.cachedRouting = summaries }
     }
 }
 

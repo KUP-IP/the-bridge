@@ -175,14 +175,24 @@ public struct RemoteAccessSection: View {
         return host.isEmpty ? "this-mac" : host
     }
 
+    /// The blessed directory-connector URL — the cloud path users will paste once
+    /// remote access goes live. Surfaced as STATIC copyable reference text today
+    /// (PKT-810 not yet enabled on this build), NOT gated behind an unreachable
+    /// `.online` state. This fixes the dead-URL problem: the page previously only
+    /// built a URL from a tunnel hostname that is never set while
+    /// `cloudConfigured == false`, so the cloud half showed all chrome, no payload.
+    static let directoryConnectorURL = "https://mcp.kup.solutions/mcp"
+
+    @State private var copiedDirectoryURL = false
+
     public var body: some View {
         ScrollView {
-            VStack(spacing: 14) {
-                hero
+            VStack(spacing: BridgeTokens.Space.cardGap) {
                 statusCard
                 securityCard
             }
-            .padding(18)
+            .padding(BridgeTokens.Space.paneH)
+            .padding(.top, 4)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
@@ -209,74 +219,122 @@ public struct RemoteAccessSection: View {
         }
     }
 
-    // MARK: - Hero
-
-    private var hero: some View {
-        BridgeGlassCard {
-            HStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(NotionPalette.blue.opacity(0.20))
-                        .frame(width: 44, height: 44)
-                    Image(systemName: "cloud")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(NotionPalette.blue)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Remote Access")
-                        .font(.system(size: 18, weight: .semibold))
-                    Text("Reach this Mac from the cloud over a private tunnel. Every remote action is capability-scoped and passkey-gated — your credentials never leave this machine.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(BridgeTokens.fg3)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-            }
-        }
-    }
-
     // MARK: - Status
 
     private var statusCard: some View {
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 10) {
-                BridgeCardLabel("Bridge Cloud Access")
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Enable Remote Access")
-                            .font(.system(size: 13, weight: .medium))
-                        Text(cloudConfigured
-                             ? "Starts a cloudflared tunnel so cloud agents can delegate work to this Mac."
-                             : "Cloud sign-in isn't set up on this build yet — remote access is coming soon.")
-                            .font(.caption)
-                            .foregroundStyle(BridgeTokens.fg3)
-                            .fixedSize(horizontal: false, vertical: true)
+                BridgeCardLabel("Remote access")
+
+                // Blessed directory-connector URL as static copyable reference.
+                directoryURLRow
+
+                Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5)
+
+                // Model A: a "Coming soon" STATE PILL when cloud isn't
+                // configured (today's default) — never a dead switch. When the
+                // cloud tenant IS provisioned, the real Enable toggle + flow
+                // re-appear (preserving RemoteAccessToggleDecision).
+                if cloudConfigured {
+                    enableToggleRow
+                    statusRow
+                    if let flow, ProvisioningPresentation.make(for: flow.state).indicator != .none {
+                        ProvisioningProgressView(
+                            state: flow.state,
+                            mcpURL: connectedMCPURL,
+                            onRetry: { flow.start() }
+                        )
                     }
-                    Spacer()
-                    Toggle("", isOn: $cloudAccessEnabled)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .disabled(!cloudConfigured)
-                        .help(cloudConfigured ? "" : "Remote Access isn't available on this build yet.")
-                        .onChange(of: cloudAccessEnabled) { _, on in
-                            handleToggle(on)
-                        }
+                    addToClaudeRow
+                } else {
+                    comingSoonRow
                 }
-                Divider().background(BridgeTokens.hairline)
-                statusRow
-                if let flow, ProvisioningPresentation.make(for: flow.state).indicator != .none {
-                    ProvisioningProgressView(
-                        state: flow.state,
-                        mcpURL: connectedMCPURL,
-                        onRetry: { flow.start() }
-                    )
-                }
-                addToClaudeRow
             }
         }
         // Mirror the flow's terminal transitions back onto the toggle +
         // status dot (DoD: success → green/.connected; failure → revert).
         .onChange(of: flowStateKey) { _, _ in syncFromFlow() }
+    }
+
+    /// The blessed cloud path, copyable today even though sign-in is gated.
+    private var directoryURLRow: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "cloud")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(BridgeTokens.fg3)
+                .frame(width: 30, height: 30)
+                .background(BridgeTokens.chipFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+                .accessibilityHidden(true)
+            Text(Self.directoryConnectorURL)
+                .font(.system(size: 12.5, design: .monospaced))
+                .foregroundStyle(BridgeTokens.fg1)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+            Spacer(minLength: 8)
+            Button { copyDirectoryURL() } label: {
+                Image(systemName: copiedDirectoryURL ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(copiedDirectoryURL ? BridgeTokens.okText : BridgeTokens.fg3)
+                    .frame(width: 30, height: 30)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Copy directory-connector URL")
+            .accessibilityLabel(copiedDirectoryURL ? "Copied directory connector URL" : "Copy directory connector URL")
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+    }
+
+    /// Honest "coming soon" state — a pill + one explanatory line, no switch.
+    private var comingSoonRow: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 5) {
+                Circle().fill(BridgeTokens.warn).frame(width: 7, height: 7)
+                Text("Cloud access — Coming soon")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(BridgeTokens.warnText)
+            }
+            .padding(.horizontal, 9).padding(.vertical, 4)
+            .background(BridgeTokens.warn.opacity(0.14), in: Capsule())
+            .overlay(Capsule().strokeBorder(BridgeTokens.warn.opacity(0.28), lineWidth: 0.5))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Cloud access: coming soon")
+
+            Text("Cloud sign-in isn't enabled on this build yet. The URL above is the path you'll add once it ships.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(BridgeTokens.fg4)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Live Enable toggle — only shown when the cloud tenant is provisioned.
+    private var enableToggleRow: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Enable remote access")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(BridgeTokens.fg1)
+                Text("Starts a cloudflared tunnel so cloud agents can delegate work to this Mac.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(BridgeTokens.fg3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Toggle("Enable remote access", isOn: $cloudAccessEnabled)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .tint(BridgeTokens.accent)
+                .onChange(of: cloudAccessEnabled) { _, on in
+                    handleToggle(on)
+                }
+        }
     }
 
     // MARK: - Toggle wiring (WS-F)
@@ -443,11 +501,11 @@ public struct RemoteAccessSection: View {
     private var statusRow: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(cloudConfigured ? displayState.dotColor : BridgeTokens.fg3)
+                .fill(displayState.dotColor)
                 .frame(width: 8, height: 8)
-            Text(cloudConfigured ? displayState.rawValue : "Coming soon")
+            Text(displayState.rawValue)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(cloudConfigured ? displayState.dotColor : BridgeTokens.fg3)
+                .foregroundStyle(displayState.dotColor)
             Spacer()
             Text("Tunnel: cloudflared")
                 .font(.system(size: 11))
@@ -455,24 +513,37 @@ public struct RemoteAccessSection: View {
         }
     }
 
+    /// Copy the blessed directory-connector URL to the pasteboard with a brief
+    /// check-confirm (mirrors the loopback Copy affordance).
+    private func copyDirectoryURL() {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(Self.directoryConnectorURL, forType: .string)
+        copiedDirectoryURL = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_400_000_000)
+            copiedDirectoryURL = false
+        }
+    }
+
     // MARK: - Security posture
 
     private var securityCard: some View {
         BridgeGlassCard {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 9) {
                 BridgeCardLabel("How remote actions stay safe")
                 postureRow(
                     icon: "checkmark.shield",
                     title: "Capability-scoped",
                     detail: "The cloud can only ask this Mac to run one short-lived, pre-scoped operation at a time — never browse freely."
                 )
-                Divider().background(BridgeTokens.hairline)
+                Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5)
                 postureRow(
                     icon: "touchid",
                     title: "Passkey-gated",
                     detail: "Before any stored credential is used, this Mac requires a fresh local passkey (Touch ID) approval."
                 )
-                Divider().background(BridgeTokens.hairline)
+                Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5)
                 postureRow(
                     icon: "lock.fill",
                     title: "Credentials stay local",
@@ -484,28 +555,32 @@ public struct RemoteAccessSection: View {
 
     @ViewBuilder
     private func postureRow(icon: String, title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 11) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(BridgeTokens.chipFill)
-                    .frame(width: 34, height: 34)
+                    .frame(width: 30, height: 30)
                     .overlay(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
+                            .strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5)
                     )
                 Image(systemName: icon)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(NotionPalette.blue)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(NotionPalette.green)
             }
+            .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(BridgeTokens.fg1)
                 Text(detail)
-                    .font(.caption)
+                    .font(.system(size: 11.5))
                     .foregroundStyle(BridgeTokens.fg3)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title): \(detail)")
     }
 }

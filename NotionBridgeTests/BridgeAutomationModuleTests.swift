@@ -55,23 +55,23 @@ func runBridgeAutomationModuleTests() async {
 
     await test("resolveSection accepts the human raw value") {
         let s = await MainActor.run { BridgeSettingsAutomation.resolveSection("Standing Orders") }
-        try expect(s == .standingOrders, "expected .standingOrders, got \(String(describing: s))")
+        try expect(s == .orders, "expected .orders, got \(String(describing: s))")
     }
 
-    await test("resolveSection accepts the enum case name (case-insensitive)") {
-        let s1 = await MainActor.run { BridgeSettingsAutomation.resolveSection("standingOrders") }
-        try expect(s1 == .standingOrders, "case-name parse failed: \(String(describing: s1))")
-        let s2 = await MainActor.run { BridgeSettingsAutomation.resolveSection("CREDENTIALS") }
-        try expect(s2 == .credentials, "uppercase raw parse failed: \(String(describing: s2))")
-        let s3 = await MainActor.run { BridgeSettingsAutomation.resolveSection("remote access") }
-        try expect(s3 == .remoteAccess, "spaced raw parse failed: \(String(describing: s3))")
+    await test("resolveSection accepts the enum case name + display name (case-insensitive)") {
+        let s1 = await MainActor.run { BridgeSettingsAutomation.resolveSection("orders") }
+        try expect(s1 == .orders, "case-name parse failed: \(String(describing: s1))")
+        let s2 = await MainActor.run { BridgeSettingsAutomation.resolveSection("SECURITY") }
+        try expect(s2 == .security, "uppercase parse failed: \(String(describing: s2))")
+        let s3 = await MainActor.run { BridgeSettingsAutomation.resolveSection("Connection") }
+        try expect(s3 == .connection, "display-name parse failed: \(String(describing: s3))")
     }
 
     await test("resolveSection accepts common shorthands") {
         let perm = await MainActor.run { BridgeSettingsAutomation.resolveSection("privacy") }
-        try expect(perm == .permissions, "privacy→permissions failed: \(String(describing: perm))")
+        try expect(perm == .security, "privacy→security failed: \(String(describing: perm))")
         let cred = await MainActor.run { BridgeSettingsAutomation.resolveSection("vault") }
-        try expect(cred == .credentials, "vault→credentials failed: \(String(describing: cred))")
+        try expect(cred == .security, "vault→security failed: \(String(describing: cred))")
     }
 
     await test("resolveSection rejects unknown / empty input") {
@@ -81,10 +81,43 @@ func runBridgeAutomationModuleTests() async {
         try expect(empty == nil, "expected nil for empty section")
     }
 
+    // V2: the FIVE retired pre-redesign section names MUST keep resolving to
+    // their merged home + the tab anchor, so external automations driving
+    // bridge_settings_navigate don't silently break (market safety).
+    await test("resolveSection keeps back-compat aliases for the 5 retired sections") {
+        let cases: [(String, SettingsSection, String?)] = [
+            ("Credentials",   .security,   "vault"),
+            ("Permissions",   .security,   "gates"),
+            ("Remote Access", .connection, "remote"),
+            ("Connections",   .connection, "local"),
+            ("Commands",      .orders,     "commands"),
+        ]
+        for (name, expectedSection, expectedAnchor) in cases {
+            let resolved = await MainActor.run {
+                BridgeSettingsAutomation.resolveSectionWithAnchor(name)
+            }
+            try expect(resolved?.section == expectedSection,
+                       "legacy '\(name)' must resolve to \(expectedSection), got \(String(describing: resolved?.section))")
+            try expect(resolved?.anchor == expectedAnchor,
+                       "legacy '\(name)' must anchor '\(String(describing: expectedAnchor))', got \(String(describing: resolved?.anchor))")
+            // The plain resolver still returns the section (no anchor).
+            let plain = await MainActor.run { BridgeSettingsAutomation.resolveSection(name) }
+            try expect(plain == expectedSection,
+                       "plain resolveSection('\(name)') must still resolve to \(expectedSection)")
+        }
+    }
+
     await test("sectionRawValues covers all SettingsSection cases") {
         let raws = await MainActor.run { BridgeSettingsAutomation.sectionRawValues }
         let cases = SettingsSection.allCases.map(\.rawValue)
         try expect(Set(raws) == Set(cases), "sectionRawValues drifted from SettingsSection")
+    }
+
+    await test("sectionDisplayNames are the 7 friendly redesign labels") {
+        let names = await MainActor.run { BridgeSettingsAutomation.sectionDisplayNames }
+        try expect(names == ["Orders", "Skills", "Jobs", "Tools",
+                             "Security", "Connection", "Advanced"],
+                   "sectionDisplayNames drift: \(names)")
     }
 
     // MARK: - bridge_settings_navigate behaviour
