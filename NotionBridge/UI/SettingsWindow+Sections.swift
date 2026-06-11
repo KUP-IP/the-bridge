@@ -47,20 +47,14 @@ extension SettingsView {
     }
 
     /// Connection = Connections (Local clients) + Remote Access.
-    /// Anchor `remote` opens the Remote tab; everything else opens Local.
+    /// Bespoke single-surface composite (replaces the generic BridgeMergedSection
+    /// for this section): a live status strip on top (server-running dot · clients
+    /// count · last-seen · calls-today · Restart + Copy-loopback) over a single
+    /// scroll that racks Local clients above Remote access. The deep-link `anchor`
+    /// (`remote`/`cloud`) auto-scrolls to the Remote-access block.
     @ViewBuilder
     var connectionSection: some View {
-        BridgeMergedSection(
-            anchor: nav.anchor,
-            tabs: [
-                .init(id: "local",  title: "Local",  anchors: ["local", "connections", "connection"]) {
-                    AnyView(connectionsSection)
-                },
-                .init(id: "remote", title: "Remote", anchors: ["remote", "remoteaccess", "cloud"]) {
-                    AnyView(RemoteAccessSection())
-                },
-            ]
-        )
+        ConnectionSection(anchor: nav.anchor, statusBar: statusBar)
     }
 
     /// Factory Reset confirmation — skills defaults, env-based Notion token, restart guidance.
@@ -94,13 +88,7 @@ extension SettingsView {
     // MARK: - Connections (PKT-876 v3.6.1 — Liquid Glass reskin)
 
     var connectionsSection: some View {
-        ConnectionsSection(
-            statusBar: statusBar,
-            permissionManager: permissionManager,
-            launchAtLogin: $launchAtLogin,
-            launchAtLoginError: $launchAtLoginError,
-            isApplyingLaunchAtLoginChange: $isApplyingLaunchAtLoginChange
-        )
+        ConnectionsSection(statusBar: statusBar)
     }
 
     // MARK: - Tools
@@ -816,6 +804,202 @@ struct SecuritySection: View {
         case "gates", "gate", "permissions", "permission", "privacy", "access": return .gates
         case "vault", "credentials", "credential", "secrets": return .vault
         default: return nil
+        }
+    }
+}
+
+// MARK: - Connection composite (bespoke merged page — replaces BridgeMergedSection)
+
+/// The merged **Connection** Settings page: a live STATUS STRIP on top over a
+/// single scroll that racks **Local clients** above **Remote access** — mirroring
+/// how trust narrows (loopback is trusted and token-exempt; cloud is gated).
+///
+/// Status strip (left→right): one dot+label vocabulary driven by
+/// `statusBar.isServerRunning` (Online/Stopped) · connected-client count ·
+/// last-seen (most-recent client) · calls-today as muted meta · trailing icon
+/// actions Restart + Copy-loopback. It replaces BOTH legacy orb-heroes
+/// (ConnectionsSection + RemoteAccessSection), reclaiming ~120pt above the fold.
+///
+/// The two bodies (`ConnectionsSection` = Local, `RemoteAccessSection` = Remote)
+/// are hero-less; this composite owns the strip and the deep-link anchor →
+/// scroll-target resolution (`remote`/`cloud` scrolls to the Remote block).
+struct ConnectionSection: View {
+    let anchor: String?
+    let statusBar: StatusBarController
+
+    @State private var copiedLoopback = false
+
+    private static let remoteAnchorID = "connection.remote"
+
+    private var port: Int { ConfigManager.shared.ssePort }
+    private var loopbackURL: String { "http://127.0.0.1:\(port)/mcp" }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            statusStrip
+                .padding(.horizontal, BridgeTokens.Space.paneH)
+                .padding(.top, BridgeTokens.Space.cardGap)
+                .padding(.bottom, 10)
+
+            Divider().background(BridgeTokens.hairlineFaint)
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: BridgeTokens.Space.cardGap) {
+                        ConnectionsSection(statusBar: statusBar)
+                            .frame(maxWidth: .infinity)
+                            .fixedSize(horizontal: false, vertical: true)
+                        remoteHeader
+                            .id(Self.remoteAnchorID)
+                        RemoteAccessSection()
+                            .frame(maxWidth: .infinity)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.bottom, BridgeTokens.Space.paneV)
+                }
+                .onAppear { scrollIfRemote(proxy) }
+                .onChange(of: anchor) { _, _ in scrollIfRemote(proxy) }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Color.clear)
+    }
+
+    // MARK: Status strip
+
+    private var statusStrip: some View {
+        let running = statusBar.isServerRunning
+        let dot = running ? BridgeTokens.ok : BridgeTokens.bad
+        let label = running ? "Online" : "Stopped"
+        let labelText = running ? BridgeTokens.okText : BridgeTokens.badText
+        return BridgeGlassCard(cornerRadius: BridgeTokens.Radius.card, padding: 12) {
+            HStack(spacing: 12) {
+                HStack(spacing: 7) {
+                    Circle().fill(dot).frame(width: 9, height: 9)
+                    Text(label)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(labelText)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Server \(label)")
+
+                metaSeparator
+                clientsMeta
+                if let seen = lastSeen {
+                    metaSeparator
+                    Text(seen)
+                        .font(.system(size: 12))
+                        .foregroundStyle(BridgeTokens.fg4)
+                        .accessibilityLabel("Last seen \(seen)")
+                }
+                metaSeparator
+                Text("\(statusBar.totalToolCalls.formatted()) calls today")
+                    .font(.system(size: 12))
+                    .foregroundStyle(BridgeTokens.fg4)
+                    .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                HStack(spacing: 4) {
+                    iconButton("arrow.clockwise", help: "Restart Bridge", label: "Restart Bridge") {
+                        NSApp.restartBridge()
+                    }
+                    iconButton(copiedLoopback ? "checkmark" : "doc.on.doc",
+                               help: "Copy loopback endpoint",
+                               label: copiedLoopback ? "Copied loopback endpoint" : "Copy loopback endpoint",
+                               tint: copiedLoopback ? BridgeTokens.okText : BridgeTokens.fg3) {
+                        copyLoopback()
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var clientsMeta: some View {
+        let n = statusBar.connectedClients.count
+        return Text(n == 0 ? "No clients" : "\(n) client\(n == 1 ? "" : "s")")
+            .font(.system(size: 12, weight: n == 0 ? .regular : .medium))
+            .foregroundStyle(n == 0 ? BridgeTokens.fg4 : BridgeTokens.fg2)
+            .lineLimit(1)
+            .accessibilityLabel(n == 0 ? "No clients connected" : "\(n) clients connected")
+    }
+
+    private var metaSeparator: some View {
+        Text("·")
+            .font(.system(size: 12))
+            .foregroundStyle(BridgeTokens.fg5)
+            .accessibilityHidden(true)
+    }
+
+    /// Most-recent client connection as a relative "last-seen" string. Nil when
+    /// no clients are connected (the field is hidden in that case).
+    private var lastSeen: String? {
+        guard let latest = statusBar.connectedClients.map(\.connectedAt).max() else { return nil }
+        let interval = Date().timeIntervalSince(latest)
+        if interval < 60 { return "just now" }
+        if interval < 3600 { return "\(Int(interval / 60))m ago" }
+        if interval < 86400 { return "\(Int(interval / 3600))h ago" }
+        return "\(Int(interval / 86400))d ago"
+    }
+
+    private func iconButton(_ systemImage: String, help: String, label: String,
+                            tint: Color = BridgeTokens.fg3, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(tint)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(label)
+    }
+
+    private func copyLoopback() {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(loopbackURL, forType: .string)
+        copiedLoopback = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_400_000_000)
+            copiedLoopback = false
+        }
+    }
+
+    // MARK: Remote-access separator header (scroll target)
+
+    private var remoteHeader: some View {
+        HStack(spacing: 8) {
+            Text("REMOTE ACCESS")
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(1.2)
+                .foregroundStyle(BridgeTokens.fg4)
+            Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5)
+        }
+        .padding(.horizontal, BridgeTokens.Space.paneH)
+        .padding(.top, 4)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    // MARK: Deep-link anchor → scroll target
+
+    private func scrollIfRemote(_ proxy: ScrollViewProxy) {
+        guard let raw = anchor?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: ""),
+            !raw.isEmpty else { return }
+        switch raw {
+        case "remote", "remoteaccess", "cloud":
+            withAnimation(.easeInOut(duration: 0.25)) {
+                proxy.scrollTo(Self.remoteAnchorID, anchor: .top)
+            }
+        default:
+            break
         }
     }
 }
