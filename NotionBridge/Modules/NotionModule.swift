@@ -88,6 +88,24 @@ public enum NotionModule {
 
     public static let moduleName = "notion"
 
+    /// WS-3: Extract the EMOJI icon from a Notion page/database JSON object
+    /// (the parsed `getPage` response). Returns the emoji glyph (e.g. "✨")
+    /// for an `icon.type == "emoji"` icon, and `nil` otherwise.
+    ///
+    /// EMOJI ONLY by design: an `external`- or `file`-typed (uploaded image)
+    /// icon returns `nil` — image icons are explicitly out of scope this
+    /// pass (no image downloader). A missing/blank emoji also returns `nil`.
+    /// Pure + deterministic; safe to call on any decoded page JSON.
+    public static func extractIconEmoji(from pageJSON: [String: Any]) -> String? {
+        guard let icon = pageJSON["icon"] as? [String: Any],
+              (icon["type"] as? String) == "emoji",
+              let emoji = icon["emoji"] as? String else {
+            return nil
+        }
+        let trimmed = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     /// Register all NotionModule tools on the given router.
     /// Lazily initializes NotionClientRegistry on first tool invocation.
     public static func register(on router: ToolRouter) async {

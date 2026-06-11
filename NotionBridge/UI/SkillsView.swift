@@ -347,9 +347,7 @@ struct SkillsView: View {
             selection = .skill(skill.name)
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: skill.platform.systemImage)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(skill.enabled ? BridgeTokens.fg3 : BridgeTokens.fg5)
+                skillLeadingGlyph(for: skill)
                     .frame(width: 18, alignment: .center)
                 Text(skill.name)
                     .font(.system(size: 13))
@@ -368,6 +366,22 @@ struct SkillsView: View {
         .accessibilityLabel(skill.name)
         .accessibilityValue(statusDescription(for: skill))
         .accessibilityAddTraits(isSel ? [.isButton, .isSelected] : .isButton)
+    }
+
+    /// WS-3: leading glyph for a skill row. Renders the captured Notion
+    /// EMOJI icon when present; otherwise falls back to the platform
+    /// SF-Symbol glyph (the prior behavior). Both honor the enabled dimming.
+    @ViewBuilder
+    private func skillLeadingGlyph(for skill: SkillsManager.Skill) -> some View {
+        if let emoji = skill.icon, !emoji.isEmpty {
+            Text(emoji)
+                .font(.system(size: 13))
+                .opacity(skill.enabled ? 1.0 : 0.45)
+        } else {
+            Image(systemName: skill.platform.systemImage)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(skill.enabled ? BridgeTokens.fg3 : BridgeTokens.fg5)
+        }
     }
 
     private func fileListRow(_ fs: ParsedSkill) -> some View {
@@ -1176,7 +1190,10 @@ struct SkillsView: View {
         let trimmed = editingURL.trimmingCharacters(in: .whitespacesAndNewlines)
         switch NotionPageRef.normalizedPageId(from: trimmed) {
         case .success(let normalized):
-            skillsManager.updateSkillURL(named: skillName, newPageId: normalized)
+            if skillsManager.updateSkillURL(named: skillName, newPageId: normalized) {
+                // WS-3: the page binding changed — re-capture its emoji icon.
+                captureNotionIcon(forSkill: skillName, pageId: normalized)
+            }
             editingSkillName = nil
             urlValidationError = nil
         case .failure(let err):
@@ -1224,6 +1241,9 @@ struct SkillsView: View {
                     if storedURL != nil || platform != .notion {
                         skillsManager.updateSkillExtras(named: name, url: storedURL, platform: platform)
                     }
+                    // WS-3: capture the Notion page EMOJI icon in the
+                    // background (best-effort; never blocks the add).
+                    captureNotionIcon(forSkill: name, pageId: normalized)
                     finishAdd(selecting: name)
                 } else {
                     addError = "A skill with this name already exists."
@@ -1242,6 +1262,27 @@ struct SkillsView: View {
                 finishAdd(selecting: name)
             } else {
                 addError = "A skill with this name already exists."
+            }
+        }
+    }
+
+    /// WS-3: Best-effort background fetch of a Notion page's EMOJI icon,
+    /// stored on the skill when present. Runs detached (the NotionClient is
+    /// an actor and the network call must not block the add); failures are
+    /// swallowed (no token / offline / image-only icon all simply leave the
+    /// skill with its platform-glyph fallback). Hops back to the main actor
+    /// to mutate the @MainActor SkillsManager.
+    private func captureNotionIcon(forSkill name: String, pageId: String) {
+        let manager = skillsManager
+        Task.detached(priority: .utility) {
+            guard let client = try? NotionClient(),
+                  let data = try? await client.getPage(pageId: pageId),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let emoji = NotionModule.extractIconEmoji(from: json) else {
+                return
+            }
+            await MainActor.run {
+                _ = manager.setIcon(named: name, to: emoji)
             }
         }
     }

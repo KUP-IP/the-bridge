@@ -240,6 +240,14 @@ public final class SkillsManager {
         public var url: String?
         /// V2-SKILLS: Auto-detected platform from URL. Defaults to .notion for backward compat.
         public var platform: SkillPlatform
+        /// WS-3: The Notion page EMOJI icon (e.g. "✨"), captured when the
+        /// skill is added or refreshed against the live Notion page. EMOJI
+        /// ONLY this pass — external/uploaded IMAGE icons are explicitly out
+        /// of scope (a `.file`/`.external` Notion icon leaves this `nil`).
+        /// `nil` when the page has no emoji icon (or was never fetched); the
+        /// UI falls back to the platform glyph. Forwards-tolerant: an older
+        /// persisted blob without this key decodes as `nil`.
+        public var icon: String?
 
         /// Convenience: the Notion page id for a `.notion` source, or
         /// empty for `.file`. Many existing call sites only make sense for
@@ -262,7 +270,7 @@ public final class SkillsManager {
         enum CodingKeys: String, CodingKey {
             case name, source, notionPageId, enabled, visibility,
                  routingDiscoverable, inCommandPalette,
-                 summary, triggerPhrases, antiTriggerPhrases, url, platform
+                 summary, triggerPhrases, antiTriggerPhrases, url, platform, icon
         }
 
         /// Flag-based designated initializer — the new W4 SSOT shape.
@@ -276,7 +284,8 @@ public final class SkillsManager {
             triggerPhrases: [String] = [],
             antiTriggerPhrases: [String] = [],
             url: String? = nil,
-            platform: SkillPlatform = .notion
+            platform: SkillPlatform = .notion,
+            icon: String? = nil
         ) {
             self.name = name
             self.source = source
@@ -288,6 +297,7 @@ public final class SkillsManager {
             self.antiTriggerPhrases = SkillMetadataLimits.clampedPhraseList(antiTriggerPhrases)
             self.url = url
             self.platform = platform
+            self.icon = Skill.normalizedIcon(icon)
         }
 
         /// Back-compat convenience initializer — every pre-W4 caller that
@@ -302,7 +312,8 @@ public final class SkillsManager {
             triggerPhrases: [String] = [],
             antiTriggerPhrases: [String] = [],
             url: String? = nil,
-            platform: SkillPlatform = .notion
+            platform: SkillPlatform = .notion,
+            icon: String? = nil
         ) {
             let pair = visibility.asFlags
             self.init(
@@ -315,7 +326,8 @@ public final class SkillsManager {
                 triggerPhrases: triggerPhrases,
                 antiTriggerPhrases: antiTriggerPhrases,
                 url: url,
-                platform: platform
+                platform: platform,
+                icon: icon
             )
         }
 
@@ -386,6 +398,11 @@ public final class SkillsManager {
             // V2-SKILLS: Backward-compat — existing skills default to .notion, no URL
             url = try c.decodeIfPresent(String.self, forKey: .url)
             platform = try c.decodeIfPresent(SkillPlatform.self, forKey: .platform) ?? .notion
+            // WS-3: forwards-tolerant icon decode. Absent in every pre-WS-3
+            // persisted blob (and in SkillsModule's SkillConfig mirror, which
+            // never writes it) → `nil`. A blank/whitespace-only stored value
+            // normalizes to `nil` so the UI cleanly falls back to the glyph.
+            icon = Skill.normalizedIcon(try c.decodeIfPresent(String.self, forKey: .icon))
         }
 
         public func encode(to encoder: Encoder) throws {
@@ -414,7 +431,77 @@ public final class SkillsManager {
             try c.encode(antiTriggerPhrases, forKey: .antiTriggerPhrases)
             try c.encodeIfPresent(url, forKey: .url)
             try c.encode(platform, forKey: .platform)
+            // WS-3: only emit `icon` when present (keeps the wire format
+            // lean and identical to the legacy shape for emoji-less skills).
+            try c.encodeIfPresent(icon, forKey: .icon)
         }
+
+        // MARK: - WS-3 icon normalization
+
+        /// Normalize a raw icon string to the stored form: trims whitespace
+        /// and collapses an empty result to `nil`. Centralizes the
+        /// "blank == no icon" rule across the init / decode paths so the
+        /// model never carries a meaningless empty-string icon.
+        static func normalizedIcon(_ raw: String?) -> String? {
+            guard let t = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !t.isEmpty else { return nil }
+            return t
+        }
+
+        // MARK: - WS-4 derived type / source accessors (data only)
+
+        /// WS-4: simple, queryable source discriminator for filtering by
+        /// origin (file vs Notion) without pattern-matching the associated
+        /// `SkillSource` payload at every call site.
+        public var sourceKind: SkillSourceKind {
+            source.isFile ? .file : .notion
+        }
+
+        /// WS-4: derived classification for a FUTURE grouped/filtered UI.
+        ///
+        /// Heuristic (best available signal from the Skill alone — the
+        /// Notion `Specialist` parent→children relation is NOT carried on
+        /// an individual Skill, it lives only in the routing cache's
+        /// `CachedParent`, so true specialist membership is not knowable
+        /// here):
+        ///   • `.routing`   — `routingDiscoverable == true`. These are the
+        ///                    orchestrator / routing-discovery entries that
+        ///                    surface through `list_routing_skills`.
+        ///   • `.specialist`— NOT routing-discoverable but still curated for
+        ///                    discovery via the Commands palette
+        ///                    (`inCommandPalette == true`). This is the
+        ///                    closest single-Skill proxy for "a focused,
+        ///                    palette-pinned helper" until the parent
+        ///                    relation is plumbed onto the Skill.
+        ///   • `.plain`     — neither flag set (fetch-only by name).
+        public var skillKind: SkillKind {
+            if routingDiscoverable { return .routing }
+            if inCommandPalette { return .specialist }
+            return .plain
+        }
+    }
+
+    // MARK: - WS-4 supporting enums
+
+    /// WS-4: origin discriminator surfaced for filtering. Mirrors the two
+    /// `SkillSource` cases without exposing their associated values.
+    public enum SkillSourceKind: String, Sendable, CaseIterable, Equatable {
+        case notion
+        case file
+    }
+
+    /// WS-4: derived skill classification for a future grouped UI. Derived
+    /// from the visibility flags (see `Skill.skillKind` for the heuristic);
+    /// not a persisted field.
+    public enum SkillKind: String, Sendable, CaseIterable, Equatable {
+        /// Routing/orchestrator-style — `routingDiscoverable`.
+        case routing
+        /// Palette-curated helper — `inCommandPalette` (best-available
+        /// proxy for a specialist; true Notion-relation membership is not
+        /// knowable from a single Skill).
+        case specialist
+        /// Fetch-only by name — neither flag set.
+        case plain
     }
 
     private static let defaultsKey = BridgeDefaults.skills
@@ -659,6 +746,34 @@ public final class SkillsManager {
         skills[idx].antiTriggerPhrases = SkillMetadataLimits.clampedPhraseList(antiTriggerPhrases)
         save()
         return true
+    }
+
+    /// WS-3: Set (or clear) a skill's captured Notion emoji icon. Pass `nil`
+    /// or a blank string to clear it (falls back to the platform glyph in
+    /// the UI). Returns false if the skill is not found. This is the write
+    /// half of the icon-capture path: the caller fetches the Notion page,
+    /// extracts the emoji (see `NotionModule.extractIconEmoji`), and stores
+    /// it here on add / refresh.
+    @discardableResult
+    public func setIcon(named name: String, to icon: String?) -> Bool {
+        guard let idx = skills.firstIndex(where: { $0.name.lowercased() == name.lowercased() }) else {
+            return false
+        }
+        skills[idx].icon = Skill.normalizedIcon(icon)
+        save()
+        return true
+    }
+
+    // MARK: - WS-4 queryable filters (data only)
+
+    /// WS-4: skills filtered by origin (file vs Notion).
+    public func skills(ofSource kind: SkillSourceKind) -> [Skill] {
+        skills.filter { $0.sourceKind == kind }
+    }
+
+    /// WS-4: skills filtered by derived classification (routing/specialist/plain).
+    public func skills(ofKind kind: SkillKind) -> [Skill] {
+        skills.filter { $0.skillKind == kind }
     }
 
     /// Bulk add multiple skills at once. Skips duplicates.
