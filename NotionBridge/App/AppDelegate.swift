@@ -895,10 +895,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// "⚠ Shortcut unavailable"). False when the palette is off or the
     /// Carbon registration failed (the combo is owned by another app).
     public var isCommandsPaletteHotkeyRegistered: Bool {
-        // Reads the single observable source of truth (kept in lock-step
-        // with the live `commandBridge` via the publish* calls). Public
-        // signature unchanged for existing call sites.
-        commandsController.isRegistered
+        // Read the LIVE `commandBridge` (the Carbon truth) first; fall back to
+        // the observable mirror only when the palette isn't built. The mirror
+        // can be transiently reset by a registrar-less `setEnabled`, so the box
+        // is authoritative for "is the hot-key actually live right now".
+        commandBridge?.isRegistered ?? commandsController.isRegistered
     }
 
     /// The combo the Settings recorder should display. The live
@@ -910,6 +911,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // the persisted value, updated on every publish/rebind). Public
         // signature unchanged for existing call sites.
         commandsController.hotkeyConfig
+    }
+
+    /// The structured outcome of the last Carbon registration attempt, read
+    /// from the LIVE `commandBridge` (the Carbon truth) so the Settings status
+    /// row never shows "⚠ Shortcut not active" while the hot-key is in fact
+    /// registered. The observable mirror can be transiently reset to
+    /// `.unattempted` by a registrar-less `setEnabled`; the box is the truth.
+    /// Falls back to the controller's published value when the palette is off.
+    public var commandsLastRegisterStatus: HotkeyRegisterStatus {
+        commandBridge?.lastRegisterStatus ?? commandsController.lastRegisterStatus
     }
 
     /// Live enable/disable entrypoint for the Settings master toggle.

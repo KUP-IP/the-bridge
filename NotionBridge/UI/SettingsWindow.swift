@@ -299,7 +299,11 @@ public struct SettingsView: View {
     /// combo collision vs a plumbing failure vs disabled). Nil controller
     /// degrades to `.unattempted` (generic mapping, prior behaviour).
     var commandsLastRegisterStatus: HotkeyRegisterStatus {
-        commandsController?.lastRegisterStatus ?? .unattempted
+        // Trust the live box (via AppDelegate) for the value; observe the
+        // controller for reactivity. The mirror can be transiently reset to
+        // .unattempted while the hot-key is in fact registered.
+        let observed = commandsController?.lastRegisterStatus
+        return (NSApp.delegate as? AppDelegate)?.commandsLastRegisterStatus ?? observed ?? .unattempted
     }
 
     /// Change B: when true the recorder control is in capture mode —
