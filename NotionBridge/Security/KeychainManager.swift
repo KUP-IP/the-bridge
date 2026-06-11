@@ -3,18 +3,35 @@
 // V3-QUALITY B1: Secure token storage via macOS Keychain (SecItem API).
 // Thread-safe — all operations are synchronous via Security framework.
 // UEP-003 K2: In-process token cache to reduce Keychain prompts on unsigned rebuilds.
+//
+// WS-5c: The canonical Keychain service is `kup.solutions.notion-bridge`
+// (matches the app's bundle id). A legacy service `com.notionbridge` is still
+// READ (fallback) and MIRROR-WRITTEN so the rename is fully migration-safe and
+// NON-DESTRUCTIVE: an item written under the old service is never lost, and the
+// vault's infra-key surfacing in CredentialManager (which filters on the old
+// service string and must not be touched) keeps working unchanged.
 
 import Foundation
 import Security
 
 /// Provides CRUD operations for storing sensitive values in the macOS Keychain.
-/// Uses kSecClassGenericPassword with service "com.notionbridge".
+/// Uses kSecClassGenericPassword with the canonical service
+/// "kup.solutions.notion-bridge", mirror-writing the legacy "com.notionbridge"
+/// service for migration safety.
 public final class KeychainManager: @unchecked Sendable {
 
     public static let shared = KeychainManager()
 
-    /// Keychain service identifier.
-    private static let service = "com.notionbridge"
+    /// Canonical Keychain service identifier (matches the app bundle id).
+    /// WS-5c rename: was `com.notionbridge`.
+    public static let service = "kup.solutions.notion-bridge"
+
+    /// Legacy Keychain service identifier. Pre-WS-5c builds stored infra keys
+    /// here, and `CredentialManager` (which we must NOT modify) still surfaces
+    /// infra keys in the vault by filtering on this exact string. We READ it as
+    /// a fallback and MIRROR-WRITE it so the old copy always exists — a harmless
+    /// duplicate is far better than a lost credential.
+    public static let legacyService = "com.notionbridge"
 
     /// In-process cache to avoid repeated Keychain prompts on unsigned rebuilds.
     /// Lifetime: one app launch. Invalidated on save/update/delete.
@@ -29,6 +46,24 @@ public final class KeychainManager: @unchecked Sendable {
     /// return safe no-ops to avoid password prompt storms from mismatched code signatures.
     private var isAppBundle: Bool {
         Bundle.main.bundleURL.pathExtension == "app"
+    }
+
+    /// Test-only escape hatch to exercise real Keychain CRUD (including the
+    /// WS-5c old→new migration round-trip) in the standalone test executable,
+    /// which is NOT an .app bundle. Mirrors CredentialManager's pattern. OFF by
+    /// default so the normal suite never touches the real Keychain.
+    private var keychainOpsEnabledInNonAppTests: Bool {
+        UserDefaults.standard.bool(forKey: Self.enableKeychainOpsOutsideAppKey)
+    }
+
+    /// UserDefaults flag the migration test sets to enable real Keychain CRUD
+    /// in the non-.app test executable.
+    public static let enableKeychainOpsOutsideAppKey =
+        "com.notionbridge.tests.enableKeychainOpsOutsideApp"
+
+    /// Whether real Keychain operations are permitted in this process.
+    private var keychainEnabled: Bool {
+        isAppBundle || keychainOpsEnabledInNonAppTests
     }
 
     // MARK: - Cache Helpers
@@ -67,40 +102,99 @@ public final class KeychainManager: @unchecked Sendable {
         negativeCacheKeys.removeAll()
     }
 
+    // MARK: - Low-level service-scoped primitives (WS-5c)
+
+    /// Raw read of one account under an explicit service. No cache, no gate.
+    private func rawRead(key: String, service: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let value = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return value
+    }
+
+    /// Raw write (add-or-replace) of one account under an explicit service.
+    /// Returns true on success. No cache, no gate.
+    @discardableResult
+    private func rawWrite(key: String, value: String, service: String) -> Bool {
+        guard let data = value.data(using: .utf8) else { return false }
+        // Delete existing first (SecItemAdd fails on duplicate).
+        let deleteQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key
+        ]
+        SecItemDelete(deleteQuery as CFDictionary)
+
+        let addQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key,
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            kSecAttrLabel as String: "Notion Bridge"
+        ]
+        let status = SecItemAdd(addQuery as CFDictionary, nil)
+        if status != errSecSuccess {
+            print("[KeychainManager] ⚠️ Save failed for '\(key)' (service=\(service)): OSStatus \(status)")
+        }
+        return status == errSecSuccess
+    }
+
+    /// Raw delete of one account under an explicit service. Returns true if
+    /// deleted or not found.
+    @discardableResult
+    private func rawDelete(key: String, service: String) -> Bool {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key
+        ]
+        let status = SecItemDelete(query as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
+    }
 
     // MARK: - Legacy Fallback Read
 
     /// Read a value from the Keychain using the key itself as the service name.
     /// This supports pre-KeychainManager entries where the service was the key name
-    /// rather than the app's bundle service (com.notionbridge).
+    /// rather than the app's bundle service.
     /// If found, migrates the entry to the current service and deletes the legacy entry.
-    public func readLegacy(service legacyService: String) -> String? {
-        guard isAppBundle else { return nil }
+    public func readLegacy(service legacyServiceName: String) -> String? {
+        guard keychainEnabled else { return nil }
 
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: legacyService,
+            kSecAttrService as String: legacyServiceName,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
-
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-
         guard status == errSecSuccess,
               let data = result as? Data,
               let value = String(data: data, encoding: .utf8) else {
             return nil
         }
 
-        // Migrate: save under current service, delete legacy entry
-        if save(key: legacyService, value: value) {
+        // Migrate: save under current service, delete legacy entry.
+        if save(key: legacyServiceName, value: value) {
             let deleteQuery: [String: Any] = [
                 kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: legacyService
+                kSecAttrService as String: legacyServiceName
             ]
             SecItemDelete(deleteQuery as CFDictionary)
-            print("[KeychainManager] Migrated legacy entry '\(legacyService)' to com.notionbridge service")
+            print("[KeychainManager] Migrated legacy entry '\(legacyServiceName)' to \(Self.service) service")
         }
 
         return value
@@ -109,127 +203,108 @@ public final class KeychainManager: @unchecked Sendable {
     // MARK: - CRUD Operations
 
     /// Save a value to the Keychain. Overwrites if key already exists.
+    ///
+    /// WS-5c: writes the canonical service AND mirror-writes the legacy service
+    /// so (a) the old-service copy always exists (zero loss / non-destructive)
+    /// and (b) CredentialManager's vault surfacing — which filters on the legacy
+    /// service and must not be modified — keeps working. Success is reported
+    /// when the CANONICAL write succeeds; the mirror is best-effort.
     @discardableResult
     public func save(key: String, value: String) -> Bool {
-        guard isAppBundle else { return true }
-        guard let data = value.data(using: .utf8) else { return false }
+        guard keychainEnabled else { return true }
+        guard value.data(using: .utf8) != nil else { return false }
 
-        // Delete existing item first (SecItemAdd fails if duplicate)
-        delete(key: key)
+        let ok = rawWrite(key: key, value: value, service: Self.service)
+        // Best-effort mirror to the legacy service (non-destructive duplicate).
+        _ = rawWrite(key: key, value: value, service: Self.legacyService)
 
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
-            kSecAttrAccount as String: key,
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-            kSecAttrLabel as String: "Notion Bridge"
-        ]
-
-        let status = SecItemAdd(query as CFDictionary, nil)
-        if status != errSecSuccess {
-            print("[KeychainManager] ⚠️ Save failed for '\(key)': OSStatus \(status)")
-        } else {
+        if ok {
             setCacheValue(value, for: key)
         }
-        return status == errSecSuccess
+        return ok
     }
 
     /// Read a value from the Keychain. Returns nil if not found.
     /// UEP-003 K2: Checks in-process cache first to avoid repeated Keychain prompts.
+    ///
+    /// WS-5c: reads the canonical service first; on a miss, falls back to the
+    /// legacy service and transparently migrates (copy old→new) WITHOUT deleting
+    /// the old copy — so a credential written before the rename is never lost.
     public func read(key: String) -> String? {
-        guard isAppBundle else { return nil }
+        guard keychainEnabled else { return nil }
 
         // Check in-process cache first
         if let cached = cachedValue(for: key) {
             return cached
         }
 
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
-            kSecAttrAccount as String: key,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let value = String(data: data, encoding: .utf8) else {
-            setCacheValue(nil, for: key)  // Cache the miss
-            return nil
+        // Canonical service first.
+        if let value = rawRead(key: key, service: Self.service) {
+            setCacheValue(value, for: key)
+            return value
         }
 
-        setCacheValue(value, for: key)
-        return value
+        // Migration fallback: legacy service. Copy forward to the canonical
+        // service (non-destructive — leave the legacy copy in place).
+        if let legacyValue = rawRead(key: key, service: Self.legacyService) {
+            _ = rawWrite(key: key, value: legacyValue, service: Self.service)
+            setCacheValue(legacyValue, for: key)
+            print("[KeychainManager] Migrated '\(key)' from legacy service to \(Self.service) (legacy copy retained)")
+            return legacyValue
+        }
+
+        setCacheValue(nil, for: key)  // Cache the miss
+        return nil
     }
 
     /// Delete a value from the Keychain. Returns true if deleted or not found.
+    ///
+    /// WS-5c: deletes from BOTH services so clearing a token fully clears it
+    /// (no stale legacy copy left readable).
     @discardableResult
     public func delete(key: String) -> Bool {
-        guard isAppBundle else { return true }
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
-            kSecAttrAccount as String: key
-        ]
+        guard keychainEnabled else { return true }
 
-        let status = SecItemDelete(query as CFDictionary)
-        if status == errSecSuccess || status == errSecItemNotFound {
+        let newOK = rawDelete(key: key, service: Self.service)
+        let legacyOK = rawDelete(key: key, service: Self.legacyService)
+        if newOK && legacyOK {
             invalidateCache(for: key)
         }
-        return status == errSecSuccess || status == errSecItemNotFound
+        return newOK && legacyOK
     }
 
     /// Check if a key exists in the Keychain.
     /// UEP-003 K2: Uses cache to avoid Keychain prompt for already-read keys.
     public func exists(key: String) -> Bool {
-        guard isAppBundle else { return false }
+        guard keychainEnabled else { return false }
 
         // Check cache first — if we have a positive cache hit, key exists
         if let cached = cachedValue(for: key) {
             return cached != nil
         }
 
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
-            kSecAttrAccount as String: key,
-            kSecReturnData as String: false
-        ]
-
-        let status = SecItemCopyMatching(query as CFDictionary, nil)
-        return status == errSecSuccess
+        for service in [Self.service, Self.legacyService] {
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: key,
+                kSecReturnData as String: false
+            ]
+            if SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess {
+                return true
+            }
+        }
+        return false
     }
 
     /// Update an existing value in the Keychain. Falls back to save if not found.
+    ///
+    /// WS-5c: routed through `save` so both services stay in sync.
     @discardableResult
     public func update(key: String, value: String) -> Bool {
-        guard isAppBundle else { return true }
-        guard let data = value.data(using: .utf8) else { return false }
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
-            kSecAttrAccount as String: key
-        ]
-
-        let attributes: [String: Any] = [
-            kSecValueData as String: data,
-            kSecAttrLabel as String: "Notion Bridge"
-        ]
-
-        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-        if status == errSecItemNotFound {
-            return save(key: key, value: value)
-        }
-        if status == errSecSuccess {
-            setCacheValue(value, for: key)
-        }
-        return status == errSecSuccess
+        guard keychainEnabled else { return true }
+        guard value.data(using: .utf8) != nil else { return false }
+        return save(key: key, value: value)
     }
 
     // MARK: - Convenience
@@ -267,40 +342,48 @@ public final class KeychainManager: @unchecked Sendable {
         delete(key: Key.cloudToken)
     }
 
-    /// List all keys stored under this service.
+    /// List all keys stored under either service (canonical ∪ legacy).
     public func allKeys() -> [String] {
-        guard isAppBundle else { return [] }
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service,
-            kSecReturnAttributes as String: true,
-            kSecMatchLimit as String: kSecMatchLimitAll
-        ]
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-        guard status == errSecSuccess,
-              let items = result as? [[String: Any]] else {
-            return []
+        guard keychainEnabled else { return [] }
+        var keys = Set<String>()
+        for service in [Self.service, Self.legacyService] {
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecReturnAttributes as String: true,
+                kSecMatchLimit as String: kSecMatchLimitAll
+            ]
+            var result: AnyObject?
+            let status = SecItemCopyMatching(query as CFDictionary, &result)
+            guard status == errSecSuccess,
+                  let items = result as? [[String: Any]] else {
+                continue
+            }
+            for item in items {
+                if let account = item[kSecAttrAccount as String] as? String {
+                    keys.insert(account)
+                }
+            }
         }
-
-        return items.compactMap { $0[kSecAttrAccount as String] as? String }
+        return Array(keys)
     }
 
-    /// Delete all items stored under this service.
+    /// Delete all items stored under either service.
     @discardableResult
     public func deleteAll() -> Bool {
-        guard isAppBundle else { return true }
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.service
-        ]
-
-        let status = SecItemDelete(query as CFDictionary)
-        if status == errSecSuccess {
+        guard keychainEnabled else { return true }
+        var allOK = true
+        for service in [Self.service, Self.legacyService] {
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service
+            ]
+            let status = SecItemDelete(query as CFDictionary)
+            allOK = allOK && (status == errSecSuccess || status == errSecItemNotFound)
+        }
+        if allOK {
             invalidateAllCache()
         }
-        return status == errSecSuccess || status == errSecItemNotFound
+        return allOK
     }
 }
