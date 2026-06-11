@@ -19,20 +19,13 @@ extension SettingsView {
     // `anchor` selects which tab opens first.
 
     /// Orders = Standing Orders doctrine + Commands palette config.
-    /// Anchor `commands` opens the Commands tab.
+    /// Bespoke single-surface composite (replaces the generic BridgeMergedSection
+    /// for this section): one shared header, a segmented Orders | Commands strip,
+    /// a per-tab meta row, and unsaved-draft-safe tab switching. The deep-link
+    /// `anchor` selects the starting tab (e.g. `commands` → Commands).
     @ViewBuilder
     var ordersSection: some View {
-        BridgeMergedSection(
-            anchor: nav.anchor,
-            tabs: [
-                .init(id: "orders",   title: "Orders",   anchors: ["orders", "doctrine", "standing"]) {
-                    AnyView(StandingOrdersSection())
-                },
-                .init(id: "commands", title: "Commands", anchors: ["commands", "command", "palette"]) {
-                    AnyView(CommandsSection())
-                },
-            ]
-        )
+        OrdersSection(anchor: nav.anchor)
     }
 
     /// Security = Credentials (Vault) + Permissions (Gates).
