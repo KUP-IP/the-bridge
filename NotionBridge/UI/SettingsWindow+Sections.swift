@@ -5,6 +5,7 @@
 import AppKit
 import Darwin
 import Foundation
+import LocalAuthentication
 import ServiceManagement
 import SwiftUI
 
@@ -28,21 +29,20 @@ extension SettingsView {
         OrdersSection(anchor: nav.anchor)
     }
 
-    /// Security = Credentials (Vault) + Permissions (Gates).
-    /// Anchor `gates`/`permissions` opens the Gates tab; everything else
-    /// (incl. a credential-row slug like "notion") opens Vault.
+    /// Security = the merged Vault (credentials) + Gates (access) page.
+    /// Bespoke single-surface composite (replaces the generic BridgeMergedSection
+    /// for this section): one posture header (Touch-ID reveal status · #stored ·
+    /// #attention · read-only tool tier counts OPEN/NOTIFY/REQUEST with a Manage-
+    /// in-Tools link) over a segmented Vault | Gates strip. Anchor `gates`/
+    /// `permissions` opens Gates; everything else (incl. a credential-row slug
+    /// like "notion") opens Vault.
     @ViewBuilder
     var securitySection: some View {
-        BridgeMergedSection(
+        SecuritySection(
             anchor: nav.anchor,
-            tabs: [
-                .init(id: "vault", title: "Vault", anchors: ["vault", "credentials", "credential"]) {
-                    AnyView(credentialsSection)
-                },
-                .init(id: "gates", title: "Gates", anchors: ["gates", "permissions", "permission", "privacy"]) {
-                    AnyView(permissionsSection)
-                },
-            ]
+            liveTools: statusBar.toolInfoList,
+            vault: { AnyView(credentialsSection) },
+            gates: { AnyView(permissionsSection) }
         )
     }
 
@@ -486,6 +486,337 @@ extension SettingsView {
     @ViewBuilder
     var jobsSection: some View {
         JobsSection()
+    }
+}
+
+// MARK: - Security composite (bespoke merged page — replaces BridgeMergedSection)
+
+/// The merged **Security** Settings page: ONE bespoke posture header (replacing
+/// both legacy orb-heroes) over a segmented `Vault | Gates` strip.
+///
+/// Posture header (left→right): a 44 `lock.shield` gold orb · "Security" title +
+/// subtitle · stat tiles STORED / ATTENTION + read-only tool tier counts
+/// OPEN/NOTIFY/REQUEST (Tools owns those — a "Manage in Tools" link, never an
+/// edit here) · a Touch-ID-to-reveal chip. It subscribes to BOTH the credentials-
+/// changed and tier-overrides-changed notifications so the counts live-update.
+///
+/// The two tab bodies (`CredentialsSection`, `PermissionsSection`) are hero-less
+/// and self-contained; this composite only owns the header, the tab bar, and the
+/// deep-link anchor → starting-tab resolution.
+struct SecuritySection: View {
+    let anchor: String?
+    let liveTools: [ToolInfo]
+    let vault: () -> AnyView
+    let gates: () -> AnyView
+
+    private enum Tab: String, Hashable, CaseIterable { case vault, gates }
+
+    @State private var selection: Tab
+
+    // Posture metrics — recomputed on the change notifications below.
+    @State private var storedCount: Int = 0
+    @State private var attentionCount: Int = 0
+    @State private var tierCounts: (open: Int, notify: Int, request: Int) = (0, 0, 0)
+
+    /// Mirrored read-only in the header chip; the editable toggle lives in the
+    /// Vault policy card (same @AppStorage key — single source of truth).
+    @AppStorage(CredentialRevealGate.requireTouchIDKey) private var requireTouchID = true
+
+    init(
+        anchor: String?,
+        liveTools: [ToolInfo],
+        vault: @escaping () -> AnyView,
+        gates: @escaping () -> AnyView
+    ) {
+        self.anchor = anchor
+        self.liveTools = liveTools
+        self.vault = vault
+        self.gates = gates
+        self._selection = State(initialValue: SecuritySection.tab(for: anchor) ?? .vault)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            postureHeader
+                .padding(.horizontal, BridgeTokens.Space.paneH)
+                .padding(.top, BridgeTokens.Space.cardGap)
+            tabBar
+                .padding(.horizontal, BridgeTokens.Space.paneH)
+                .padding(.top, 12)
+                .padding(.bottom, 12)
+
+            Divider().background(BridgeTokens.hairlineFaint)
+
+            tabBody
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Color.clear)
+        .task { refreshMetrics() }
+        .onReceive(NotificationCenter.default.publisher(for: .notionBridgeCredentialsFeatureDidChange)) { _ in
+            refreshMetrics()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .notionBridgeTierOverridesDidChange)) { _ in
+            refreshTierCounts()
+        }
+        .onChange(of: anchor) { _, newAnchor in
+            if let t = SecuritySection.tab(for: newAnchor) { selection = t }
+        }
+    }
+
+    // MARK: Posture header
+
+    private var postureHeader: some View {
+        let spec = BridgeSettingsHeaderPreset.spec(for: .security)
+        return BridgeGlassCard(cornerRadius: BridgeTokens.Radius.card, padding: 14) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(BridgeTokens.gold.opacity(0.20))
+                        .frame(width: 44, height: 44)
+                    Image(systemName: "lock.shield")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(BridgeTokens.gold.opacity(0.85))
+                }
+                .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(spec.title)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(BridgeTokens.fg1)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("Stored secrets and the gates that govern what tools can do.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(BridgeTokens.fg3)
+                }
+                Spacer(minLength: 8)
+                postureMetrics
+                touchIDChip
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var postureMetrics: some View {
+        HStack(spacing: 10) {
+            statTile(value: "\(storedCount)", label: "stored", color: BridgeTokens.okText)
+            statTile(
+                value: "\(attentionCount)",
+                label: "attention",
+                color: attentionCount > 0 ? BridgeTokens.warnText : BridgeTokens.fg4
+            )
+            tierCountTile
+        }
+    }
+
+    private func statTile(value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                .foregroundStyle(color)
+                .monospacedDigit()
+            Text(label.uppercased())
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(0.6)
+                .foregroundStyle(BridgeTokens.fg4)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 7)
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(value) \(label)")
+    }
+
+    /// Read-only tri-segment tile of tool tier counts (OPEN · NOTIFY · REQUEST),
+    /// tapping through to the Tools page where they are actually managed. Tools
+    /// owns the tier model — this is a posture mirror, never an editor.
+    private var tierCountTile: some View {
+        Button {
+            SettingsNavigation.shared.go(.tools)
+        } label: {
+            VStack(spacing: 3) {
+                HStack(spacing: 4) {
+                    Text("\(tierCounts.open)").foregroundStyle(BridgeTokens.okText)
+                    Text("·").foregroundStyle(BridgeTokens.fg5)
+                    Text("\(tierCounts.notify)").foregroundStyle(BridgeTokens.warnText)
+                    Text("·").foregroundStyle(BridgeTokens.fg5)
+                    Text("\(tierCounts.request)").foregroundStyle(BridgeTokens.badText)
+                }
+                .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                .monospacedDigit()
+                HStack(spacing: 3) {
+                    Text("GATES")
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(0.6)
+                        .foregroundStyle(BridgeTokens.fg4)
+                    Image(systemName: "arrow.up.forward")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(BridgeTokens.fg5)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .help("Open / Notify / Request tool counts — manage per-tool gates in Tools")
+        .accessibilityLabel("Tool gates: \(tierCounts.open) open, \(tierCounts.notify) notify, \(tierCounts.request) request. Manage in Tools.")
+    }
+
+    /// Touch-ID reveal status chip — surfaces the reveal gate BEFORE the user hits
+    /// Copy/Rotate. Reads `requireTouchID`; on a device without biometrics the
+    /// reveal passes through (matches CredentialRevealGate.shouldGate).
+    private var touchIDChip: some View {
+        let available = SecuritySection.biometricAvailable
+        let (text, tone): (String, Color) = {
+            if !available { return ("Touch ID unavailable", BridgeTokens.fg4) }
+            return requireTouchID
+                ? ("Touch ID to reveal: On", BridgeTokens.okText)
+                : ("Touch ID to reveal: Off", BridgeTokens.fg4)
+        }()
+        return HStack(spacing: 5) {
+            Image(systemName: "touchid")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(tone)
+            Text(text)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(tone)
+        }
+        .padding(.horizontal, 9).padding(.vertical, 5)
+        .background(BridgeTokens.chipFill, in: Capsule())
+        .overlay(Capsule().strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+        .fixedSize()
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(text)
+    }
+
+    // MARK: Tab bar
+
+    private var tabBar: some View {
+        HStack(spacing: 0) {
+            tabButton("Vault", .vault)
+            tabButton("Gates", .gates)
+        }
+        .padding(2)
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Security section tabs")
+    }
+
+    private func tabButton(_ label: String, _ value: Tab) -> some View {
+        let on = selection == value
+        return Button {
+            withAnimation(.easeInOut(duration: 0.16)) { selection = value }
+        } label: {
+            Text(label)
+                .font(.system(size: 12.5, weight: on ? .semibold : .regular))
+                .foregroundStyle(on ? BridgeTokens.fg1 : BridgeTokens.fg3)
+                .padding(.horizontal, 16).padding(.vertical, 6)
+                .frame(minHeight: 28)
+                .background {
+                    if on {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(BridgeTokens.accent.opacity(0.18))
+                            .overlay(RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(BridgeTokens.accent.opacity(0.45), lineWidth: 0.5))
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? [.isSelected] : [])
+    }
+
+    // MARK: Tab body
+
+    @ViewBuilder private var tabBody: some View {
+        switch selection {
+        case .vault: vault()
+        case .gates: gates()
+        }
+    }
+
+    // MARK: Metrics
+
+    private func refreshMetrics() {
+        refreshCredentialCounts()
+        refreshTierCounts()
+    }
+
+    private func refreshCredentialCounts() {
+        guard let entries = try? CredentialManager.shared.list() else {
+            storedCount = 0
+            attentionCount = 0
+            return
+        }
+        storedCount = entries.count
+        let store = CredentialHealthStore()
+        let health = store.load()
+        attentionCount = entries.filter { entry in
+            if entry.type == .card {
+                return CredentialCardExpiry.health(
+                    expMonth: entry.metadata.expMonth,
+                    expYear: entry.metadata.expYear
+                ).needsAttention
+            }
+            let key = CredentialHealthStore.key(service: entry.service, account: entry.account)
+            return (health[key] ?? .unchecked).health.needsAttention
+        }.count
+    }
+
+    /// Tool tier counts from the SAME resolution Tools/router use (per-tool
+    /// override > module grant > registered default). Read-only mirror.
+    private func refreshTierCounts() {
+        let toolOverrides = (UserDefaults.standard.dictionary(forKey: BridgeDefaults.tierOverrides) as? [String: String]) ?? [:]
+        let moduleOverrides = (UserDefaults.standard.dictionary(forKey: BridgeDefaults.moduleTierOverrides) as? [String: String]) ?? [:]
+        var open = 0, notify = 0, request = 0
+        for tool in liveTools {
+            let tier = ToolTierResolution.effectiveTier(
+                toolName: tool.name,
+                module: tool.module,
+                registeredTier: tool.tier,
+                toolOverrides: toolOverrides,
+                moduleOverrides: moduleOverrides
+            )
+            switch tier {
+            case "open": open += 1
+            case "notify": notify += 1
+            case "request": request += 1
+            default: break
+            }
+        }
+        tierCounts = (open, notify, request)
+    }
+
+    /// True when this device can evaluate a biometric (or passcode-fallback)
+    /// policy — drives the header chip's "Touch ID unavailable" state. When false
+    /// the reveal gate passes through (matches CredentialManager's fallback path).
+    static var biometricAvailable: Bool {
+        let context = LAContext()
+        var error: NSError?
+        return context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error)
+    }
+
+    // MARK: Deep-link anchor → tab
+
+    /// Resolve a deep-link anchor to a tab (gates/permissions aliases open Gates;
+    /// vault/credential aliases open Vault). Returns nil when the anchor names
+    /// neither (caller keeps the default Vault tab; a credential slug like
+    /// "notion" still reaches the Vault body via SettingsNavigation).
+    private static func tab(for anchor: String?) -> Tab? {
+        guard let raw = anchor?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: ""),
+            !raw.isEmpty else { return nil }
+        switch raw {
+        case "gates", "gate", "permissions", "permission", "privacy", "access": return .gates
+        case "vault", "credentials", "credential", "secrets": return .vault
+        default: return nil
+        }
     }
 }
 
