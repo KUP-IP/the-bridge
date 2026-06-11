@@ -894,7 +894,17 @@ public actor SSEServer {
                     intent: intent
                 )
             }
-            let arguments: Value = params.arguments.map { .object($0) } ?? .object([:])
+            if params.name.hasPrefix("memory_") {
+                DeliveryLog.shared.recordMemoryToolCall(
+                    sessionID: resourceSessionID,
+                    clientName: resourceClientName,
+                    toolName: params.name
+                )
+            }
+            var arguments: Value = params.arguments.map { .object($0) } ?? .object([:])
+            if params.name == "memory_remember" {
+                arguments = MemoryModule.argumentsWithClientSource(arguments, clientName: resourceClientName)
+            }
             let (text, isError) = await router.dispatchFormatted(toolName: params.name, arguments: arguments)
             if !isError { await MainActor.run { onToolCall() } }
             return .init(content: [.text(.init(text))], isError: isError)

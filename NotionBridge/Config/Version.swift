@@ -105,7 +105,8 @@ public enum BridgeConstants {
     ///   joins the existing `notion` family) = 208.
     /// fb-permissions: + 1 (permissions_status — unified TCC grant probe, new
     ///   `permissions` family) = 209.
-    public static let staticFeatureModuleToolCount = 209
+    /// Unified Memory Wave 2 (PKT-977): + 2 (memory_export + memory_import) = 211.
+    public static let staticFeatureModuleToolCount = 211
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

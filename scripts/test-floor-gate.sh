@@ -977,8 +977,8 @@ set -euo pipefail
 # axcrash +8, automation +17, buildtools +22, notionwrite +11, resultsize +17,
 # permissions +13, credentials +27, session +17, sparkle +15 = +173 → 1950.
 # (3 docs-only branches — playbook, design-decouple, operator-runbooks — add 0
-# tests.) Measured integrated green 2014 passed / 0 failed locally across the
-# full suite; FLOOR set to 1950 stays 64 below the measured 2014 so the existing
+# tests.) Measured integrated green 2018 passed / 0 failed locally across the
+# full suite; FLOOR set to 1950 stays 68 below the measured 2018 so the existing
 # GUI/TCC + flake headroom is preserved while none of the +173 new tests can be
 # silently dropped. Never lowered below origin/main's 1777.
 # fb-securitygate-credentials-followup (2026-06-06): coalescer drain-before-park

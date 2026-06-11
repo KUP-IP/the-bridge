@@ -38,6 +38,8 @@ public enum DeliveryEventKind: String, Sendable, Equatable, CaseIterable {
     /// the skill name/path that was fetched and the intent (when supplied)
     /// so the routing surface can be audited for drift / mis-routes.
     case skillFetched
+    /// A `memory_*` tool call (audit-only — memories surfaced telemetry).
+    case memoryToolCall
 }
 
 /// One immutable telemetry event. `Sendable` so it can be built off-main and
@@ -326,6 +328,23 @@ public final class DeliveryLog {
     /// value for the routing-stability audit. `skill` is the `name` string
     /// (empty when absent); `intent` is the trimmed `intent` string when
     /// non-empty, else nil. Pure + nonisolated — touches only its argument.
+    /// Record a `memory_*` tool call. AUDIT ONLY — never gates dispatch.
+    public nonisolated func recordMemoryToolCall(
+        sessionID: String,
+        clientName: String?,
+        toolName: String,
+        at: Date = Date()
+    ) {
+        let event = DeliveryEvent(
+            sessionID: sessionID,
+            clientName: clientName,
+            kind: .memoryToolCall,
+            uri: toolName,
+            at: at
+        )
+        Task { @MainActor in DeliveryLog.shared.ingest(event) }
+    }
+
     public nonisolated static func skillFetchFields(from arguments: Value?) -> (skill: String, intent: String?) {
         guard case .object(let dict)? = arguments else { return ("", nil) }
         let skill: String = {

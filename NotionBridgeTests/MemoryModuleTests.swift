@@ -275,12 +275,12 @@ func runMemoryModuleTests() async {
 
     // MARK: - Module registration + tiering
 
-    await test("MemoryModule registers exactly 2 tools") {
+    await test("MemoryModule registers exactly 4 tools") {
         let (store, url) = makeTempStore()
         defer { Task { await store.close(); cleanup(url) } }
         let router = await makeMemoryRouter(store)
         let tools = await router.registrations(forModule: "memory")
-        try expect(tools.count == 2, "expected 2 memory tools, got \(tools.count)")
+        try expect(tools.count == 4, "expected 4 memory tools, got \(tools.count)")
     }
 
     await test("memory tiering: remember=.notify (write), recall=.open (read-only)") {
@@ -333,5 +333,65 @@ func runMemoryModuleTests() async {
                 throw TestError.assertion("expected invalidArguments, got \(e)")
             }
         }
+    }
+
+    // MARK: - Wave 2: export / import / consolidation / client source
+
+    await test("MemoryStore: exportJSON round-trips through importJSON") {
+        let (store, url) = makeTempStore()
+        defer { Task { await store.close(); cleanup(url) } }
+        _ = try await store.remember(text: "export me", scope: "global", source: "t")
+        let json = try await store.exportJSON()
+        let (store2, url2) = makeTempStore()
+        defer { Task { await store2.close(); cleanup(url2) } }
+        let result = try await store2.importJSON(json)
+        try expect(result.imported == 1 && result.skipped == 0, "import should land one row")
+        let recalled = try await store2.recall(query: "export", scope: "global", entity: nil, limit: 5)
+        try expect(recalled.count == 1, "imported memory must be recallable")
+    }
+
+    await test("MemoryStore: importJSON skips duplicate contentHash in same scope") {
+        let (store, url) = makeTempStore()
+        defer { Task { await store.close(); cleanup(url) } }
+        _ = try await store.remember(text: "dup check", scope: "mac", source: "t")
+        let json = try await store.exportJSON()
+        let result = try await store.importJSON(json)
+        try expect(result.imported == 0 && result.skipped == 1, "duplicate must skip")
+    }
+
+    await test("MemoryStore: consolidationSweep tombstones stale reference rows") {
+        let (store, url) = makeTempStore()
+        defer { Task { await store.close(); cleanup(url) } }
+        let staleSeconds = 60.0 * 60 * 24 * 90 + 3600
+        let staleDate = Date().addingTimeInterval(-staleSeconds)
+        let staleRef = MemoryEntry(
+            scope: "global", text: "old ref link", type: .reference,
+            lastUsedAt: staleDate, source: "test", contentHash: "stale-ref-hash"
+        )
+        let envelope = MemoryStore.ExportEnvelope(entries: [staleRef])
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let json = String(data: try encoder.encode(envelope), encoding: .utf8)!
+        _ = try await store.importJSON(json)
+
+        let pinned = try await store.remember(text: "pinned ref", scope: "global", type: .reference, source: "t")
+        try await store.pin(id: pinned.id, true)
+
+        let report = try await store.consolidationSweep(now: Date())
+        try expect(report.referenceDemoted == 1, "stale reference must demote once, got \(report.referenceDemoted)")
+        let gone = try await store.recall(query: "old ref link", scope: "global", entity: nil, limit: 5)
+        try expect(!gone.contains { $0.text == "old ref link" }, "tombstoned reference must not recall")
+        let stillLive = try await store.recall(query: "pinned", scope: "global", entity: nil, limit: 5)
+        try expect(stillLive.contains { $0.id == pinned.id }, "pinned reference must survive sweep")
+    }
+
+    await test("MemoryModule.argumentsWithClientSource injects client when source omitted") {
+        let args = MemoryModule.argumentsWithClientSource(.object(["text": .string("x")]), clientName: "cursor-vscode")
+        try expect(memObjField(args, "source") == .string("cursor-vscode"))
+        let kept = MemoryModule.argumentsWithClientSource(
+            .object(["text": .string("x"), "source": .string("explicit")]),
+            clientName: "cursor-vscode"
+        )
+        try expect(memObjField(kept, "source") == .string("explicit"), "explicit source must win")
     }
 }

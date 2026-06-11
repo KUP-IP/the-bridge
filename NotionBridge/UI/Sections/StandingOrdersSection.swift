@@ -746,6 +746,7 @@ struct StandingOrdersBody: View {
         case .resourceRead: return "fetched"
         case .reminderToolCall: return "reminder"
         case .skillFetched: return "skill"
+        case .memoryToolCall: return "memory"
         }
     }
 
@@ -755,6 +756,7 @@ struct StandingOrdersBody: View {
         case .resourceRead: return BridgeTokens.okText
         case .reminderToolCall: return BridgeTokens.warnText
         case .skillFetched: return BridgeTokens.infoText
+        case .memoryToolCall: return BridgeTokens.infoText
         }
     }
 
