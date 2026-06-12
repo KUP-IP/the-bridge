@@ -38,16 +38,28 @@ public enum MCPHTTPValidation {
     }
 
     /// Validation pipeline for new MCP sessions (`initialize` on `POST /mcp`).
-    static func streamableHTTPPipeline(ssePort: Int) -> StandardValidationPipeline {
+    ///
+    /// - Parameter connectorAuthed: when true, this request was ALREADY
+    ///   authenticated upstream by the connector bearer gate
+    ///   (`ConnectorAuthContext` — a verified OAuth JWT, or a loopback-scoped
+    ///   local static bearer). The legacy static-bearer / remote-tunnel-missing
+    ///   phase MUST be skipped for these sessions: a connector OAuth JWT is not
+    ///   the loopback static bearer, so re-comparing the `Authorization` header
+    ///   against the static token would 403 every valid connector token (the
+    ///   local↔cloud coexistence collision). Origin/Accept/Content-Type/
+    ///   protocol/session checks still apply.
+    static func streamableHTTPPipeline(ssePort: Int, connectorAuthed: Bool = false) -> StandardValidationPipeline {
         var validators: [any HTTPRequestValidator] = []
 
-        switch streamableHTTPBearerPhase() {
-        case .remoteTunnelMissingToken:
-            validators.append(MCPRemoteTunnelMissingBearerValidator())
-        case .bearerRequired(let secret):
-            validators.append(MCPBearerTokenValidator(expectedToken: secret))
-        case .none:
-            break
+        if !connectorAuthed {
+            switch streamableHTTPBearerPhase() {
+            case .remoteTunnelMissingToken:
+                validators.append(MCPRemoteTunnelMissingBearerValidator())
+            case .bearerRequired(let secret):
+                validators.append(MCPBearerTokenValidator(expectedToken: secret))
+            case .none:
+                break
+            }
         }
 
         validators.append(originValidator(ssePort: ssePort))

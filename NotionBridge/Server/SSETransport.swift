@@ -593,7 +593,7 @@ public actor SSEServer {
     /// The original (pre-S2) Streamable-HTTP session handling, unchanged.
     /// Split out so both the unauthenticated default path and the
     /// post-bearer authorized path funnel through identical session logic.
-    private func processStreamableHTTP(_ request: HTTPRequest) async -> HTTPResponse {
+    private func processStreamableHTTP(_ request: HTTPRequest, connectorAuthed: Bool = false) async -> HTTPResponse {
         let sessionID = request.header(HTTPHeaderName.sessionID)
 
         if let sessionID, var session = sessions[sessionID] {
@@ -615,7 +615,7 @@ public actor SSEServer {
            let body = request.body,
            isInitializeRequest(body)
         {
-            return await createSession(request)
+            return await createSession(request, connectorAuthed: connectorAuthed)
         }
 
         if let sessionID {
@@ -766,12 +766,15 @@ public actor SSEServer {
                 detail: "tool=\(toolName)"
             )
         }
-        return await processStreamableHTTP(request)
+        // Connector-authenticated (OAuth JWT or loopback static bearer, already
+        // verified by ConnectorAuthContext upstream): the session pipeline must
+        // skip the legacy static-bearer re-check, else a valid OAuth token 403s.
+        return await processStreamableHTTP(request, connectorAuthed: true)
     }
 
     // MARK: - Session Factory (Streamable HTTP)
 
-    private func createSession(_ request: HTTPRequest) async -> HTTPResponse {
+    private func createSession(_ request: HTTPRequest, connectorAuthed: Bool = false) async -> HTTPResponse {
         let sessionID = UUID().uuidString
 
         // V1-QUALITY-C2: Extract clientInfo from initialize request
@@ -789,7 +792,7 @@ public actor SSEServer {
         await pruneDuplicateClientSessions(clientName: clientName, clientVersion: clientVersion)
         await evictSessionsIfNeeded(reservingSlots: 1)
 
-        let validationPipeline = MCPHTTPValidation.streamableHTTPPipeline(ssePort: port)
+        let validationPipeline = MCPHTTPValidation.streamableHTTPPipeline(ssePort: port, connectorAuthed: connectorAuthed)
 
         let transport = StatefulHTTPServerTransport(
             sessionIDGenerator: FixedIDGenerator(id: sessionID),
