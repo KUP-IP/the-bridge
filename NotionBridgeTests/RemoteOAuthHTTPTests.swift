@@ -29,8 +29,10 @@ func runRemoteOAuthHTTPTests() async {
         let m = ProtectedResourceMetadataProvider.metadata(environment: [:])
         try expect(!m.resource.isEmpty, "resource must be non-empty")
         try expect(!m.authorizationServers.isEmpty, "authorization_servers must be non-empty")
-        // PKT-810: scopes_supported is intentionally EMPTY (directory model —
-        // WorkOS AuthKit rejects app-custom scopes; auth is server-side).
+        // v3.7.10: scopes_supported advertises the AuthKit OpenID scopes so
+        // ChatGPT/Claude can authorize; auth stays server-side. (Asserted
+        // exactly in RemoteOAuthHardeningS4Tests "A1 → v3.7.10".)
+        try expect(!m.scopesSupported.isEmpty, "scopes_supported must be non-empty (AuthKit OpenID scopes)")
         try expect(m.bearerMethodsSupported == ["header"], "bearer_methods_supported must be [header]")
     }
 
@@ -69,18 +71,23 @@ func runRemoteOAuthHTTPTests() async {
         try expect(v == "https://issuer.example", "expected trimmed issuer, got '\(v)'")
     }
 
-    await test("PRM: scopes_supported is empty (PKT-810 directory model)") {
-        // PKT-810: WorkOS AuthKit rejects an authorize that requests app-custom
-        // scopes (`invalid_scope`), proven by a live authorize probe. The
-        // connector therefore advertises NO scopes; Claude/ChatGPT request none
-        // and the authorize proceeds. Authorization moves server-side
-        // (ConnectorScopeGate grants the reachable allowlist to an authenticated
-        // scope-less token; SecurityGate + step-up consent guard each call).
+    await test("PRM: scopes_supported advertises the AuthKit OpenID scopes (v3.7.10)") {
+        // v3.7.10: PKT-810's empty list is correct in theory but ChatGPT's
+        // connector cannot complete authorize against it (proven live 2026-06-12);
+        // WorkOS AuthKit also rejects app-custom scopes (`invalid_scope`). PRM now
+        // advertises the standard OpenID scopes AuthKit mints, which both Claude
+        // and ChatGPT can request. Authorization stays server-side (connector
+        // tokens default to full parity; ConnectorScopeGate opt-in + SecurityGate
+        // + step-up consent guard each call). The Bridge-specific names remain in
+        // ConnectorScopeName for the scoped-token path.
         let m = ProtectedResourceMetadataProvider.metadata(environment: [:])
-        try expect(m.scopesSupported.isEmpty, "scopes_supported must be empty; got \(m.scopesSupported)")
         try expect(
-            ProtectedResourceMetadataProvider.connectorScopes == m.scopesSupported,
-            "provider constant must match emitted scopes"
+            m.scopesSupported == ProtectedResourceMetadataProvider.advertisedAuthKitScopes,
+            "scopes_supported must advertise the AuthKit OpenID scopes; got \(m.scopesSupported)"
+        )
+        try expect(
+            ProtectedResourceMetadataProvider.connectorScopes.isEmpty,
+            "connectorScopes (scoped-token path) stays empty; advertised set is separate"
         )
     }
 

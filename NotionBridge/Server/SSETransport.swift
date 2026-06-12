@@ -776,9 +776,123 @@ public actor SSEServer {
             )
         }
         // Connector-authenticated (OAuth JWT or loopback static bearer, already
-        // verified by ConnectorAuthContext upstream): the session pipeline must
-        // skip the legacy static-bearer re-check, else a valid OAuth token 403s.
+        // verified by ConnectorAuthContext upstream). ChatGPT's connector
+        // importer expects ordinary JSON-RPC responses on POST; the SDK stateful
+        // transport answers with SSE framing (valid Streamable HTTP, but ChatGPT
+        // cannot parse it → -32603 "data couldn't be read…"). Serve OAuth
+        // connector clients compact JSON here, falling back to the SDK path for
+        // anything processConnectorJSONRPC does not handle. The session pipeline
+        // still skips the legacy static-bearer re-check (connectorAuthed).
+        if let connectorResponse = await processConnectorJSONRPC(request) {
+            return connectorResponse
+        }
         return await processStreamableHTTP(request, connectorAuthed: true)
+    }
+
+    /// Compact JSON-RPC handler for OAuth connector clients (v3.7.10). ChatGPT's
+    /// importer rejects the SDK's SSE-framed responses (it expects plain
+    /// `application/json` on POST); this answers `initialize` / `tools/list` /
+    /// `tools/call` / `ping` / notifications with compact JSON (Content-Type +
+    /// Mcp-Session-Id), reusing the SAME `router.dispatchFormatted` execution and
+    /// `buildRPCResponse` builders as the legacy and Streamable-HTTP paths.
+    /// Returns `nil` for anything it does not handle so the caller falls back to
+    /// the SDK transport. claude.ai accepts these plain responses too, so both
+    /// cloud connectors share this path.
+    private func processConnectorJSONRPC(_ request: HTTPRequest) async -> HTTPResponse? {
+        guard request.method.uppercased() == "POST",
+              let body = request.body,
+              let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let method = json["method"] as? String
+        else { return nil }
+
+        let requestId = json["id"]
+        let sessionID = request.header(HTTPHeaderName.sessionID) ?? UUID().uuidString
+        let headers = Self.connectorJSONHeaders(sessionID: sessionID)
+
+        switch method {
+        case "initialize":
+            if let params = json["params"] as? [String: Any],
+               let clientInfo = params["clientInfo"] as? [String: Any],
+               let name = clientInfo["name"] as? String {
+                let version = clientInfo["version"] as? String ?? "unknown"
+                let onClientConnected = self.onClientConnected
+                await MainActor.run { onClientConnected(name, version) }
+                print("[SSE-Connector] Client identified: \(name) v\(version)")
+            }
+            let data = buildRPCResponse(id: requestId, result: [
+                "protocolVersion": BridgeConstants.mcpProtocolVersion,
+                "capabilities": ["tools": [:] as [String: Any]] as [String: Any],
+                "serverInfo": [
+                    "name": "The Bridge",
+                    "version": AppVersion.resolved
+                ] as [String: Any],
+                "instructions": "Use The Bridge tools for approved local Mac and KEEP OS actions. Prefer read-only tools first, and treat write, send, delete, payment, and calendar actions as confirmation-sensitive."
+            ] as [String: Any]) ?? Data()
+            return .data(data, headers: headers)
+
+        case "notifications/initialized":
+            return .accepted(headers: headers)
+
+        case "tools/list":
+            let disabledNames = CredentialsFeature.mergedDisabledToolNames()
+            var regs = await router.enabledRegistrations(disabledNames: disabledNames)
+            if let allowlist = toolAllowlist {
+                regs = regs.filter { allowlist.contains($0.name) }
+            }
+            let tools: [[String: Any]] = regs.compactMap { reg in
+                guard let data = try? JSONEncoder().encode(MCPToolFactory.tool(for: reg)),
+                      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                else { return nil }
+                return object
+            }
+            let data = buildRPCResponse(id: requestId, result: ["tools": tools]) ?? Data()
+            return .data(data, headers: headers)
+
+        case "tools/call":
+            let params = json["params"] as? [String: Any] ?? [:]
+            let name = params["name"] as? String ?? ""
+            if let allowlist = toolAllowlist, !allowlist.contains(name) {
+                let text = "Error: Tool '\(name)' is not allowed in this session"
+                let data = buildRPCResponse(id: requestId, result: [
+                    "content": [["type": "text", "text": text] as [String: Any]],
+                    "isError": true
+                ] as [String: Any]) ?? Data()
+                return .data(data, headers: headers)
+            }
+            let args = params["arguments"] as? [String: Any] ?? [:]
+            let argsValue: Value
+            if let d = try? JSONSerialization.data(withJSONObject: args),
+               let v = try? JSONDecoder().decode(Value.self, from: d) {
+                argsValue = v
+            } else {
+                argsValue = .object([:])
+            }
+            let (text, isError) = await router.dispatchFormatted(toolName: name, arguments: argsValue)
+            if !isError { await MainActor.run { onToolCall() } }
+            let data = buildRPCResponse(id: requestId, result: [
+                "content": [["type": "text", "text": text] as [String: Any]],
+                "isError": isError
+            ] as [String: Any]) ?? Data()
+            return .data(data, headers: headers)
+
+        case "ping":
+            let data = buildRPCResponse(id: requestId, result: [:] as [String: Any]) ?? Data()
+            return .data(data, headers: headers)
+
+        default:
+            if method.hasPrefix("notifications/") {
+                return .accepted(headers: headers)
+            }
+            let data = buildRPCError(id: requestId, code: -32601, message: "Method not found: \(method)") ?? Data()
+            return .data(data, headers: headers)
+        }
+    }
+
+    private static func connectorJSONHeaders(sessionID: String) -> [String: String] {
+        [
+            HTTPHeaderName.contentType: "application/json",
+            HTTPHeaderName.sessionID: sessionID
+        ]
     }
 
     // MARK: - Session Factory (Streamable HTTP)

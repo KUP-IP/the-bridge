@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.7.10 — ChatGPT + Claude web + local desktop all work on one build
+
+Closes the cloud connector for ChatGPT (its tool calls were failing) while keeping claude.ai and local Claude Code working — all on the v3.7.9 base, so nothing shipped (keychain UX, memory Wave 2, securitygate, PKT-810 loopback) regresses. Verified live 2026-06-12: claude.ai AND ChatGPT each listed `~/Desktop` over the connector in a fresh chat; local loopback handshake 200; tunnel-with-static-bearer still 401. Suite 2079/0, floor 1992.
+
+### Fixed
+- **ChatGPT tool calls returned `-32603` "The data couldn't be read because it isn't in the correct format"** (its catalog loaded but every `tools/call` failed). Root cause: the MCP SDK's stateful Streamable-HTTP transport answers with **SSE framing**, and ChatGPT's connector importer expects **plain JSON-RPC on POST** — it cannot parse the SSE response. (claude.ai tolerates SSE, which is why only ChatGPT broke.) New `processConnectorJSONRPC` serves OAuth connector clients **compact `application/json`** (`initialize`/`tools/list`/`tools/call`/`ping`/notifications) via the same `router.dispatchFormatted` + `buildRPCResponse` used by the legacy and Streamable-HTTP paths; the SDK/SSE path remains the fallback and is still used by local desktop clients through the loopback path.
+- **ChatGPT could not complete OAuth authorize**: PRM `scopes_supported` was empty (PKT-810 directory model); ChatGPT's connector needs a non-empty, AuthKit-mintable scope set. PRM now advertises the standard OpenID scopes WorkOS AuthKit mints (`openid email profile offline_access`) — both Claude and ChatGPT request them successfully. Authorization stays server-side (connector tokens default to full tool parity; SecurityGate + step-up consent remain the guardrail; `ConnectorScopeGate` strict mode retained as opt-in).
+
+### Retained
+- The local-desktop static-bearer ↔ cloud OAuth coexistence (v3.7.9 `loopbackStaticBearerFallback`, gated on the absence of Cloudflare's `Cf-Ray`/`Cf-Connecting-Ip` tunnel header) is unchanged. A tunnel request can never reach the static-bearer fallback, so the static bearer can never bypass OAuth.
+
+### Note
+- A parallel agent (Codex) independently re-implemented the connector — including the same JSON-response fix — on the *pre*-v3.7.9 base (`feat/backend-remediation`), which lacked the keychain fix + loopback. This release ports only the essential JSON handler + scope change onto current `main`, so that branch's connector rework is superseded and should rebase onto this.
+
 ## v3.7.9 — Cloud connector: tools work end-to-end over OAuth
 
 Hotfix making the v3.7.8 cloud directory connector actually usable from claude.ai (web + mobile). Verified live: claude.ai listed `~/Desktop` over `https://mcp.kup.solutions/mcp`. Suite 2079/0, floor 1992.

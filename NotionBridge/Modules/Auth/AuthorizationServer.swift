@@ -81,6 +81,20 @@ public enum ProtectedResourceMetadataProvider {
     /// path (back-compatible).
     public static let connectorScopes: [String] = []
 
+    /// `scopes_supported` actually advertised to OAuth clients. The empty
+    /// directory-connector list above is correct in theory (request nothing →
+    /// no `invalid_scope`), but ChatGPT's connector requires a non-empty,
+    /// AuthKit-mintable set at authorize time — proven live (Codex, 2026-06-12):
+    /// with an empty/Bridge-only list ChatGPT cannot complete authorization.
+    /// WorkOS hosted AuthKit mints exactly these standard OpenID scopes, so
+    /// advertising them lets Claude AND ChatGPT request a set the AS will grant.
+    /// Authorization stays server-side: connector tokens default to full tool
+    /// parity (`strictScopes=false`); ConnectorScopeGate (opt-in) + SecurityGate
+    /// tiers + step-up consent remain the per-call guardrail.
+    public static let advertisedAuthKitScopes: [String] = [
+        "openid", "email", "profile", "offline_access",
+    ]
+
     /// Resolves the authorization-server issuer: `BRIDGE_OAUTH_ISSUER`
     /// (trimmed, non-empty) if set, else the documented default.
     public static func resolvedIssuer(
@@ -148,7 +162,7 @@ public enum ProtectedResourceMetadataProvider {
         return ProtectedResourceMetadata(
             resource: resolved,
             authorizationServers: [resolvedIssuer(environment: environment)],
-            scopesSupported: connectorScopes,
+            scopesSupported: advertisedAuthKitScopes,
             bearerMethodsSupported: ["header"]
         )
     }

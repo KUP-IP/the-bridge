@@ -247,11 +247,13 @@ func runRemoteOAuthHardeningTests() async {
             body: body
         )
         let resp = await server.handleHTTPRequest(req)
-        // Scope + step-up pass ⇒ falls through to pre-S2 session contract.
-        // The session id is unknown ⇒ pre-S2 404 "Session not found",
-        // crucially NOT a 401/403 auth refusal (step-up was satisfied).
-        try expect(resp.statusCode == 404,
-                   "satisfied step-up must reach session path (404 unknown session), got \(resp.statusCode)")
+        // Scope + step-up pass ⇒ the request is authorized and dispatched.
+        // v3.7.10: connector tools/call is served by processConnectorJSONRPC
+        // (compact JSON so ChatGPT's importer can parse it), so an authorized
+        // call now executes and returns 200 — crucially NOT a 401/403 auth
+        // refusal (step-up was satisfied; the deny-path siblings assert 401/403).
+        try expect(resp.statusCode == 200,
+                   "satisfied step-up must be authorized + dispatched (200), got \(resp.statusCode)")
     }
 
     await test("StepUp E2E: non-destructive tools/call needs no step-up (reaches session path)") {
@@ -267,8 +269,10 @@ func runRemoteOAuthHardeningTests() async {
             body: body
         )
         let resp = await server.handleHTTPRequest(req)
-        try expect(resp.statusCode == 404,
-                   "non-destructive authorized call must reach session path, got \(resp.statusCode)")
+        // v3.7.10: authorized connector tools/call is dispatched by
+        // processConnectorJSONRPC → 200 (was a 404 SDK-session fall-through).
+        try expect(resp.statusCode == 200,
+                   "non-destructive authorized call must be dispatched (200), got \(resp.statusCode)")
     }
 
     // MARK: - Confused-deputy isolation

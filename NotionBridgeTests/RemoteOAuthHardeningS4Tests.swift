@@ -188,24 +188,27 @@ func runRemoteOAuthHardeningS4Tests() async {
                    "contacts.read missing from ConnectorScopeName.all")
     }
 
-    await test("A1 → PKT-810: PRM scopes_supported is empty (directory model supersedes the 5-element contract)") {
-        // Superseded the pre-PKT-810 5-element contract. WorkOS AuthKit rejects
-        // an authorize requesting app-custom scopes (`invalid_scope`, proven by
-        // live probe), so the connector advertises NONE. The named scopes still
-        // exist in ConnectorScopeName for the scoped-token path; they are just
-        // not advertised. Authorization is server-side (ConnectorScopeGate +
-        // SecurityGate). contacts.read remains a canonical scope name (asserted
-        // by the sibling "contacts.read is in the canonical scope name list").
+    await test("A1 → v3.7.10: PRM scopes_supported advertises the AuthKit OpenID scopes (ChatGPT authorize)") {
+        // PKT-810's empty list is correct in theory but ChatGPT's connector
+        // could not complete authorize against it (proven live 2026-06-12);
+        // WorkOS AuthKit also rejects app-custom scopes (`invalid_scope`). So
+        // PRM now advertises exactly the standard OpenID scopes AuthKit mints,
+        // which both Claude AND ChatGPT can request. The Bridge-specific scope
+        // names still exist in ConnectorScopeName for the scoped-token path;
+        // authorization stays server-side (ConnectorScopeGate + SecurityGate).
+        let expected = ProtectedResourceMetadataProvider.advertisedAuthKitScopes
+        try expect(expected == ["openid", "email", "profile", "offline_access"],
+                   "advertisedAuthKitScopes drifted: \(expected)")
         let m = ProtectedResourceMetadataProvider.metadata(environment: [:])
-        try expect(m.scopesSupported.isEmpty,
-                   "PRM scopes_supported must be empty (directory model): \(m.scopesSupported)")
-        // Wire form must carry an (empty) scopes_supported array, not drop it.
+        try expect(m.scopesSupported == expected,
+                   "PRM scopes_supported must advertise the AuthKit OpenID scopes: \(m.scopesSupported)")
+        // Wire form must carry the scopes_supported array verbatim.
         let body = ProtectedResourceMetadataProvider.jsonBody(environment: [:])
         let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
         try expect(json?["scopes_supported"] != nil,
                    "serialized PRM must still include the scopes_supported key")
         let scopes = json?["scopes_supported"] as? [String] ?? ["<missing>"]
-        try expect(scopes.isEmpty, "serialized scopes_supported must be empty: \(scopes)")
+        try expect(scopes == expected, "serialized scopes_supported must match advertised set: \(scopes)")
     }
 
     await test("A1: default-deny preserved — a non-connector tool is still denied with all scopes") {
@@ -249,11 +252,12 @@ func runRemoteOAuthHardeningS4Tests() async {
             method: "POST",
             headers: ["Authorization": "Bearer \(tok)", "Mcp-Session-Id": "A1-s2"],
             body: body))
-        // Scope satisfied (contacts_get is not destructive ⇒ no step-up)
-        // ⇒ falls through to the pre-S2 session contract; unknown session
-        // ⇒ 404, crucially NOT a 401/403 auth refusal.
-        try expect(resp.statusCode == 404,
-                   "authorized contacts.read call must reach session path (404), got \(resp.statusCode)")
+        // Scope satisfied (contacts_get is not destructive ⇒ no step-up) ⇒ the
+        // request is authorized. v3.7.10: connector tools/call is served by
+        // processConnectorJSONRPC (compact JSON for ChatGPT), so it executes and
+        // returns 200, crucially NOT a 401/403 auth refusal.
+        try expect(resp.statusCode == 200,
+                   "authorized contacts.read call must be dispatched (200), got \(resp.statusCode)")
     }
 
     // MARK: - A2: TransportRouter injection seam
@@ -372,10 +376,10 @@ func runRemoteOAuthHardeningS4Tests() async {
             method: "POST",
             headers: ["Authorization": "Bearer \(tok)", "Mcp-Session-Id": "A3-scoped"],
             body: body))
-        // Scope + step-up satisfied ⇒ falls through to pre-S2 session
-        // contract; unknown session ⇒ 404, NOT a 401/403 auth refusal.
-        try expect(resp.statusCode == 404,
-                   "step-up scope must reach session path (404), got \(resp.statusCode)")
+        // Scope + step-up satisfied ⇒ authorized. v3.7.10: connector tools/call
+        // is dispatched by processConnectorJSONRPC → 200, NOT a 401/403 refusal.
+        try expect(resp.statusCode == 200,
+                   "step-up scope must be dispatched (200), got \(resp.statusCode)")
     }
 
     await test("A3: per-call _stepUp token ALONE does NOT authorize a destructive call (E2E)") {

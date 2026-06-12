@@ -11,7 +11,7 @@ import Foundation
 public enum AppVersion {
     /// Marketing version (CFBundleShortVersionString equivalent).
     /// Format: MAJOR.MINOR.PATCH (Semantic Versioning).
-    public static let marketing = "3.7.9"
+    public static let marketing = "3.7.10"
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
@@ -37,7 +37,18 @@ public enum AppVersion {
     ///   denied every cloud tools/call (scope-less WorkOS tokens) — now default
     ///   full tool parity for authenticated connector tokens, with the per-tool
     ///   SecurityGate as the guardrail (strictScopes opt-in retained).
-    public static let build = "54"
+    /// v3.7.10: 54 → 56 — reconcile two divergent connector reworks on the
+    ///   v3.7.9 base (keeps the keychain UX fix + PKT-810 loopback coexistence).
+    ///   Three fixes so Claude web + local Claude + ChatGPT all work on one build:
+    ///   (1) PRM advertises the AuthKit OpenID scopes so ChatGPT can authorize
+    ///       (empty/Bridge-only scopes_supported blocked it with invalid_scope);
+    ///   (2) OAuth connector clients get COMPACT JSON-RPC responses instead of
+    ///       the SDK's SSE framing — ChatGPT's importer cannot parse SSE and 503'd
+    ///       every tools/call with -32603 "data couldn't be read" (claude.ai
+    ///       tolerates SSE, which is why only ChatGPT broke); local desktop keeps
+    ///       the SDK path via the loopback fallback;
+    ///   (3) v3.7.9's loopback-static-bearer fallback retained for local↔cloud.
+    public static let build = "56"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }
