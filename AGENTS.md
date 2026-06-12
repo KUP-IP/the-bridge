@@ -95,6 +95,27 @@ Set the Notion API token (resolution priority order):
 - Split stability fixes, settings/UI restructures, and unrelated documentation or test drift into separate reviewable commits when feasible.
 - When installing a production candidate, verify the running binary path is `/Applications/Notion Bridge.app/Contents/MacOS/NotionBridge`, not a `.build` artifact.
 
+### Branching strategy (trunk-based, short-lived branches)
+
+Trunk = `origin/main`. Branches are short-lived and **rebased onto current main before work resumes**. The v3.7.10 connector incident is the cautionary tale: a feature branch (`feat/backend-remediation`) sat 25+ commits behind main and re-implemented the connector that was *already shipped on main* (PKT-810) — duplicating ~1.5h of effort and nearly regressing the keychain fix. The rules that prevent it:
+
+- **Branch off CURRENT main, never a stale base.** `git fetch origin && git switch -c <branch> origin/main`.
+- **Rebase before you resume.** If `main` moved while a branch was idle, `git rebase origin/main` (or merge) **before** continuing — *mandatory* before touching shared surfaces (`SSETransport`, `MCPHTTPValidation`, connector/OAuth/auth, security, keychain). Stale-base edits to these are how divergent reimplementations happen.
+- **Keep the primary checkout (`/Users/keepup/Developer/the-bridge`) on `main`.** Do feature work in a `git worktree` or a fresh branch — never leave the primary checkout parked on a feature branch (it strands local `main` and invites edits to the wrong branch; this review was itself almost committed to the wrong branch that way).
+- **Commit and push WIP the same day.** No long-lived *uncommitted* work in a shared checkout — it is invisible to other sessions/agents and fragile. Push WIP branches so collaborators can rebase on them rather than re-deriving the work.
+- **One owner per shared subsystem per release cycle.** The connector/OAuth/transport surface gets a single owner at a time; parallel agents coordinate via PR against main, not parallel rewrites of the same files.
+- **After each release: delete merged branches and prune merged worktrees.** A branch with `git rev-list --count origin/main..<branch>` == 0 is fully merged — delete it. Target ≤ 2 active worktrees. See `docs/operator/BRANCHING-STRATEGY-REVIEW.md` for the standing audit + cleanup commands.
+
+### Release flow (the v3.7.x pattern)
+
+1. `git switch -c release/vX.Y.Z origin/main` (off current main).
+2. One atomic version commit: `Version.swift` (marketing + build) **and** root `Info.plist` (`CFBundleShortVersionString` + `CFBundleVersion`) in the SAME commit (see `### Version surfaces`), plus the `CHANGELOG.md` entry.
+3. `make test-floor` green (suite ≥ floor; raise the floor only by net-new tests, never lower it).
+4. `make install-copy` for an on-device smoke test; relaunch via `open -a "The Bridge"` so it inherits the launchd OAuth env (`solutions.kup.bridge-env`) — a bare relaunch serves the placeholder issuer and breaks Claude web.
+5. Fast-forward main: verify `git merge-base --is-ancestor origin/main HEAD`, then `git push origin release/vX.Y.Z:main`.
+6. Tag: `git tag -a vX.Y.Z -m "…" && git push origin vX.Y.Z` → `release.yml` runs test→sign→notarize→DMG+appcast (~28 min).
+7. After the run succeeds, delete the release branch and prune its worktree.
+
 ## Architecture
 
 ### Package Structure
