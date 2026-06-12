@@ -727,7 +727,16 @@ public actor SSEServer {
             )
         }
 
-        if let toolName = Self.toolCallTarget(in: request.body) {
+        // Connector tool-authorization policy. DEFAULT = full parity: an
+        // authenticated connector token (a verified OAuth JWT from the operator's
+        // own WorkOS tenant, or the loopback static bearer) may reach every tool,
+        // exactly like a local client — the per-tool SecurityGate (tier +
+        // confirmation prompts) is the real guardrail at dispatch, and WorkOS can
+        // only ever authenticate the operator. The scope/step-up gates below are
+        // an OPTIONAL stricter layer applied ONLY when `strictScopes` is set on
+        // the ConnectorAuthContext; otherwise they would 403 every tool, since
+        // WorkOS AuthKit issues scope-less tokens (no app-custom scopes).
+        if auth.strictScopes, let toolName = Self.toolCallTarget(in: request.body) {
             // 2. Scope gate.
             let decision = await auth.scopeGate.evaluate(
                 toolName: toolName,

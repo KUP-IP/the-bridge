@@ -444,7 +444,8 @@ func runRemoteOAuthBearerTests() async {
     let prmURL = "http://127.0.0.1:9700/.well-known/oauth-protected-resource"
     let authCtx = ConnectorAuthContext(
         validator: validator(keys: keys.verifyKeys),
-        resourceMetadataURL: prmURL
+        resourceMetadataURL: prmURL,
+        strictScopes: true
     )
 
     await test("AuthContext: WWW-Authenticate references the RFC 9728 PRM doc") {

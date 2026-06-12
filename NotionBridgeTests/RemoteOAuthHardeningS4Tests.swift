@@ -92,7 +92,8 @@ func runRemoteOAuthHardeningS4Tests() async {
             validator: validator(),
             sessionBinding: ConnectorSessionBinding(),
             diagnostics: ConnectorAuthDiagnostics(),
-            resourceMetadataURL: s4PRM
+            resourceMetadataURL: s4PRM,
+            strictScopes: true
         )
     }
 

@@ -86,7 +86,8 @@ func runRemoteOAuthHardeningTests() async {
             validator: validator(),
             sessionBinding: binding,
             diagnostics: diagnostics,
-            resourceMetadataURL: hPRM
+            resourceMetadataURL: hPRM,
+            strictScopes: true
         )
     }
 

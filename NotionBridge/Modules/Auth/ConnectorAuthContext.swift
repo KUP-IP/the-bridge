@@ -41,6 +41,14 @@ public struct ConnectorAuthContext: Sendable {
     /// branch, so it can never bypass cloud OAuth.
     public let localBearer: String?
 
+    /// Connector tool-authorization policy. DEFAULT false = full parity: an
+    /// authenticated connector token may reach every tool, gated only by the
+    /// per-tool SecurityGate at dispatch (WorkOS authenticates only the
+    /// operator, and AuthKit issues scope-less tokens, so the ConnectorScopeGate
+    /// would otherwise deny every tool). When true, the scope + step-up gates
+    /// are additionally enforced before dispatch.
+    public let strictScopes: Bool
+
     public init(
         validator: ConnectorBearerValidator,
         scopeGate: ConnectorScopeGate = ConnectorScopeGate(),
@@ -48,7 +56,8 @@ public struct ConnectorAuthContext: Sendable {
         sessionBinding: ConnectorSessionBinding = ConnectorSessionBinding(),
         diagnostics: ConnectorAuthDiagnostics = ConnectorAuthDiagnostics(),
         resourceMetadataURL: String,
-        localBearer: String? = nil
+        localBearer: String? = nil,
+        strictScopes: Bool = false
     ) {
         self.validator = validator
         self.scopeGate = scopeGate
@@ -57,6 +66,7 @@ public struct ConnectorAuthContext: Sendable {
         self.diagnostics = diagnostics
         self.resourceMetadataURL = resourceMetadataURL
         self.localBearer = localBearer
+        self.strictScopes = strictScopes
     }
 
     /// RFC 6750 §3 `WWW-Authenticate` header value for a rejected /
