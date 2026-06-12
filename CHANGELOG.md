@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.7.9 — Cloud connector: tools work end-to-end over OAuth
+
+Hotfix making the v3.7.8 cloud directory connector actually usable from claude.ai (web + mobile). Verified live: claude.ai listed `~/Desktop` over `https://mcp.kup.solutions/mcp`. Suite 2079/0, floor 1992.
+
+### Fixed
+- **OAuth connector 403 ("invalid MCP bearer token")**: a valid OAuth JWT passed the connector bearer gate but was then re-checked against the *loopback static bearer* in the per-session validation pipeline (local↔cloud coexistence collision), 403-ing every remote OAuth client (claude.ai included). The session pipeline now skips the static-bearer phase for connector-authenticated sessions (`connectorAuthed`); origin/protocol/session checks still apply.
+- **OAuth connector tools denied ("not exposed to remote connector clients")**: the `ConnectorScopeGate` mapped tools to connector scopes, but WorkOS AuthKit issues scope-less tokens — so every cloud `tools/call` was denied. Authenticated connector tokens now get **full tool parity** with a local client by default; the per-tool **SecurityGate** (tiers + confirmation prompts) remains the guardrail. The scope/step-up gates are retained as an opt-in stricter layer (`ConnectorAuthContext.strictScopes`).
+
 ## v3.7.8 — Cloud connector live · keychain UX (prompt-free) · two-chat integration
 
 Integrates seven branches from two parallel agent sessions, gated together (test floor 1992, 2079 passing). Ships the post-3.7.7 work that accumulated unreleased on `main` (Settings redesign) plus the cloud directory connector, a keychain UX overhaul, and stability fixes.

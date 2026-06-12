@@ -11,7 +11,7 @@ import Foundation
 public enum AppVersion {
     /// Marketing version (CFBundleShortVersionString equivalent).
     /// Format: MAJOR.MINOR.PATCH (Semantic Versioning).
-    public static let marketing = "3.7.8"
+    public static let marketing = "3.7.9"
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
@@ -31,7 +31,13 @@ public enum AppVersion {
     ///   securitygate fixes, memory Wave 2, migration-safe keychain service,
     ///   ⌃⌘B default hotkey + true reg-state, skill body cache + offline fetch,
     ///   emoji skill icons (Settings 10→7 redesign already on main).
-    public static let build = "53"
+    /// v3.7.9: 53 → 54 — cloud connector fixes: a valid OAuth JWT was 403'd by
+    ///   the legacy loopback static-bearer re-check in the session pipeline
+    ///   (now skipped for connector-authed sessions); and the ConnectorScopeGate
+    ///   denied every cloud tools/call (scope-less WorkOS tokens) — now default
+    ///   full tool parity for authenticated connector tokens, with the per-tool
+    ///   SecurityGate as the guardrail (strictScopes opt-in retained).
+    public static let build = "54"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }
