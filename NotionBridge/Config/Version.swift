@@ -48,7 +48,13 @@ public enum AppVersion {
     ///       tolerates SSE, which is why only ChatGPT broke); local desktop keeps
     ///       the SDK path via the loopback fallback;
     ///   (3) v3.7.9's loopback-static-bearer fallback retained for local↔cloud.
-    public static let build = "56"
+    /// v3.7.11: 56 → 57 — tool-surface resurface (223→163 tools across 26
+    ///   families: pruned Chrome/Stripe/dev-loop-IDE-CI layer + deprecation
+    ///   shims) + compact-default tools_list. NB: the bump commit (bb24000)
+    ///   set Info.plist CFBundleVersion to 57 + marketing 3.7.10→3.7.11 but
+    ///   left this `build` constant at 56 — re-synced here so the SSOT, the
+    ///   in-app display, and the bundle agree (Sparkle compares CFBundleVersion).
+    public static let build = "57"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }
