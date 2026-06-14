@@ -43,7 +43,7 @@ func runBridgeModuleRegistryTests() async {
     await test("includeStripe is now inert — Stripe fully removed (no prod/test delta)") {
         let falseNames = Set(await (buildRouter(includeStripe: false)).allRegistrations().map(\.name))
         let trueNames = Set(await (buildRouter(includeStripe: true)).allRegistrations().map(\.name))
-        // The Stripe family was removed entirely in the v4.0.0 tool-surface resurface.
+        // The Stripe family was removed entirely in the v3.7.11 tool-surface resurface.
         // `includeStripe` is retained for call-site compatibility but now wires nothing,
         // so the two surfaces must be byte-for-byte identical.
         try expect(falseNames == trueNames,

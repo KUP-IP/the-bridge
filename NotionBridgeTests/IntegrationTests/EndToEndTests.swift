@@ -369,40 +369,40 @@ func runEndToEndTests() async {
         // FB-notionwrite: notion_page_edit added (23 → 24).
         try expect(notion.count == 22, "NotionModule: expected 22 (FB-notionwrite)")
         try expect(screen.count == 4, "ScreenModule: expected 4")
-        // v4.0.0 resurface: the ax_query deprecation alias was removed. Live set:
+        // v3.7.11 resurface: the ax_query deprecation alias was removed. Live set:
         // ax_tree, ax_inspect, ax_focused_app, ax_perform_action = 4.
         try expect(accessibility.count == 4,
-                   "AccessibilityModule: expected 4 (v4.0.0 resurface)")
+                   "AccessibilityModule: expected 4 (v3.7.11 resurface)")
         try expect(applescript.count == 1, "AppleScriptModule: expected 1")
 
         let chrome = await router.registrations(forModule: "chrome")
         let skills = await router.registrations(forModule: "skills")
-        // v4.0.0 resurface: Chrome family removed entirely. Skills: manage_skill +
+        // v3.7.11 resurface: Chrome family removed entirely. Skills: manage_skill +
         // the list_routing_skills alias removed → fetch_skill, skills_routing_list,
         // and 5 skill_* primitives = 7.
-        try expect(chrome.isEmpty, "ChromeModule removed in v4.0.0 — expected 0 chrome tools")
-        try expect(skills.count == 7, "SkillsModule: expected 7 (v4.0.0 resurface)")
+        try expect(chrome.isEmpty, "ChromeModule removed in v3.7.11 — expected 0 chrome tools")
+        try expect(skills.count == 7, "SkillsModule: expected 7 (v3.7.11 resurface)")
 
         let credential = await router.registrations(forModule: "credential")
         try expect(credential.count == 4, "CredentialModule: expected 4")
 
         let payment = await router.registrations(forModule: "payment")
-        try expect(payment.isEmpty, "PaymentModule removed in v4.0.0 — expected 0 payment tools")
+        try expect(payment.isEmpty, "PaymentModule removed in v3.7.11 — expected 0 payment tools")
 
         let connections = await router.registrations(forModule: "connections")
         try expect(connections.count == 5, "ConnectionsModule: expected 5")
 
         let scheduler = await router.registrations(forModule: "scheduler")
-        // v4.0.0 resurface: jobs_pause_all / jobs_resume_all deprecation aliases
+        // v3.7.11 resurface: jobs_pause_all / jobs_resume_all deprecation aliases
         // removed (use job_pause / job_resume with all:true). 15 − 2 = 13.
-        try expect(scheduler.count == 13, "JobsModule scheduler family: expected 13 (v4.0.0 resurface)")
+        try expect(scheduler.count == 13, "JobsModule scheduler family: expected 13 (v3.7.11 resurface)")
 
         let dev = await router.registrations(forModule: "dev")
-        // v4.0.0 resurface trimmed dev/ to the lean quick-fix kit: gh_* (9),
+        // v3.7.11 resurface trimmed dev/ to the lean quick-fix kit: gh_* (9),
         // git read/branch/apply (7), file_edit + code_search (2), and
         // http_fetch/diff_render/file_zip/file_unzip/file_hash (5). The dev-loop
         // layer (lsp, bg_process, devserver, runners, worktrees, wrangler) was cut.
-        try expect(dev.count >= 20, "dev module family: expected ≥20 (v4.0.0 lean kit)")
+        try expect(dev.count >= 20, "dev module family: expected ≥20 (v3.7.11 lean kit)")
 
         let computer = await router.registrations(forModule: "computer")
         try expect(computer.count == 5, "computer module family: expected 5")

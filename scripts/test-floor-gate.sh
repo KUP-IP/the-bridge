@@ -988,7 +988,7 @@ set -euo pipefail
 # credentials/securitygate, hotkey ⌃⌘B, emoji icons, keychain clean-service, skill
 # body cache + offline fetch) + keychain UX (always-allow-self ACL, the-bridge
 # rename). Net-new across the integration: 1951→1992 (2079 passing).
-# v4.0.0 tool-surface resurface (2026-06-14): RECORDED FLOOR DECISION (order-inversion
+# v3.7.11 tool-surface resurface (2026-06-14): RECORDED FLOOR DECISION (order-inversion
 # rule — a green baseline is only lowered with a conscious, recorded decision). Wave 1
 # pruned ~60 MCP tools (Chrome family; all Stripe + payment_execute; the dev-loop/IDE-CI
 # layer — lsp, bg_process, devserver, vitest/playwright/lighthouse, wrangler, swift_build/

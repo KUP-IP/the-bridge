@@ -11,7 +11,7 @@ import Foundation
 public enum AppVersion {
     /// Marketing version (CFBundleShortVersionString equivalent).
     /// Format: MAJOR.MINOR.PATCH (Semantic Versioning).
-    public static let marketing = "3.7.10"
+    public static let marketing = "3.7.11"
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
@@ -128,7 +128,7 @@ public enum BridgeConstants {
     /// fb-permissions: + 1 (permissions_status — unified TCC grant probe, new
     ///   `permissions` family) = 209.
     /// Unified Memory Wave 2 (PKT-977): + 2 (memory_export + memory_import) = 211.
-    /// Tool-surface resurface (v4.0.0, 2026-06-14): −50 static tools. Pruned the
+    /// Tool-surface resurface (v3.7.11, 2026-06-14): −50 static tools. Pruned the
     ///   Chrome family (6); the dev-loop/IDE-CI layer (lsp 6, vitest/playwright/
     ///   lighthouse 3, devserver+port_inspect 4, bg_process 5, wrangler 1,
     ///   swift_build/test/make_run 3, file_watch+tree_sitter_query 2,
@@ -160,7 +160,7 @@ public enum BridgeConstants {
     ///   bridge_focus_settings) = 27.
     /// FB [buildtools]: + swift family (swift_build/swift_test/make_run) = 28.
     /// fb-permissions: + permissions family (permissions_status) = 29.
-    /// Tool-surface resurface (v4.0.0, 2026-06-14): − chrome, − payment, − swift
+    /// Tool-surface resurface (v3.7.11, 2026-06-14): − chrome, − payment, − swift
     ///   families (their tools were fully pruned); dev family survives via
     ///   git/gh/file_edit/code_search/http_fetch. 29 − 3 = 26.
     public static let staticFeatureModuleFamilyCount = 26
