@@ -61,7 +61,7 @@ func runMCPToolFactoryTests() async {
         let gate = SecurityGate(); let log = AuditLog()
         let router = ToolRouter(securityGate: gate, auditLog: log)
         await BridgeModuleRegistry.registerStaticFeatureModules(
-            on: router, includeStripe: false,
+            on: router,
             registerSession: { await SessionModule.register(on: $0, auditLog: log) })
         let regs = await router.allRegistrations()
         try expect(regs.count == BridgeConstants.staticFeatureModuleToolCount,

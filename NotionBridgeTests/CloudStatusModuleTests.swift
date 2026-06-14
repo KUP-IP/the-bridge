@@ -137,7 +137,6 @@ func runCloudStatusModuleTests() async {
         let router = ToolRouter(securityGate: gate, auditLog: log)
         await BridgeModuleRegistry.registerStaticFeatureModules(
             on: router,
-            includeStripe: false,
             registerSession: { r in await SessionModule.register(on: r, auditLog: log) }
         )
         let names = await router.allRegistrations().map(\.name)

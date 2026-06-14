@@ -27,16 +27,12 @@ public enum BridgeModuleRegistry {
     ///
     /// - Parameters:
     ///   - router: the tool router to register into.
-    ///   - includeStripe: production passes `true` (StripeMcpModule talks to
-    ///     the network); the test harnesses pass `false` and intentionally
-    ///     omit it. This is the only module that differs between contexts.
     ///   - registerSession: invoked at SessionModule's canonical position.
     ///     Production passes a closure that registers SessionModule with its
     ///     diagnosticsProvider; tests pass a closure that registers it with
     ///     only an auditLog.
     public static func registerStaticFeatureModules(
         on router: ToolRouter,
-        includeStripe: Bool,
         registerSession: (ToolRouter) async -> Void
     ) async {
         await ShellModule.register(on: router)

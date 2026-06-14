@@ -23,7 +23,6 @@ func runEndToEndTests() async {
     // surface as ServerManager.setup() minus StripeMcpModule (network-dependent).
     await BridgeModuleRegistry.registerStaticFeatureModules(
         on: router,
-        includeStripe: false,
         registerSession: { sessionRouter in
             await SessionModule.register(on: sessionRouter, auditLog: auditLog)
         }

@@ -188,7 +188,6 @@ public actor ServerManager {
         // live diagnosticsProvider; the registry owns module ordering.
         await BridgeModuleRegistry.registerStaticFeatureModules(
             on: router,
-            includeStripe: true,
             registerSession: { sessionRouter in
                 await SessionModule.register(
                     on: sessionRouter,
