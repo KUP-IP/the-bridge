@@ -37,25 +37,32 @@ public enum SessionModule {
             name: "tools_list",
             module: moduleName,
             tier: .open,
-            description: "List MCP tools the bridge exposes, with full description, inputs, tier, and module. Filter by module to narrow.",
+            description: "List MCP tools the bridge exposes. COMPACT by default (name, module, tier, one-line summary) to stay well under client output-token caps. Pass `module` to scope to one family, or `detail:true` for full descriptions + input schemas.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "module": .object([
                         "type": .string("string"),
-                        "description": .string("Optional module name to filter by. If omitted, returns all tools.")
+                        "description": .string("Optional module name to filter by. If omitted, returns all tools. Scoping to a module implies detail:true.")
+                    ]),
+                    "detail": .object([
+                        "type": .string("boolean"),
+                        "description": .string("When true (or when `module` is set) each entry carries full description, input schema, tier, and output. Default false returns a compact summary so the full catalog stays under the ~25k MCP output cap.")
                     ])
                 ]),
                 "required": .array([])
             ]),
             handler: { arguments in
                 let moduleFilter: String?
-                if case .object(let args) = arguments,
-                   case .string(let m) = args["module"] {
-                    moduleFilter = m
+                var wantDetail = false
+                if case .object(let args) = arguments {
+                    if case .string(let m) = args["module"] { moduleFilter = m } else { moduleFilter = nil }
+                    if case .bool(let d) = args["detail"] { wantDetail = d }
                 } else {
                     moduleFilter = nil
                 }
+                // Scoping to a single module implies the caller wants full detail.
+                let fullDetail = wantDetail || (moduleFilter != nil)
 
                 let registrations: [ToolRegistration]
                 if let filter = moduleFilter {
@@ -64,7 +71,20 @@ public enum SessionModule {
                     registrations = await router.allRegistrations()
                 }
 
+                func summarize(_ s: String) -> String {
+                    let oneLine = s.split(whereSeparator: { $0 == "\n" || $0 == "\r" }).joined(separator: " ")
+                    return oneLine.count <= 100 ? oneLine : String(oneLine.prefix(99)) + "…"
+                }
+
                 let toolEntries: [Value] = registrations.map { reg in
+                    guard fullDetail else {
+                        return .object([
+                            "name": .string(reg.name),
+                            "module": .string(reg.module),
+                            "tier": .string(reg.tier.rawValue),
+                            "summary": .string(summarize(reg.description))
+                        ])
+                    }
                     let inputs: Value
                     if case .object(let schema) = reg.inputSchema,
                        case .object(let props) = schema["properties"] {

@@ -34,9 +34,6 @@ public enum GhModule {
         // Old names stay as ONE-cycle deprecation aliases.
         let prCreate = makePrCreate(runtime: runtime, bgRuntime: bgRuntime)
         await router.register(prCreate)
-        await router.register(ToolDeprecationAlias.renameAlias(
-            oldName: "gh_pr_open", newName: "gh_pr_create", from: prCreate
-        ))
 
         await router.register(makePrStatus(runtime: runtime))
         await router.register(makePrComment(runtime: runtime))
@@ -44,17 +41,11 @@ public enum GhModule {
 
         let actionsRunsList = makeActionsRunsList(runtime: runtime)
         await router.register(actionsRunsList)
-        await router.register(ToolDeprecationAlias.renameAlias(
-            oldName: "gh_actions_runs", newName: "gh_actions_runs_list", from: actionsRunsList
-        ))
 
         await router.register(makeCheckStatus(runtime: runtime))
 
         let issueCreate = makeIssueCreate(runtime: runtime)
         await router.register(issueCreate)
-        await router.register(ToolDeprecationAlias.renameAlias(
-            oldName: "gh_issue_open", newName: "gh_issue_create", from: issueCreate
-        ))
 
         await router.register(makeIssueComment(runtime: runtime))
         await router.register(makeIssueClose(runtime: runtime))

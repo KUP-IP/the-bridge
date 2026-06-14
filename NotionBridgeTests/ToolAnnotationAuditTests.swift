@@ -19,7 +19,6 @@ func runToolAnnotationAuditTests() async {
     let router = ToolRouter(securityGate: gate, auditLog: log)
     await BridgeModuleRegistry.registerStaticFeatureModules(
         on: router,
-        includeStripe: false,
         registerSession: { sessionRouter in
             await SessionModule.register(on: sessionRouter, auditLog: log)
         }

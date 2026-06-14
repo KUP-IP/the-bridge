@@ -1,5 +1,23 @@
 # Changelog
 
+## v3.7.11 — Tool-surface resurface: 223→163 tools + compact `tools_list`
+
+Reshapes the MCP tool surface to the product positioning — a centralized auth hub (Mac moat + Notion infrastructure + automation engine + a lean chat-to-code kit), direct-API integrations only, no MCP-proxy hops, and no competing with Claude Code / Codex on dev tooling. Live surface **223 → 163 tools**; static module surface 211 → 161 across **26 families** (was 29). Suite 1864/0; test floor reset 1992 → 1777 (−215 tests tracking the pruned tools, recorded with provenance in `scripts/test-floor-gate.sh`).
+
+### Removed
+- **Chrome** family (6 tools) and **all Stripe** (proxy + shims) including `payment_execute`.
+- The **dev-loop / IDE-CI layer**: `lsp_*` (6), `vitest`/`playwright`/`lighthouse` (3), `devserver_*` + `port_inspect` (4), `bg_process_*` (5), `wrangler_d1_status`, `swift_build`/`swift_test`/`make_run` (3), `file_watch` + `tree_sitter_query` (2), `git_worktree*` (4) + `git_merge`.
+- `screen_analyze`.
+- Residual **deprecation shims**: `ax_query`, the old `gh_{pr,issue,actions}_*` names (3), `list_routing_skills`, `manage_skill`, `jobs_pause_all`/`jobs_resume_all`, `file_apply_patch`, `file_str_replace`, `notion_code_block_append`, `notion_connections_list`, `bridge_focus_settings`.
+- The shared runtimes the surviving git/gh/file tools depend on (`BgProcessRuntime`/`RunnerSupport`/`GhRuntime`/`GitRuntime`) were **kept** — only the bg_process *tools* were removed, not the runtime.
+
+### Changed
+- **`tools_list` is compact by default** (name/module/tier/summary; omits input schemas) so the full catalog stays under the ~25k MCP output cap that triggered this work. Pass `module:` or `detail:true` for full schemas.
+- Removed the now-dead `includeStripe` parameter from `registerStaticFeatureModules`.
+
+### Fixed
+- Re-synced the `AppVersion.build` constant 56 → 57 to match `Info.plist` CFBundleVersion (the version-bump commit had advanced the plist but left the Swift SSOT at 56).
+
 ## v3.7.10 — ChatGPT + Claude web + local desktop all work on one build
 
 Closes the cloud connector for ChatGPT (its tool calls were failing) while keeping claude.ai and local Claude Code working — all on the v3.7.9 base, so nothing shipped (keychain UX, memory Wave 2, securitygate, PKT-810 loopback) regresses. Verified live 2026-06-12: claude.ai AND ChatGPT each listed `~/Desktop` over the connector in a fresh chat; local loopback handshake 200; tunnel-with-static-bearer still 401. Suite 2079/0, floor 1992.

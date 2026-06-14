@@ -1,27 +1,20 @@
-// CodeEditModule.swift — PKT-750 (v2.2 · 1.2): code_search · file_str_replace · file_apply_patch
+// CodeEditModule.swift — PKT-750 (v2.2 · 1.2): code_search · file_edit
 // NotionBridge · Modules · dev/
 //
-// Three code-aware editing primitives, all registered on the dev/ module surface
+// Code-aware editing primitives registered on the dev/ module surface
 // introduced in PKT-738 (v2.2 · 0.1):
 //
-//   code_search       — wraps `rg --json` with structured output (file, line,
-//                       column, byte offset, lineText, submatches, optional
-//                       before/after context). Tier .open. Returns
-//                       capability_missing if ripgrep is not on PATH or in
-//                       common Homebrew locations.
+//   code_search  — wraps `rg --json` with structured output (file, line,
+//                  column, byte offset, lineText, submatches, optional
+//                  before/after context). Tier .open. Returns
+//                  capability_missing if ripgrep is not on PATH or in
+//                  common Homebrew locations.
 //
-//   file_str_replace  — literal-string replace with uniqueness guarantee
-//                       (single match by default; replaceAllMatches:true to
-//                       override). preview:true returns a unified diff without
-//                       writing. Atomic via String.write(atomically:true).
-//                       Tier .notify.
+//   file_edit    — unified edit tool: mode='replace' (literal search→replace
+//                  with optional preview, atomic write) or mode='patch'
+//                  (unified-diff apply with context validation). Tier .notify.
 //
-//   file_apply_patch  — accepts a unified-diff patch (single-file), validates
-//                       each hunk's context against current file content
-//                       (rejects on drift), and applies atomically.
-//                       preview:true validates without writing. Tier .notify.
-//
-// All three return the v2.2 dev/ error envelope:
+// All tools return the v2.2 dev/ error envelope:
 //   ok=false; status ∈ {capability_missing, not_found, failed}; tool, error.
 
 import Foundation
@@ -63,24 +56,17 @@ public enum CodeEditModule {
 
     public static func register(on router: ToolRouter) async {
         await registerCodeSearch(on: router)
-        await registerFileStrReplace(on: router)
-        await registerFileApplyPatch(on: router)
-        // Sprint A · mcp-builder #5: merge file_str_replace + file_apply_patch
-        // into file_edit with mode='replace'|'patch'. Operator Q4=a override
-        // dropped the audit-recommended 2-cycle window to 1 cycle, so the
-        // old names stay registered (as 1-cycle aliases) alongside file_edit.
         await registerFileEdit(on: router)
     }
 
     /// Sprint A · mcp-builder #5: file_edit primary that dispatches into
-    /// file_str_replace's or file_apply_patch's handler based on `mode`.
+    /// strReplace or applyPatch based on `mode`.
     private static func registerFileEdit(on router: ToolRouter) async {
-        // audit-recommended 2-cycle; operator Q4=a override to 1-cycle
         await router.register(ToolRegistration(
             name: "file_edit",
             module: moduleName,
             tier: .notify,
-            description: "Edit a file with mode='replace' (literal search→replacement with optional preview, replaces file_str_replace) or mode='patch' (unified-diff application, replaces file_apply_patch). Single tool for code-edit ergonomics matching Claude Code's built-in edit verb.",
+            description: "Edit a file with mode='replace' (literal search→replacement with optional preview) or mode='patch' (unified-diff application). Single tool for code-edit ergonomics matching Claude Code's built-in edit verb.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -108,9 +94,31 @@ public enum CodeEditModule {
                 }
                 switch mode {
                 case "replace":
-                    return try await router.dispatch(toolName: "file_str_replace", arguments: args)
+                    guard case .string(let path) = dict["path"],
+                          case .string(let search) = dict["search"],
+                          case .string(let replacement) = dict["replacement"] else {
+                        throw ToolRouterError.invalidArguments(toolName: "file_edit", reason: "mode='replace' requires 'path', 'search', and 'replacement'")
+                    }
+                    let replaceAll: Bool = { if case .bool(let b) = dict["replaceAllMatches"] { return b }; return false }()
+                    let preview: Bool = { if case .bool(let b) = dict["preview"] { return b }; return false }()
+                    let expanded = (path as NSString).expandingTildeInPath
+                    do {
+                        return try strReplace(path: expanded, search: search, replacement: replacement, replaceAll: replaceAll, preview: preview)
+                    } catch {
+                        return errorValue("file_edit", error)
+                    }
                 case "patch":
-                    return try await router.dispatch(toolName: "file_apply_patch", arguments: args)
+                    guard case .string(let path) = dict["path"],
+                          case .string(let patch) = dict["patch"] else {
+                        throw ToolRouterError.invalidArguments(toolName: "file_edit", reason: "mode='patch' requires 'path' and 'patch'")
+                    }
+                    let preview: Bool = { if case .bool(let b) = dict["preview"] { return b }; return false }()
+                    let expanded = (path as NSString).expandingTildeInPath
+                    do {
+                        return try applyPatch(path: expanded, patch: patch, preview: preview)
+                    } catch {
+                        return errorValue("file_edit", error)
+                    }
                 default:
                     return .object([
                         "error": .string("file_edit: unknown mode '\(mode)' — expected 'replace' or 'patch'")
@@ -350,45 +358,6 @@ public enum CodeEditModule {
         ])
     }
 
-    // MARK: - file_str_replace
-
-    private static func registerFileStrReplace(on router: ToolRouter) async {
-        await router.register(ToolRegistration(
-            name: "file_str_replace",
-            module: moduleName,
-            tier: .notify,
-            description: "DEPRECATED — use `file_edit` with mode='replace' instead. Removed in 3.5.0 (audit-recommended 2-cycle; operator Q4=a override to 1-cycle). Replace one or more occurrences of a literal string in a file. By default rejects ambiguous matches (>1 occurrence) — pass replaceAllMatches:true to override. Pass preview:true to receive a unified diff without writing. Atomic via String.write(atomically:true).",
-            inputSchema: .object([
-                "type": .string("object"),
-                "properties": .object([
-                    "path": .object(["type": .string("string"), "description": .string("Absolute file path (tilde-expanded)")]),
-                    "search": .object(["type": .string("string"), "description": .string("Literal string to find (not a regex)")]),
-                    "replacement": .object(["type": .string("string"), "description": .string("Replacement string")]),
-                    "replaceAllMatches": .object(["type": .string("boolean"), "description": .string("Replace all occurrences. Default: false (single-match enforced)")]),
-                    "preview": .object(["type": .string("boolean"), "description": .string("Return unified diff without writing. Default: false")])
-                ]),
-                "required": .array([.string("path"), .string("search"), .string("replacement")])
-            ]),
-            handler: { arguments in
-                guard case .object(let args) = arguments,
-                      case .string(let path) = args["path"],
-                      case .string(let search) = args["search"],
-                      case .string(let replacement) = args["replacement"] else {
-                    throw ToolRouterError.invalidArguments(toolName: "file_str_replace", reason: "missing required 'path', 'search', or 'replacement'")
-                }
-                let replaceAll: Bool = { if case .bool(let b) = args["replaceAllMatches"] { return b }; return false }()
-                let preview: Bool = { if case .bool(let b) = args["preview"] { return b }; return false }()
-                let expanded = (path as NSString).expandingTildeInPath
-
-                do {
-                    return try strReplace(path: expanded, search: search, replacement: replacement, replaceAll: replaceAll, preview: preview)
-                } catch {
-                    return errorValue("file_str_replace", error)
-                }
-            }
-        ))
-    }
-
     static func strReplace(path: String, search: String, replacement: String, replaceAll: Bool, preview: Bool) throws -> Value {
         guard FileManager.default.fileExists(atPath: path) else {
             throw CodeEditError.fileNotFound(path)
@@ -526,40 +495,6 @@ public enum CodeEditModule {
             else { j -= 1 }
         }
         return lcs.reversed()
-    }
-
-    // MARK: - file_apply_patch
-
-    private static func registerFileApplyPatch(on router: ToolRouter) async {
-        await router.register(ToolRegistration(
-            name: "file_apply_patch",
-            module: moduleName,
-            tier: .notify,
-            description: "DEPRECATED — use `file_edit` with mode='patch' instead. Removed in 3.5.0 (audit-recommended 2-cycle; operator Q4=a override to 1-cycle). Apply a unified-diff patch to a single file. Validates each hunk's context against current file content (rejects on drift). Atomic via String.write(atomically:true). Multi-file diffs must be split per file by the caller. Pass preview:true to validate without writing.",
-            inputSchema: .object([
-                "type": .string("object"),
-                "properties": .object([
-                    "path": .object(["type": .string("string"), "description": .string("Absolute file path the patch applies to (tilde-expanded)")]),
-                    "patch": .object(["type": .string("string"), "description": .string("Unified-diff patch text. The --- / +++ headers are optional and ignored if present.")]),
-                    "preview": .object(["type": .string("boolean"), "description": .string("Validate without writing. Default: false")])
-                ]),
-                "required": .array([.string("path"), .string("patch")])
-            ]),
-            handler: { arguments in
-                guard case .object(let args) = arguments,
-                      case .string(let path) = args["path"],
-                      case .string(let patch) = args["patch"] else {
-                    throw ToolRouterError.invalidArguments(toolName: "file_apply_patch", reason: "missing required 'path' or 'patch'")
-                }
-                let preview: Bool = { if case .bool(let b) = args["preview"] { return b }; return false }()
-                let expanded = (path as NSString).expandingTildeInPath
-                do {
-                    return try applyPatch(path: expanded, patch: patch, preview: preview)
-                } catch {
-                    return errorValue("file_apply_patch", error)
-                }
-            }
-        ))
     }
 
     struct PatchHunk {

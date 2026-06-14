@@ -4,9 +4,9 @@
 
 The Bridge exposes your local Mac and connected services as Model Context Protocol (MCP) tools over **Streamable HTTP**, **legacy SSE**, and **stdio** — locally on `127.0.0.1` for clients like Claude Code, Cursor, and Notion agents, and **securely from the cloud** (claude.ai and ChatGPT custom connectors) through a customer-owned Cloudflare Tunnel with OAuth. Built in Swift 6.2 for macOS 26+ on Apple Silicon, it is designed to be always-on, auto-launched, and safe enough for daily operator use.
 
-**~220 tools** across 29 module groups · **3 transports + cloud connector** (Claude web · ChatGPT) · **3-tier security model** with on-device approvals · **Liquid Glass UI**
+**~163 tools** across 26 module groups · **3 transports + cloud connector** (Claude web · ChatGPT) · **3-tier security model** with on-device approvals · **Liquid Glass UI**
 
-**Latest release:** [v3.7.10](https://github.com/KUP-IP/the-bridge/releases/tag/v3.7.10) (June 2026) — the cloud connector works end-to-end over OAuth for both Claude web and ChatGPT. Existing installs auto-update via Sparkle.
+**Latest release:** [v3.7.11](https://github.com/KUP-IP/the-bridge/releases/tag/v3.7.11) (June 2026) — a tool-surface resurface that prunes the catalog to a lean, positioning-aligned ~163 tools (Chrome, the dynamic Stripe proxy, and the heavy dev-loop layer removed); `tools_list` is compact by default. Existing installs auto-update via Sparkle.
 
 **Product page:** https://kup.solutions/notion-bridge
 
@@ -29,7 +29,7 @@ Current commercial posture:
 
 ## Current product surface
 
-The Bridge currently ships **~220 tools organized into 29 module groups**, surfaced collapsibly in **Settings → Tools**. Highlights below; the full registry is in-app.
+The Bridge currently ships **~163 tools organized into 26 module groups**, surfaced collapsibly in **Settings → Tools**. Highlights below; the full registry is in-app.
 
 | Module | Tools | Notes |
 |---|---:|---|
@@ -49,7 +49,7 @@ The Bridge currently ships **~220 tools organized into 29 module groups**, surfa
 | SkillsModule | 3 | `fetch_skill`, `list_routing_skills`, `manage_skill` |
 | ConnectionsModule | 5 | connection inventory, health, validation |
 | BuiltinModule | 1 | `echo` (registered in `ServerManager`, not a Swift `*Module` type) |
-| **Total** | **~220** | Across 29 module groups. Includes the dynamic Stripe MCP proxy tools (when configured) plus the v3.5–v3.7 additions: the Apple suite (**Calendar**, **Reminders**, **Notes**, **Mail**, **Shortcuts**), **Memory** (recall/remember/export/import), on-device **Automation**, **CommandStore** (10-slot favorites), **StandingOrders** (per-client overlays), **JobsManager** (launchd-backed schedules), **Git/Gh**, **BgProcess**, **LSP**, **Snippets**, **Permissions**, and Swift build tools (`swift_build` / `swift_test` / `make_run`) |
+| **Total** | **~163** | Across 26 module groups after the v3.7.11 resurface: the Apple suite (**Calendar**, **Reminders**, **Notes**, **Mail**, **Shortcuts**), **Memory**, on-device **Automation**, **CommandStore**, **StandingOrders**, **JobsManager**, **Notion**, **Git/Gh** quick-fix, **Snippets**, **Permissions**, and screen/clipboard/accessibility/AppleScript Mac steering. Removed: Chrome, the dynamic Stripe proxy + payment, and the dev-loop/IDE layer (LSP, bg_process, dev servers, test runners, Swift build tools). |
 
 Core product traits:
 - Native macOS menu-bar app with onboarding, settings, and a status popover
@@ -154,7 +154,7 @@ Use stdio when connecting local clients such as Claude Code or Cursor directly t
 
 #### Using Bridge with Antigravity
 
-Google Antigravity enforces a strict 100-tool limit per MCP server, whereas The Bridge exposes ~220 tools. To use Bridge with Antigravity, we have curated a subset of ~84 tools to stay under the limit.
+Google Antigravity enforces a strict 100-tool limit per MCP server, whereas The Bridge exposes ~163 tools. To use Bridge with Antigravity, we have curated a subset of ~84 tools to stay under the limit.
 
 You can launch the Bridge process with a `--multi-instance` flag (bypasses single-instance GUI guard) and `--allow-tools` flag pointing to the Antigravity allowlist:
 

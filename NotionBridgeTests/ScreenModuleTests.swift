@@ -1,8 +1,8 @@
 // ScreenModuleTests.swift – V1-TESTCOVERAGE
 // NotionBridge · Tests
 //
-// Tests for ScreenModule (5 tools: screen_capture, screen_ocr,
-// screen_analyze, screen_record_start, screen_record_stop).
+// Tests for ScreenModule (4 tools: screen_capture, screen_ocr,
+// screen_record_start, screen_record_stop).
 // Note: Screen tools require Screen Recording TCC grant. Tests focus on
 // registration, tier classification, and graceful error handling.
 
@@ -20,13 +20,12 @@ func runScreenModuleTests() async {
     let router = ToolRouter(securityGate: gate, auditLog: log)
     await ScreenModule.register(on: router)
     await ScreenModule.registerRecording(on: router)
-    await ScreenModule.registerAnalyze(on: router)
 
     // --- Registration ---
 
-    await test("ScreenModule registers 5 tools") {
+    await test("ScreenModule registers 4 tools") {
         let tools = await router.registrations(forModule: "screen")
-        try expect(tools.count == 5, "Expected 5 screen tools, got \(tools.count)")
+        try expect(tools.count == 4, "Expected 4 screen tools, got \(tools.count)")
     }
 
     await test("ScreenModule tool names are correct") {
@@ -34,7 +33,6 @@ func runScreenModuleTests() async {
         let names = Set(tools.map(\.name))
         try expect(names.contains("screen_capture"), "Missing screen_capture")
         try expect(names.contains("screen_ocr"), "Missing screen_ocr")
-        try expect(names.contains("screen_analyze"), "Missing screen_analyze")
         try expect(names.contains("screen_record_start"), "Missing screen_record_start")
         try expect(names.contains("screen_record_stop"), "Missing screen_record_stop")
     }
@@ -52,13 +50,6 @@ func runScreenModuleTests() async {
         let tool = tools.first(where: { $0.name == "screen_ocr" })!
         try expect(tool.tier == .open, "Expected open, got \(tool.tier.rawValue)")
     }
-    await test("screen_analyze is open tier") {
-        let tools = await router.registrations(forModule: "screen")
-        let tool = tools.first(where: { $0.name == "screen_analyze" })!
-        try expect(tool.tier == .open, "Expected open, got \(tool.tier.rawValue)")
-    }
-
-
     await test("screen_record_start is notify tier") {
         let tools = await router.registrations(forModule: "screen")
         let tool = tools.first(where: { $0.name == "screen_record_start" })!
@@ -96,19 +87,6 @@ func runScreenModuleTests() async {
             }
         }
     }
-    await test("screen_analyze rejects missing filePath") {
-        let result = try await router.dispatch(
-            toolName: "screen_analyze",
-            arguments: .object([:])
-        )
-        if case .object(let dict) = result {
-            if case .string(let err) = dict["error"] {
-                try expect(!err.isEmpty, "Error message should not be empty")
-            }
-        }
-    }
-
-
     await test("screen_record_stop handles no active recording") {
         let result = try await router.dispatch(
             toolName: "screen_record_stop",
@@ -141,15 +119,6 @@ func runScreenModuleTests() async {
             try? await router.dispatch(toolName: "screen_capture", arguments: .object([:]))
         }.value
         try expect(result != nil, "screen_capture dispatch should produce a value off-main, not hang")
-    }
-
-    await test("chrome_tabs from a detached (off-main) task returns promptly, never hangs") {
-        let chromeRouter = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
-        await ChromeModule.register(on: chromeRouter)
-        let result = await Task.detached {
-            try? await chromeRouter.dispatch(toolName: "chrome_tabs", arguments: .object([:]))
-        }.value
-        try expect(result != nil, "chrome_tabs dispatch should produce a value off-main, not hang")
     }
 
     // --- FB-AUTOMATION: requireFrontmostBundleId guard ---

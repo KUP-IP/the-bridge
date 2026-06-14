@@ -11,8 +11,6 @@ public enum ArtifactModule {
     public static func register(on router: ToolRouter) async {
         await registerHTTPFetch(on: router)
         await registerDiffRender(on: router)
-        await registerFileWatch(on: router)
-        await registerTreeSitterQuery(on: router)
         await registerFileZip(on: router)
         await registerFileUnzip(on: router)
         await registerFileHash(on: router)
@@ -196,58 +194,6 @@ public enum ArtifactModule {
         return line
     }
 
-    private static func registerFileWatch(on router: ToolRouter) async {
-        await router.register(ToolRegistration(
-            name: "file_watch",
-            module: moduleName,
-            tier: .open,
-            description: "Watch a file or directory for a bounded interval using deterministic polling and debounce. Returns created, modified, and deleted paths; no persistent watcher remains after the call.",
-            inputSchema: .object([
-                "type": .string("object"),
-                "properties": .object([
-                    "path": .object(["type": .string("string")]),
-                    "durationMs": .object(["type": .string("integer"), "description": .string("Default 1000, max 30000")]),
-                    "debounceMs": .object(["type": .string("integer"), "description": .string("Default 100")]),
-                    "recursive": .object(["type": .string("boolean"), "description": .string("Default true for directories")])
-                ]),
-                "required": .array([.string("path")])
-            ]),
-            handler: { arguments in
-                guard case .object(let args) = arguments, let rawPath = string(args, "path") else {
-                    throw ToolRouterError.invalidArguments(toolName: "file_watch", reason: "missing 'path'")
-                }
-                let path = expand(rawPath)
-                let duration = min(max(int(args, "durationMs", default: 1000), 1), 30_000)
-                let debounce = min(max(int(args, "debounceMs", default: 100), 0), 5_000)
-                let recursive = bool(args, "recursive", default: true)
-                let start = snapshot(path: path, recursive: recursive)
-                try? await Task.sleep(nanoseconds: UInt64(duration) * 1_000_000)
-                if debounce > 0 { try? await Task.sleep(nanoseconds: UInt64(debounce) * 1_000_000) }
-                let end = snapshot(path: path, recursive: recursive)
-                let startKeys = Set(start.keys)
-                let endKeys = Set(end.keys)
-                let created = endKeys.subtracting(startKeys).sorted()
-                let deleted = startKeys.subtracting(endKeys).sorted()
-                let modified = startKeys.intersection(endKeys).filter { start[$0] != end[$0] }.sorted()
-                return .object([
-                    "ok": .bool(true),
-                    "path": .string(path),
-                    "durationMs": .int(duration),
-                    "debounceMs": .int(debounce),
-                    "events": .array(
-                        created.map { event("created", $0) } +
-                        modified.map { event("modified", $0) } +
-                        deleted.map { event("deleted", $0) }
-                    )
-                ])
-            }
-        ))
-    }
-
-    private static func event(_ kind: String, _ path: String) -> Value {
-        .object(["kind": .string(kind), "path": .string(path)])
-    }
-
     private static func snapshot(path: String, recursive: Bool) -> [String: String] {
         let fm = FileManager.default
         var isDir: ObjCBool = false
@@ -269,100 +215,6 @@ public enum ArtifactModule {
             out[url.path] = "\(vals?.contentModificationDate?.timeIntervalSince1970 ?? 0):\(vals?.fileSize ?? -1)"
         }
         return out
-    }
-
-    private static func registerTreeSitterQuery(on router: ToolRouter) async {
-        await router.register(ToolRegistration(
-            name: "tree_sitter_query",
-            module: moduleName,
-            tier: .open,
-            description: "Run a tree-sitter query when the tree-sitter CLI is installed; otherwise returns a deterministic structural fallback for TypeScript, Swift, JSON, Markdown, and Bash with backend='fallback'.",
-            inputSchema: .object([
-                "type": .string("object"),
-                "properties": .object([
-                    "path": .object(["type": .string("string")]),
-                    "language": .object(["type": .string("string")]),
-                    "query": .object(["type": .string("string"), "description": .string("Tree-sitter query or fallback selector: symbols, headings, keys, functions")]),
-                    "maxMatches": .object(["type": .string("integer"), "description": .string("Default 200")])
-                ]),
-                "required": .array([.string("path")])
-            ]),
-            handler: { arguments in
-                guard case .object(let args) = arguments, let rawPath = string(args, "path") else {
-                    throw ToolRouterError.invalidArguments(toolName: "tree_sitter_query", reason: "missing 'path'")
-                }
-                let path = expand(rawPath)
-                let content = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
-                let lang = (string(args, "language") ?? languageFor(path: path)).lowercased()
-                let query = string(args, "query", default: "symbols") ?? "symbols"
-                let maxMatches = max(1, int(args, "maxMatches", default: 200))
-                if let cli = discover("tree-sitter"), !query.isEmpty {
-                    let result = (try? runProcess(cli, ["query", query, path])) ?? (1, "", "tree-sitter query failed")
-                    if result.0 == 0 {
-                        return .object([
-                            "ok": .bool(true),
-                            "backend": .string("tree-sitter-cli"),
-                            "language": .string(lang),
-                            "matches": .array(result.1.split(separator: "\n").prefix(maxMatches).map { .string(String($0)) })
-                        ])
-                    }
-                }
-                let matches = fallbackMatches(content: content, language: lang, query: query, maxMatches: maxMatches)
-                return .object([
-                    "ok": .bool(true),
-                    "backend": .string("fallback"),
-                    "capability": .string("tree-sitter CLI not installed; used deterministic regex structural scanner"),
-                    "language": .string(lang),
-                    "matches": .array(matches)
-                ])
-            }
-        ))
-    }
-
-    private static func fallbackMatches(content: String, language: String, query: String, maxMatches: Int) -> [Value] {
-        let patterns: [String]
-        switch language {
-        case "typescript", "javascript", "ts", "js":
-            patterns = ["\\b(function|class|interface|type|const|let|var)\\s+([A-Za-z_$][A-Za-z0-9_$]*)"]
-        case "swift":
-            patterns = ["\\b(func|struct|class|actor|enum|protocol|let|var)\\s+([A-Za-z_][A-Za-z0-9_]*)"]
-        case "json":
-            patterns = ["\"([^\"]+)\"\\s*:"]
-        case "markdown", "md":
-            patterns = ["^(#{1,6})\\s+(.+)$"]
-        case "bash", "sh", "zsh":
-            patterns = ["(?:^|\\n)\\s*(?:function\\s+)?([A-Za-z_][A-Za-z0-9_]*)\\s*\\(\\)"]
-        default:
-            patterns = [NSRegularExpression.escapedPattern(for: query)]
-        }
-        var out: [Value] = []
-        for pat in patterns {
-            guard let rx = try? NSRegularExpression(pattern: pat, options: [.anchorsMatchLines]) else { continue }
-            let ns = content as NSString
-            for m in rx.matches(in: content, range: NSRange(location: 0, length: ns.length)) {
-                guard out.count < maxMatches else { return out }
-                let line = content[..<content.index(content.startIndex, offsetBy: m.range.location)].filter { $0 == "\n" }.count + 1
-                let text = ns.substring(with: m.range)
-                out.append(.object([
-                    "line": .int(line),
-                    "text": .string(text),
-                    "capture": .string(m.numberOfRanges > 1 ? ns.substring(with: m.range(at: m.numberOfRanges - 1)) : text)
-                ]))
-            }
-        }
-        return out
-    }
-
-    private static func languageFor(path: String) -> String {
-        switch URL(fileURLWithPath: path).pathExtension.lowercased() {
-        case "ts", "tsx": return "typescript"
-        case "js", "jsx": return "javascript"
-        case "swift": return "swift"
-        case "json": return "json"
-        case "md", "markdown": return "markdown"
-        case "sh", "bash", "zsh": return "bash"
-        default: return "unknown"
-        }
     }
 
     private static func registerFileZip(on router: ToolRouter) async {
@@ -454,23 +306,4 @@ public enum ArtifactModule {
         ))
     }
 
-    private static func discover(_ name: String) -> String? {
-        let candidates = ["/opt/homebrew/bin/\(name)", "/usr/local/bin/\(name)", "/usr/bin/\(name)"]
-        for c in candidates where FileManager.default.isExecutableFile(atPath: c) { return c }
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-        p.arguments = [name]
-        let out = Pipe()
-        p.standardOutput = out
-        p.standardError = Pipe()
-        do {
-            try p.run()
-            let data = out.fileHandleForReading.readDataToEndOfFile()
-            p.waitUntilExit()
-            let s = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            return p.terminationStatus == 0 && !s.isEmpty ? s : nil
-        } catch {
-            return nil
-        }
-    }
 }

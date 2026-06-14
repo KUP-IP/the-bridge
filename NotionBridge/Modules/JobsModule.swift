@@ -7,8 +7,7 @@
 //                      Total: 15 scheduler tools.
 //
 // Tier assignments:
-//   job_create, job_delete, job_update, job_duplicate, job_run, job_import,
-//   jobs_pause_all, jobs_resume_all → .notify (mutating)
+//   job_create, job_delete, job_update, job_duplicate, job_run, job_import → .notify (mutating)
 //   job_get, job_list, job_pause, job_resume, job_history, job_templates,
 //   job_export → .open (read)
 
@@ -27,36 +26,8 @@ public enum JobsModule {
         await router.register(makeJobList())
         await router.register(makeJobDelete())
 
-        // Sprint A · mcp-builder #3: merge jobs_pause_all / jobs_resume_all
-        // into job_pause / job_resume with `all: true`. The mass ops stay
-        // registered as 1-cycle deprecation aliases that inject all:true.
-        let jobPause = makeJobPause()
-        await router.register(jobPause)
-        await router.register(ToolDeprecationAlias.transformAlias(
-            oldName: "jobs_pause_all",
-            newName: "job_pause",
-            module: moduleName,
-            tier: .notify,
-            inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
-            forwardingDescription: "Kill-switch: pause every active job in parallel. Pass `all: true` to job_pause for the same behavior.",
-            handler: { _ in
-                try await jobPause.handler(.object(["all": .bool(true)]))
-            }
-        ))
-
-        let jobResume = makeJobResume()
-        await router.register(jobResume)
-        await router.register(ToolDeprecationAlias.transformAlias(
-            oldName: "jobs_resume_all",
-            newName: "job_resume",
-            module: moduleName,
-            tier: .notify,
-            inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
-            forwardingDescription: "Resume every paused job in parallel. Pass `all: true` to job_resume for the same behavior.",
-            handler: { _ in
-                try await jobResume.handler(.object(["all": .bool(true)]))
-            }
-        ))
+        await router.register(makeJobPause())
+        await router.register(makeJobResume())
 
         await router.register(makeJobHistory())
         await router.register(makeJobTemplates())
@@ -271,23 +242,6 @@ public enum JobsModule {
         )
     }
 
-    private static func makeJobsPauseAll() -> ToolRegistration {
-        ToolRegistration(
-            name: "jobs_pause_all", module: moduleName, tier: .notify,
-            description: "Kill-switch: pause every active job in parallel. Mass operation — scope is the entire scheduler.",
-            inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
-            handler: { args in try await JobsManager.shared.pauseAllTool(args: args) }
-        )
-    }
-
-    private static func makeJobsResumeAll() -> ToolRegistration {
-        ToolRegistration(
-            name: "jobs_resume_all", module: moduleName, tier: .notify,
-            description: "Resume every paused job in parallel. Mass operation — scope is the entire scheduler.",
-            inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
-            handler: { args in try await JobsManager.shared.resumeAllTool(args: args) }
-        )
-    }
 }
 
 // MARK: - Errors

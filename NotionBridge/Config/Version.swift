@@ -11,7 +11,7 @@ import Foundation
 public enum AppVersion {
     /// Marketing version (CFBundleShortVersionString equivalent).
     /// Format: MAJOR.MINOR.PATCH (Semantic Versioning).
-    public static let marketing = "3.7.10"
+    public static let marketing = "3.7.11"
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
@@ -48,7 +48,13 @@ public enum AppVersion {
     ///       tolerates SSE, which is why only ChatGPT broke); local desktop keeps
     ///       the SDK path via the loopback fallback;
     ///   (3) v3.7.9's loopback-static-bearer fallback retained for local↔cloud.
-    public static let build = "56"
+    /// v3.7.11: 56 → 57 — tool-surface resurface (223→163 tools across 26
+    ///   families: pruned Chrome/Stripe/dev-loop-IDE-CI layer + deprecation
+    ///   shims) + compact-default tools_list. NB: the bump commit (bb24000)
+    ///   set Info.plist CFBundleVersion to 57 + marketing 3.7.10→3.7.11 but
+    ///   left this `build` constant at 56 — re-synced here so the SSOT, the
+    ///   in-app display, and the bundle agree (Sparkle compares CFBundleVersion).
+    public static let build = "57"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }
@@ -128,7 +134,18 @@ public enum BridgeConstants {
     /// fb-permissions: + 1 (permissions_status — unified TCC grant probe, new
     ///   `permissions` family) = 209.
     /// Unified Memory Wave 2 (PKT-977): + 2 (memory_export + memory_import) = 211.
-    public static let staticFeatureModuleToolCount = 211
+    /// Tool-surface resurface (v3.7.11, 2026-06-14): −50 static tools. Pruned the
+    ///   Chrome family (6); the dev-loop/IDE-CI layer (lsp 6, vitest/playwright/
+    ///   lighthouse 3, devserver+port_inspect 4, bg_process 5, wrangler 1,
+    ///   swift_build/test/make_run 3, file_watch+tree_sitter_query 2,
+    ///   git_worktree×4+git_merge 5); payment_execute (1); screen_analyze (1); and
+    ///   residual deprecation shims (ax_query, gh_{pr,issue,actions}_* old names ×3,
+    ///   list_routing_skills, manage_skill, jobs_pause_all/resume_all ×2,
+    ///   file_apply_patch, file_str_replace, notion_code_block_append,
+    ///   notion_connections_list, bridge_focus_settings = 12). 211 − 50 = 161.
+    ///   The Stripe family was removed entirely but was already excluded from this
+    ///   static count (it registered via the network-gated `includeStripe` path).
+    public static let staticFeatureModuleToolCount = 161
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.
@@ -149,5 +166,8 @@ public enum BridgeConstants {
     ///   bridge_focus_settings) = 27.
     /// FB [buildtools]: + swift family (swift_build/swift_test/make_run) = 28.
     /// fb-permissions: + permissions family (permissions_status) = 29.
-    public static let staticFeatureModuleFamilyCount = 29
+    /// Tool-surface resurface (v3.7.11, 2026-06-14): − chrome, − payment, − swift
+    ///   families (their tools were fully pruned); dev family survives via
+    ///   git/gh/file_edit/code_search/http_fetch. 29 − 3 = 26.
+    public static let staticFeatureModuleFamilyCount = 26
 }

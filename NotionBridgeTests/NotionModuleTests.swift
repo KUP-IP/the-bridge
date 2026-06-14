@@ -22,9 +22,9 @@ func runNotionModuleTests() async {
     // MARK: - Tool Registration (23 tools)
     // ============================================================
 
-    await test("NotionModule registers 24 tools (FB-notionwrite: notion_page_edit added)") {
+    await test("NotionModule registers 22 tools (FB-notionwrite: notion_page_edit added)") {
         let tools = await router.registrations(forModule: "notion")
-        try expect(tools.count == 24, "Expected 24 notion tools, got \(tools.count)")
+        try expect(tools.count == 22, "Expected 22 notion tools, got \(tools.count)")
     }
 
     let expectedTools: [String] = [
@@ -34,9 +34,9 @@ func runNotionModuleTests() async {
         "notion_database_get", "notion_datasource_get",
         "notion_comments_list", "notion_comment_create", "notion_users_list",
         "notion_page_move", "notion_file_upload", "notion_token_introspect",
-        "notion_connections_list", "notion_block_update",
+        "notion_block_update",
         "notion_datasource_update", "notion_datasource_create",
-        "notion_discussion_create", "notion_code_block_append"
+        "notion_discussion_create"
     ]
 
     for toolName in expectedTools {
@@ -54,7 +54,7 @@ func runNotionModuleTests() async {
     let openTools = [
         "notion_search", "notion_page_read", "notion_query",
         "notion_page_markdown_read", "notion_comments_list",
-        "notion_users_list", "notion_token_introspect", "notion_connections_list",
+        "notion_users_list", "notion_token_introspect",
         "notion_database_get", "notion_datasource_get"
     ]
     for toolName in openTools {
@@ -762,19 +762,6 @@ func runNotionModuleTests() async {
             if case .object(let dict) = result {
                 try expect(dict["count"] != nil, "Expected count key")
                 try expect(dict["results"] != nil, "Expected results key")
-            } else {
-                throw TestError.assertion("Expected object result")
-            }
-        }
-
-        await test("notion_connections_list returns connections") {
-            let result = try await router.dispatch(
-                toolName: "notion_connections_list",
-                arguments: .object([:])
-            )
-            if case .object(let dict) = result {
-                try expect(dict["count"] != nil, "Expected count key")
-                try expect(dict["connections"] != nil, "Expected connections key")
             } else {
                 throw TestError.assertion("Expected object result")
             }

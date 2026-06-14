@@ -23,7 +23,6 @@ func runEndToEndTests() async {
     // surface as ServerManager.setup() minus StripeMcpModule (network-dependent).
     await BridgeModuleRegistry.registerStaticFeatureModules(
         on: router,
-        includeStripe: false,
         registerSession: { sessionRouter in
             await SessionModule.register(on: sessionRouter, auditLog: auditLog)
         }
@@ -311,7 +310,6 @@ func runEndToEndTests() async {
         try expect(tierMap["credential_read"] == "request", "credential_read should be request")
         try expect(tierMap["credential_list"] == "notify", "credential_list should be notify")
         try expect(tierMap["credential_delete"] == "request", "credential_delete should be request")
-        try expect(tierMap["payment_execute"] == "request", "payment_execute should be request")
     }
 
     // ============================================================
@@ -368,48 +366,42 @@ func runEndToEndTests() async {
         try expect(contacts.count == 4, "ContactsModule: expected 4")
         // Sprint A · mcp-builder #1: notion_block_read removed (24 → 23).
         // FB-notionwrite: notion_page_edit added (23 → 24).
-        try expect(notion.count == 24, "NotionModule: expected 24 (FB-notionwrite)")
-        try expect(screen.count == 5, "ScreenModule: expected 5")
-        // Sprint A · mcp-builder #1 (W2): ax_find_element, ax_element_info
-        // removed. #11 (W3): ax_query → ax_inspect rename (alias kept), and
-        // ax_focused_app revived as a NEW dedicated tool. Final live set:
-        // ax_tree, ax_inspect, ax_query, ax_focused_app, ax_perform_action = 5.
-        try expect(accessibility.count == 5,
-                   "AccessibilityModule: expected 5 (Sprint A · #11 final)")
+        try expect(notion.count == 22, "NotionModule: expected 22 (FB-notionwrite)")
+        try expect(screen.count == 4, "ScreenModule: expected 4")
+        // v3.7.11 resurface: the ax_query deprecation alias was removed. Live set:
+        // ax_tree, ax_inspect, ax_focused_app, ax_perform_action = 4.
+        try expect(accessibility.count == 4,
+                   "AccessibilityModule: expected 4 (v3.7.11 resurface)")
         try expect(applescript.count == 1, "AppleScriptModule: expected 1")
 
         let chrome = await router.registrations(forModule: "chrome")
         let skills = await router.registrations(forModule: "skills")
-        // Sprint A · mcp-builder #14: chrome_tabs → chrome_tabs_list rename
-        // (alias kept), list_routing_skills → skills_routing_list (alias kept).
-        // Sprint A · mcp-builder #2: manage_skill split into 5 primitives
-        //   (skill_create/delete/update/rename/sync_notion) + alias kept.
-        try expect(chrome.count == 6, "ChromeModule: expected 6 (Sprint A · #14)")
-        try expect(skills.count == 9, "SkillsModule: expected 9 (Sprint A · #2 + #14)")
+        // v3.7.11 resurface: Chrome family removed entirely. Skills: manage_skill +
+        // the list_routing_skills alias removed → fetch_skill, skills_routing_list,
+        // and 5 skill_* primitives = 7.
+        try expect(chrome.isEmpty, "ChromeModule removed in v3.7.11 — expected 0 chrome tools")
+        try expect(skills.count == 7, "SkillsModule: expected 7 (v3.7.11 resurface)")
 
         let credential = await router.registrations(forModule: "credential")
         try expect(credential.count == 4, "CredentialModule: expected 4")
 
         let payment = await router.registrations(forModule: "payment")
-        try expect(payment.count == 1, "PaymentModule: expected 1")
+        try expect(payment.isEmpty, "PaymentModule removed in v3.7.11 — expected 0 payment tools")
 
         let connections = await router.registrations(forModule: "connections")
         try expect(connections.count == 5, "ConnectionsModule: expected 5")
 
         let scheduler = await router.registrations(forModule: "scheduler")
-        // Sprint A · mcp-builder #3: jobs_pause_all / jobs_resume_all
-        // reinstated as 1-cycle aliases that forward to job_pause/job_resume
-        // with all:true. Net +2.
-        try expect(scheduler.count == 15, "JobsModule scheduler family: expected 15 (Sprint A · #3)")
+        // v3.7.11 resurface: jobs_pause_all / jobs_resume_all deprecation aliases
+        // removed (use job_pause / job_resume with all:true). 15 − 2 = 13.
+        try expect(scheduler.count == 13, "JobsModule scheduler family: expected 13 (v3.7.11 resurface)")
 
         let dev = await router.registrations(forModule: "dev")
-        // Sprint A · mcp-builder mutated the dev/ family in stages. At the
-        // end of Sprint A the count is the original 48, minus 1 for the
-        // removed dev_module_info (#8), plus N new renamed/split/merged
-        // primaries (#7 gh_*, #6 git_worktree_*, #5 file_edit). Aliases
-        // stay registered under their old names, so renames are net +1.
-        // Lower bound (post W2 only): 50. Upper bound (post W4): 54.
-        try expect(dev.count >= 50, "dev module family: expected ≥50 (Sprint A · W2+)")
+        // v3.7.11 resurface trimmed dev/ to the lean quick-fix kit: gh_* (9),
+        // git read/branch/apply (7), file_edit + code_search (2), and
+        // http_fetch/diff_render/file_zip/file_unzip/file_hash (5). The dev-loop
+        // layer (lsp, bg_process, devserver, runners, worktrees, wrangler) was cut.
+        try expect(dev.count >= 20, "dev module family: expected ≥20 (v3.7.11 lean kit)")
 
         let computer = await router.registrations(forModule: "computer")
         try expect(computer.count == 5, "computer module family: expected 5")

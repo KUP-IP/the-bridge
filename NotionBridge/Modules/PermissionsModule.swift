@@ -158,7 +158,7 @@ public enum PermissionsModule {
                 whenNotToUse: [
                     "to request or trigger a permission prompt (this tool is read-only)"
                 ],
-                relatedTools: ["system_info", "ax_query", "reminders_list", "calendar_list"]
+                relatedTools: ["system_info", "ax_inspect", "reminders_list", "calendar_list"]
             ),
             handler: { arguments in
                 let only: PermissionManager.Grant? = {

@@ -688,10 +688,6 @@ public enum AccessibilityModule {
             }
         )
         await router.register(axInspect)
-        // One-cycle deprecation alias under the old name.
-        await router.register(ToolDeprecationAlias.renameAlias(
-            oldName: "ax_query", newName: "ax_inspect", from: axInspect
-        ))
 
         // ── 2. ax_focused_app (open) — Sprint A · #11 REVIVAL ─────────────
         // Promoted from "mode='focused_app'" to its own top-level tool
