@@ -14,54 +14,6 @@ func runGhModuleTests() async {
     print("\n\u{1F500} GhModule Tests (PKT-742 v2.2 · 2.2)")
 
     // ------------------------------------------------------------------
-    // 1) Tool registration: 9 tools, module = "dev", tier = .request
-    // ------------------------------------------------------------------
-    await test("GhModule registers 9 tools under module=\"dev\"") {
-        let gate = SecurityGate()
-        let log = AuditLog()
-        let router = ToolRouter(securityGate: gate, auditLog: log)
-        await GhModule.register(on: router)
-        let regs = await router.registrations(forModule: "dev")
-        let names = Set(regs.map { $0.name })
-        let expected: Set<String> = [
-            "gh_pr_open",
-            "gh_pr_status",
-            "gh_pr_comment",
-            "gh_pr_merge",
-            "gh_actions_runs",
-            "gh_check_status",
-            "gh_issue_open",
-            "gh_issue_comment",
-            "gh_issue_close",
-        ]
-        try expect(expected.isSubset(of: names),
-            "missing gh_* tools — got \(names.sorted())")
-    }
-
-    await test("gh_* tier policy: read-only listing .open, rest .request (FB-5)") {
-        let gate = SecurityGate()
-        let log = AuditLog()
-        let router = ToolRouter(securityGate: gate, auditLog: log)
-        await GhModule.register(on: router)
-        let regs = await router.registrations(forModule: "dev")
-        let ghRegs = regs.filter { $0.name.hasPrefix("gh_") }
-        try expect(ghRegs.count >= 9,
-            "expected >=9 gh_* tools, got \(ghRegs.count)")
-        // FB-5: read-only listing tools (gh_actions_runs_list + its deprecated
-        // alias gh_actions_runs) are tier .open; all other gh_* are .request.
-        let readOnly: Set<String> = ["gh_actions_runs_list", "gh_actions_runs"]
-        for r in ghRegs {
-            if readOnly.contains(r.name) {
-                try expect(r.tier == .open,
-                    "\(r.name) tier expected .open, got \(r.tier.rawValue)")
-            } else {
-                try expect(r.tier == .request,
-                    "\(r.name) tier expected .request, got \(r.tier.rawValue)")
-            }
-        }
-    }
-
-    // ------------------------------------------------------------------
     // 2) Auth-status parser correctness on a representative gh blob.
     // ------------------------------------------------------------------
     await test("parseAccount extracts the active account name") {

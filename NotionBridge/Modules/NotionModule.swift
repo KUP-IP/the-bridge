@@ -945,8 +945,8 @@ public enum NotionModule {
                 title: "Notion: Create Comment",
                 whenToUse: ["posting a short inline comment on a page"],
                 whenNotToUse: ["threaded replies (use notion_discussion_create)",
-                               "long code/text (use notion_code_block_append)"],
-                relatedTools: ["notion_discussion_create", "notion_comments_list", "notion_code_block_append"]
+                               "long code/text (use notion_blocks_append with autoChunk:true)"],
+                relatedTools: ["notion_discussion_create", "notion_comments_list"]
             ),
             handler: { arguments in
                 guard case .object(let args) = arguments,
@@ -1204,37 +1204,6 @@ public enum NotionModule {
             }
         ))
 
-        // MARK: 16. notion_connections_list – open (B4)
-        await router.register(ToolRegistration(
-            name: "notion_connections_list",
-            module: moduleName,
-            tier: .open,
-            description: "DEPRECATED — use `connections_list` with `kind:'notion'` filter. Removed in 3.5.0. List saved Notion workspace connections registered with the bridge.",
-            inputSchema: .object([
-                "type": .string("object"),
-                "properties": .object([:]),
-                "required": .array([])
-            ]),
-            handler: { _ in
-                let connList = try await registryHolder.listConnections()
-
-                var items: [Value] = []
-                for conn in connList {
-                    items.append(.object([
-                        "name": .string(conn.name),
-                        "primary": .bool(conn.isPrimary),
-                        "status": .string(conn.status),
-                        "token": .string(conn.maskedToken)
-                    ]))
-                }
-
-                return .object([
-                    "count": .int(items.count),
-                    "connections": .array(items)
-                ])
-            }
-        ))
-
         // Sprint A · mcp-builder #1: notion_block_read DEPRECATED shim
         // removed (PKT-738 v2.2 ramp complete; audit allows full removal).
         // Use notion_page_read for whole-page reads, or notion_block_update
@@ -1245,7 +1214,7 @@ public enum NotionModule {
             name: "notion_block_update",
             module: moduleName,
             tier: .notify,
-            description: "Replace one block's inline content / type payload. For code blocks prefer notion_code_block_append (handles 2000-char chunking).",
+            description: "Replace one block's inline content / type payload. For code blocks prefer notion_blocks_append with autoChunk:true.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -1640,58 +1609,6 @@ public enum NotionModule {
             }
         ))
 
-        // MARK: 24. notion_code_block_append – notify (E3, v1.9.1)
-        // Sprint A · mcp-builder #4: marked DEPRECATED — the operator
-        // proposal merges this into notion_blocks_append with `autoChunk:true`
-        // (1-cycle alias). The auto-chunking PATCH semantics differ from
-        // notion_blocks_append's POST semantics, so the alias keeps the
-        // same handler — only the description signals migration.
-        await router.register(ToolRegistration(
-            name: "notion_code_block_append",
-            module: moduleName,
-            tier: .notify,
-            description: "DEPRECATED — prefer `notion_blocks_append` with `autoChunk:true` and a single code child. Removed in 3.5.0. Replace a code block's content with a long string, auto-chunking into ≤2000-char runs. Target must already be type 'code'.",
-            inputSchema: .object([
-                "type": .string("object"),
-                "properties": .object([
-                    "blockId": .object(["type": .string("string"), "description": .string("Target code block ID, URL, or compressed placeholder")]),
-                    "content": .object(["type": .string("string"), "description": .string("Full content string; auto-chunked into 2000-char runs")]),
-                    "language": .object(["type": .string("string"), "description": .string("Optional code language (e.g. swift, typescript, plain text)")]),
-                    "workspace": workspaceParam
-                ]),
-                "required": .array([.string("blockId"), .string("content")])
-            ]),
-            handler: { arguments in
-                guard case .object(let args) = arguments,
-                      case .string(let blockId) = args["blockId"],
-                      case .string(let content) = args["content"] else {
-                    throw ToolRouterError.invalidArguments(toolName: "notion_code_block_append", reason: "missing 'blockId' or 'content'")
-                }
-
-                let language: String? = {
-                    if case .string(let l) = args["language"] { return l }
-                    return nil
-                }()
-
-                let client = try await registryHolder.getClient(workspace: extractWorkspace(args))
-                let responseData = try await client.updateCodeBlockChunked(blockId: blockId, content: content, language: language)
-
-                guard let json = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any] else {
-                    return .object(["error": .string("Failed to parse code block update response")])
-                }
-
-                let id = json["id"] as? String ?? ""
-                let type = json["type"] as? String ?? ""
-                let chunkCount = (content.count + 1999) / 2000
-
-                return .object([
-                    "success": .bool(true),
-                    "id": .string(id),
-                    "type": .string(type),
-                    "chunkCount": .int(max(chunkCount, 1))
-                ])
-            }
-        ))
     }
 }
 

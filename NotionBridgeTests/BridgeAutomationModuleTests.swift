@@ -6,7 +6,6 @@
 //     parsing, and rejection of unknown / ambiguous input.
 //   • bridge_settings_navigate — registration, tier (.open), section validation,
 //     happy-path (selection model updated even with no app host present).
-//   • bridge_focus_settings — registration, tier (.notify), no-app-host outcome.
 //   • mouse_click axPath additions — the coordinate-free path no longer requires
 //     x/y, and a bad axPath surfaces a clear error (capability_missing first when
 //     AX is not granted, which is the CI default).
@@ -31,7 +30,6 @@ func runBridgeAutomationModuleTests() async {
     await test("BridgeAutomationModule registers both Settings tools") {
         let tools = await router.registrations(forModule: "automation")
         try expect(tools.contains { $0.name == "bridge_settings_navigate" }, "missing bridge_settings_navigate")
-        try expect(tools.contains { $0.name == "bridge_focus_settings" }, "missing bridge_focus_settings")
     }
 
     await test("BridgeAutomationModule.moduleName is 'automation'") {
@@ -43,12 +41,6 @@ func runBridgeAutomationModuleTests() async {
         let tools = await router.registrations(forModule: "automation")
         let t = tools.first { $0.name == "bridge_settings_navigate" }!
         try expect(t.tier == .open, "expected .open, got \(t.tier.rawValue)")
-    }
-
-    await test("bridge_focus_settings is .notify tier") {
-        let tools = await router.registrations(forModule: "automation")
-        let t = tools.first { $0.name == "bridge_focus_settings" }!
-        try expect(t.tier == .notify, "expected .notify, got \(t.tier.rawValue)")
     }
 
     // MARK: - Section resolution
@@ -164,23 +156,6 @@ func runBridgeAutomationModuleTests() async {
         let nav = await MainActor.run { (SettingsNavigation.shared.section, SettingsNavigation.shared.anchor) }
         try expect(nav.0 == .tools, "selection model section not updated: \(nav.0)")
         try expect(nav.1 == "screen", "selection model anchor not updated: \(String(describing: nav.1))")
-    }
-
-    // MARK: - bridge_focus_settings behaviour
-
-    await test("bridge_focus_settings returns a structured outcome") {
-        // No AppDelegate host in the test harness → windowFound is false but the
-        // tool must still return a non-throwing structured success envelope.
-        let result = try await router.dispatch(
-            toolName: "bridge_focus_settings",
-            arguments: .object(["openIfNeeded": .bool(false)])
-        )
-        guard case .object(let dict) = result else {
-            throw TestError.assertion("expected object response")
-        }
-        try expect(dict["success"] != nil, "missing success key")
-        try expect(dict["windowFound"] != nil, "missing windowFound key")
-        try expect(dict["activated"] != nil, "missing activated key")
     }
 
     // MARK: - mouse_click axPath additions (coordinate-space fix)

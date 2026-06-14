@@ -620,7 +620,6 @@ await test("AuditEntry is Codable (JSON round-trip)") {
 // SKIPPED: checkAll() hangs in CLI — NSAppleScript probes need AppKit run loop
 // await runPermissionManagerTests()
 await runShellModuleTests()
-await runLspModuleTests()
 await runFileModuleTests()
 await runSessionModuleTests()
 await runSessionPersistenceTests()   // ITEM [session]: MCP session durability across restart/install (persist + clean-shutdown marker + resumable reconnect)
@@ -646,7 +645,6 @@ await runBuiltinModuleTests()
 await runConfigManagerTests()
 await runMCPHTTPValidationTests()
 await runDesktopOrganizationScenarioTests()
-await runChromeModuleTests()
 await runSkillsModuleTests()
 await runCredentialManagerTests()
 await runCredentialModuleTests()
@@ -654,7 +652,6 @@ await runCredentialHardeningTests()   // [credentials] hardening: env-var alias 
 await runCredentialValidatorTests()   // v3.7.6 Wave 4a: premium vault validation core — pure service→method mapping (incl. unmappable→unchecked truthfulness invariant), health→badge-tone, status persistence round-trip, Touch-ID reveal gate, weekly-due decision, card expiry/form validators. NO live network.
 await runKeychainMigrationTests()     // WS-5c: keychain service rename com.notionbridge → kup.solutions.notion-bridge is ZERO-LOSS (legacy item still reads back; non-destructive old-copy retained; save mirrors both; delete clears both) + WS-5b cadence guard (recordRun flips isDue OFF → periodic timer/wake never double-run). Live round-trip auto-skips when the test process has no writable Keychain.
 await runStripeClientTests()
-await runPaymentModuleTests()
 await runConnectionsModuleTests()
 await runStripeTokenizationTests()
 await runSecurityAuditTests()
@@ -678,12 +675,8 @@ await runBridgeAutomationModuleTests()  // FB-AUTOMATION: bridge_settings_naviga
 await runCGEventModuleTests()           // PKT-765 (v2.2 · 3.3.1)
 await runPasteboardHistoryModuleTests() // PKT-765 (v2.2 · 3.3.1)
 await runJobsModuleTests()
-await runBgProcessModuleTests()
-await runDevServerModuleTests()
 await runGhModuleTests()
 await runGitModuleTests()
-await runLspModuleTests()
-await runLspModuleRenameRefsLiveTests()
 await runWSHMenuBarTests()        // PKT-804 (v2.3): menu-bar quick-page
 await runSnippetsModuleTests()    // PKT-2135a9e9 (v2.3 · WS-D): snippets module
 await runStandingOrdersModuleTests() // PKT-931 (v3.7·B): standing_orders_* MCP tools
@@ -723,17 +716,11 @@ await runBridgeModuleRegistryTests() // PKT v3.0·0.4: single-source module regi
 await runMCPToolFactoryTests()       // PKT v3.0·0.5: metadata contract + unified Tool factory
 await runToolConventionTests()       // PKT v3.0·0.5: P0 — aliases + key convention + dispatch contract
 await runToolMetadataAuthoringTests() // PKT v3.0·0.5: P1 — projection + authored-metadata render
-await runPlaywrightModuleTests()  // PKT-781 (v2.2 · 3.2a)
-await runVitestModuleTests()      // PKT-781 (v2.2 · 3.2a)
-await runLighthouseModuleTests()  // PKT-781 (v2.2 · 3.2a)
-await runSwiftBuildModuleTests()  // FB [buildtools]: swift_build/swift_test/make_run over bg_process
 await runArtifactModuleTests()    // PKT-743 (v2.2 · 3.1)
 await runRunnerParsersTests()      // PKT-782 (v2.2 · 3.2b)
 await runCronHumanizerTests()
 
-await runStripeDeprecationShimTests()
 await runEndToEndTests()
-await runWranglerModuleTests() // PKT-757 (v2.2 · 0.2.2)
 
 // PKT-1 (v3.5): rename migration + canonical paths.
 await runPathMigrationTests()

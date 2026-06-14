@@ -1,10 +1,8 @@
 // DevSuiteAuditTests.swift — Dev-suite audit (every-angle-of-attack)
 // NotionBridge · Tests
 //
-// Cross-tool invariants for the entire `module == "dev"` surface (the
-// authoritative Dev suite: DevModule, BgProcessModule, DevServerModule,
-// GhModule, GitModule, LspModule, CodeEditModule, WranglerModule,
-// ArtifactModule, PlaywrightModule, VitestModule, LighthouseModule).
+// Cross-tool invariants for the surviving `module == "dev"` surface:
+// DevModule, GhModule, GitModule, CodeEditModule, ArtifactModule.
 //
 // Per-module behavioural tests live in the module-specific files; this
 // file locks suite-wide contracts so a future Dev tool cannot regress
@@ -16,27 +14,15 @@ import Foundation
 import MCP
 import NotionBridgeLib
 
-/// Build a router carrying ONLY the Dev-suite modules, with hermetic
-/// runtimes where a module would otherwise touch shared singletons.
+/// Build a router carrying ONLY the surviving Dev-suite modules.
 private func makeDevRouter() async -> ToolRouter {
     let router = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
-    let base = URL(fileURLWithPath: NSTemporaryDirectory())
-        .appendingPathComponent("NBT-devsuite-\(UUID().uuidString)", isDirectory: true)
-    try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-    let bg = BgProcessRuntime(baseDir: base)
 
     await DevModule.register(on: router)
-    await BgProcessModule.register(on: router, runtime: bg)
-    await DevServerModule.register(on: router)
     await GhModule.register(on: router)
     await GitModule.register(on: router)
-    await LspModule.register(on: router)
     await CodeEditModule.register(on: router)
-    await WranglerModule.register(on: router)
     await ArtifactModule.register(on: router)
-    await PlaywrightModule.register(on: router, bgRuntime: bg, probeOverride: { true })
-    await VitestModule.register(on: router, bgRuntime: bg, probeOverride: { true })
-    await LighthouseModule.register(on: router, bgRuntime: bg, probeOverride: { true })
     return router
 }
 
@@ -48,8 +34,8 @@ private func camelCaseKeyOK(_ key: String) -> Bool {
 func runDevSuiteAuditTests() async {
     print("\n\u{1F50E} Dev-Suite Audit (cross-tool invariants)")
 
-    // The authoritative tool inventory under module="dev". Sprint A
-    // (mcp-builder Top-15) mutates this set across multiple waves:
+    // The authoritative tool inventory under module="dev" for the surviving
+    // modules. Sprint A wave notes:
     //   • W2 #8: `dev_module_info` REMOVED (scaffold placeholder).
     //   • W2 #7: gh_issue_open / gh_pr_open / gh_actions_runs gain
     //     renamed siblings (1-cycle aliases keep old names live).
@@ -59,11 +45,8 @@ func runDevSuiteAuditTests() async {
     // is in the expected superset, and that no surprise tools showed up.
     // Wave-specific containment is exercised by per-module tests.
     let expectedDevTools: Set<String> = [
-        "bg_process_start", "bg_process_status", "bg_process_logs",
-        "bg_process_kill", "bg_process_list",
-        "port_inspect", "devserver_start", "devserver_stop", "devserver_health",
         // gh_* (renames keep old name as deprecation alias):
-        "gh_pr_open", "gh_pr_create",
+        "gh_pr_create",
         "gh_pr_status", "gh_pr_comment", "gh_pr_merge",
         "gh_actions_runs", "gh_actions_runs_list",
         "gh_check_status",
@@ -73,16 +56,12 @@ func runDevSuiteAuditTests() async {
         "git_apply_patch",
         // git_worktree split (alias kept):
         "git_worktree", "git_worktree_list", "git_worktree_add", "git_worktree_remove",
-        "git_create_branch", "git_merge",
-        "lsp_diagnostics", "lsp_hover", "lsp_references", "lsp_definition",
-        "lsp_rename", "lsp_session_list",
+        "git_create_branch", 
         "code_search",
-        // file_edit merge (aliases kept):
-        "file_edit", "file_str_replace", "file_apply_patch",
-        "wrangler_d1_status",
-        "http_fetch", "diff_render", "file_watch", "tree_sitter_query",
-        "file_zip", "file_unzip", "file_hash",
-        "playwright_run", "vitest_run", "lighthouse_run"
+        // file_edit merge:
+        "file_edit",
+        "http_fetch", "diff_render",
+        "file_zip", "file_unzip", "file_hash"
     ]
 
     await test("Dev module surface is a subset of the post-Sprint-A expected superset") {
@@ -176,9 +155,7 @@ func runDevSuiteAuditTests() async {
         // dev_module_info removed by Sprint A · mcp-builder #8.
         let readOnly = ["git_status", "git_diff", "git_log",
                         "git_show", "git_blame", "code_search", "file_hash",
-                        "diff_render", "lsp_diagnostics", "lsp_hover",
-                        "wrangler_d1_status", "port_inspect", "bg_process_status",
-                        "bg_process_logs", "bg_process_list", "devserver_health"]
+                        "diff_render"]
         for name in readOnly {
             guard let a = ToolAnnotationCatalog.annotations(for: name) else {
                 throw TestError.assertion("\(name) has no annotation")
@@ -189,12 +166,10 @@ func runDevSuiteAuditTests() async {
     }
 
     await test("mutating Dev tools are annotated non-read-only") {
-        let mutating = ["bg_process_start", "bg_process_kill", "devserver_start",
-                        "devserver_stop", "gh_pr_open", "gh_pr_merge",
-                        "gh_issue_close", "git_apply_patch", "git_merge",
-                        "git_create_branch", "file_str_replace", "file_apply_patch",
-                        "file_zip", "file_unzip", "lsp_rename", "http_fetch",
-                        "playwright_run", "vitest_run", "lighthouse_run"]
+        let mutating = ["gh_pr_merge",
+                        "gh_issue_close", "git_apply_patch", 
+                        "git_create_branch",
+                        "file_zip", "file_unzip", "http_fetch"]
         for name in mutating {
             guard let a = ToolAnnotationCatalog.annotations(for: name) else {
                 throw TestError.assertion("\(name) has no annotation")
@@ -211,14 +186,14 @@ func runDevSuiteAuditTests() async {
 
     await test("dispatchFormatted surfaces did-you-mean on a Dev tool with a known misnomer key") {
         let router = await makeDevRouter()
-        // bg_process_status requires 'id'. Send the canonical wrong key
-        // 'page_id' (a harvested misnomer) → handler throws invalidArguments
+        // git_show requires 'ref'. Send the canonical wrong key
+        // 'commit_hash' (a harvested misnomer) → handler throws invalidArguments
         // → central recovery must append the did-you-mean hint.
         let (text, isError) = await router.dispatchFormatted(
-            toolName: "bg_process_status",
-            arguments: .object(["page_id": .string("x")])
+            toolName: "file_hash",
+            arguments: .object(["page_id": .string("abc123")])
         )
-        try expect(isError, "missing required 'id' must be an error")
+        try expect(isError, "missing required 'ref' must be an error")
         try expect(text.contains("did you mean") && text.contains("page_id→pageId"),
                    "central misnomer recovery did not fire for Dev tool: \(text)")
     }

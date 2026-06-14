@@ -194,8 +194,6 @@ public actor ConnectionRegistry {
             ]
             SecItemDelete(legacyDeleteQuery as CFDictionary)
             ConfigManager.shared.stripeAPIKey = nil
-            // Reset StripeMcpProxy cached session so tools/list reflects removal
-            await StripeMcpProxy.shared.reset()
         case .tunnel:
             throw ConnectionRegistryError.unsupportedAction("Remote access is managed through the Remote Access settings section")
         case .generic:

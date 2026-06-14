@@ -37,10 +37,6 @@ func runReadOnlyTierAuditTests() async {
         // Credential tools expose secret material — confirmation is intentional.
         "credential_read",
         "credential_list",
-        // GitModule applies a uniform module-wide `.request` policy to all its
-        // tools (see GitModule.swift header). `git_worktree_list` is the only
-        // read-only-named member and inherits that deliberate policy.
-        "git_worktree_list",
         // standing_orders_* (PKT-931) are operator-curated config. The packet
         // DoD mandates tier .notify for ALL FOUR tools (config must not change
         // silently). list/read are read-only-named but intentionally .notify,

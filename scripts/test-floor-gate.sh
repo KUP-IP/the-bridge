@@ -988,7 +988,21 @@ set -euo pipefail
 # credentials/securitygate, hotkey ⌃⌘B, emoji icons, keychain clean-service, skill
 # body cache + offline fetch) + keychain UX (always-allow-self ACL, the-bridge
 # rename). Net-new across the integration: 1951→1992 (2079 passing).
-FLOOR="${BRIDGE_TEST_FLOOR:-1992}"
+# v4.0.0 tool-surface resurface (2026-06-14): RECORDED FLOOR DECISION (order-inversion
+# rule — a green baseline is only lowered with a conscious, recorded decision). Wave 1
+# pruned ~60 MCP tools (Chrome family; all Stripe + payment_execute; the dev-loop/IDE-CI
+# layer — lsp, bg_process, devserver, vitest/playwright/lighthouse, wrangler, swift_build/
+# test/make_run, git_worktree*, git_merge, file_watch, tree_sitter_query, port_inspect; and
+# residual deprecation shims — ax_query, gh_{pr,issue,actions}_* old names, list_routing_skills,
+# manage_skill, jobs_{pause,resume}_all, file_apply_patch, file_str_replace,
+# notion_code_block_append, notion_connections_list, bridge_focus_settings, screen_analyze)
+# and their tests: 12 whole test files git-rm'd (BgProcess, Chrome, DevServer, Lighthouse,
+# Lsp ×2, Payment, Playwright, StripeDeprecationShim, SwiftBuild, Vitest, Wrangler) + ~50
+# per-tool test blocks excised from surviving modules. Local green 2079 → 1864 (−215, all
+# pure/CI-running tests; the 87-test GUI/TCC local-only margin is untouched), so the
+# CI-reliable green moves 1992 → 1992 − 215 = 1777. NOT a regression — legitimate tool
+# removal. staticFeatureModuleToolCount 211 → 161, family count 29 → 26 (Version.swift).
+FLOOR="${BRIDGE_TEST_FLOOR:-1777}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

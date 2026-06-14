@@ -66,7 +66,6 @@ func runModuleGroupTests() async {
         // http_fetch is its own group.
         try expect(ModuleGroupDerivation.resolve(toolName: "http_fetch") == .http)
         // payment_execute → .payment
-        try expect(ModuleGroupDerivation.resolve(toolName: "payment_execute") == .payment)
     }
 
     await test("override: synthetic-input primitives fold into .synthetic") {
@@ -77,15 +76,12 @@ func runModuleGroupTests() async {
 
     await test("override: skill-adjacent legacy names fold into .skills") {
         try expect(ModuleGroupDerivation.resolve(toolName: "fetch_skill") == .skills)
-        try expect(ModuleGroupDerivation.resolve(toolName: "manage_skill") == .skills)
-        try expect(ModuleGroupDerivation.resolve(toolName: "list_routing_skills") == .skills)
     }
 
     await test("system catch-all: orphan prefix → .system (Q1 no-orphan)") {
         try expect(ModuleGroupDerivation.resolve(toolName: "tools_list") == .system)
         try expect(ModuleGroupDerivation.resolve(toolName: "session_info") == .system)
         try expect(ModuleGroupDerivation.resolve(toolName: "notify") == .system)
-        try expect(ModuleGroupDerivation.resolve(toolName: "tree_sitter_query") == .system)
         // Genuinely unknown — must STILL bucket to .system.
         try expect(ModuleGroupDerivation.resolve(toolName: "totally_made_up_tool_xyz") == .system)
     }
@@ -240,13 +236,11 @@ func runModuleGroupTests() async {
 
     await test("deep-link: anchor referencing a single tool expands the group that contains it") {
         // A chip can reference a tool whose module is a singleton; it must still
-        // resolve to the group the tool belongs to (here payment_execute → payment).
+        // resolve to the group the tool belongs to (here applescript_exec → applescript).
         let live: [(name: String, module: String)] = [
-            ("payment_execute", "payment"),
-            ("stripe_api_execute", "stripe"),
+            ("applescript_exec", "applescript"),
         ]
-        try expect(ModuleGroupDerivation.groupID(forAnchor: "payment", registeredTools: live) == .payment)
-        try expect(ModuleGroupDerivation.groupID(forAnchor: "stripe", registeredTools: live) == .stripe)
+        try expect(ModuleGroupDerivation.groupID(forAnchor: "applescript", registeredTools: live) == .applescript)
     }
 
     await test("deep-link: anchor that is a group id but matches no live module falls back to the id") {

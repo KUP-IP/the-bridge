@@ -40,15 +40,14 @@ func runBridgeModuleRegistryTests() async {
                    "duplicate registrations: \(Dictionary(grouping: names, by: { $0 }).filter { $0.value.count > 1 }.keys.sorted())")
     }
 
-    await test("includeStripe is the ONLY prod/test delta (true ⊋ false, delta = Stripe)") {
+    await test("includeStripe is now inert — Stripe fully removed (no prod/test delta)") {
         let falseNames = Set(await (buildRouter(includeStripe: false)).allRegistrations().map(\.name))
         let trueNames = Set(await (buildRouter(includeStripe: true)).allRegistrations().map(\.name))
-        try expect(falseNames.isSubset(of: trueNames), "includeStripe:false must be a subset of true")
-        let delta = trueNames.subtracting(falseNames)
-        try expect(!delta.isEmpty, "includeStripe:true added no tools — StripeMcpModule not wired?")
-        // Every delta tool must belong to the Stripe module surface.
-        try expect(delta.allSatisfy { $0.contains("stripe") || $0.hasPrefix("stripe_") },
-                   "includeStripe delta contains non-Stripe tools: \(delta.sorted())")
+        // The Stripe family was removed entirely in the v4.0.0 tool-surface resurface.
+        // `includeStripe` is retained for call-site compatibility but now wires nothing,
+        // so the two surfaces must be byte-for-byte identical.
+        try expect(falseNames == trueNames,
+                   "includeStripe must no longer change the surface — Stripe removed; delta: \(trueNames.symmetricDifference(falseNames).sorted())")
     }
 
     await test("every registry tool has an EXPLICIT annotation (centralized drift guard)") {

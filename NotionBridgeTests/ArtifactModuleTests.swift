@@ -8,15 +8,13 @@ import NotionBridgeLib
 func runArtifactModuleTests() async {
     print("\n📦 ArtifactModule Tests (PKT-743 v2.2 · 3.1)")
 
-    await test("ArtifactModule registers 7 dev tools") {
+    await test("ArtifactModule registers 5 dev tools") {
         let router = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
         await ArtifactModule.register(on: router)
         let names = Set(await router.registrations(forModule: "dev").map(\.name))
         let expected: Set<String> = [
             "http_fetch",
             "diff_render",
-            "file_watch",
-            "tree_sitter_query",
             "file_zip",
             "file_unzip",
             "file_hash",
@@ -106,53 +104,4 @@ func runArtifactModuleTests() async {
         try expect(try String(contentsOf: payload, encoding: .utf8) == "roundtrip")
     }
 
-    await test("tree_sitter_query fallback finds symbols") {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("nb-artifact-tree-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tmp) }
-        let file = tmp.appendingPathComponent("sample.ts")
-        try "export function bridgeThing() { return 1 }\nconst other = 2\n".write(to: file, atomically: true, encoding: .utf8)
-
-        let router = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
-        await ArtifactModule.register(on: router)
-        let result = try await router.dispatch(toolName: "tree_sitter_query", arguments: .object([
-            "path": .string(file.path),
-            "language": .string("typescript"),
-            "query": .string("symbols")
-        ]))
-        guard case .object(let dict) = result,
-              case .string(let backend) = dict["backend"],
-              case .array(let matches) = dict["matches"] else {
-            throw TestError.assertion("unexpected tree_sitter_query payload")
-        }
-        try expect(["fallback", "tree-sitter-cli"].contains(backend))
-        try expect(!matches.isEmpty, "expected symbol matches")
-    }
-
-    await test("file_watch reports bounded modifications") {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("nb-artifact-watch-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tmp) }
-        let file = tmp.appendingPathComponent("watched.txt")
-        try "before".write(to: file, atomically: true, encoding: .utf8)
-
-        let router = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
-        await ArtifactModule.register(on: router)
-        async let watch = router.dispatch(toolName: "file_watch", arguments: .object([
-            "path": .string(tmp.path),
-            "durationMs": .int(250),
-            "debounceMs": .int(50)
-        ]))
-        try? await Task.sleep(nanoseconds: 50_000_000)
-        try "after".write(to: file, atomically: true, encoding: .utf8)
-        let result = try await watch
-        guard case .object(let dict) = result,
-              case .array(let events) = dict["events"] else {
-            throw TestError.assertion("unexpected file_watch payload")
-        }
-        let text = String(describing: events)
-        try expect(text.contains("modified") || text.contains("created"), "expected watch event, got \(text)")
-    }
 }

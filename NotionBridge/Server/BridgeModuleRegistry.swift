@@ -52,41 +52,27 @@ public enum BridgeModuleRegistry {
         await NotionModule.register(on: router)
         await ScreenModule.register(on: router)
         await ScreenModule.registerRecording(on: router)
-        await ScreenModule.registerAnalyze(on: router)
         await AccessibilityModule.register(on: router)
         await AppleScriptModule.register(on: router)
-        await ChromeModule.register(on: router)
         await SkillsModule.register(on: router)
         await CredentialModule.register(on: router)
-        await PaymentModule.register(on: router)
-        if includeStripe {
-            await StripeMcpModule.register(on: router)
-        }
         await ConnectionsModule.register(on: router)
         await JobsModule.register(on: router)
         await DevModule.register(on: router)
-        await BgProcessModule.register(on: router)
-        await DevServerModule.register(on: router)
         await GhModule.register(on: router)
         await GitModule.register(on: router)
-        await LspModule.register(on: router)
         await CodeEditModule.register(on: router)
-        await WranglerModule.register(on: router)
         await SpotlightModule.register(on: router)
         await SyntheticInputModule.register(on: router)
         await MouseClickModule.register(on: router)
         await CGEventModule.register(on: router)
         await PasteboardHistoryModule.register(on: router)
-        await PlaywrightModule.register(on: router)
-        await VitestModule.register(on: router)
-        await LighthouseModule.register(on: router)
-        await SwiftBuildModule.register(on: router)  // FB [buildtools]: swift_build/swift_test/make_run
         await ArtifactModule.register(on: router)
         await SnippetsModule.register(on: router)
         await StandingOrdersModule.register(on: router)
         await ShortcutsModule.register(on: router)
         await MemoryModule.register(on: router)
-        await BridgeAutomationModule.register(on: router) // FB-AUTOMATION: bridge_settings_navigate + bridge_focus_settings
+        await BridgeAutomationModule.register(on: router) // FB-AUTOMATION: bridge_settings_navigate
         await PermissionsModule.register(on: router)       // fb-permissions: permissions_status
     }
 

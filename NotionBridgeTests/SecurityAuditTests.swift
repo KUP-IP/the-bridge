@@ -110,7 +110,6 @@ func runSecurityAuditTests() async {
         await ShellModule.register(on: router)
         await AppleScriptModule.register(on: router)
         await CredentialModule.register(on: router)
-        await PaymentModule.register(on: router)
         await MessagesModule.register(on: router)
         let all = await router.allRegistrations()
         let requestTools = all.filter { $0.tier == .request }
@@ -118,7 +117,6 @@ func runSecurityAuditTests() async {
             "shell_exec", "run_script",
             "applescript_exec",
             "credential_save", "credential_read", "credential_delete",
-            "payment_execute",
             "messages_send"
         ]
         for name in expectedRequest {
