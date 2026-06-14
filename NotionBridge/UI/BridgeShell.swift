@@ -1,18 +1,30 @@
-// BridgeShell.swift — Resurface shell for The Bridge (v3.7.2).
-// The carbon "stage" wallpaper, the custom Liquid-Glass section-nav, the
-// hero titlebar + footbar, and the four custom vector glyphs (bow / crossed
-// tools / two gears / key) the operator flagged. Mirrors design/design-system
-// (kit.css .desktop / .secnav / .sec / .titlebar / .footbar) — the SSOT.
+// BridgeShell.swift — Settings-window shell chrome for The Bridge (v4).
+// The "stage" window surface (solid canvas + carbon-fibre weave), the section-
+// nav sidebar, the titlebar + footbar, and the custom vector glyphs (bow /
+// crossed tools / two gears / key). Reconciled to the v4 geometry + material
+// system in design/the-bridge-design-system/project — the `.bw-*` shell rules
+// in bridge-ui.css + the Settings.html layout + tokens.css — the SSOT.
 //
-// Colors come from BridgeTokens; nothing here hardcodes a palette value.
+// All geometry comes from BridgeTokens.Space/Radius and all color/material from
+// the W1 tokens (Weave / glassControl / bevelControl / hairline / fg* / ok …);
+// nothing here hardcodes a covered palette value or chrome dimension.
 
 import SwiftUI
 
-// MARK: - The stage (carbon base + three mood lights + carbon-fibre weave)
+// MARK: - The stage (the window surface: solid canvas + carbon-fibre weave)
 
-/// Full-bleed background behind every glass surface. A SOLID carbon fill —
-/// no gradient/aurora — with a faint carbon-fibre weave layered as texture.
-/// Color enters the UI only through small accents (blue/gold) + signals.
+/// The Settings-window surface, full-bleed behind every glass card. This is the
+/// SSOT `.bw-window` ground verbatim: `background-color: var(--canvas)` +
+/// `background-image: var(--weave)` — a SOLID fill (carbon in dark, titanium in
+/// light) with the faint carbon-fibre weave layered as texture, NO gradient.
+/// Color enters the UI only through small accents (blue/gold) + the signals.
+///
+/// Note on the `Elevation.window` rung: in the locked design the *window shell*
+/// is canvas + weave (NOT a `--glass-window` fill); the window's 14pt rounding,
+/// `--edge-window` border, e4 shadow and window blur are drawn by the host
+/// `NSWindow` chrome (SettingsWindow.swift), not painted here — so no glass fill
+/// is applied to the stage. `Elevation.window` is reserved for any genuinely
+/// floating in-app modal/popover surface.
 public struct BridgeStage: View {
     public init() {}
 
@@ -26,27 +38,28 @@ public struct BridgeStage: View {
 }
 
 /// Subtle diagonal cross-hatch evoking carbon fibre, layered over the canvas
-/// fill. Faint by design. On DARK: white .02 / black .22 hairlines (unchanged
-/// carbon weave). On LIGHT: a whisper — the harsh black@.22 would scar the
-/// titanium ground, so the woven texture is preserved with a faint dark
-/// hairline (black@.04) plus a soft white highlight. Drawn once per size.
+/// fill (tokens.css `--weave`). Faint by design and now fully token-driven via
+/// `BridgeTokens.Weave`: a +45° highlight hatch and a -45° shade hatch, both at
+/// the `Weave.step` (4pt) cadence. The DARK branch resolves to white@.02 /
+/// black@.22 (the unchanged carbon weave); LIGHT resolves to the titanium
+/// whisper (white@.45 / rgba(15,18,28,.022)) — no value is hardcoded here.
+/// Drawn once per size in a `Canvas`.
 struct BridgeCarbonWeave: View {
-    @Environment(\.colorScheme) private var colorScheme
-
     var body: some View {
-        // Resolve stroke styling for the active appearance up front so the
-        // Canvas closure (which captures by value) stays cheap & deterministic.
-        let isDark = colorScheme == .dark
-        let highlight = isDark ? Color.white.opacity(0.02) : Color.white.opacity(0.30)
-        let shadow    = isDark ? Color.black.opacity(0.22) : Color.black.opacity(0.04)
+        // Pull the two hatch colors + the step straight from the W1 tokens so
+        // the appearance flip lives in one place (BridgeTokens.Weave) and this
+        // view never re-derives a palette value. Captured by value into the
+        // cheap, deterministic Canvas closure.
+        let step      = BridgeTokens.Weave.step
+        let highlight = BridgeTokens.Weave.highlight
+        let shadow    = BridgeTokens.Weave.shadow
         return Canvas { ctx, size in
-            let step: CGFloat = 4
-            var light = Path()
-            var dark = Path()
+            var light = Path()   // +45° highlight hatch
+            var dark = Path()    // -45° shade hatch (offset half a step)
             var x: CGFloat = -size.height
             while x < size.width {
                 light.move(to: CGPoint(x: x, y: 0));    light.addLine(to: CGPoint(x: x + size.height, y: size.height))
-                dark.move(to: CGPoint(x: x + 2, y: 0));  dark.addLine(to: CGPoint(x: x + 2 + size.height, y: size.height))
+                dark.move(to: CGPoint(x: x + step / 2, y: 0));  dark.addLine(to: CGPoint(x: x + step / 2 + size.height, y: size.height))
                 x += step
             }
             ctx.stroke(light, with: .color(highlight), lineWidth: 1)
@@ -158,18 +171,18 @@ public struct BridgeSectionNav: View {
                     action: { selection = section }
                 )
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 0)   // `.bw-side-spacer` — pin rows to the top
         }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 8)
-        .frame(width: 188)
+        // `.bw-sidebar`: padding 6px 10px 10px, 188pt wide, over the inset
+        // `--well` fill with a `--hair-faint` trailing rule (SSOT bridge-ui.css).
+        .padding(.top, 6)
+        .padding(.bottom, BridgeTokens.Space.s3)        // 10
+        .padding(.horizontal, BridgeTokens.Space.s3)    // 10
+        .frame(width: BridgeTokens.Space.sidebarW)      // 188
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(
-            LinearGradient(colors: [BridgeTokens.hairlineFaint, BridgeTokens.hairlineFaint.opacity(0)],
-                           startPoint: .top, endPoint: .bottom)
-        )
+        .background(BridgeTokens.wellFill)
         .overlay(alignment: .trailing) {
-            Rectangle().fill(BridgeTokens.hairline).frame(width: 0.5)
+            Rectangle().fill(BridgeTokens.hairlineFaint).frame(width: 0.5)
         }
         // Restore the keyboard navigation NavigationSplitView's List gave us
         // for free: Up/Down arrows move `selection` to the previous/next
@@ -207,32 +220,34 @@ struct BridgeSectionNavItem: View {
     let action: () -> Void
     @State private var hovering = false
 
+    // `.bw-nav` row radius (SSOT bridge-ui.css = 7px).
+    private let rowRadius: CGFloat = 7
+
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
+            HStack(spacing: 9) {   // `.bw-nav` gap: 9px
                 icon
-                    .frame(width: 18, height: 18)
-                    .foregroundStyle(isSelected ? BridgeTokens.fg1 : BridgeTokens.fg4)
+                    .frame(width: 15, height: 15)   // `.bw-nav svg` 15×15
+                    .opacity(isSelected ? 1 : 0.9)  // svg opacity .9 → 1 on `.on`
+                    // Selected glyph picks up the royal-blue link ink
+                    // (`.bw-nav.on svg { color: var(--accent-link) }`).
+                    .foregroundStyle(isSelected ? BridgeTokens.accentLink : BridgeTokens.fg3)
                 Text(section.displayName)
-                    .font(.system(size: 13))
-                    .foregroundStyle(isSelected ? BridgeTokens.fg1 : BridgeTokens.fg3)
+                    // `.bw-nav` text: 13 / medium, fg-3 → fg-1 (hover/selected).
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(textColor)
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 9)
-            .frame(height: BridgeTokens.Space.navItemH)
-            .background(background)
-            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .overlay {
-                if isSelected {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5)
-                }
-            }
+            .padding(.horizontal, 9)   // `.bw-nav` padding: 0 9px
+            .frame(height: BridgeTokens.Space.navItemH)   // 30
+            .background(rowBackground)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .animation(.easeInOut(duration: 0.15), value: isSelected)   // --fast .15s
+        .animation(.easeInOut(duration: 0.15), value: hovering)
         .accessibilityLabel(section.displayName)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
@@ -245,17 +260,31 @@ struct BridgeSectionNavItem: View {
         case .skills:   BridgeVectorIcon(.skills)
         case .tools:    BridgeVectorIcon(.tools)
         case .advanced: BridgeVectorIcon(.advanced)
-        default:        Image(systemName: section.icon).font(.system(size: 14))
+        default:        Image(systemName: section.icon).font(.system(size: 13))
         }
     }
 
-    @ViewBuilder private var background: some View {
+    /// Row ink: fg-1 when selected OR hovered, fg-3 at rest (`.bw-nav` rules).
+    private var textColor: Color {
+        (isSelected || hovering) ? BridgeTokens.fg1 : BridgeTokens.fg3
+    }
+
+    /// `.bw-nav` background ladder. Selected = the raised neutral control thumb
+    /// per the LOCKED SSOT (`.bw-nav.on { background: var(--glass-control);
+    /// box-shadow: var(--bevel-control); border: .5px solid var(--hair); }`) —
+    /// the accent stays reserved for primary actions/links/focus (the glyph
+    /// alone carries the accent-link tint). Hover = the faint `--hover` wash.
+    @ViewBuilder private var rowBackground: some View {
+        let shape = RoundedRectangle(cornerRadius: rowRadius, style: .continuous)
         if isSelected {
-            BridgeTokens.accent.opacity(0.14)
+            shape
+                .fill(BridgeTokens.glassControl)
+                .bridgeBevel(BridgeTokens.bevelControl, radius: rowRadius)
+                .overlay(shape.strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
         } else if hovering {
-            BridgeTokens.hoverFill
+            shape.fill(BridgeTokens.hoverFill)
         } else {
-            Color.clear
+            shape.fill(Color.clear)
         }
     }
 }
@@ -275,34 +304,44 @@ public struct BridgeTitleBar: View {
     public var body: some View {
         HStack(spacing: 0) {
             Text(title)
-                .font(.system(size: 13, weight: .semibold))
+                // `.bw-titletext`: 13 / semibold, fg-2, -.1px tracking.
+                .font(BridgeTokens.Typeface.base600)
+                .tracking(-0.1)
                 .foregroundStyle(BridgeTokens.fg2)
                 .allowsHitTesting(false)   // keep the titlebar draggable
             Spacer(minLength: 0)
         }
+        // Leading inset clears the native traffic-light cluster (`--traffic-gutter`
+        // = 78); transparent + no bottom hairline so the canvas/weave shows through.
         .padding(.leading, BridgeTokens.Space.trafficGutter)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: BridgeTokens.Space.titleBar)
+        .frame(height: BridgeTokens.Space.titleBar)   // 38
     }
 }
 
-/// 30px footbar (Settings Redesign PKT-A, B2.3): integrated into the canvas —
-/// NO `chipFill` slab background, NO top hairline. Keeps the slim version
-/// readout + status dot on the trailing edge.
+/// 30px footbar (`.bw-foot`): integrated into the canvas — NO `chipFill` slab
+/// background, just a faint `--hair-faint` top rule (the SSOT bridge-ui.css
+/// `border-top`). Keeps the slim version readout + emerald health dot on the
+/// trailing edge.
 public struct BridgeFootBar: View {
     public let version: String
     public init(version: String) { self.version = version }
 
     public var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 10) {   // `.bw-foot` gap: 10px
             Text("The Bridge").foregroundStyle(BridgeTokens.fg4)
             Spacer(minLength: 0)
             Text(version).foregroundStyle(BridgeTokens.fg4)
+            // `.dot.ok` — emerald fill + the soft glow (token `ok` @ ~55%).
             Circle().fill(BridgeTokens.ok).frame(width: 7, height: 7)
-                .shadow(color: BridgeTokens.ok.opacity(0.55), radius: 3)
+                .shadow(color: BridgeTokens.ok.opacity(0.55), radius: 4)
         }
-        .font(.system(size: 11))
-        .padding(.horizontal, 14)
-        .frame(height: BridgeTokens.Space.footBar)
+        .font(BridgeTokens.Typeface.micro)   // foot meta: 10.5 (was 11)
+        .padding(.horizontal, BridgeTokens.Space.s4)   // 14
+        .frame(height: BridgeTokens.Space.footBar)     // 30
+        // `.bw-foot` faint top rule — integrate into the canvas without a slab.
+        .overlay(alignment: .top) {
+            Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5)
+        }
     }
 }

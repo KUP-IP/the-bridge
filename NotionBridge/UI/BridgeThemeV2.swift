@@ -13,15 +13,16 @@ import AppKit
 
 /// Notion's swatch palette used across icon pickers and dep-link chips.
 public enum NotionPalette {
-    public static let gray   = Color(red: 0.608, green: 0.604, blue: 0.592)
-    public static let brown  = Color(red: 0.392, green: 0.278, blue: 0.227)
-    public static let orange = Color(red: 0.851, green: 0.451, blue: 0.051)
-    public static let yellow = Color(red: 0.874, green: 0.670, blue: 0.004)
-    public static let green  = Color(red: 0.058, green: 0.482, blue: 0.424)
-    public static let blue   = Color(red: 0.043, green: 0.431, blue: 0.600)
-    public static let purple = Color(red: 0.411, green: 0.251, blue: 0.647)
-    public static let pink   = Color(red: 0.678, green: 0.102, blue: 0.447)
-    public static let red    = Color(red: 0.878, green: 0.243, blue: 0.243)
+    // sRGB byte-exact to tokens.css `--c-*` (the v4 SSOT, authoritative).
+    public static let gray   = Color(red: 0.608, green: 0.604, blue: 0.592) // #9B9A97
+    public static let brown  = Color(red: 0.392, green: 0.278, blue: 0.227) // #64473A
+    public static let orange = Color(red: 0.851, green: 0.451, blue: 0.051) // #D9730D
+    public static let yellow = Color(red: 0.875, green: 0.671, blue: 0.004) // #DFAB01
+    public static let green  = Color(red: 0.059, green: 0.482, blue: 0.424) // #0F7B6C
+    public static let blue   = Color(red: 0.043, green: 0.431, blue: 0.600) // #0B6E99
+    public static let purple = Color(red: 0.412, green: 0.251, blue: 0.647) // #6940A5
+    public static let pink   = Color(red: 0.678, green: 0.102, blue: 0.447) // #AD1A72
+    public static let red    = Color(red: 0.878, green: 0.243, blue: 0.243) // #E03E3E
 
     public static let all: [(name: String, color: Color)] = [
         ("gray", gray), ("brown", brown), ("orange", orange),
@@ -38,18 +39,18 @@ public enum NotionPalette {
 
 // MARK: - Glass surfaces
 
-/// Reusable Liquid Glass card. Wraps content with the rounded-rect
-/// translucent material, subtle rim highlight, and inset glow.
+/// Reusable Liquid Glass card — the e1 "workhorse container" (`.glass-card`).
+///
+/// v4: repainted entirely through the W1 `BridgeTokens.Elevation.card` rung, so
+/// the four depth ingredients (surface fill + sheen · directional bevel · edge
+/// hairline · dual drop shadow) are token-driven and adapt to carbon/titanium
+/// for free. A faint top-edge specular `rim` strip is layered for the
+/// thick-glass read. The public initializer is byte-for-byte unchanged —
+/// downstream pages keep calling `BridgeGlassCard(cornerRadius:padding:)`.
 public struct BridgeGlassCard<Content: View>: View {
     private let content: Content
     private let cornerRadius: CGFloat
     private let padding: CGFloat
-
-    // System-tethered (v3.7.6): the white sheen + white hairlines assume a dark
-    // base and VANISH on titanium. On LIGHT we swap to a subtle dark/neutral
-    // sheen + a darker hairline so cards still read as RAISED glass; DARK is
-    // byte-for-byte unchanged.
-    @Environment(\.colorScheme) private var colorScheme
 
     public init(
         cornerRadius: CGFloat = 12,
@@ -62,51 +63,42 @@ public struct BridgeGlassCard<Content: View>: View {
     }
 
     public var body: some View {
-        let isDark = colorScheme == .dark
-        // Sheen gradient (top→bottom). DARK: white .07→.02 (unchanged).
-        // LIGHT: a brighter near-white lift on top fading out, so the card
-        // surface reads slightly raised off the #ECEDEF canvas.
-        let sheenTop    = isDark ? Color.white.opacity(0.07) : Color.white.opacity(0.65)
-        let sheenBottom = isDark ? Color.white.opacity(0.02) : Color.white.opacity(0.30)
-        // Tint opacity: the dark tint sits low; the light neutral tint sits even
-        // lower so it just cools the white sheen rather than graying the card.
-        let tintOpacity = isDark ? 0.20 : 0.10
-        // Edge hairline. DARK: white@.10 (unchanged). LIGHT: black@.06 so the
-        // card has a visible darker border on the light ground.
-        let hairline = isDark ? Color.white.opacity(0.10) : Color.black.opacity(0.06)
-        // Top rim highlight. DARK: white@.25 (unchanged). LIGHT: a soft white
-        // rim still helps, but darker beneath — keep a faint white top rim.
-        let rimHighlight = isDark ? Color.white.opacity(0.25) : Color.white.opacity(0.55)
-
+        let rung = BridgeTokens.Elevation.card
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         return content
             .padding(padding)
-            .background(
-                ZStack {
-                    LinearGradient(
-                        colors: [sheenTop, sheenBottom],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                    BridgeTokens.glassCardTint.opacity(tintOpacity)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            )
+            // Ingredient 1 — surface fill (opaque base + top→bottom sheen).
+            .background(rung.fill?.paint(in: shape))
+            // Ingredient 3 — elevation EDGE hairline (.5px, materials.css `.glass-card`).
+            .overlay(rung.edge.map { shape.strokeBorder($0, lineWidth: 0.5) })
+            // Ingredient 2 — directional bevel (top rim-light + bottom occlusion).
+            .bridgeBevel(rung.bevel, radius: cornerRadius)
+            // Specular top-edge rim strip (`--rim`, top 1.5px) — sells thick glass.
             .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(hairline, lineWidth: 0.5)
-            )
-            .overlay(
-                // top rim highlight
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                shape
                     .inset(by: 0.5)
-                    .stroke(
+                    .stroke(BridgeTokens.rim, lineWidth: 1.0)
+                    .mask(
                         LinearGradient(
-                            colors: [rimHighlight, .clear],
+                            colors: [.black, .black, .clear],
                             startPoint: .top, endPoint: .bottom
-                        ),
-                        lineWidth: 0.5
+                        )
                     )
                     .allowsHitTesting(false)
             )
+            .clipShape(shape)
+            // Ingredient 4 — dual ambient + contact drop shadow.
+            .modifier(OptionalShadow(rung.shadow))
+    }
+}
+
+/// Applies a `BridgeShadow` when present; a no-op when the rung carries none.
+private struct OptionalShadow: ViewModifier {
+    let shadow: BridgeTokens.BridgeShadow?
+    init(_ shadow: BridgeTokens.BridgeShadow?) { self.shadow = shadow }
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let s = shadow { content.bridgeShadow(s) } else { content }
     }
 }
 
@@ -169,31 +161,67 @@ public struct PartialToggle: View {
     @Binding public var state: TripleState
     public init(state: Binding<TripleState>) { self._state = state }
 
+    // Geometry from materials.css `.toggle` + preview/cmp-toggles.html:
+    // 40×24 track, 18×18 knob, 2px inset → knob travels 0 / 8 / 16px.
+    private static let trackW: CGFloat = 40
+    private static let trackH: CGFloat = 24
+    private static let knob: CGFloat   = 18
+    private static let inset: CGFloat  = 2
+
     public var body: some View {
         Button(action: cycle) {
-            ZStack(alignment: alignment) {
+            ZStack(alignment: .leading) {
                 Capsule()
                     .fill(track)
-                    .frame(width: 40, height: 24)
-                    .overlay(Capsule().strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
-                Circle()
-                    .fill(LinearGradient(colors: [.white, Color(white: 0.84)], startPoint: .top, endPoint: .bottom))
-                    .frame(width: 18, height: 18)
-                    .shadow(color: .black.opacity(0.4), radius: 1, y: 1)
-                    .padding(.horizontal, 3)
+                    .frame(width: Self.trackW, height: Self.trackH)
+                    .overlay(Capsule().strokeBorder(trackBorder, lineWidth: 0.5))
+                    // Inset bevel — the recessed well the knob rides in.
+                    .overlay(BridgeTokens.bevelInset.overlay(in: Capsule()))
+                knobView
+                    .offset(x: knobOffset)
             }
+            .frame(width: Self.trackW, height: Self.trackH)
         }
         .buttonStyle(.plain)
+        // Background transition `--fast` (.15s); knob travel `--med` (.22s ease).
         .animation(.easeInOut(duration: 0.15), value: state)
+        .accessibilityValue(accessibilityValue)
     }
 
-    private var alignment: Alignment {
+    /// White knob with its OWN inset highlight (`inset 0 1px 0 rgba(255,255,255,.5)`)
+    /// + drop + .5px contact ring. Partial tints the knob lightly amber per the
+    /// preview spec so the mid-track position reads as "some, not all".
+    private var knobView: some View {
+        let topTint: Color = (state == .partial)
+            ? Color(red: 0.953, green: 0.890, blue: 0.659)   // #f3e3a8 (preview partial knob)
+            : Color(white: 0.84)                              // #d6d6d6
+        return Circle()
+            .fill(LinearGradient(colors: [.white, topTint], startPoint: .top, endPoint: .bottom))
+            .frame(width: Self.knob, height: Self.knob)
+            .overlay(
+                // knob's own top inset highlight
+                Circle().inset(by: 0.5)
+                    .stroke(Color.white.opacity(0.5), lineWidth: 1)
+                    .mask(LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom))
+            )
+            .shadow(color: .black.opacity(0.4), radius: 1.25, y: 1)
+            .overlay(Circle().strokeBorder(Color.black.opacity(0.06), lineWidth: 0.5))
+            .animation(.easeInOut(duration: 0.22), value: state)
+    }
+
+    /// Knob x-offset within the 2px-inset track: 0 (off) · 8 (partial, mid) · 16 (on).
+    private var knobOffset: CGFloat {
+        let travel = Self.trackW - Self.knob - Self.inset * 2   // 16
         switch state {
-        case .off:     return .leading
-        case .partial: return .center
-        case .on:      return .trailing
+        case .off:     return Self.inset
+        case .partial: return Self.inset + travel / 2           // mid-track
+        case .on:      return Self.inset + travel
         }
     }
+
+    /// off = neutral glass · on = GREEN gradient (health-coded) · partial = AMBER
+    /// gradient. Greens/ambers from preview/cmp-toggles.html (the richer spec the
+    /// packet quotes); neutral uses the adaptive `chipFill` token.
     private var track: LinearGradient {
         switch state {
         case .off:
@@ -202,12 +230,35 @@ public struct PartialToggle: View {
                 startPoint: .top, endPoint: .bottom)
         case .partial:
             return LinearGradient(
-                colors: [BridgeTokens.warn.opacity(0.55), BridgeTokens.warn.opacity(0.40)],
+                colors: [
+                    Color(red: 0.961, green: 0.769, blue: 0.318).opacity(0.55), // rgba(245,196,81,.55)
+                    Color(red: 0.882, green: 0.667, blue: 0.157).opacity(0.40), // rgba(225,170,40,.40)
+                ],
                 startPoint: .top, endPoint: .bottom)
         case .on:
             return LinearGradient(
-                colors: [BridgeTokens.ok.opacity(0.65), BridgeTokens.ok.opacity(0.55)],
+                colors: [
+                    Color(red: 0.314, green: 0.706, blue: 0.471).opacity(0.65), // rgba(80,180,120,.65)
+                    Color(red: 0.157, green: 0.549, blue: 0.314).opacity(0.55), // rgba(40,140,80,.55)
+                ],
                 startPoint: .top, endPoint: .bottom)
+        }
+    }
+
+    /// Track border: neutral hairline off; signal-tinted (60%) on/partial.
+    private var trackBorder: Color {
+        switch state {
+        case .off:     return BridgeTokens.hairline
+        case .partial: return Color(red: 0.961, green: 0.769, blue: 0.318).opacity(0.40) // rgba(245,196,81,.40)
+        case .on:      return Color(red: 0.392, green: 0.784, blue: 0.549).opacity(0.40) // rgba(100,200,140,.40)
+        }
+    }
+
+    private var accessibilityValue: String {
+        switch state {
+        case .off:     return "off"
+        case .partial: return "partial"
+        case .on:      return "on"
         }
     }
 
@@ -251,21 +302,19 @@ public struct BridgeGlassBubble<Content: View>: View {
 
     public var body: some View {
         let isDark = colorScheme == .dark
+        let rung = BridgeTokens.Elevation.raise
         // Specular dome (hotspot → falloff). DARK: white .42→.10→.02 (unchanged).
         // LIGHT: a softer white sheen that fades to clear over the neutral tint.
+        // This radial specular is the bubble's signature read; it complements the
+        // token `rung.fill` underneath (the e2 raise surface) rather than
+        // replacing it, so the dome now sits on the shared raised-glass material.
         let domeColors: [Color] = isDark
             ? [Color.white.opacity(0.42), Color.white.opacity(0.10), Color.white.opacity(0.02)]
             : [Color.white.opacity(0.70), Color.white.opacity(0.22), Color.white.opacity(0.0)]
-        // Surface tint under the sheen. DARK: white@.12 (v3.7.6 Command-Bridge
-        // legibility bump from .06 — the tray bubbles now sit on a transparent
-        // panel that hugs the bar, so a heavier well keeps the favorite domes
-        // reading as solid glass rather than washing out against the desktop).
-        // LIGHT: a faint neutral well so the dome sits on a cooler, slightly-
-        // recessed base.
-        let surfaceTint = isDark ? Color.white.opacity(0.12) : BridgeTokens.chipFill
-        // Rim. DARK: white@.18 (unchanged). LIGHT: a darker hairline edge.
-        let rim = isDark ? Color.white.opacity(0.18) : BridgeTokens.hairlineStrong
         return ZStack {
+            // Ingredient 1 — e2 raise surface fill (token-driven base + sheen).
+            rung.fill?.paint(in: Circle())
+            // Signature specular dome on top of the raised glass.
             Circle()
                 .fill(
                     RadialGradient(
@@ -274,14 +323,325 @@ public struct BridgeGlassBubble<Content: View>: View {
                         startRadius: 0, endRadius: size * 0.9
                     )
                 )
-                .overlay(Circle().fill(surfaceTint))
-            Circle().strokeBorder(rim, lineWidth: 1)
+            // Top-left specular glint (`--glint`) — the raise-rung highlight.
+            Circle().fill(BridgeTokens.glint).allowsHitTesting(false)
+            // Ingredient 3 — elevation EDGE hairline at the raise rung.
+            (rung.edge.map { Circle().strokeBorder($0, lineWidth: 1) })
             content
         }
         .frame(width: size, height: size)
-        .shadow(color: .black.opacity(0.32), radius: 7, y: 6)
+        // Ingredient 2 — directional bevel (top rim-light + bottom occlusion).
+        .overlay(rung.bevel.overlay(in: Circle()).allowsHitTesting(false))
+        // Ingredient 4 — dual ambient + contact drop shadow (e2). Keep dark's
+        // prior single soft shadow feel; the dual layer reads richer on titanium.
+        .modifier(OptionalShadow(rung.shadow))
+        // Preserve the prior dark contact shadow so the tray dome doesn't get
+        // lighter than v3.7.6 on carbon (the e2 dual shadow is softer up top).
+        .shadow(color: .black.opacity(isDark ? 0.18 : 0.0), radius: 7, y: 6)
     }
 }
+
+// ============================================================================
+// MARK: - v4 base controls (button · chip · input · status dot)
+// ============================================================================
+//
+// The small interactive vocabulary, in the evolved-glass idiom. Each consumes
+// the W1 tokens (glassControl · bevelControl · accent family · signals · focus
+// ring · wellFill · bevelInset) so both carbon + titanium come for free. Motion
+// matches materials.css: `--fast` (.15s) ease on background/shadow.
+
+/// Translucent-glass button — the four `.btn` variants from materials.css /
+/// preview/cmp-buttons.html. 30px tall, control radius (8). States:
+/// default · hover (brighten) · active (1px nudge) · focus (focus ring) · disabled.
+///
+///   • `.primary` — translucent blue gradient, onAccent text.
+///   • `.default` — raised glass (`glassControl`) + control bevel.
+///   • `.danger`  — red-tinted fill, `#ff9b9b` text.
+///   • `.link`    — borderless accent text + `↗` affordance.
+public struct BridgeButton: View {
+    public enum Variant: Sendable, Equatable { case primary, `default`, danger, link }
+
+    private let title: String
+    private let systemImage: String?
+    private let variant: Variant
+    private let isEnabled: Bool
+    private let action: () -> Void
+
+    public init(
+        _ title: String,
+        systemImage: String? = nil,
+        variant: Variant = .default,
+        isEnabled: Bool = true,
+        action: @escaping () -> Void
+    ) {
+        self.title = title
+        self.systemImage = systemImage
+        self.variant = variant
+        self.isEnabled = isEnabled
+        self.action = action
+    }
+
+    public var body: some View {
+        Button(action: action) {
+            HStack(spacing: variant == .link ? 3 : 6) {
+                if let systemImage {
+                    Image(systemName: systemImage).font(.system(size: 12, weight: .semibold))
+                }
+                Text(title)
+                if variant == .link {
+                    Text("↗").font(.system(size: 10)).opacity(0.65)
+                }
+            }
+            .font(variant == .link ? BridgeTokens.Typeface.sub : BridgeTokens.Typeface.base600)
+        }
+        .buttonStyle(BridgeButtonStyle(variant: variant))
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.42)   // `.btn:disabled { opacity:.42 }`
+    }
+}
+
+/// The `ButtonStyle` that paints `BridgeButton` — owns the per-variant fills,
+/// borders, bevels, hover/active feedback, and focus ring so the whole control
+/// vocabulary is one consistent material.
+public struct BridgeButtonStyle: ButtonStyle {
+    let variant: BridgeButton.Variant
+
+    // ButtonStyle is NOT a View, so @State/@FocusState are inert here. Hover +
+    // focus live in `BridgeButtonChrome` (a real ViewModifier body), which is
+    // where SwiftUI property wrappers actually drive updates.
+    public func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(foreground)
+            .modifier(BridgeButtonChrome(variant: variant, pressed: configuration.isPressed))
+            .animation(.easeInOut(duration: 0.15), value: configuration.isPressed)
+    }
+
+    private var foreground: Color {
+        switch variant {
+        case .primary: return BridgeTokens.onAccent
+        case .default: return BridgeTokens.fg1
+        case .danger:  return BridgeTokens.badText
+        case .link:    return BridgeTokens.accentLink
+        }
+    }
+}
+
+/// The geometry + surface chrome for a `BridgeButton`, factored out so the
+/// style stays readable AND so the hover/focus property wrappers run in a real
+/// View body. Handles padding, the four fills, borders, bevels, the active
+/// translate, and the focus halo.
+private struct BridgeButtonChrome: ViewModifier {
+    let variant: BridgeButton.Variant
+    let pressed: Bool
+    @State private var hovering = false
+    @FocusState private var focused: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if variant == .link {
+            content
+                .padding(.horizontal, 6).padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(BridgeTokens.accent.opacity(hovering ? 0.12 : 0)) // `.link-btn:hover`
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .focused($focused)
+                .onHover { hovering = $0 }
+                .animation(.easeInOut(duration: 0.15), value: hovering)
+        } else {
+            let shape = RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
+            content
+                .frame(height: 30)
+                .padding(.horizontal, 13)
+                .background(fillView(shape))
+                .overlay(shape.strokeBorder(border, lineWidth: 0.5))
+                .modifier(BevelIf(apply: variant == .default, bevel: BridgeTokens.bevelControl, radius: BridgeTokens.Radius.control))
+                .overlay(
+                    // focus ring (`--focus`: 0 0 0 3px) — a halo stroke outside the edge.
+                    shape.strokeBorder(BridgeTokens.focusRing, lineWidth: focused ? BridgeTokens.focusRingWidth : 0)
+                )
+                .clipShape(shape)
+                .contentShape(shape)
+                .focused($focused)
+                .onHover { hovering = $0 }
+                .animation(.easeInOut(duration: 0.15), value: hovering)
+                .offset(y: pressed ? 0.5 : 0)   // `.btn:active { transform: translateY(.5px) }`
+        }
+    }
+
+    @ViewBuilder
+    private func fillView<S: Shape>(_ shape: S) -> some View {
+        switch variant {
+        case .primary:
+            // Translucent blue gradient (preview): rgba(120,160,220,.4)→rgba(80,120,200,.35).
+            shape.fill(
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.471, green: 0.627, blue: 0.863).opacity(hovering ? 0.52 : 0.40),
+                        Color(red: 0.314, green: 0.471, blue: 0.784).opacity(hovering ? 0.47 : 0.35),
+                    ],
+                    startPoint: .top, endPoint: .bottom)
+            )
+        case .default:
+            // Raised glass control + brighten-on-hover (`color-mix … fg-1 8%`).
+            shape.fill(BridgeTokens.glassControl)
+                .overlay(shape.fill(BridgeTokens.fg1.opacity(hovering ? 0.08 : 0)))
+        case .danger:
+            // Red-tinted fill: rgba(255,90,90,.14) → .22 on hover.
+            shape.fill(Color(red: 1.0, green: 0.353, blue: 0.353).opacity(hovering ? 0.22 : 0.14))
+        case .link:
+            shape.fill(.clear)
+        }
+    }
+
+    private var border: Color {
+        switch variant {
+        case .primary: return Color(red: 0.588, green: 0.706, blue: 0.902).opacity(0.40) // rgba(150,180,230,.4)
+        case .default: return BridgeTokens.hairlineStrong
+        case .danger:  return Color(red: 1.0, green: 0.353, blue: 0.353).opacity(0.28)   // rgba(255,90,90,.28)
+        case .link:    return .clear
+        }
+    }
+}
+
+/// Applies a bevel only when `apply` is true (the default-variant raised look).
+private struct BevelIf: ViewModifier {
+    let apply: Bool
+    let bevel: BridgeTokens.Bevel
+    let radius: CGFloat
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if apply { content.bridgeBevel(bevel, radius: radius) } else { content }
+    }
+}
+
+/// Neutral-glass pill for triggers / tags (`.chip`). 26px tall, full-pill
+/// radius. `on` → accent-blue selected; `anti` → red. Hover brightens the
+/// neutral fill + lifts text to fg1, matching materials.css `.chip:hover`.
+public struct BridgeChip: View {
+    public enum State: Sendable, Equatable { case neutral, on, anti }
+
+    private let title: String
+    private let systemImage: String?
+    private let state: State
+    private let action: (() -> Void)?
+    @SwiftUI.State private var hovering = false
+
+    public init(
+        _ title: String,
+        systemImage: String? = nil,
+        state: State = .neutral,
+        action: (() -> Void)? = nil
+    ) {
+        self.title = title
+        self.systemImage = systemImage
+        self.state = state
+        self.action = action
+    }
+
+    @ViewBuilder
+    public var body: some View {
+        if let action {
+            Button(action: action) { pillLabel }.buttonStyle(.plain)
+        } else {
+            pillLabel
+        }
+    }
+
+    /// The rendered pill (everything except the optional tap target).
+    private var pillLabel: some View {
+        let pill = Capsule(style: .continuous)
+        return HStack(spacing: 5) {
+            if let systemImage {
+                Image(systemName: systemImage).font(.system(size: 11))
+            }
+            Text(title).font(BridgeTokens.Typeface.meta)
+        }
+        .foregroundStyle(foreground)
+        .frame(height: 26)
+        .padding(.horizontal, 10)
+        .background(fillView(pill))
+        .overlay(pill.strokeBorder(border, lineWidth: 0.5))
+        .modifier(BevelIf(apply: state == .neutral, bevel: BridgeTokens.bevelControl, radius: 999))
+        .clipShape(pill)
+        .contentShape(pill)
+        .onHover { hovering = $0 }
+        .animation(.easeInOut(duration: 0.15), value: hovering)
+    }
+
+    private var foreground: Color {
+        switch state {
+        case .neutral: return hovering ? BridgeTokens.fg1 : BridgeTokens.fg3
+        case .on:      return BridgeTokens.onAccent
+        case .anti:    return BridgeTokens.badText
+        }
+    }
+
+    @ViewBuilder
+    private func fillView<S: Shape>(_ shape: S) -> some View {
+        switch state {
+        case .neutral:
+            shape.fill(BridgeTokens.glassControl)
+                .overlay(shape.fill(BridgeTokens.fg1.opacity(hovering ? 0.08 : 0)))
+        case .on:
+            shape.fill(BridgeTokens.accent)
+        case .anti:
+            shape.fill(Color(red: 1.0, green: 0.353, blue: 0.353).opacity(0.10)) // rgba(255,90,90,.10)
+        }
+    }
+
+    private var border: Color {
+        switch state {
+        case .neutral: return BridgeTokens.hairline
+        case .on:      return BridgeTokens.accentBorder
+        case .anti:    return Color(red: 1.0, green: 0.353, blue: 0.353).opacity(0.24) // rgba(255,90,90,.24)
+        }
+    }
+}
+
+/// Inset-well text field (`.input`): control radius 8, recessed `wellFill`
+/// surface + `bevelInset`, focus ring + accent border on focus, caret tinted
+/// `accentStrong`, placeholder `fg5`. Wraps a SwiftUI `TextField` so existing
+/// `@State`/`@Binding` text flows unchanged; `mono` swaps to the mono face.
+public struct BridgeInput: View {
+    private let placeholder: String
+    @Binding private var text: String
+    private let mono: Bool
+    @FocusState private var focused: Bool
+
+    public init(_ placeholder: String, text: Binding<String>, mono: Bool = false) {
+        self.placeholder = placeholder
+        self._text = text
+        self.mono = mono
+    }
+
+    public var body: some View {
+        let shape = RoundedRectangle(cornerRadius: BridgeTokens.Radius.input, style: .continuous)
+        return TextField(placeholder, text: $text)
+            .textFieldStyle(.plain)
+            .font(mono ? BridgeTokens.Typeface.mono : BridgeTokens.Typeface.base)
+            .foregroundStyle(BridgeTokens.fg1)
+            .tint(BridgeTokens.accentStrong)            // caret + selection = accent-strong
+            .focused($focused)
+            .frame(height: 32)
+            .padding(.horizontal, 11)
+            .background(shape.fill(BridgeTokens.wellFill))     // inset well surface
+            .bridgeBevel(BridgeTokens.bevelInset, radius: BridgeTokens.Radius.input)
+            .overlay(shape.strokeBorder(focused ? BridgeTokens.accentBorder : BridgeTokens.hairline, lineWidth: 0.5))
+            .overlay(
+                // focus ring (`--focus`: 0 0 0 3px).
+                shape.strokeBorder(BridgeTokens.focusRing, lineWidth: focused ? BridgeTokens.focusRingWidth : 0)
+            )
+            .animation(.easeInOut(duration: 0.15), value: focused)
+    }
+}
+
+// `BridgeStatusDot` is defined once, in BridgeUIKit.swift (the component layer),
+// where it uses the richer `BridgeSignal` palette (ok/warn/bad/info/neutral) and
+// is consumed by the rows/strips/table. The earlier duplicate that lived here
+// (a `.ok/.warn/.bad/.idle` variant) was removed at the W2 checkpoint to resolve
+// the redefinition — map a former `.idle` dot to `BridgeStatusDot(.neutral)`.
 
 // MARK: - SF Symbol section-nav icons
 
