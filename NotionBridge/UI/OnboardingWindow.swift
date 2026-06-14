@@ -192,7 +192,8 @@ struct OnboardingView: View {
                                        startPoint: .top, endPoint: .center), lineWidth: 0.5)
                 .allowsHitTesting(false)
         )
-        .shadow(color: .black.opacity(0.6), radius: 50, y: 30)
+        // `.win` box-shadow → the e4 window elevation rung (dual ambient+contact).
+        .bridgeShadow(BridgeTokens.shadowE4)
         .onChange(of: currentStep) { _, newValue in
             UserDefaults.standard.set(newValue.rawValue, forKey: OnboardingResumeKey.stepRaw)
         }
@@ -329,6 +330,23 @@ struct OnboardingView: View {
 
     private enum HeroTone { case accent, gold }
 
+    /// `.ob-hero.logo` — the welcome medallion carrying the app icon itself
+    /// (78×78, continuous-19 radius, dropped shadow, inner rim). Mirrors the
+    /// design's brand tile rather than a generic glyph.
+    private func obLogoHero() -> some View {
+        let shape = RoundedRectangle(cornerRadius: 19, style: .continuous)
+        return Image(nsImage: NSApp.applicationIconImage)
+            .resizable()
+            .interpolation(.high)
+            .frame(width: 78, height: 78)
+            .clipShape(shape)
+            .overlay(
+                shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                    .allowsHitTesting(false)
+            )
+            .shadow(color: .black.opacity(0.45), radius: 11, y: 8)
+    }
+
     /// `.ob-title` — 23pt semibold display title.
     private func obTitle(_ text: String) -> some View {
         Text(text)
@@ -373,11 +391,30 @@ struct OnboardingView: View {
             .foregroundStyle(BridgeTokens.fg4)
     }
 
+    /// Secure twin of `.ob-input` (W2 `BridgeInput` has no masked variant):
+    /// a `SecureField` in the same inset-well glass chrome — `wellFill` +
+    /// `bevelInset` + `.5px` hairline, `input` radius, mono face, accent-strong
+    /// caret. Used only for the secret token field.
+    private func obSecureField(_ placeholder: String, text: Binding<String>) -> some View {
+        let shape = RoundedRectangle(cornerRadius: BridgeTokens.Radius.input, style: .continuous)
+        return SecureField(placeholder, text: text)
+            .textContentType(.none)
+            .textFieldStyle(.plain)
+            .font(BridgeTokens.Typeface.mono)
+            .foregroundStyle(BridgeTokens.fg1)
+            .tint(BridgeTokens.accentStrong)
+            .frame(height: 32)
+            .padding(.horizontal, 11)
+            .background(shape.fill(BridgeTokens.wellFill))
+            .bridgeBevel(BridgeTokens.bevelInset, radius: BridgeTokens.Radius.input)
+            .overlay(shape.strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+    }
+
     // MARK: - Welcome Step (PKT-357: F6, F7, F8)
 
     private var welcomeStep: some View {
         VStack(spacing: 0) {
-            obHero("bridge.fill")
+            obLogoHero()
                 .padding(.top, 8)
 
             obTitle("Welcome to The Bridge")
@@ -444,27 +481,20 @@ struct OnboardingView: View {
                 .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
             .padding(.top, 20)
 
-            // Full document links
+            // Full document links — `.ob-links a` → v4 `.btn.link` (accent-link;
+            // the variant supplies the trailing ↗ external glyph).
             HStack(spacing: 18) {
-                Link(destination: URL(string: "https://kup.solutions/privacy")!) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.up.right.square")
-                        Text("Privacy Policy")
-                    }
-                    .font(.system(size: 12, weight: .medium))
+                BridgeButton("Privacy Policy", variant: .link) {
+                    NSWorkspace.shared.open(URL(string: "https://kup.solutions/privacy")!)
                 }
-                Link(destination: URL(string: "https://kup.solutions/terms")!) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.up.right.square")
-                        Text("Terms of Service")
-                    }
-                    .font(.system(size: 12, weight: .medium))
+                BridgeButton("Terms of Service", variant: .link) {
+                    NSWorkspace.shared.open(URL(string: "https://kup.solutions/terms")!)
                 }
             }
-            .foregroundStyle(BridgeTokens.accentLink)
             .padding(.top, 16)
 
-            // Acceptance checkbox
+            // Acceptance checkbox — `.ob-check-row`: native checkbox (binding +
+            // a11y trait preserved) inside an accent-tinted gate row.
             Toggle(isOn: $hasAcceptedLegal) {
                 Text("I have read and agree to the **Privacy Policy** and **Terms of Service**")
                     .font(.system(size: 12.5))
@@ -473,6 +503,13 @@ struct OnboardingView: View {
             }
             .toggleStyle(.checkbox)
             .tint(BridgeTokens.accent)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(BridgeTokens.accent.opacity(0.09),
+                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .strokeBorder(BridgeTokens.accentBorder, lineWidth: 0.5))
             .padding(.top, 16)
         }
         .frame(maxWidth: .infinity)
@@ -507,25 +544,22 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 6) {
                     obFieldLabel("Workspace")
-                    TextField(selectedProvider.namePlaceholder, text: $workspaceName)
-                        .textFieldStyle(.roundedBorder)
+                    // `.ob-input` — v4 inset-well field (W2 BridgeInput).
+                    BridgeInput(selectedProvider.namePlaceholder, text: $workspaceName)
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
                     obFieldLabel("Integration token")
-                    SecureField(selectedProvider.tokenPlaceholder, text: $workspaceToken)
-                        .textContentType(.none)
-                        .textFieldStyle(.roundedBorder)
+                    // Secret token: BridgeInput has no secure variant, so this
+                    // wraps SecureField in the same `.ob-input` glass-well chrome
+                    // (wellFill + bevelInset + hairline, mono caret = accentStrong).
+                    obSecureField(selectedProvider.tokenPlaceholder, text: $workspaceToken)
                 }
 
                 if let helpURL = selectedProvider.helpURL {
-                    Link(destination: helpURL) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.up.right.square")
-                            Text(selectedProvider.helpLabel)
-                        }
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(BridgeTokens.accentLink)
+                    // `.ob-help` external link — v4 `.btn.link` (trailing ↗).
+                    BridgeButton(selectedProvider.helpLabel, variant: .link) {
+                        NSWorkspace.shared.open(helpURL)
                     }
                 }
             }
@@ -697,19 +731,11 @@ struct OnboardingView: View {
 
             HStack {
                 Spacer()
-                Button {
+                // `.ob-tcopy .btn.sm` — raised-glass copy action (W2 BridgeButton).
+                BridgeButton("Copy", systemImage: "doc.on.doc", variant: .default) {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(config, forType: .string)
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "doc.on.doc")
-                        Text("Copy")
-                    }
-                    .font(.system(size: 12, weight: .medium))
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(BridgeTokens.accent)
             }
         }
         .padding(14)
@@ -769,19 +795,13 @@ struct OnboardingView: View {
                 }
                 .padding(.top, 16)
             } else {
-                Button {
+                // `.btn.primary.lg` — the verify CTA (W2 BridgeButton).
+                BridgeButton(healthCheckButtonLabel,
+                             systemImage: "bolt.fill",
+                             variant: .primary,
+                             isEnabled: !healthCheckStatus.isChecking) {
                     runHealthCheck()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "bolt.fill")
-                        Text(healthCheckButtonLabel)
-                    }
-                    .frame(minWidth: 160)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(BridgeTokens.accent)
-                .controlSize(.large)
-                .disabled(healthCheckStatus.isChecking)
                 .padding(.top, 20)
             }
         }
@@ -943,19 +963,16 @@ struct OnboardingView: View {
         }
     }
 
+    /// Accent CTA on the foot rail — the v4 `.btn.primary` (translucent-blue
+    /// glass). Maps to `BridgeButton(variant: .primary)`.
     private func footPrimaryButton(_ title: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(title, action: action)
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .tint(BridgeTokens.accent)
-            .disabled(disabled)
+        BridgeButton(title, variant: .primary, isEnabled: !disabled, action: action)
     }
 
+    /// Secondary foot action (Back / Skip) — the v4 raised-glass `.btn`
+    /// (`BridgeButton(variant: .default)`), the design's subdued nav affordance.
     private func footSecondaryButton(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(title, action: action)
-            .buttonStyle(.plain)
-            .controlSize(.large)
-            .foregroundStyle(BridgeTokens.fg3)
+        BridgeButton(title, variant: .default, action: action)
     }
 }
 

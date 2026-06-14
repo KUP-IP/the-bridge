@@ -95,10 +95,7 @@ public struct CredentialAddSheet: View {
                     }
                     formFields
                     if let errorText {
-                        Label(errorText, systemImage: "exclamationmark.triangle.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(BridgeTokens.badText)
-                            .fixedSize(horizontal: false, vertical: true)
+                        BridgeBanner(signal: .bad, message: errorText)
                     }
                 }
                 .padding(20)
@@ -168,13 +165,17 @@ public struct CredentialAddSheet: View {
     private var typePicker: some View {
         VStack(alignment: .leading, spacing: 6) {
             fieldLabel("Type")
-            Picker("", selection: $selectedType) {
-                Text("API key").tag(CredentialType.apiKey)
-                Text("Password").tag(CredentialType.password)
-                Text("Card").tag(CredentialType.card)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            // W2 `.seg` — raised neutral-thumb segmented control bound directly to
+            // the CredentialType enum (api key · password · card; `.unknown` is
+            // never user-selectable).
+            BridgeSegmented(
+                selection: $selectedType,
+                options: [
+                    (CredentialType.apiKey, "API key"),
+                    (CredentialType.password, "Password"),
+                    (CredentialType.card, "Card"),
+                ]
+            )
         }
     }
 
@@ -212,25 +213,44 @@ public struct CredentialAddSheet: View {
     private var footer: some View {
         HStack {
             Spacer()
-            Button("Cancel") { dismiss() }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-            Button {
-                Task { await save() }
-            } label: {
-                HStack(spacing: 6) {
-                    if saving { ProgressView().controlSize(.small) }
-                    Text(saveLabel)
-                }
-                .frame(minWidth: 80)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(saving || !isValid)
-            .keyboardShortcut(.defaultAction)
+            BridgeButton("Cancel", variant: .default) { dismiss() }
+            saveButton
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
+    }
+
+    /// Primary save action. Kept as a bespoke control (rather than `BridgeButton`)
+    /// because it carries an inline progress spinner during the keychain write +
+    /// biometric gate; the surface chrome still matches the v4 primary variant
+    /// (translucent accent gradient · onAccent ink · accentBorder edge · control
+    /// radius). `.keyboardShortcut(.defaultAction)` preserves Return-to-save.
+    private var saveButton: some View {
+        Button {
+            Task { await save() }
+        } label: {
+            HStack(spacing: 6) {
+                if saving { ProgressView().controlSize(.small) }
+                Text(saveLabel)
+            }
+            .font(BridgeTokens.Typeface.base600)
+            .foregroundStyle(BridgeTokens.onAccent)
+            .frame(minWidth: 80)
+            .frame(height: 30)
+            .padding(.horizontal, 13)
+            .background(
+                LinearGradient(
+                    colors: [BridgeTokens.accent.opacity(0.55), BridgeTokens.accent.opacity(0.40)],
+                    startPoint: .top, endPoint: .bottom),
+                in: RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
+                    .strokeBorder(BridgeTokens.accentBorder, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .disabled(saving || !isValid)
+        .opacity((saving || !isValid) ? 0.42 : 1)
+        .keyboardShortcut(.defaultAction)
     }
 
     private var saveLabel: String {

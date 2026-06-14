@@ -100,42 +100,24 @@ public struct OrdersSection: View {
         }
     }
 
-    /// Segmented `Orders | Commands` control — mirrors the doctrine mode toggle
-    /// visual at full-section scope, focus-ring suppressed to match the sidebar.
+    /// Segmented `Orders | Commands` control — the canonical W2 `BridgeSegmented`
+    /// (raised neutral thumb on an inset well). A bridging binding routes the
+    /// selection through `setTab` so the `@AppStorage` persistence + the animated
+    /// switch are preserved (the component writes the value; `setTab` records it).
     private var segmented: some View {
-        HStack(spacing: 0) {
-            tabButton("Orders", .orders)
-            tabButton("Commands", .commands)
-        }
-        .padding(2)
-        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+        let bound = Binding<Tab>(
+            get: { selection },
+            set: { newValue in
+                withAnimation(.easeInOut(duration: 0.16)) { setTab(newValue) }
+            }
+        )
+        return BridgeSegmented(
+            selection: bound,
+            options: [(Tab.orders, "Orders"), (Tab.commands, "Commands")]
+        )
+        .fixedSize()
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Orders section tabs")
-    }
-
-    private func tabButton(_ label: String, _ value: Tab) -> some View {
-        let on = selection == value
-        return Button {
-            withAnimation(.easeInOut(duration: 0.16)) { setTab(value) }
-        } label: {
-            Text(label)
-                .font(.system(size: 12.5, weight: on ? .semibold : .regular))
-                .foregroundStyle(on ? BridgeTokens.fg1 : BridgeTokens.fg3)
-                .padding(.horizontal, 16).padding(.vertical, 6)
-                .frame(minHeight: 28)
-                .background {
-                    if on {
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(BridgeTokens.accent.opacity(0.18))
-                            .overlay(RoundedRectangle(cornerRadius: 6)
-                                .strokeBorder(BridgeTokens.accent.opacity(0.45), lineWidth: 0.5))
-                    }
-                }
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(on ? [.isSelected] : [])
     }
 
     /// Per-tab meta: Orders → token + skills stats; Commands → command/favorite
@@ -459,7 +441,9 @@ struct StandingOrdersBody: View {
         switch mode {
         case .preview:
             ScrollView {
-                SOMarkdownView(markdown: composedText)
+                // Canonical W2 doctrine renderer (H2 rules, bullets, inline
+                // **bold**/`code`). Same composed source as before.
+                BridgeMarkdown(composedText)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(expandedStyle ? 18 : 14)
             }

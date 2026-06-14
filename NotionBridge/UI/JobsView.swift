@@ -1,26 +1,30 @@
 // JobsView.swift — Settings > Jobs · shared row / detail / sheet components.
-// NotionBridge · UI · v3.7.8 Settings-redesign (PKT-jobs)
+// NotionBridge · UI · v4 "Liquid Glass, evolved" redesign (PKT-jobs)
 //
-// The Jobs page is owned end-to-end by JobsSection (the locked Liquid-Glass
-// mockup — shared section header + 4-stat strip, failing banner, glass
-// scheduled-job rows, expandable run-log). This file hosts the reusable pieces
-// JobsSection composes:
-//   • JobsFailingBanner — one failing-state banner at two scales (page + row)
-//   • JobGlassRow       — one scheduled-job row: icon tile, name + mono cron +
-//                         tool detail, and a fixed 3-slot trailing grid
-//                         {next-run · status badge · actions}. The body taps to
-//                         expand (no standalone chevron — a hover background
-//                         signals it); the editor + a per-row run history live
-//                         inside the expansion.
+// The Jobs page is owned end-to-end by JobsSection (the v4 design — slim meta
+// row, page failing banner, glass scheduled-job rows, expandable inline editor
+// + per-row run history). This file hosts the reusable pieces JobsSection
+// composes, recreated faithfully from
+// design/the-bridge-design-system/project/pages/page-jobs.jsx:
+//   • JobsFailingBanner — one failing-state notice at two scales. `.row` is the
+//     compact in-row banner (`.jbp-rowbanner`); the `.page` scale defers to the
+//     W2 `BridgeBanner(.bad)` JobsSection renders directly (with live Retry).
+//   • JobGlassRow       — one scheduled-job row: tone-tinted icon tile, name +
+//     mono cron + humanized cadence + tool detail, and a fixed trailing grid
+//     {next-run · BridgeBadge status · pause/run actions}. The body taps to
+//     expand (a hover/open fill is the affordance — no standalone chevron); the
+//     re-glassed editor + a per-row run history live inside the expansion.
 //   • JobDetailView     — the inline-expand editor (name/schedule/actions/options
-//                         + Run/Duplicate/Pause/Delete/Save), re-glassed; bindings
-//                         verbatim, cron validation + Save gating preserved.
+//     + Run/Duplicate/Pause/Delete/Save), re-glassed onto W2 inputs + buttons;
+//     bindings verbatim, cron validation + Save gating preserved.
 //   • NewJobSheet       — +New job sheet (create)
 //   • ImportSheet       — paste/load a jobs export
 //
-// EVERY store binding and action (JobsManager.*) is preserved verbatim — only
-// the presentation moved. The public `JobsView` shim renders JobsSection so any
-// stray caller still resolves to the redesigned page.
+// EVERY store binding and action (JobsManager.* / JobStore.*) is preserved
+// verbatim — only the presentation moved to the W1 tokens + W2 components.
+// Both carbon + titanium themes resolve for free off the adaptive tokens.
+// The public `JobsView` shim renders JobsSection so any stray caller still
+// resolves to the redesigned page.
 
 import SwiftUI
 import AppKit
@@ -34,60 +38,33 @@ public struct JobsView: View {
     public var body: some View { JobsSection() }
 }
 
-// MARK: - Shared failing banner (page + row)
+// MARK: - Shared failing banner (row scale)
 
-/// One failing-state banner rendered at two scales so the page-level alert and
-/// the in-row banner share a single layout/token vocabulary (the audit flagged
-/// two divergent banners). `.page` carries an optional "Retry now" action;
-/// `.row` is a compact inline notice.
+/// The compact in-row failing notice (`.jbp-rowbanner`): a `.bad`-tinted strip
+/// with a triangle glyph + message, shown under a failing job's subline when the
+/// row is collapsed. The page-scale banner is the W2 `BridgeBanner(.bad)` that
+/// JobsSection renders directly (it carries the live "Retry now" action), so the
+/// two share the design's single `.bad` banner vocabulary at two scales.
 struct JobsFailingBanner: View {
-    enum Scale { case page, row }
-
-    let scale: Scale
     let summary: String
-    /// Optional retry handler (page scale only).
-    var onRetry: (() async -> Void)?
 
-    @State private var retrying = false
-
-    private var iconSize: CGFloat { scale == .page ? 15 : 11 }
-    private var titleSize: CGFloat { scale == .page ? 13 : 11.5 }
     private var radius: CGFloat { BridgeTokens.Radius.control }
-    private var pad: CGFloat { scale == .page ? 12 : 9 }
 
     var body: some View {
-        HStack(alignment: scale == .page ? .top : .top, spacing: scale == .page ? 11 : 8) {
+        HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: iconSize))
+                .font(.system(size: 11))
                 .foregroundStyle(BridgeTokens.badText)
             Text(summary)
-                .font(.system(size: titleSize, weight: scale == .page ? .medium : .regular))
+                .font(.system(size: 11.5))
                 .foregroundStyle(BridgeTokens.badText)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            if scale == .page, let onRetry {
-                Button {
-                    guard !retrying else { return }
-                    Task { retrying = true; await onRetry(); retrying = false }
-                } label: {
-                    HStack(spacing: 5) {
-                        if retrying { ProgressView().controlSize(.mini) }
-                        Text(retrying ? "Retrying…" : "Retry now")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(BridgeTokens.badText)
-                    }
-                    .padding(.horizontal, 11).padding(.vertical, 5)
-                    .background(BridgeTokens.bad.opacity(0.14), in: Capsule())
-                    .overlay(Capsule().strokeBorder(BridgeTokens.bad.opacity(0.30), lineWidth: 0.5))
-                }
-                .buttonStyle(.plain)
-                .disabled(retrying)
-                .help("Run the failing job again now")
-            }
         }
-        .padding(.horizontal, pad).padding(.vertical, scale == .page ? pad : 8)
+        .padding(.horizontal, 9).padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(BridgeTokens.bad.opacity(scale == .page ? 0.07 : 0.10),
+        // `.jbp-rowbanner`: bad@10% fill, bad@26% border.
+        .background(BridgeTokens.bad.opacity(0.10),
                     in: RoundedRectangle(cornerRadius: radius, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
             .strokeBorder(BridgeTokens.bad.opacity(0.26), lineWidth: 0.5))
@@ -98,12 +75,13 @@ struct JobsFailingBanner: View {
 
 // MARK: - Scheduled-job row (glass)
 
-/// One scheduled-job row in the "Scheduled jobs" card — an accent icon tile,
-/// name + mono cron + tool detail, and a fixed 3-slot trailing grid
+/// One scheduled-job row in the "Scheduled jobs" card — a tone-tinted icon tile,
+/// name + mono cron + humanized cadence + tool detail, and a fixed trailing grid
 /// {next-run · status badge · action cluster}. Tapping the body toggles the
-/// inline editor (a hover background is the affordance — the standalone chevron
-/// is gone). Run-now shows an in-row spinner + toast and, for action chains that
-/// touch send/payment/delete tools, prompts to confirm first.
+/// inline editor (a hover/open background is the affordance — the standalone
+/// chevron is gone). Run-now shows an in-row spinner + toast and, for action
+/// chains that touch send/payment/delete tools, prompts to confirm first.
+/// `.jbp-row` / `.jbp-rowhead` / `.jbp-tile` / `.jbp-trail`.
 struct JobGlassRow: View {
     let job: JobRecord
     /// Most-recent execution for this job, if any — drives the failing banner
@@ -123,50 +101,38 @@ struct JobGlassRow: View {
         job.status == .active && lastExecution?.status == .failure
     }
 
-    private var tone: Tone {
+    private var tone: BridgeSignal {
         if isFailing { return .bad }
         return job.status == .active ? .ok : .warn
     }
 
-    private enum Tone { case ok, warn, bad
-        var dot: Color {
-            switch self { case .ok: return BridgeTokens.ok
-                          case .warn: return BridgeTokens.warn
-                          case .bad: return BridgeTokens.bad }
-        }
-        var badge: String {
-            switch self { case .ok: return "Active"; case .warn: return "Paused"; case .bad: return "Failing" }
-        }
-        var badgeBG: Color {
-            switch self { case .ok: return BridgeTokens.ok.opacity(0.16)
-                          case .warn: return BridgeTokens.warn.opacity(0.16)
-                          case .bad: return BridgeTokens.bad.opacity(0.14) }
-        }
-        var badgeFG: Color {
-            switch self { case .ok: return BridgeTokens.okText
-                          case .warn: return BridgeTokens.warnText
-                          case .bad: return BridgeTokens.badText }
-        }
-        var iconTint: Color {
-            switch self { case .ok: return BridgeTokens.okText
-                          case .warn: return BridgeTokens.warnText
-                          case .bad: return BridgeTokens.badText }
-        }
+    /// The status-badge label + BridgeBadge tone for this job's state.
+    private var badgeLabel: String {
+        switch tone { case .ok: return "Active"; case .warn: return "Paused"; default: return "Failing" }
+    }
+    private var badgeTone: BridgeBadge.Tone {
+        switch tone { case .ok: return .ok; case .warn: return .warn; default: return .bad }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             rowHeader
             if isExpanded {
-                Rectangle().fill(BridgeTokens.hairline).frame(height: 0.5).padding(.top, 10)
+                // `.jbp-ed` is indented under the icon tile; the hairline divides
+                // the head from the editor (`.jbp-ed .hair`).
+                Rectangle().fill(BridgeTokens.hairline).frame(height: 0.5)
+                    .padding(.top, 9)
+                    .padding(.leading, 41)   // clears the 30pt tile + 11pt gap
                 JobDetailView(job: job, onChanged: onChanged)
-                    .padding(.top, 6)
+                    .padding(.top, 12)
+                    .padding(.leading, 41)
             }
         }
-        .background(
-            RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
-                .fill((hovering || isExpanded) ? BridgeTokens.hoverFill : Color.clear)
-        )
+        .padding(.horizontal, 11)
+        .padding(.vertical, 9)
+        .background(rowBackground)
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .onHover { hovering = $0 }
         .confirmationDialog(
             "Run “\(job.name)” now?",
             isPresented: $showRunConfirm,
@@ -176,6 +142,22 @@ struct JobGlassRow: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This job can send messages, move money, or delete data. Running it now executes those actions immediately.")
+        }
+    }
+
+    /// `.jbp-row` background: open → `well-deep` + raise edge + inset bevel;
+    /// hover → `hover` fill; else clear. Border is a transparent→edge swap.
+    @ViewBuilder
+    private var rowBackground: some View {
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        if isExpanded {
+            shape.fill(BridgeTokens.wellFillDeep)
+                .overlay(shape.strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5))
+                .bridgeBevel(BridgeTokens.bevelInset, radius: 10)
+        } else if hovering {
+            shape.fill(BridgeTokens.hoverFill)
+        } else {
+            Color.clear
         }
     }
 
@@ -189,30 +171,26 @@ struct JobGlassRow: View {
                     .lineLimit(1)
                     .help(job.name)
                 subline
-                if isFailing {
+                if isFailing && !isExpanded {
                     JobsFailingBanner(
-                        scale: .row,
-                        summary: lastExecution?.errorMessage ?? "Last run failed — check the job log.",
-                        onRetry: nil
+                        summary: lastExecution?.errorMessage ?? "Last run failed — check the job log."
                     )
-                    .padding(.top, 6)
+                    .padding(.top, 7)
                 }
             }
             Spacer(minLength: 8)
             trailingGrid
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 5)
         .contentShape(Rectangle())
         .onTapGesture { onToggle() }
-        .onHover { hovering = $0 }
-        // The whole row is a combined element: a VO user hears one summary, then
-        // the action buttons (their own elements) follow.
+        // The whole header is a combined element: a VO user hears one summary,
+        // then the action buttons (their own elements) follow.
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(job.name), \(tone.badge), \(nextRunText)")
+        .accessibilityLabel("\(job.name), \(badgeLabel), \(nextRunText)")
         .accessibilityHint(isExpanded ? "Collapse to hide the editor" : "Expand to edit and view history")
     }
 
+    /// `.jbp-tile`: a 30pt chip-fill well with a tone-tinted family glyph.
     private var iconTile: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -221,13 +199,14 @@ struct JobGlassRow: View {
                     .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
             Image(systemName: jobGlyph)
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(tone.iconTint)
+                .foregroundStyle(tone.text)
         }
         .frame(width: 30, height: 30)
         .padding(.top, 1)
         .accessibilityHidden(true)
     }
 
+    /// `.jbp-sub`: mono cron · faint dot · humanized cadence + primary tool (+N).
     private var subline: some View {
         HStack(spacing: 5) {
             Text(job.schedule)
@@ -242,33 +221,30 @@ struct JobGlassRow: View {
         }
     }
 
-    /// Fixed 3-slot trailing grid {next-run · status badge · action cluster} so
-    /// the right edge stops being a traffic jam and columns line up across rows.
+    /// Fixed trailing grid {next-run · status badge · action cluster} so the
+    /// right edge stops being a traffic jam and columns line up across rows.
+    /// `.jbp-trail` / `.jbp-nextcol`.
     private var trailingGrid: some View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .trailing, spacing: 6) {
                 Text(nextRunText)
                     .font(.system(size: 11.5, design: .monospaced))
-                    .foregroundStyle(BridgeTokens.fg3)
+                    .foregroundStyle(job.status == .active && !isFailing
+                                     ? BridgeTokens.fg3 : BridgeTokens.fg5)
                     .monospacedDigit()
                     .lineLimit(1)
                     .help(nextRunHelp)
-                statusBadge
+                BridgeBadge(badgeLabel, tone: badgeTone, showsDot: true)
+                    .accessibilityHidden(true)
             }
+            .frame(minWidth: 96, alignment: .trailing)
             actions
         }
     }
 
-    private var statusBadge: some View {
-        Text(tone.badge)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(tone.badgeFG)
-            .padding(.horizontal, 9).padding(.vertical, 3)
-            .background(tone.badgeBG, in: Capsule())
-            .overlay(Capsule().strokeBorder(tone.dot.opacity(0.30), lineWidth: 0.5))
-            .accessibilityHidden(true)
-    }
-
+    /// `.jbp-acts`: pause/resume · run-now (spinner + toast). The overflow menu
+    /// (duplicate / copy id / delete) rides here too — kept from the shipped row
+    /// so those verbs stay reachable directly on the row.
     private var actions: some View {
         HStack(spacing: 3) {
             if job.status == .active {
@@ -312,6 +288,25 @@ struct JobGlassRow: View {
         .padding(.top, 1)
     }
 
+    /// `.jbp-ibtn`: a 28pt borderless icon button (hover → hoverFill + fg1).
+    private func iconButton(_ systemImage: String, help: String, a11y: String,
+                            action: @escaping () async -> Void) -> some View {
+        Button {
+            guard !busy else { return }
+            Task { busy = true; await action(); busy = false }
+        } label: {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(BridgeTokens.fg3)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .disabled(busy)
+        .accessibilityLabel(a11y)
+    }
+
     /// Run-now is always visible; it shows an in-row spinner while running and a
     /// toast on completion. For side-effecting chains it routes through a confirm.
     private var runNowButton: some View {
@@ -337,38 +332,22 @@ struct JobGlassRow: View {
         .overlay(alignment: .topTrailing) { toastOverlay }
     }
 
+    /// `.jbp-toast`: a popover-elevation pill that flashes the run result.
     @ViewBuilder
     private var toastOverlay: some View {
         if let toast {
             Text(toast)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(BridgeTokens.fg1)
-                .padding(.horizontal, 7).padding(.vertical, 3)
-                .background(BridgeTokens.chipFill, in: Capsule())
-                .overlay(Capsule().strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background(BridgeTokens.glassPopover.paint(in: Capsule(style: .continuous)))
+                .overlay(Capsule(style: .continuous).strokeBorder(BridgeTokens.edgeRaise, lineWidth: 0.5))
+                .bridgeShadow(BridgeTokens.shadowE2)
                 .fixedSize()
-                .offset(y: -22)
+                .offset(y: -24)
                 .transition(.opacity)
                 .accessibilityHidden(true)
         }
-    }
-
-    private func iconButton(_ systemImage: String, help: String, a11y: String,
-                            action: @escaping () async -> Void) -> some View {
-        Button {
-            guard !busy else { return }
-            Task { busy = true; await action(); busy = false }
-        } label: {
-            Image(systemName: systemImage)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(BridgeTokens.fg3)
-                .frame(width: 28, height: 28)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(help)
-        .disabled(busy)
-        .accessibilityLabel(a11y)
     }
 
     // MARK: row actions (bindings preserved)
@@ -421,11 +400,13 @@ struct JobGlassRow: View {
     // MARK: derived text
 
     private var detailText: String {
+        let cadence = CronHumanizer.describe(job.schedule)
         if let primary = job.actionChain.first {
             let extra = job.actionChain.count > 1 ? " +\(job.actionChain.count - 1)" : ""
+            if let cadence { return "\(cadence) · \(primary.tool)\(extra)" }
             return primary.tool + extra
         }
-        return CronHumanizer.describe(job.schedule) ?? "no actions"
+        return cadence ?? "no actions"
     }
 
     /// Compact next-run hint. Paused → "paused"; failing → "retrying…";
@@ -456,7 +437,7 @@ struct JobGlassRow: View {
         let tool = job.actionChain.first?.tool.lowercased() ?? ""
         if tool.contains("stripe") || tool.contains("invoice") || tool.contains("payment") { return "creditcard" }
         if tool.contains("notion") { return "doc.text" }
-        if tool.contains("credential") || tool.contains("token") { return "key" }
+        if tool.contains("credential") || tool.contains("token") || tool.contains("vault") { return "key" }
         if tool.contains("strava") || tool.contains("fetch") || tool.contains("http") { return "arrow.triangle.2.circlepath" }
         if tool.contains("shell") || tool.contains("script") || tool.contains("exec") { return "terminal" }
         if tool.contains("mail") || tool.contains("message") { return "envelope" }
@@ -542,46 +523,72 @@ struct NewJobSheet: View {
     @State private var errorMsg: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("New Scheduled Job").font(.title2.bold())
-            Form {
-                TextField("Name", text: $name)
-                TextField("Schedule (cron)", text: $schedule)
-                    .font(.body.monospaced())
+        VStack(alignment: .leading, spacing: 14) {
+            Text("New scheduled job").font(BridgeTokens.Typeface.hero)
+                .foregroundStyle(BridgeTokens.fg1)
+
+            VStack(alignment: .leading, spacing: 6) {
+                BridgeCardLabel("Name")
+                BridgeInput("Job name", text: $name)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                BridgeCardLabel("Schedule")
+                BridgeInput("* * * * *", text: $schedule, mono: true)
                     .onChange(of: schedule) { _, v in validateSchedule(v) }
                 if let err = scheduleError {
-                    Text(err).font(.caption).foregroundStyle(BridgeTokens.badText)
+                    Text(err).font(.system(size: 11.5)).foregroundStyle(BridgeTokens.badText)
                 } else {
-                    Text((CronHumanizer.describe(schedule) ?? schedule)).font(.caption).foregroundStyle(.secondary)
-                }
-                Toggle("Skip when on battery", isOn: $skipOnBattery)
-                VStack(alignment: .leading) {
-                    Text("Action Chain (JSON)").font(.caption).foregroundStyle(.secondary)
-                    TextEditor(text: $actionsJSON)
-                        .font(.body.monospaced())
-                        .frame(minHeight: 140)
-                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
-                        .onChange(of: actionsJSON) { _, v in validateActions(v) }
-                    if let err = actionsError {
-                        Text(err).font(.caption).foregroundStyle(BridgeTokens.badText)
-                    }
+                    Text((CronHumanizer.describe(schedule) ?? schedule))
+                        .font(.system(size: 11.5)).foregroundStyle(BridgeTokens.fg3)
                 }
             }
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    BridgeCardLabel("Action chain")
+                    Spacer()
+                    Text("JSON").font(.system(size: 11)).foregroundStyle(BridgeTokens.fg5)
+                }
+                jsonEditor(text: $actionsJSON)
+                    .frame(minHeight: 140)
+                    .onChange(of: actionsJSON) { _, v in validateActions(v) }
+                if let err = actionsError {
+                    Text(err).font(.system(size: 11.5)).foregroundStyle(BridgeTokens.badText)
+                }
+            }
+
+            Toggle("Skip when on battery", isOn: $skipOnBattery)
+                .toggleStyle(.switch).controlSize(.small)
+
             if let err = errorMsg {
-                Text(err).font(.caption).foregroundStyle(BridgeTokens.badText)
+                Text(err).font(.system(size: 11.5)).foregroundStyle(BridgeTokens.badText)
             }
-            HStack {
+            HStack(spacing: 8) {
                 Spacer()
-                Button("Cancel") { onCancel() }
-                Button("Create Job") { Task { await create() } }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(creating || name.isEmpty || scheduleError != nil || actionsError != nil)
+                BridgeButton("Cancel") { onCancel() }
+                BridgeButton("Create job", systemImage: "plus", variant: .primary,
+                             isEnabled: !creating && !name.isEmpty && scheduleError == nil && actionsError == nil) {
+                    Task { await create() }
+                }
             }
         }
         .padding(20)
         .frame(width: 520, height: 560)
+        .background(BridgeTokens.bgRaised)
         .onAppear { validateSchedule(schedule); validateActions(actionsJSON) }
+    }
+
+    /// A glass-well TextEditor for the JSON chain (matches `.jbp-json`).
+    private func jsonEditor(text: Binding<String>) -> some View {
+        TextEditor(text: text)
+            .font(.body.monospaced())
+            .scrollContentBackground(.hidden)
+            .padding(8)
+            .background(BridgeTokens.wellFillDeep, in: RoundedRectangle(cornerRadius: BridgeTokens.Radius.input))
+            .overlay(RoundedRectangle(cornerRadius: BridgeTokens.Radius.input)
+                .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+            .accessibilityLabel("Action chain JSON")
     }
 
     private func validateSchedule(_ s: String) {
@@ -677,30 +684,17 @@ struct JobDetailView: View {
                                      ? BridgeTokens.badText : BridgeTokens.fg3)
             }
         }
-        .padding(.horizontal, 2)
+        // Stop body taps from bubbling to the row header (which would collapse).
+        .contentShape(Rectangle())
+        .onTapGesture {}
         .task { await loadHistory() }
     }
 
-    private func blockLabel(_ text: String) -> some View { BridgeCardLabel(text) }
-
-    /// A glass well wrapper for editor fields so the editor matches the row's
-    /// material instead of dropping to native `.roundedBorder`.
-    private func glassField<C: View>(@ViewBuilder _ content: () -> C) -> some View {
-        content()
-            .padding(.horizontal, 9).padding(.vertical, 7)
-            .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: BridgeTokens.Radius.input))
-            .overlay(RoundedRectangle(cornerRadius: BridgeTokens.Radius.input)
-                .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
-    }
-
+    /// `.jbp-idrow`: mono job id · copy · reveal-log link.
     private var headerBlock: some View {
         VStack(alignment: .leading, spacing: 8) {
-            glassField {
-                TextField("Job name", text: $editedName)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .accessibilityLabel("Job name")
-            }
+            BridgeInput("Job name", text: $editedName)
+                .accessibilityLabel("Job name")
             HStack(spacing: 8) {
                 Label(job.id, systemImage: "number")
                     .font(.system(size: 11, design: .monospaced))
@@ -717,11 +711,9 @@ struct JobDetailView: View {
                 .help("Copy job id")
                 .accessibilityLabel("Copy job id")
 
-                Button { revealLog() } label: {
-                    Label("Reveal Log", systemImage: "doc.text.magnifyingglass")
-                        .font(.system(size: 11))
+                BridgeButton("Reveal log", systemImage: "doc.text.magnifyingglass", variant: .link) {
+                    revealLog()
                 }
-                .buttonStyle(.borderless)
                 .help("Open the raw .out.log in Finder")
             }
         }
@@ -729,14 +721,11 @@ struct JobDetailView: View {
 
     private var scheduleBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
-            blockLabel("Schedule")
-            glassField {
-                TextField("* * * * *", text: $editedSchedule)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13, design: .monospaced))
-                    .onChange(of: editedSchedule) { _, newValue in validateSchedule(newValue) }
-                    .accessibilityLabel("Cron schedule")
-            }
+            BridgeCardLabel("Schedule")
+            BridgeInput("* * * * *", text: $editedSchedule, mono: true)
+                .onChange(of: editedSchedule) { _, newValue in validateSchedule(newValue) }
+                .accessibilityLabel("Cron schedule")
+            // `.jbp-echo`: humanized echo or the validation error.
             if let err = scheduleError {
                 Text(err).font(.system(size: 11.5)).foregroundStyle(BridgeTokens.badText)
             } else {
@@ -749,10 +738,11 @@ struct JobDetailView: View {
     private var actionsBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                blockLabel("Action Chain")
+                BridgeCardLabel("Action chain")
                 Spacer()
                 Text("JSON").font(.system(size: 11)).foregroundStyle(BridgeTokens.fg5)
             }
+            // `.jbp-json`: deep-well mono editor with inset bevel.
             TextEditor(text: $editedActionsJSON)
                 .font(.body.monospaced())
                 .scrollContentBackground(.hidden)
@@ -760,6 +750,7 @@ struct JobDetailView: View {
                 .padding(8)
                 .background(BridgeTokens.wellFillDeep, in: RoundedRectangle(cornerRadius: BridgeTokens.Radius.input))
                 .overlay(RoundedRectangle(cornerRadius: BridgeTokens.Radius.input).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+                .bridgeBevel(BridgeTokens.bevelInset, radius: BridgeTokens.Radius.input)
                 .onChange(of: editedActionsJSON) { _, newValue in validateActions(newValue) }
                 .accessibilityLabel("Action chain JSON")
             if let err = actionsError {
@@ -779,10 +770,11 @@ struct JobDetailView: View {
         }
     }
 
+    /// `.jbp-runs`: per-job run history (✓/✗ mark · time · result), in a well.
     @ViewBuilder
     private var historyBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
-            blockLabel("Recent runs")
+            BridgeCardLabel("Recent runs")
             if !historyLoaded {
                 HStack { ProgressView().controlSize(.mini); Text("Loading…").font(.system(size: 11.5)).foregroundStyle(BridgeTokens.fg4) }
             } else if history.isEmpty {
@@ -812,30 +804,31 @@ struct JobDetailView: View {
                 .padding(.horizontal, 9).padding(.vertical, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: BridgeTokens.Radius.control))
-                .overlay(RoundedRectangle(cornerRadius: BridgeTokens.Radius.control).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+                .overlay(RoundedRectangle(cornerRadius: BridgeTokens.Radius.control).strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+                .bridgeBevel(BridgeTokens.bevelInset, radius: BridgeTokens.Radius.control)
             }
         }
     }
 
+    /// `.jbp-foot`: Run / Duplicate / Pause-Resume · spacer · Delete · Save.
     private var footerActions: some View {
         HStack(spacing: 8) {
-            Button { Task { await runNow() } } label: { Label("Run Now", systemImage: "play.fill") }
-                .disabled(running)
-            Button { Task { await duplicate() } } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
+            BridgeButton("Run now", systemImage: "play.fill", isEnabled: !running) {
+                Task { await runNow() }
+            }
+            BridgeButton("Duplicate") { Task { await duplicate() } }
             if job.status == .active {
-                Button { Task { await pause() } } label: { Label("Pause", systemImage: "pause.fill") }
+                BridgeButton("Pause") { Task { await pause() } }
             } else {
-                Button { Task { await resume() } } label: { Label("Resume", systemImage: "play.fill") }
+                BridgeButton("Resume") { Task { await resume() } }
             }
             Spacer()
-            Button(role: .destructive) { Task { await delete() } } label: { Label("Delete", systemImage: "trash") }
-            Button { Task { await saveChanges() } } label: { Label("Save Changes", systemImage: "checkmark.circle.fill") }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-                .tint(BridgeTokens.accent)
-                .disabled(scheduleError != nil || actionsError != nil || !hasChanges)
+            BridgeButton("Delete", variant: .danger) { Task { await delete() } }
+            BridgeButton("Save changes", systemImage: "checkmark", variant: .primary,
+                         isEnabled: scheduleError == nil && actionsError == nil && hasChanges) {
+                Task { await saveChanges() }
+            }
         }
-        .controlSize(.small)
     }
 
     private var hasChanges: Bool {
@@ -994,16 +987,21 @@ struct ImportSheet: View {
     var onImport: (String) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Import Jobs").font(.title2.bold())
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Import jobs").font(BridgeTokens.Typeface.hero)
+                .foregroundStyle(BridgeTokens.fg1)
             Text("Paste a jobs export JSON envelope. IDs will be regenerated to avoid collisions.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.system(size: 11.5)).foregroundStyle(BridgeTokens.fg3)
             TextEditor(text: $jsonText)
                 .font(.body.monospaced())
+                .scrollContentBackground(.hidden)
                 .frame(minWidth: 500, minHeight: 280)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
-            HStack {
-                Button("Load from File…") {
+                .padding(8)
+                .background(BridgeTokens.wellFillDeep, in: RoundedRectangle(cornerRadius: BridgeTokens.Radius.input))
+                .overlay(RoundedRectangle(cornerRadius: BridgeTokens.Radius.input)
+                    .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+            HStack(spacing: 8) {
+                BridgeButton("Load from file…", systemImage: "folder") {
                     let panel = NSOpenPanel()
                     panel.allowedContentTypes = [.json]
                     panel.allowsMultipleSelection = false
@@ -1012,13 +1010,15 @@ struct ImportSheet: View {
                     }
                 }
                 Spacer()
-                Button("Cancel") { onCancel() }
-                Button("Import") { onImport(jsonText) }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(jsonText.trimmingCharacters(in: .whitespaces).isEmpty)
+                BridgeButton("Cancel") { onCancel() }
+                BridgeButton("Import", variant: .primary,
+                             isEnabled: !jsonText.trimmingCharacters(in: .whitespaces).isEmpty) {
+                    onImport(jsonText)
+                }
             }
         }
         .padding(20)
+        .background(BridgeTokens.bgRaised)
     }
 }
 

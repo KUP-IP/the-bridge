@@ -1,21 +1,26 @@
 // JobsSection.swift — Settings → Jobs pane.
-// v3.7.8 Settings-redesign (PKT-jobs) · density + consistency pass over the
-// v3.7.3 locked mockup (design/ui_kits/the-bridge/Jobs.jsx):
-//   - Shared `BridgeSettingsSectionHeader` (purple, clock.badge.checkmark) —
-//     no more bespoke emerald orb / duplicated 22pt title. The 4-stat strip
-//     (done·24h / running / paused / failing) rides in the header accessory
-//     and dims during a load error so it never asserts false health.
-//   - Page-level failing banner (shared `JobsFailingBanner`, also used by the
-//     row) shown when an active job's most recent execution failed.
-//   - "Scheduled jobs" card: filter + inline search (Sort folded into the
-//     overflow), glass rows (3-slot trailing grid: next-run · status · actions).
+// v4 "Liquid Glass, evolved" redesign (PKT-jobs) · recreated from
+// design/the-bridge-design-system/project/pages/page-jobs.jsx:
+//   - Slim meta row (`.jbp-meta`) replaces the tall hero header: a "Scheduler"
+//     label with a health BridgeBadge (Healthy / N failing), a mono counts
+//     strip (done·24h · active · paused · failing — throughput leads), then the
+//     primary actions (Pause all · New job). The strip dims during a load error
+//     so it never asserts false health.
+//   - Page-level failing banner — the shared `.bad` vocabulary at page scale via
+//     the W2 `BridgeBanner(.bad)` with a live "Retry now" action (the in-row
+//     banner is the same vocabulary at row scale, in JobGlassRow).
+//   - "Scheduled jobs" card: glass card label + inline search (BridgeInput) +
+//     segmented filter (BridgeSegmented All/Active/Paused) + overflow menu (Sort
+//     folded in, plus resume-all / import / export). Glass rows (JobGlassRow)
+//     carry the 3-slot trailing grid: next-run · status badge · actions.
 //   - "Recent runs" card: an expandable run-log derived from job_executions
 //     (✓/✗ mark · time · job · duration / error) with per-line .help reveal.
 //
-// Every store binding and action is preserved: JobStore.listAll +
-// executions drive the data; JobsManager handles pause/resume/run/duplicate/
-// delete/create/import/export/pause-all/resume-all verbatim. JobsSection() is
-// still instantiated directly with a no-arg init.
+// Every store binding and action is preserved: JobStore.listAll + executions
+// drive the data; JobsManager handles pause/resume/run/duplicate/delete/create/
+// import/export/pause-all/resume-all verbatim. JobsSection() is still
+// instantiated directly with a no-arg init. Both carbon + titanium resolve for
+// free off the adaptive W1 tokens.
 
 import SwiftUI
 import AppKit
@@ -66,26 +71,28 @@ public struct JobsSection: View {
 
     public init() {}
 
-    // Jobs density targets (spec: pad 18→14, inter-card gap →10). Kept local so
-    // they don't perturb the shared BridgeTokens.Space scale other pages share.
+    // Jobs density targets (spec: pane pad 18→14, inter-card gap →12). Kept
+    // local so they don't perturb the shared BridgeTokens.Space scale.
     private let paneInset: CGFloat = 14
-    private let cardGap: CGFloat = 10
+    private let cardGap: CGFloat = 12
 
     public var body: some View {
-        ScrollView {
-            VStack(spacing: cardGap) {
-                header
-                if failingCount > 0 {
-                    JobsFailingBanner(
-                        scale: .page,
-                        summary: pageFailureSummary,
-                        onRetry: firstFailingJob.map { job in { await retry(job) } }
-                    )
+        VStack(spacing: 0) {
+            // Slim meta row (`.jbp-meta`) — flush, with its own bottom hairline.
+            metaRow
+            Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5)
+
+            // Body (`.jbp-body`) — scrolls; page banner + cards.
+            ScrollView {
+                VStack(spacing: cardGap) {
+                    if let job = firstFailingJob {
+                        pageFailingBanner(for: job)
+                    }
+                    scheduledCard
+                    recentRunsCard
                 }
-                scheduledCard
-                recentRunsCard
+                .padding(paneInset)
             }
-            .padding(paneInset)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
@@ -114,7 +121,7 @@ public struct JobsSection: View {
 
     private var activeCount: Int { jobs.filter { $0.status == .active }.count }
     private var pausedCount: Int { jobs.filter { $0.status == .paused }.count }
-    /// "Running" in the stat strip = active (scheduled) jobs that aren't failing.
+    /// "Running" in the strip = active (scheduled) jobs that aren't failing.
     private var runningCount: Int {
         jobs.filter { $0.status == .active && lastExecByJob[$0.id]?.status != .failure }.count
     }
@@ -125,55 +132,86 @@ public struct JobsSection: View {
         jobs.first { $0.status == .active && lastExecByJob[$0.id]?.status == .failure }
     }
 
-    // MARK: - Header (shared section header + stat strip accessory)
+    // MARK: - Slim meta row (`.jbp-meta`)
 
-    private var header: some View {
-        let spec = BridgeSettingsHeaderPreset.spec(for: .jobs)
-        return BridgeSettingsSectionHeader(
-            title: spec.title,
-            subtitle: "Scheduled tool calls Bridge runs on cron — even when no client is connected.",
-            systemImage: spec.systemImage,
-            tint: spec.tint
-        ) {
-            statStrip
+    /// Scheduler label + health badge · mono counts · spacer · Pause all · New job.
+    private var metaRow: some View {
+        HStack(spacing: 14) {
+            // `.m-label`: glyph + "Scheduler" + the health badge.
+            HStack(spacing: 9) {
+                Image(systemName: "clock.badge.checkmark")
+                    .font(.system(size: 14))
+                    .foregroundStyle(BridgeTokens.fg2)
+                Text("Scheduler")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(BridgeTokens.fg1)
+                    .fixedSize()
+                if failingCount > 0 {
+                    BridgeBadge("\(failingCount) failing", tone: .bad, showsDot: true)
+                } else {
+                    BridgeBadge("Healthy", tone: .ok, showsDot: true)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(failingCount > 0
+                                ? "Scheduler — \(failingCount) failing"
+                                : "Scheduler — healthy")
+
+            // `.m-counts`: mono throughput + fleet state (throughput leads).
+            countsStrip
+                .opacity(loadError == nil ? 1 : 0.35)
+
+            Spacer(minLength: 8)
+
+            BridgeButton("Pause all", systemImage: "pause",
+                         isEnabled: !bulkInProgress && activeCount > 0) {
+                Task { await pauseAll() }
+            }
+            .help("Pause every active job")
+            BridgeButton("New job", systemImage: "plus", variant: .primary) {
+                showNewJobSheet = true
+            }
         }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
     }
 
-    /// Four at-a-glance numbers: throughput leads (done · 24h), then the live
-    /// fleet state. Dimmed during a load error so it never asserts "all healthy"
-    /// (0/0/0) during an outage.
-    private var statStrip: some View {
-        HStack(spacing: 8) {
-            statTile(value: "\(done24hCount)", label: "done · 24h", color: BridgeTokens.okText)
-            statTile(value: "\(runningCount)", label: "running", color: BridgeTokens.fg2)
-            statTile(value: "\(pausedCount)", label: "paused", color: BridgeTokens.warnText)
-            statTile(value: "\(failingCount)", label: "failing",
-                     color: failingCount > 0 ? BridgeTokens.badText : BridgeTokens.fg2)
+    /// `.m-counts` — mono `N done · 24h · N active · N paused · N failing`, the
+    /// active/failing weights tinted by signal so the eye lands on trouble.
+    private var countsStrip: some View {
+        HStack(spacing: 0) {
+            countNum("\(done24hCount)", color: BridgeTokens.fg2)
+            countSep(" done · 24h")
+            countDot()
+            countNum("\(runningCount)", color: BridgeTokens.fg2)
+            countSep(" active")
+            countDot()
+            countNum("\(pausedCount)", color: pausedCount > 0 ? BridgeTokens.warnText : BridgeTokens.fg2)
+            countSep(" paused")
+            countDot()
+            countNum("\(failingCount)", color: failingCount > 0 ? BridgeTokens.badText : BridgeTokens.fg2)
+            countSep(" failing")
         }
-        .opacity(loadError == nil ? 1 : 0.35)
+        .lineLimit(1)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Job stats: \(done24hCount) done in 24 hours, \(runningCount) running, \(pausedCount) paused, \(failingCount) failing")
+        .accessibilityLabel("\(done24hCount) done in 24 hours, \(runningCount) active, \(pausedCount) paused, \(failingCount) failing")
     }
 
-    private func statTile(value: String, label: String, color: Color) -> some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(.system(size: 17, weight: .semibold, design: .monospaced))
-                .foregroundStyle(color)
-                .monospacedDigit()
-            // 11pt sentence-case label (holds the legibility floor; the audit
-            // flagged the old 10pt all-caps label as sub-floor). No tracking /
-            // uppercasing so four tiles still fit the header accessory.
-            Text(label)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(BridgeTokens.fg4)
-                .lineLimit(1)
-                .fixedSize()
-        }
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .frame(minWidth: 54)
-        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: BridgeTokens.Radius.control))
-        .overlay(RoundedRectangle(cornerRadius: BridgeTokens.Radius.control).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+    private func countNum(_ s: String, color: Color) -> some View {
+        Text(s)
+            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+            .monospacedDigit()
+            .foregroundStyle(color)
+    }
+    private func countSep(_ s: String) -> some View {
+        Text(s)
+            .font(.system(size: 12, design: .monospaced))
+            .foregroundStyle(BridgeTokens.fg4)
+    }
+    private func countDot() -> some View {
+        Text("  ·  ")
+            .font(.system(size: 12, design: .monospaced))
+            .foregroundStyle(BridgeTokens.fg5)
     }
 
     // MARK: - Failing summary copy (for the shared page banner)
@@ -197,6 +235,18 @@ public struct JobsSection: View {
         await reload()
     }
 
+    /// Page-scale failing banner — the shared `.bad` `BridgeBanner` with a live
+    /// "Retry now" action that re-runs the (concrete) failing job.
+    private func pageFailingBanner(for job: JobRecord) -> some View {
+        BridgeBanner(
+            signal: .bad,
+            message: pageFailureSummary,
+            systemImage: "exclamationmark.triangle"
+        ) {
+            RetryNowButton { await retry(job) }
+        }
+    }
+
     // MARK: - Scheduled jobs card
 
     private var scheduledCard: some View {
@@ -205,17 +255,12 @@ public struct JobsSection: View {
                 HStack(spacing: 8) {
                     BridgeCardLabel("Scheduled jobs")
                     Spacer()
-                    Button { Task { await pauseAll() } } label: { Text("Pause all") }
-                        .controlSize(.small)
-                        .disabled(bulkInProgress || activeCount == 0)
-                        .help("Pause every active job")
-                    Button { showNewJobSheet = true } label: { Label("New job", systemImage: "plus") }
-                        .controlSize(.small)
-                        .buttonStyle(.borderedProminent)
-                        .tint(BridgeTokens.accent)
+                    searchField
+                    BridgeSegmented(selection: $statusFilter,
+                                    options: StatusFilter.allCases.map { ($0, $0.rawValue) })
+                        .fixedSize()
                     overflowMenu
                 }
-                controlsRow
                 Rectangle().fill(BridgeTokens.hairline).frame(height: 0.5)
                 content
                 if let msg = bulkMessage {
@@ -257,59 +302,41 @@ public struct JobsSection: View {
         .help("More actions — sort, resume all, import / export")
     }
 
-    private var controlsRow: some View {
-        HStack(spacing: 10) {
-            Picker("Filter", selection: $statusFilter) {
-                ForEach(StatusFilter.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-
-            searchField
-        }
-    }
-
+    /// `.input` with a leading search glyph (`.jbp` filter field).
     private var searchField: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
-                .foregroundStyle(BridgeTokens.fg4)
-            TextField("Search jobs", text: $searchText)
+                .foregroundStyle(BridgeTokens.fg5)
+            TextField("Filter jobs", text: $searchText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12.5))
-                .accessibilityLabel("Search jobs")
+                .foregroundStyle(BridgeTokens.fg1)
+                .tint(BridgeTokens.accentStrong)
+                .accessibilityLabel("Filter jobs")
         }
-        .padding(.horizontal, 9).padding(.vertical, 6)
-        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: BridgeTokens.Radius.input))
-        .overlay(RoundedRectangle(cornerRadius: BridgeTokens.Radius.input).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
-        .frame(maxWidth: .infinity)
+        .frame(width: 160, height: 30)
+        .padding(.horizontal, 10)
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: BridgeTokens.Radius.input, style: .continuous))
+        .bridgeBevel(BridgeTokens.bevelInset, radius: BridgeTokens.Radius.input)
+        .overlay(RoundedRectangle(cornerRadius: BridgeTokens.Radius.input, style: .continuous)
+            .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
     }
 
     @ViewBuilder
     private var content: some View {
         if isLoading {
-            HStack { Spacer(); ProgressView().controlSize(.small); Spacer() }
-                .padding(.vertical, 22)
+            BridgeLoadingView(rows: 4)
+                .padding(.vertical, 6)
         } else if let err = loadError {
-            VStack(spacing: 8) {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 26)).foregroundStyle(BridgeTokens.warnText)
-                Text("Couldn’t load scheduled jobs.")
-                    .font(.system(size: 12.5, weight: .medium)).foregroundStyle(BridgeTokens.fg2)
-                Text(err)
-                    .font(.system(size: 11.5)).foregroundStyle(BridgeTokens.fg4)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(3)
-                    .help(err)
-                Button("Retry") { Task { await reload() } }.controlSize(.small)
+            BridgeErrorView(message: "Couldn’t load scheduled jobs. \(err)") {
+                Task { await reload() }
             }
-            .frame(maxWidth: .infinity).padding(.vertical, 18)
         } else if filteredJobs.isEmpty {
             emptyState
         } else {
-            VStack(spacing: 0) {
-                ForEach(Array(filteredJobs.enumerated()), id: \.element.id) { idx, job in
+            VStack(spacing: 3) {
+                ForEach(Array(filteredJobs.enumerated()), id: \.element.id) { _, job in
                     JobGlassRow(
                         job: job,
                         lastExecution: lastExecByJob[job.id],
@@ -321,38 +348,34 @@ public struct JobsSection: View {
                         },
                         onChanged: { Task { await reload() } }
                     )
-                    if idx < filteredJobs.count - 1 {
-                        Rectangle().fill(BridgeTokens.hairlineFaint)
-                            .frame(height: 0.5)
-                            .padding(.vertical, 3)
-                    }
                 }
             }
         }
     }
 
     private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "clock.badge.checkmark")
-                .font(.system(size: 34))
-                .foregroundStyle(BridgeTokens.fg5)
-            Text(jobs.isEmpty ? "No scheduled jobs yet" : "No jobs match this filter")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(BridgeTokens.fg2)
+        Group {
             if jobs.isEmpty {
-                Text("Create a job or import an export file to schedule background tool calls.")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(BridgeTokens.fg4)
-                    .multilineTextAlignment(.center)
-                HStack(spacing: 8) {
-                    Button("New Job") { showNewJobSheet = true }
-                        .buttonStyle(.borderedProminent).tint(BridgeTokens.accent)
-                    Button("Import…") { showImportSheet = true }
+                BridgeEmptyStateView(
+                    systemImage: "clock.badge.checkmark",
+                    title: "No scheduled jobs yet",
+                    message: "Create a job or import an export file to schedule background tool calls."
+                ) {
+                    HStack(spacing: 8) {
+                        BridgeButton("New job", systemImage: "plus", variant: .primary) {
+                            showNewJobSheet = true
+                        }
+                        BridgeButton("Import…") { showImportSheet = true }
+                    }
                 }
-                .controlSize(.small)
+            } else {
+                BridgeEmptyStateView(
+                    systemImage: "line.3.horizontal.decrease.circle",
+                    title: "No jobs match this filter",
+                    message: "Try a different filter — or create one with New job."
+                )
             }
         }
-        .frame(maxWidth: .infinity).padding(.vertical, 24)
     }
 
     // MARK: - Recent runs card
@@ -556,5 +579,36 @@ public struct JobsSection: View {
         } catch {
             await MainActor.run { bulkMessage = "Import failed: \(error)" }
         }
+    }
+}
+
+// MARK: - Page-banner Retry action
+
+/// The live "Retry now" action button hosted inside the page-scale failing
+/// `BridgeBanner` — runs the failing job again and reflects an in-flight spinner.
+/// Pulled out so the banner's trailing `action` slot stays a small, stateful view.
+private struct RetryNowButton: View {
+    let onRetry: () async -> Void
+    @State private var retrying = false
+
+    var body: some View {
+        Button {
+            guard !retrying else { return }
+            Task { retrying = true; await onRetry(); retrying = false }
+        } label: {
+            HStack(spacing: 5) {
+                if retrying { ProgressView().controlSize(.mini) }
+                Text(retrying ? "Retrying…" : "Retry now")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(BridgeTokens.badText)
+            }
+            .padding(.horizontal, 11).padding(.vertical, 5)
+            .background(BridgeTokens.bad.opacity(0.16), in: Capsule(style: .continuous))
+            .overlay(Capsule(style: .continuous).strokeBorder(BridgeTokens.bad.opacity(0.32), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .disabled(retrying)
+        .help("Run the failing job again now")
+        .accessibilityLabel(retrying ? "Retrying" : "Retry now")
     }
 }

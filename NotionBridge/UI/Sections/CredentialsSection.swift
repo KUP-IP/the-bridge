@@ -97,26 +97,17 @@ public struct CredentialsSection: View {
 
     // MARK: - Keychain banner (the ONE place keychain is named)
 
+    /// W2 `.banner` (info) — the single keychain-safety notice. Royal-blue ink,
+    /// faint accent fill + accent border, key glyph. The mono store name reads as
+    /// a lowercase module/tool token per the v4 grammar.
     private var keychainBanner: some View {
-        BridgeGlassCard(cornerRadius: 11, padding: 12) {
-            HStack(spacing: 12) {
-                Image(systemName: "lock.fill")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(BridgeTokens.accentLink)
-                (
-                    Text("Secrets live in your macOS Keychain under ")
-                        .foregroundStyle(BridgeTokens.fg2)
-                    + Text("kup.solutions.notion-bridge")
-                        .font(.system(size: 12.5, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(BridgeTokens.accentLink)
-                    + Text(". Bridge never writes plaintext to disk.")
-                        .foregroundStyle(BridgeTokens.fg2)
-                )
-                .font(.system(size: 12.5))
-                .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-            }
-        }
+        BridgeBanner(
+            signal: .info,
+            message:
+                "Secrets live in your macOS Keychain under kup.solutions.notion-bridge. "
+                + "Touch ID to reveal — Bridge never writes plaintext to disk.",
+            systemImage: "key.fill"
+        )
     }
 
     // MARK: - Stored credentials
@@ -126,36 +117,53 @@ public struct CredentialsSection: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     BridgeCardLabel("Stored credentials")
-                    Spacer()
+                    Spacer(minLength: 8)
                     if isLoading {
                         ProgressView().controlSize(.small)
                     }
+                    autoValidateBadge
                     validateAllButton
                     addCredentialPill
                 }
 
                 if let errorMessage {
-                    Text(errorMessage)
-                        .font(.caption)
-                        .foregroundStyle(BridgeTokens.badText)
+                    BridgeBanner(signal: .bad, message: errorMessage)
                 }
 
                 if stored.isEmpty && !isLoading {
                     emptyState
                 } else {
-                    // Key by a STABLE service+account id (not array offset) so
+                    // Each credential sits in its own recessed well (design source:
+                    // `var(--well)` + `--bevel-inset` + faint hairline, radius 10),
+                    // keyed by a STABLE service+account id (not array offset) so
                     // reorder/delete animations keep row identity intact.
-                    ForEach(stored, id: \.rowID) { entry in
-                        credentialRow(entry)
-                        if entry.rowID != stored.last?.rowID {
-                            Rectangle()
-                                .fill(BridgeTokens.hairlineFaint)
-                                .frame(height: 0.5)
-                                .padding(.vertical, 1)
+                    VStack(spacing: 6) {
+                        ForEach(stored, id: \.rowID) { entry in
+                            credentialRow(entry)
                         }
                     }
                 }
             }
+        }
+    }
+
+    /// Truthful "auto-validates" status pill — green only when the weekly policy
+    /// is actually ON (mirrors the design's "Auto-validates every 6h" badge, but
+    /// honest to the real cadence + toggle).
+    @ViewBuilder
+    private var autoValidateBadge: some View {
+        if autoValidateWeekly {
+            HStack(spacing: 5) {
+                BridgeStatusDot(.ok, size: 6)
+                Text("Auto-validates weekly")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(BridgeTokens.okText)
+            }
+            .padding(.horizontal, 9).padding(.vertical, 3)
+            .background(BridgeTokens.ok.opacity(0.14), in: Capsule())
+            .overlay(Capsule().strokeBorder(BridgeTokens.ok.opacity(0.28), lineWidth: 0.5))
+            .help("Bridge re-checks each service about every 7 days. Toggle in Credential policy below.")
+            .accessibilityLabel("Auto-validates weekly is on")
         }
     }
 
@@ -196,23 +204,24 @@ public struct CredentialsSection: View {
                     colors: [BridgeTokens.accent.opacity(0.55), BridgeTokens.accent.opacity(0.40)],
                     startPoint: .top, endPoint: .bottom),
                 in: Capsule())
-            .overlay(Capsule().strokeBorder(BridgeTokens.accentStrong.opacity(0.55), lineWidth: 0.5))
+            // accentBorder is the adaptive edge token for accent surfaces; use it
+            // for the border (accentStrong is reserved for the caret/ink seed).
+            .overlay(Capsule().strokeBorder(BridgeTokens.accentBorder, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
         .help("Add a new credential")
     }
 
     private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("No stored credentials yet.")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(BridgeTokens.fg2)
-            Text("Only credentials saved through Bridge appear here — system and third-party items are intentionally hidden. Add an API key, password, or card to get started.")
-                .font(.system(size: 12))
-                .foregroundStyle(BridgeTokens.fg4)
-                .fixedSize(horizontal: false, vertical: true)
+        BridgeEmptyStateView(
+            systemImage: "key.fill",
+            title: "No stored credentials yet",
+            message: "Only credentials saved through Bridge appear here — system and third-party items are intentionally hidden. Add an API key, password, or card to get started."
+        ) {
+            BridgeButton("Add credential", systemImage: "plus", variant: .primary) {
+                sheetMode = .add
+            }
         }
-        .padding(.vertical, 6)
     }
 
     @ViewBuilder
@@ -220,12 +229,16 @@ public struct CredentialsSection: View {
         let normalizedName = CredentialValidationMapper.normalizedProvider(forService: entry.service)
         let isFocused = (anchor == normalizedName)
         let record = resolvedHealth(for: entry)
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
         HStack(alignment: .top, spacing: 12) {
             credentialIcon(for: entry)
             VStack(alignment: .leading, spacing: 3) {
-                Text(displayName(for: entry))
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(BridgeTokens.fg1)
+                HStack(spacing: 8) {
+                    Text(displayName(for: entry))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(BridgeTokens.fg1)
+                    statusBadge(record.health)
+                }
                 Text(maskedSubtitle(for: entry))
                     .font(.system(size: 11.5, design: .monospaced))
                     .foregroundStyle(BridgeTokens.fg4)
@@ -241,18 +254,19 @@ public struct CredentialsSection: View {
                 checkedLine(for: entry, record: record)
             }
             Spacer(minLength: 8)
-            statusBadge(record.health)
             actions(for: entry, record: record)
         }
-        .padding(.vertical, 5)
-        .padding(.horizontal, isFocused ? 8 : 0)
+        .padding(.vertical, 11)
+        .padding(.horizontal, 12)
+        // Each row is a recessed well (design source: --well + --bevel-inset +
+        // faint hairline). A focused/anchored row tints the well accent so a
+        // deep-link from another page lands on a highlighted credential.
         .background(
-            isFocused
-                ? RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(BridgeTokens.accent.opacity(0.10))
-                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .strokeBorder(BridgeTokens.accent.opacity(0.28), lineWidth: 0.5))
-                : nil
+            shape.fill(isFocused ? BridgeTokens.accent.opacity(0.10) : BridgeTokens.wellFill)
+                .overlay(shape.strokeBorder(
+                    isFocused ? BridgeTokens.accent.opacity(0.28) : BridgeTokens.hairlineFaint,
+                    lineWidth: 0.5))
+                .bridgeBevel(BridgeTokens.bevelInset, radius: 10)
         )
     }
 

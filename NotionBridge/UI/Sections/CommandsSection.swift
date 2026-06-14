@@ -68,10 +68,20 @@ public struct CommandsSection: View {
     /// The recorder + status are driven by the OBSERVED `CommandsController`.
     private var shortcutRow: some View {
         BridgeGlassCard {
-            HStack(alignment: .center, spacing: 14) {
+            HStack(alignment: .center, spacing: BridgeTokens.Space.s4) {
+                ZStack {
+                    Circle()
+                        .fill(BridgeTokens.chipFill)
+                        .overlay(Circle().strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5))
+                    Image(systemName: "command")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(BridgeTokens.accentLink)
+                }
+                .frame(width: 30, height: 30)
+
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Global shortcut")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(BridgeTokens.Typeface.base600)
                         .foregroundStyle(BridgeTokens.fg1)
                     statusLine
                 }
@@ -103,11 +113,9 @@ public struct CommandsSection: View {
     private var statusLine: some View {
         let status = settingsStatus
         HStack(spacing: 6) {
-            Image(systemName: status.isWarning ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(status.isWarning ? BridgeTokens.warnText : BridgeTokens.okText)
+            BridgeStatusDot(status.isWarning ? .warn : .ok, size: 7)
             Text(status.message)
-                .font(.system(size: 11.5, weight: .medium))
+                .font(BridgeTokens.Typeface.meta.weight(.medium))
                 .foregroundStyle(status.isWarning ? BridgeTokens.warnText : BridgeTokens.fg3)
                 .lineLimit(1)
                 .truncationMode(.tail)

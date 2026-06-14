@@ -464,15 +464,49 @@ public struct ModuleGroupList: View {
     /// Per-module "Always Allow" grants (BridgeDefaults.moduleTierOverrides).
     @State private var moduleTierOverrides: [String: String] =
         (UserDefaults.standard.dictionary(forKey: BridgeDefaults.moduleTierOverrides) as? [String: String]) ?? [:]
-    /// Live content-pane width, captured from a zero-height width-reader, used to
-    /// choose 1 vs 2 grid columns. Seeded above the breakpoint so the very first
-    /// frame renders 2-up (the common case) before the reader fires; it corrects
-    /// to 1 immediately if the pane is actually narrow.
-    @State private var containerWidth: CGFloat = ModuleGroupList.twoColumnBreakpoint
+
+    /// v4 database view: which family rows are expanded (by group id). Seeded
+    /// from the persisted `moduleGroupExpanded` default so a family the operator
+    /// left open stays open across launches — the per-card expand state the
+    /// pre-v4 `ModuleGroupCard` stack persisted, carried into the table.
+    @State private var expandedGroups: Set<ModuleGroupID> = ModuleGroupList.seedExpanded()
+    /// v4 search box — narrows the visible families/tools by name + description.
+    /// Pure view-side filter; no controller/persistence wiring touched.
+    @State private var searchText: String = ""
+    /// v4 family-category filter ("All" + the design's super-sections). Pure
+    /// view-side; derived category labels, never persisted.
+    @State private var categoryFilter: String = ToolFamilyCategory.allLabel
 
     public init(tools: [ToolInfo], nav: SettingsNavigation = .shared) {
         self.tools = tools
         self.nav = nav
+    }
+
+    /// Seed the expanded-family set from the persisted per-group expand map,
+    /// so families the operator left open survive a relaunch (mirrors the old
+    /// `ModuleGroupCard.savedExpandState`). Closed/absent → collapsed.
+    private static func seedExpanded() -> Set<ModuleGroupID> {
+        let dict = UserDefaults.standard
+            .dictionary(forKey: BridgeDefaults.moduleGroupExpanded) ?? [:]
+        var open: Set<ModuleGroupID> = []
+        for (key, value) in dict {
+            if (value as? Bool) == true, let id = ModuleGroupID(rawValue: key) {
+                open.insert(id)
+            }
+        }
+        return open
+    }
+
+    /// Toggle + persist a family's expand state (same `moduleGroupExpanded`
+    /// dictionary key the pre-v4 card stack wrote, so expand state is shared).
+    private func toggleExpanded(_ id: ModuleGroupID) {
+        let nowOpen: Bool
+        if expandedGroups.contains(id) { expandedGroups.remove(id); nowOpen = false }
+        else { expandedGroups.insert(id); nowOpen = true }
+        var dict = UserDefaults.standard
+            .dictionary(forKey: BridgeDefaults.moduleGroupExpanded) ?? [:]
+        dict[id.rawValue] = nowOpen
+        UserDefaults.standard.set(dict, forKey: BridgeDefaults.moduleGroupExpanded)
     }
 
     /// Tool name → description lookup, derived from the live `ToolInfo`
@@ -529,6 +563,31 @@ public struct ModuleGroupList: View {
         NotificationCenter.default.post(name: .notionBridgeTierOverridesDidChange, object: nil)
     }
 
+    /// The representative tier for a family pill: the MOST-SEVERE effective tier
+    /// across the family's tools (Confirm > Notify > Open), so the family pill
+    /// communicates the strongest gate any member runs at. Display-only — the
+    /// family pill is not interactive (a family-wide tier write isn't part of the
+    /// model); per-tool pills remain the editable control via `cycleTier`.
+    private func familyTier(for group: ModuleGroup) -> BridgeTier {
+        var strongest: BridgeTier = .open
+        for name in group.tools {
+            let raw = tiers[name] ?? "open"
+            let t = BridgeTier(rawValue: raw) ?? .open
+            if severity(t) > severity(strongest) { strongest = t }
+        }
+        return strongest
+    }
+    private func severity(_ t: BridgeTier) -> Int {
+        switch t { case .open: return 0; case .notify: return 1; case .confirm: return 2 }
+    }
+
+    /// A `.bad`-severity dependency means a required permission/credential is
+    /// missing — surfaces the family's "grant access" banner (parity with the
+    /// pre-v4 `ModuleGroupCard.unmetDependency`).
+    private func unmetDependency(for group: ModuleGroup) -> ModuleGroupDependency? {
+        group.dependencies.first { $0.severity == .bad }
+    }
+
     private var groups: [ModuleGroup] {
         // Display the grouped cards alphabetically by group name (case-
         // insensitive), mirroring the legacy ToolRegistryView's
@@ -543,10 +602,269 @@ public struct ModuleGroupList: View {
         }
     }
 
+    // ── v4 derived view-model ──
+
+    /// Live total / active / family counts — bound to the ACTUAL registry, never
+    /// the design-time "209 / 29". Active = registered minus disabled.
+    private var totalCount: Int { tools.count }
+    private var activeCount: Int {
+        totalCount - disabledTools.intersection(tools.map(\.name)).count
+    }
+    private var familyCount: Int { groups.count }
+
+    /// The category filter segments: "All" + every category that actually has a
+    /// family present in the live registry (so an empty category never shows).
+    private var categorySegments: [String] {
+        let present = ToolFamilyCategory.allCases.filter { cat in
+            groups.contains { ToolFamilyCategory.category(for: $0.id) == cat }
+        }
+        return [ToolFamilyCategory.allLabel] + present.map(\.label)
+    }
+
+    /// Groups after the search + category filter. Search matches a family name,
+    /// its subtitle, or any member tool name/description (so a tool search keeps
+    /// its family visible). Category narrows to the chosen super-section.
+    private var visibleGroups: [ModuleGroup] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return groups.filter { group in
+            if categoryFilter != ToolFamilyCategory.allLabel,
+               ToolFamilyCategory.category(for: group.id).label != categoryFilter {
+                return false
+            }
+            guard !q.isEmpty else { return true }
+            if group.displayName.lowercased().contains(q) { return true }
+            if group.subtitle.lowercased().contains(q) { return true }
+            return group.tools.contains { name in
+                name.lowercased().contains(q)
+                    || (descriptions[name] ?? "").lowercased().contains(q)
+            }
+        }
+    }
+
+    /// Visible groups bucketed by category, in the declared category order, so
+    /// the table mirrors the design's super-section grouping ("Mac & system" …).
+    private var sectionedGroups: [(category: ToolFamilyCategory, groups: [ModuleGroup])] {
+        let vis = visibleGroups
+        return ToolFamilyCategory.allCases.compactMap { cat in
+            let members = vis.filter { ToolFamilyCategory.category(for: $0.id) == cat }
+            return members.isEmpty ? nil : (cat, members)
+        }
+    }
+
+    /// When searching, a family with a query hit shows only its matching tools;
+    /// otherwise all of the family's tools. Keeps a tool-name search legible.
+    private func visibleTools(in group: ModuleGroup) -> [String] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return group.tools }
+        // If the family itself matched by name/subtitle, show all its tools.
+        if group.displayName.lowercased().contains(q)
+            || group.subtitle.lowercased().contains(q) { return group.tools }
+        let hits = group.tools.filter {
+            $0.lowercased().contains(q) || (descriptions[$0] ?? "").lowercased().contains(q)
+        }
+        return hits.isEmpty ? group.tools : hits
+    }
+
+    // ── Layout ──
+
+    public var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: BridgeTokens.Space.s5) {
+                    pageHead
+                    filterBar
+                    if sectionedGroups.isEmpty {
+                        BridgeEmptyStateView(
+                            systemImage: "magnifyingglass",
+                            title: "No tools match",
+                            message: "No family or tool matches your search and filter. Clear them to see the full surface.")
+                    } else {
+                        ForEach(sectionedGroups, id: \.category) { section in
+                            categorySection(section.category, groups: section.groups)
+                        }
+                    }
+                }
+                .padding(.vertical, BridgeTokens.Space.paneV)
+                .padding(.horizontal, BridgeTokens.Space.paneH)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            // Deep-link: expand + scroll the chip's target family into view. Fires
+            // on first appear (chip tapped from another page) and on every later
+            // anchor change (operator already on Tools). The anchor is cleared
+            // after consuming so re-selecting the same chip re-triggers.
+            .onAppear { scrollToAnchorIfNeeded(proxy) }
+            .onChange(of: nav.anchor) { _, _ in scrollToAnchorIfNeeded(proxy) }
+        }
+        // Live external edits to the disabled set (e.g. SecurityGate "Always
+        // Allow" or another surface) reflect here.
+        .onReceive(NotificationCenter.default.publisher(
+            for: UserDefaults.didChangeNotification
+        )) { _ in
+            let fresh = Set(UserDefaults.standard.stringArray(forKey: BridgeDefaults.disabledTools) ?? [])
+            if fresh != disabledTools { disabledTools = fresh }
+        }
+        // Live external edits to the tier overrides keep the pills accurate.
+        .onReceive(NotificationCenter.default.publisher(
+            for: .notionBridgeTierOverridesDidChange
+        )) { _ in
+            tierOverrides = (UserDefaults.standard.dictionary(forKey: BridgeDefaults.tierOverrides) as? [String: String]) ?? [:]
+            moduleTierOverrides = (UserDefaults.standard.dictionary(forKey: BridgeDefaults.moduleTierOverrides) as? [String: String]) ?? [:]
+        }
+    }
+
+    /// Page header: title + supporting copy, with the live stat strip
+    /// (enabled/total · families) on the trailing edge. Counts come from the
+    /// real registry — never the design-time "209 / 29 families".
+    private var pageHead: some View {
+        HStack(alignment: .top, spacing: BridgeTokens.Space.s4) {
+            BridgeListIconTile(systemImage: "wrench.and.screwdriver.fill")
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Tools")
+                    .font(BridgeTokens.Typeface.onb)
+                    .foregroundStyle(BridgeTokens.fg1)
+                Text("Per-family and per-tool control across the full surface. Set the security tier each tool runs at.")
+                    .font(BridgeTokens.Typeface.sub)
+                    .foregroundStyle(BridgeTokens.fg3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            BridgeStatStrip(spacing: BridgeTokens.Space.s3) {
+                BridgeStatTile(value: "\(activeCount)/\(totalCount)", label: "Enabled", signal: .ok)
+                BridgeStatTile(value: "\(familyCount)", label: "Families", signal: .info)
+            }
+            .fixedSize()
+        }
+    }
+
+    /// Search field + family-category segmented filter (design's `.searchf` +
+    /// `.seg`). Both are pure view-side controls — no controller wiring.
+    private var filterBar: some View {
+        HStack(spacing: BridgeTokens.Space.s3) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(BridgeTokens.fg5)
+                TextField("Search \(totalCount) tools…", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(BridgeTokens.Typeface.base)
+                    .foregroundStyle(BridgeTokens.fg1)
+                if !searchText.isEmpty {
+                    Button { searchText = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(BridgeTokens.fg5)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(searchWell)
+
+            BridgeSegmented(
+                selection: $categoryFilter,
+                options: categorySegments.map { ($0, $0) }
+            )
+            .fixedSize()
+        }
+    }
+
+    private var searchWell: some View {
+        let shape = RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
+        return shape
+            .fill(BridgeTokens.wellFill)
+            .overlay(shape.strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+    }
+
+    /// One super-section: an UPPERCASE category label (with a mono live family
+    /// count) over a single `BridgeToolTable` holding that category's families.
+    @ViewBuilder
+    private func categorySection(_ category: ToolFamilyCategory,
+                                 groups sectionGroups: [ModuleGroup]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text(category.label).bridgeCap()
+                    .foregroundStyle(BridgeTokens.fg4)
+                Text("· \(sectionGroups.count)")
+                    .font(BridgeTokens.Typeface.mono)
+                    .foregroundStyle(BridgeTokens.fg5)
+            }
+            .padding(.leading, 2)
+
+            BridgeToolTable(columns: ["Family · tool", "On", "Tier", ""]) {
+                ForEach(sectionGroups) { group in
+                    familyGroup(group)
+                        // Scroll/expand anchor — the resolved group id, so the
+                        // deep-link can jump straight to the family.
+                        .id(group.id)
+                }
+            }
+        }
+    }
+
+    /// One family disclosure row + (when expanded) its per-tool rows, built from
+    /// the W2 table primitives. Master toggle, count, family tier pill, per-tool
+    /// tier pills + toggles all bind to the SAME wiring the card stack used.
+    @ViewBuilder
+    private func familyGroup(_ group: ModuleGroup) -> some View {
+        let isExpanded = expandedGroups.contains(group.id)
+        BridgeToolGroup(
+            isExpanded: isExpanded,
+            header: BridgeToolGroupRow(
+                name: group.displayName,
+                desc: group.subtitle,
+                systemImage: group.systemImage,
+                isExpanded: isExpanded,
+                activeCount: group.enabledCount,
+                totalCount: group.total,
+                tier: familyTier(for: group),
+                isOn: Binding(
+                    get: { group.masterState != .off },
+                    set: { setGroupEnabled(group, enabled: $0) }
+                ),
+                onToggleExpand: { toggleExpanded(group.id) }
+                // Family tier pill is display-only (no `onTierTap`): a family-wide
+                // tier write isn't part of the model. Per-tool pills are editable.
+            )
+        ) {
+            // Unmet-dependency guard: when an enabled family needs a permission /
+            // credential it doesn't have, surface the "grant access" banner the
+            // pre-v4 card carried — tapping it routes via `handleDepLink`. Keeps
+            // the cross-page fix flow the redesign would otherwise drop.
+            if let dep = unmetDependency(for: group), group.masterState != .off {
+                BridgeBanner(
+                    signal: .warn,
+                    message: "Enabled, but won't function until you grant \(dep.label).",
+                    systemImage: "exclamationmark.triangle"
+                ) {
+                    Button("Fix") { handleDepLink(dep) }
+                        .buttonStyle(.plain)
+                        .font(BridgeTokens.Typeface.meta.weight(.semibold))
+                        .foregroundStyle(BridgeTokens.warnText)
+                }
+                .padding(.horizontal, BridgeToolTableMetrics.hPad)
+                .padding(.top, 10)
+                .padding(.bottom, 2)
+            }
+            ForEach(visibleTools(in: group), id: \.self) { name in
+                BridgeToolRow(
+                    name: name,
+                    desc: descriptions[name] ?? "",
+                    tier: BridgeTier(rawValue: tiers[name] ?? "open") ?? .open,
+                    isOn: Binding(
+                        get: { !group.disabledNames.contains(name) },
+                        set: { setEnabled(name, $0) }
+                    ),
+                    onTierTap: { cycleTier(name) }
+                )
+            }
+        }
+    }
+
     /// The `ModuleGroupID` a Tools dep-link chip's `anchor` targets, resolved
-    /// against the live tool list (so it tracks the chip's module → group). nil
-    /// when there is no anchor or it maps to no on-screen group. Drives both the
-    /// `ScrollViewReader` scroll target and the matching card's auto-expand.
+    /// against the live tool list. Drives the deep-link expand + scroll.
     private var anchoredGroupID: ModuleGroupID? {
         ModuleGroupDerivation.groupID(
             forAnchor: nav.anchor,
@@ -554,174 +872,20 @@ public struct ModuleGroupList: View {
         )
     }
 
-    /// Container width at/above which the registry shows TWO group columns.
-    /// Midpoint of the locked 640–680 band: a default-size window's content
-    /// pane (right of the 188px nav) shows 2 columns; a pinched/half-width
-    /// window collapses to 1. Capped at 2 — never 3+ — so each card stays wide
-    /// enough for the row anatomy (dot · name · desc · chip · switch) above the
-    /// 11–12px legibility floor.
-    private static let twoColumnBreakpoint: CGFloat = 660
-
-    public var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                // Content sizes naturally inside the ScrollView (vertical scroll).
-                // Column count is driven off the CONTAINER width, captured via a
-                // zero-height width-reader background — NOT a height-greedy
-                // GeometryReader wrapping the content (which would collapse the
-                // scroll). This tracks window resize + the nav rail correctly.
-                VStack(alignment: .leading, spacing: BridgeSpacing.sm) {
-                    // Hero spans full width at every breakpoint — it sits ABOVE
-                    // the grid, not as a grid cell.
-                    hero
-                    // PKT-tools: responsive 2-up grid (was a full-width VStack).
-                    // Gutter + row spacing on BridgeSpacing.sm (12) keeps Tools
-                    // and Jobs on one tier.
-                    LazyVGrid(columns: gridColumns(forWidth: containerWidth),
-                              alignment: .leading,
-                              spacing: BridgeSpacing.sm) {
-                        ForEach(groups) { group in
-                            ModuleGroupCard(
-                                group: group,
-                                toolDescriptions: descriptions,
-                                toolTiers: tiers,
-                                // Deep-link: auto-expand the chip's target group.
-                                forceExpanded: group.id == anchoredGroupID,
-                                onPerToolChange: { toolName, enabled in
-                                    setEnabled(toolName, enabled)
-                                },
-                                onMasterChange: { enabled in
-                                    setGroupEnabled(group, enabled: enabled)
-                                },
-                                onDepLinkTapped: { dep in
-                                    handleDepLink(dep)
-                                },
-                                onTierTap: { toolName in
-                                    cycleTier(toolName)
-                                }
-                            )
-                            // Scroll anchor id — the resolved group id, so the
-                            // ScrollViewReader can jump straight to the target
-                            // card. Unaffected by the grid (id is on the card).
-                            .id(group.id)
-                        }
-                    }
-                }
-                .padding(BridgeSpacing.md)
-                // Width-reader: a zero-height background measures the content
-                // pane width and reports it up via a preference, so the grid can
-                // pick 1 vs 2 columns off the real container width.
-                .background(
-                    GeometryReader { geo in
-                        Color.clear.preference(key: ToolsContentWidthKey.self,
-                                               value: geo.size.width)
-                    }
-                )
-            }
-            // Deep-link: scroll the chip's target group into view. Fires on first
-            // appear (chip tapped from another page → Tools just rendered) and on
-            // every later anchor change (operator already on Tools). The anchor is
-            // cleared after consuming so re-selecting the same chip re-triggers.
-            .onAppear { scrollToAnchorIfNeeded(proxy) }
-            .onChange(of: nav.anchor) { _, _ in scrollToAnchorIfNeeded(proxy) }
-            .onPreferenceChange(ToolsContentWidthKey.self) { containerWidth = $0 }
-        }
-        .onReceive(NotificationCenter.default.publisher(
-            for: UserDefaults.didChangeNotification
-        )) { _ in
-            let fresh = Set(UserDefaults.standard.stringArray(forKey: BridgeDefaults.disabledTools) ?? [])
-            if fresh != disabledTools { disabledTools = fresh }
-        }
-    }
-
-    /// 2 flexible columns (top-aligned, ragged bottoms) at/above the breakpoint;
-    /// 1 below. Top alignment keeps a collapsed card from being stretched to a
-    /// tall expanded sibling's height — correct masonry-ish behaviour for
-    /// collapsibles. Capped at 2.
-    private func gridColumns(forWidth width: CGFloat) -> [GridItem] {
-        if width >= Self.twoColumnBreakpoint {
-            return [
-                GridItem(.flexible(), spacing: BridgeSpacing.sm, alignment: .top),
-                GridItem(.flexible(), spacing: BridgeSpacing.sm, alignment: .top)
-            ]
-        }
-        return [GridItem(.flexible(), alignment: .top)]
-    }
-
-    /// Scroll the anchored group's card to the top, then clear the consumed
+    /// Expand + scroll the anchored family to the top, then clear the consumed
     /// anchor so the same chip can re-trigger later. No-op when the anchor maps
-    /// to no on-screen group (e.g. an orphaned-credential chip).
+    /// to no on-screen family (e.g. an orphaned-credential chip).
     private func scrollToAnchorIfNeeded(_ proxy: ScrollViewProxy) {
         guard let target = anchoredGroupID else { return }
-        // A tiny hop lets the ForEach lay out the cards before we scroll —
-        // matches the cross-page nav timing (the section view appears, THEN we
-        // jump). withAnimation keeps the jump legible rather than instant.
+        // Land the operator on an OPEN family (matches the pre-v4 forceExpanded).
+        expandedGroups.insert(target)
+        // A tiny hop lets the ForEach lay out the rows before we scroll.
         DispatchQueue.main.async {
             withAnimation(.easeInOut(duration: 0.25)) {
                 proxy.scrollTo(target, anchor: .top)
             }
-            // Clear the consumed anchor so re-tapping the same chip re-fires the
-            // onChange (and so a later visit doesn't re-jump unexpectedly).
             nav.anchor = nil
         }
-    }
-
-    private var hero: some View {
-        let total = tools.count
-        let active = total - disabledTools.intersection(tools.map(\.name)).count
-        let disabled = total - active
-        return BridgeGlassCard(cornerRadius: 12, padding: 16) {
-            HStack(spacing: 16) {
-                // Orb — mirrors the StandingOrders hero icon tile.
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(BridgeTokens.accent.opacity(0.22))
-                        .frame(width: 50, height: 50)
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(BridgeTokens.accent.opacity(0.45), lineWidth: 1))
-                    Image(systemName: "hammer.fill")
-                        .font(.system(size: 21, weight: .semibold))
-                        .foregroundStyle(BridgeTokens.accentLink)
-                }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Tool registry")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(BridgeTokens.fg1)
-                    Text("\(groups.count) modules · MCP v1.0 · grouped by source. Toggle a module or an individual tool.")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(BridgeTokens.fg3)
-                }
-                Spacer(minLength: 8)
-                HStack(spacing: 10) {
-                    heroStat(value: total, label: "total", emphasis: .neutral)
-                    heroStat(value: active, label: "active", emphasis: .on)
-                    heroStat(value: disabled, label: "disabled", emphasis: .off)
-                }
-            }
-        }
-    }
-
-    private enum HeroEmphasis { case neutral, on, off }
-    private func heroStat(value: Int, label: String, emphasis: HeroEmphasis) -> some View {
-        let valueColor: Color = {
-            switch emphasis {
-            case .on:      return BridgeTokens.okText
-            case .off:     return BridgeTokens.fg4
-            case .neutral: return BridgeTokens.fg1
-            }
-        }()
-        return VStack(spacing: 3) {
-            Text("\(value)")
-                .font(.system(size: 18, weight: .semibold, design: .monospaced))
-                .foregroundStyle(valueColor)
-            Text(label.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(0.8)
-                .foregroundStyle(BridgeTokens.fg4)
-        }
-        .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
     }
 
     // MARK: Mutators
@@ -757,14 +921,47 @@ public struct ModuleGroupList: View {
     }
 }
 
-// MARK: - Layout plumbing
+// MARK: - Family categories (the design's super-sections)
 
-/// Carries the content-pane width out of a zero-height width-reader so the Tools
-/// grid can choose 1 vs 2 columns off the real container width (without a
-/// height-greedy GeometryReader collapsing the scroll).
-private struct ToolsContentWidthKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
+/// The design groups families under super-section labels ("Mac & system",
+/// "Apple apps", "Web & data", "Local dev", "Bridge"). The live `ModuleGroup`
+/// model has no category, so this maps each `ModuleGroupID` to its section —
+/// the labels + filter segments come from here, but every COUNT (families,
+/// tools, enabled) is bound to the live registry, never the design-time totals.
+enum ToolFamilyCategory: String, CaseIterable, Hashable {
+    case macSystem
+    case appleApps
+    case webData
+    case localDev
+    case bridge
+
+    static let allLabel = "All"
+
+    var label: String {
+        switch self {
+        case .macSystem: return "Mac & system"
+        case .appleApps: return "Apple apps"
+        case .webData:   return "Web & data"
+        case .localDev:  return "Local dev"
+        case .bridge:    return "Bridge"
+        }
+    }
+
+    /// Map a family id to its super-section. Mirrors the design's grouping;
+    /// anything new falls into `.macSystem` (the system catch-all's home).
+    static func category(for id: ModuleGroupID) -> ToolFamilyCategory {
+        switch id {
+        case .file, .shell, .accessibility, .screen, .synthetic, .clipboard,
+             .system, .applescript, .bgProcess:
+            return .macSystem
+        case .messages, .notes, .contacts, .reminders, .calendar:
+            return .appleApps
+        case .notion, .chrome, .http, .connections, .stripe, .payment, .credential:
+            return .webData
+        case .git, .gh, .lsp, .devserver:
+            return .localDev
+        case .skills, .jobs, .memory, .snippets:
+            return .bridge
+        }
     }
 }

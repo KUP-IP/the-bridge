@@ -28,6 +28,11 @@ struct ToolRegistryView: View {
 
     @State private var credentialFeatureEpoch = 0
 
+    /// v4 table view: which module groups are expanded (by module key).
+    @State private var expandedModules: Set<String> = []
+    /// v4 search box — narrows visible modules/tools by name + description.
+    @State private var searchText: String = ""
+
     @State private var disabledTools: Set<String> = Set(
         UserDefaults.standard.stringArray(forKey: BridgeDefaults.disabledTools) ?? []
     )
@@ -109,117 +114,86 @@ struct ToolRegistryView: View {
         }
     }
 
-    private func tierColor(_ tier: String) -> Color {
-        switch tier {
-        case "open":
-            return BridgeTokens.ok
-        case "notify":
-            return BridgeTokens.warn
-        default:
-            return BridgeTokens.bad
+    // MARK: v4 derived view-model
+
+    /// Map a tier rawValue ("open"/"notify"/"request") to the UI `BridgeTier`.
+    /// The domain rawValue "request" round-trips to `.confirm` (label "Confirm").
+    private func uiTier(_ raw: String) -> BridgeTier { BridgeTier(rawValue: raw) ?? .open }
+
+    /// Live total / active counts — bound to the ACTUAL registry.
+    private var liveTotal: Int { tools.count }
+    private var liveActive: Int { tools.filter { effectiveToolEnabled($0) }.count }
+
+    /// Modules after the search filter (matches module name, tool name, or
+    /// description). Pure view-side — no wiring touched.
+    private var filteredGroups: [(module: String, tools: [ToolInfo])] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return groupedTools }
+        return groupedTools.compactMap { group in
+            if displayName(for: group.module).lowercased().contains(q) { return group }
+            let hits = group.tools.filter {
+                $0.name.lowercased().contains(q) || $0.description.lowercased().contains(q)
+            }
+            return hits.isEmpty ? nil : (group.module, hits)
         }
     }
 
     var body: some View {
         if tools.isEmpty {
-            VStack(spacing: 16) {
-                Spacer()
-                Image(systemName: "hammer")
-                    .font(.system(size: 48))
-                    .foregroundStyle(.gray.opacity(0.5))
-                Text("Tool Registry")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-                Text("Tools will appear here once the server is running.")
-                    .font(.callout)
-                    .foregroundStyle(.tertiary)
-                Spacer()
-            }
+            BridgeEmptyStateView(
+                systemImage: "hammer",
+                title: "Tool registry",
+                message: "Tools will appear here once the server is running.")
         } else {
-            Form {
-                // F7: Cross-dependency warning — notifications denied + Notify-tier tools exist
-                if notificationDenied && hasNotificationTierTools {
-                    Section {
-                        Label("Notification permission is not granted. Notify/Request tiers cannot prompt or alert.",
-                              systemImage: "exclamationmark.triangle.fill")
-                            .font(.callout)
-                            .foregroundStyle(BridgeTokens.warn)
+            ScrollView {
+                VStack(alignment: .leading, spacing: BridgeTokens.Space.s5) {
+                    // Live stat strip — enabled/total bound to the real registry.
+                    BridgeStatStrip {
+                        BridgeStatTile(value: "\(liveActive)/\(liveTotal)", label: "Enabled", signal: .ok)
+                        BridgeStatTile(value: "\(groupedTools.count)", label: "Modules", signal: .info)
                     }
-                }
 
-                Section {
-                    HStack(spacing: 16) {
-                        tierHintDot(.green, label: "Open")
-                        tierHintDot(.orange, label: "Notify")
-                        tierHintDot(.red, label: "Request")
+                    // F7: Cross-dependency guard — notifications denied while
+                    // Notify/Confirm-tier tools exist.
+                    if notificationDenied && hasNotificationTierTools {
+                        BridgeBanner(
+                            signal: .warn,
+                            message: "Notification permission is not granted. Notify and Confirm tiers cannot prompt or alert.",
+                            systemImage: "exclamationmark.triangle")
                     }
-                    .font(.caption)
-                } header: {
-                    Text("Security Tiers")
-                        .font(.headline)
-                }
 
-                ForEach(groupedTools, id: \.module) { group in
-                    Section {
-                        ForEach(group.tools) { tool in
-                            toolRow(tool)
-                        }
-                    } header: {
-                        HStack {
-                            Text(displayName(for: group.module))
-                                .font(.headline)
-                            Spacer()
-                            Text("\(enabledCount(in: group.tools))/\(group.tools.count)")
-                                .font(.caption)
-                                .foregroundStyle(BridgeColors.secondary)
-                        }
-                    }
-                }
+                    // Search.
+                    searchField
 
-                // fb-securitygate-revoke-ui: surface active module-scoped
-                // "Always Allow" grants with a per-module revoke, so a user who
-                // granted module-wide can pull back ONE module without the
-                // blanket Reset nuking every override.
-                if !moduleTierOverrides.isEmpty {
-                    Section {
-                        ForEach(moduleTierOverrides.keys.sorted(), id: \.self) { module in
-                            moduleGrantRow(module)
-                        }
-                    } header: {
-                        Text("Module Grants")
-                            .font(.headline)
-                    } footer: {
-                        Text("“Always Allow” grants that apply to every tool in a module. A tool’s own tier override takes precedence over its module grant.")
-                            .font(.caption)
-                            .foregroundStyle(BridgeColors.secondary)
-                    }
-                }
-
-                // F4: Reset to Defaults — keep this after the tool list.
-                if !tierOverrides.isEmpty || !moduleTierOverrides.isEmpty {
-                    Section {
-                        Button {
-                            tierOverrides.removeAll()
-                            persistTierOverrides()
-                            // fb-securitygate: also clear module-scoped
-                            // "Always Allow" grants so a reset is complete —
-                            // otherwise a module grant would silently outlive
-                            // the per-tool overrides the user just cleared.
-                            moduleTierOverrides.removeAll()
-                            persistModuleTierOverrides()
-                            NotificationCenter.default.post(name: .notionBridgeTierOverridesDidChange, object: nil)
-                        } label: {
-                            HStack {
-                                Image(systemName: "arrow.counterclockwise")
-                                Text("Reset to Defaults")
+                    // Per-module tables.
+                    if filteredGroups.isEmpty {
+                        BridgeEmptyStateView(
+                            systemImage: "magnifyingglass",
+                            title: "No tools match",
+                            message: "No module or tool matches your search.")
+                    } else {
+                        BridgeToolTable(columns: ["Module · tool", "On", "Tier", ""]) {
+                            ForEach(filteredGroups, id: \.module) { group in
+                                moduleGroup(group)
                             }
                         }
-                        .foregroundStyle(BridgeTokens.warn)
+                    }
+
+                    // fb-securitygate-revoke-ui: active module-scoped "Always
+                    // Allow" grants, each individually revocable.
+                    if !moduleTierOverrides.isEmpty {
+                        moduleGrantsSection
+                    }
+
+                    // F4: Reset to Defaults.
+                    if !tierOverrides.isEmpty || !moduleTierOverrides.isEmpty {
+                        resetButton
                     }
                 }
+                .padding(.vertical, BridgeTokens.Space.paneV)
+                .padding(.horizontal, BridgeTokens.Space.paneH)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .formStyle(.grouped)
             .id(credentialFeatureEpoch)
             .onReceive(NotificationCenter.default.publisher(for: .notionBridgeCredentialsFeatureDidChange)) { _ in
                 credentialFeatureEpoch += 1
@@ -229,6 +203,198 @@ struct ToolRegistryView: View {
                 moduleTierOverrides = (UserDefaults.standard.dictionary(forKey: BridgeDefaults.moduleTierOverrides) as? [String: String]) ?? [:]
             }
         }
+    }
+
+    // MARK: v4 subviews
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12, weight: .regular))
+                .foregroundStyle(BridgeTokens.fg5)
+            TextField("Search \(liveTotal) tools…", text: $searchText)
+                .textFieldStyle(.plain)
+                .font(BridgeTokens.Typeface.base)
+                .foregroundStyle(BridgeTokens.fg1)
+            if !searchText.isEmpty {
+                Button { searchText = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(BridgeTokens.fg5)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 30)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
+                .fill(BridgeTokens.wellFill)
+                .overlay(RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
+                    .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)))
+    }
+
+    /// One module's disclosure row + (when expanded) its per-tool rows, built
+    /// from the W2 table primitives. The module master toggle enables/disables
+    /// every member; the count + tier pill summarize the module; per-tool rows
+    /// carry the editable tier pill + enable toggle. ALL existing wiring is
+    /// preserved (disabledTools, tierOverrides, module grants, onToggle).
+    @ViewBuilder
+    private func moduleGroup(_ group: (module: String, tools: [ToolInfo])) -> some View {
+        let isExpanded = expandedModules.contains(group.module)
+        let active = enabledCount(in: group.tools)
+        let total = group.tools.count
+        // Module pill = the most-severe effective tier across the module.
+        let moduleTier = group.tools
+            .map { uiTier(effectiveTier(for: $0)) }
+            .max(by: { tierRank($0) < tierRank($1) }) ?? .open
+
+        BridgeToolGroup(
+            isExpanded: isExpanded,
+            header: BridgeToolGroupRow(
+                name: displayName(for: group.module),
+                desc: moduleDescription(group.tools),
+                systemImage: "shippingbox",
+                isExpanded: isExpanded,
+                activeCount: active,
+                totalCount: total,
+                tier: moduleTier,
+                isOn: Binding(
+                    get: { active > 0 },
+                    set: { setModuleEnabled(group.tools, enabled: $0) }
+                ),
+                onToggleExpand: { toggleModule(group.module) }
+            )
+        ) {
+            ForEach(group.tools) { tool in
+                toolTableRow(tool)
+            }
+        }
+    }
+
+    /// A single nested tool row — the v4 replacement for the old `toolRow`,
+    /// preserving the enable toggle + the tappable 3-tier cycle + the core-lock /
+    /// credential-gate semantics.
+    @ViewBuilder
+    private func toolTableRow(_ tool: ToolInfo) -> some View {
+        let isCoreProtected = Self.coreTools.contains(tool.name)
+        let gatedCredentials = credentialModuleGateActive(for: tool)
+        let isEnabled = effectiveToolEnabled(tool)
+        let currentTier = effectiveTier(for: tool)
+
+        BridgeToolRow(
+            name: tool.name,
+            desc: gatedCredentials
+                ? "Enable Keychain credentials to use this tool."
+                : (tierSource(for: tool) == .moduleGrant
+                    ? "tier via \(displayName(for: tool.module)) module grant"
+                    : tool.description),
+            tier: uiTier(currentTier),
+            isOn: Binding(
+                get: { isEnabled },
+                set: { newValue in
+                    if gatedCredentials { return }
+                    if isCoreProtected { return }
+                    if newValue { disabledTools.remove(tool.name) }
+                    else { disabledTools.insert(tool.name) }
+                    persistDisabledTools()
+                    onToggle(tool.name, newValue)
+                }
+            ),
+            onTierTap: {
+                if isCoreProtected || gatedCredentials { return }
+                // Base = what the tool resolves to WITHOUT its own override.
+                let base = moduleTierOverrides[tool.module] ?? tool.tier
+                let newTier = nextTier(after: currentTier)
+                if newTier == base {
+                    tierOverrides.removeValue(forKey: tool.name)
+                } else {
+                    tierOverrides[tool.name] = newTier
+                }
+                persistTierOverrides()
+                NotificationCenter.default.post(name: .notionBridgeTierOverridesDidChange, object: nil)
+            }
+        )
+        .opacity(isCoreProtected ? 0.7 : 1)
+    }
+
+    /// The module-grants section: active "Always Allow" grants, each revocable.
+    private var moduleGrantsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text("Module grants").bridgeCap().foregroundStyle(BridgeTokens.fg4)
+                Text("· \(moduleTierOverrides.count)")
+                    .font(BridgeTokens.Typeface.mono)
+                    .foregroundStyle(BridgeTokens.fg5)
+            }
+            .padding(.leading, 2)
+            VStack(spacing: 8) {
+                ForEach(moduleTierOverrides.keys.sorted(), id: \.self) { module in
+                    moduleGrantRow(module)
+                }
+            }
+            Text("“Always Allow” grants apply to every tool in a module. A tool’s own tier override takes precedence over its module grant.")
+                .font(BridgeTokens.Typeface.sub)
+                .foregroundStyle(BridgeTokens.fg4)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 2)
+        }
+    }
+
+    private var resetButton: some View {
+        Button {
+            tierOverrides.removeAll()
+            persistTierOverrides()
+            // fb-securitygate: also clear module-scoped grants so a reset is
+            // complete — otherwise a module grant would outlive the per-tool
+            // overrides the user just cleared.
+            moduleTierOverrides.removeAll()
+            persistModuleTierOverrides()
+            NotificationCenter.default.post(name: .notionBridgeTierOverridesDidChange, object: nil)
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "arrow.counterclockwise")
+                Text("Reset to defaults")
+            }
+            .font(BridgeTokens.Typeface.base600)
+            .foregroundStyle(BridgeTokens.warnText)
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .background(Capsule().fill(BridgeTokens.warn.opacity(0.14)))
+            .overlay(Capsule().strokeBorder(BridgeTokens.warn.opacity(0.30), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Severity ordering for the module-summary tier pill.
+    private func tierRank(_ t: BridgeTier) -> Int {
+        switch t { case .open: return 0; case .notify: return 1; case .confirm: return 2 }
+    }
+
+    /// A short module description from the busiest tool names (keeps the row's
+    /// sub-line meaningful without a per-module copy table).
+    private func moduleDescription(_ tools: [ToolInfo]) -> String {
+        tools.prefix(4).map(\.name).joined(separator: " · ")
+    }
+
+    private func toggleModule(_ module: String) {
+        if expandedModules.contains(module) { expandedModules.remove(module) }
+        else { expandedModules.insert(module) }
+    }
+
+    /// Enable/disable every NON-core, non-gated tool in a module. Mirrors the
+    /// per-tool write path (disabledTools + onToggle) so the master toggle and
+    /// the per-tool toggles share one source of truth.
+    private func setModuleEnabled(_ moduleTools: [ToolInfo], enabled: Bool) {
+        for tool in moduleTools {
+            if Self.coreTools.contains(tool.name) { continue }
+            if credentialModuleGateActive(for: tool) { continue }
+            if enabled { disabledTools.remove(tool.name) }
+            else { disabledTools.insert(tool.name) }
+            onToggle(tool.name, enabled)
+        }
+        persistDisabledTools()
     }
 
     private func credentialModuleGateActive(for tool: ToolInfo) -> Bool {
@@ -245,108 +411,6 @@ struct ToolRegistryView: View {
         tools.filter { effectiveToolEnabled($0) }.count
     }
 
-    @ViewBuilder
-    private func toolRow(_ tool: ToolInfo) -> some View {
-        let isCoreProtected = Self.coreTools.contains(tool.name)
-        let gatedCredentials = credentialModuleGateActive(for: tool)
-        let isEnabled = effectiveToolEnabled(tool)
-        let currentTier = effectiveTier(for: tool)
-
-        HStack(alignment: .top, spacing: 12) {
-            Toggle("", isOn: Binding(
-                get: { isEnabled },
-                set: { newValue in
-                    if gatedCredentials { return }
-                    if newValue {
-                        disabledTools.remove(tool.name)
-                    } else {
-                        disabledTools.insert(tool.name)
-                    }
-                    persistDisabledTools()
-                    onToggle(tool.name, newValue)
-                }
-            ))
-            .toggleStyle(.switch)
-            .labelsHidden()
-            .disabled(isCoreProtected || gatedCredentials)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(tool.name)
-                        .fontWeight(.medium)
-
-                    // Tappable 3-state tier toggle (Open -> Notify -> Request).
-                    Button {
-                        // Base = what the tool resolves to WITHOUT its own
-                        // override: the module grant if one exists, else the
-                        // registered default. Landing back on the base clears the
-                        // per-tool override so the tool follows the grant/default.
-                        let base = moduleTierOverrides[tool.module] ?? tool.tier
-                        let newTier = nextTier(after: currentTier)
-                        if newTier == base {
-                            tierOverrides.removeValue(forKey: tool.name)
-                        } else {
-                            tierOverrides[tool.name] = newTier
-                        }
-                        persistTierOverrides()
-                    } label: {
-                        Text(currentTier)
-                            .font(.caption2)
-                            .fontWeight(.semibold)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 1)
-                            .background(tierColor(currentTier).opacity(0.15))
-                            .foregroundStyle(tierColor(currentTier))
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    // Dimmed when tool is disabled (per Interaction spec)
-                    .opacity(isEnabled ? 1.0 : 0.4)
-
-                    if isCoreProtected {
-                        Image(systemName: "lock.fill")
-                            .font(.caption2)
-                            .foregroundStyle(BridgeColors.secondary)
-                    }
-                }
-
-                // Distinguish a tier inherited from a module-wide grant from the
-                // tool's own override (the tappable chip above is the per-tool one).
-                if tierSource(for: tool) == .moduleGrant {
-                    Text("tier via \(displayName(for: tool.module)) module grant")
-                        .font(.caption2)
-                        .foregroundStyle(BridgeColors.secondary)
-                }
-
-                if !isEnabled {
-                    Text(tool.description)
-                        .font(.caption)
-                        .foregroundStyle(BridgeColors.secondary)
-                        .lineLimit(3)
-                }
-
-                if gatedCredentials {
-                    Text("Enable Keychain credentials under Settings → Credentials to use these tools.")
-                        .font(.caption2)
-                        .foregroundStyle(BridgeTokens.warn)
-                }
-            }
-        }
-        .padding(.vertical, 2)
-    }
-
-    @ViewBuilder
-    private func tierHintDot(_ color: Color, label: String) -> some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(color)
-                .frame(width: 8, height: 8)
-            Text(label)
-                .fontWeight(.semibold)
-                .foregroundStyle(BridgeColors.secondary)
-        }
-    }
-
     private func persistDisabledTools() {
         UserDefaults.standard.set(Array(disabledTools), forKey: BridgeDefaults.disabledTools)
     }
@@ -360,34 +424,22 @@ struct ToolRegistryView: View {
     @ViewBuilder
     private func moduleGrantRow(_ module: String) -> some View {
         let tier = moduleTierOverrides[module] ?? SecurityTier.notify.rawValue
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(displayName(for: module))
-                    .fontWeight(.medium)
-                Text("Covers every \(displayName(for: module)) tool")
-                    .font(.caption2)
-                    .foregroundStyle(BridgeColors.secondary)
+        BridgeListRow(
+            title: displayName(for: module),
+            subtitle: "Covers every \(displayName(for: module)) tool",
+            systemImage: "checkmark.shield",
+            trailing: {
+                BridgeTierPill(uiTier(tier))
+                BridgeButton("Revoke", variant: .danger) {
+                    revokeModuleGrant(module)
+                }
             }
-            Spacer()
-            Text(tier)
-                .font(.caption2)
-                .fontWeight(.semibold)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 1)
-                .background(tierColor(tier).opacity(0.15))
-                .foregroundStyle(tierColor(tier))
-                .clipShape(Capsule())
-            Button {
-                revokeModuleGrant(module)
-            } label: {
-                Text("Revoke")
-                    .font(.caption)
-                    .fontWeight(.medium)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(BridgeTokens.bad)
-        }
-        .padding(.vertical, 2)
+        )
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(BridgeTokens.wellFill)
+                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5)))
     }
 
     /// Revoke ONE module grant; sibling tools fall back to their per-tool

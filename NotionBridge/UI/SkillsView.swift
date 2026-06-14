@@ -1,15 +1,25 @@
-// SkillsView.swift — Skills Tab in Settings (twin master–detail redesign)
+// SkillsView.swift — Skills Tab in Settings (v4 "Liquid Glass, evolved").
 // NotionBridge · UI
 // PKT-366 F9: Skills configuration UI with add/remove/toggle.
 // PKT-366 F11: Cross-tab dependency guard (fetch_skill disabled warning).
 // PKT-487: Clickable names, inline URL edit, reorder, sort alphabetically.
-// v3.7.2 bundle-2 redesign: twin master–detail to match the locked mockup
-//   (design/.../the-bridge/Skills.jsx). A skill list (left) + a detail pane
-//   (right) with a routing-metadata grid, trigger / anti-trigger chips, a body
-//   preview, and the Routing / Palette permission toggles. Every binding —
-//   SkillsManager CRUD, routing/palette flags, inline URL editing, platform
-//   badge, reorder + delete + rename, file-source skills, add form — is
-//   preserved verbatim; only the view layer was restructured.
+// v3.7.2 bundle-2 redesign: twin master–detail to match the locked mockup.
+// v4 redesign (PKT skills): the design's primary vertical slice — recreated
+//   from design/.../skills/skills-window.jsx faithfully on the W1 token ladder
+//   (BridgeTokens) + the W2 component kit (BridgeUIKit / BridgeTheme*). The
+//   surface gains: emoji skill glyphs, KIND grouping (by visibility tier),
+//   a SOURCE filter (Notion · Google Docs · File), a counts banner
+//   (BridgeStatStrip), and the offline body-cache pattern — a peek (BridgePeek)
+//   that expands into a float (BridgeFloat), a "Not stored" state, a list-level
+//   "Cache all" action, plus the empty / loading / error edge states
+//   (BridgeEmptyStateView / BridgeLoadingView / BridgeErrorView).
+//
+//   EVERY binding is preserved verbatim — SkillsManager CRUD (add / remove /
+//   rename / reorder / sort), the routing / palette / enabled flags, inline URL
+//   editing, the platform badge, file-source skills + their per-path toggles,
+//   the add form, and the workspace cache-refresh closure (`onRefreshCache` +
+//   its `cacheBusy` / `cacheMessage` / `cacheIsError` status bindings). Only the
+//   view layer was restructured; the data sources + actions are unchanged.
 
 import SwiftUI
 import Combine
@@ -17,7 +27,7 @@ import Combine
 import AppKit
 #endif
 
-/// Skills tab for the Settings window — twin master–detail.
+/// Skills tab for the Settings window — twin master–detail, v4 surface.
 struct SkillsView: View {
     let skillsManager: SkillsManager
 
@@ -45,6 +55,30 @@ struct SkillsView: View {
     @State private var searchText: String = ""
     @State private var showAddForm: Bool = false
 
+    /// v4 source filter (mirrors `.sk-filter` — All · File · Notion · Google
+    /// Docs). Drives both the list grouping and the counts banner.
+    private enum SourceFilter: String, CaseIterable, Hashable {
+        case all, file, notion, gdocs
+        var label: String {
+            switch self {
+            case .all:    return "All"
+            case .file:   return "File"
+            case .notion: return "Notion"
+            case .gdocs:  return "Google Docs"
+            }
+        }
+    }
+    @State private var sourceFilter: SourceFilter = .all
+
+    /// v4 body-cache preview tab + expand-on-click float (the `.sk-peek` →
+    /// `.sk-float` pattern). The body shown is the skill's MCP summary (the only
+    /// body this install stores per-skill); expanding floats it full-height.
+    private enum BodyTab: Hashable { case preview, markdown }
+    @State private var bodyTab: BodyTab = .preview
+    @State private var expandedBody: Bool = false
+    /// File-source expand state (separate so the float can read the on-disk body).
+    @State private var expandedBodyFile: String? = nil
+
     // MARK: - Add-skill form state (unchanged bindings)
 
     @State private var newSkillName: String = ""
@@ -64,6 +98,10 @@ struct SkillsView: View {
     @State private var fileSkillEnabledMap: [String: Bool] = [:]
     @State private var fileSkillRoutingMap: [String: Bool] = [:]
     @State private var fileSkillPaletteMap: [String: Bool] = [:]
+    /// `false` until the async file-source index returns once. Drives the
+    /// loading edge state during the genuine first-load window (when no Notion
+    /// skills exist yet either, so the list would otherwise read as empty).
+    @State private var filesLoaded: Bool = false
 
     // W4 (3.4.1): independent routing / palette toggles on the add form.
     @State private var newSkillRoutingDiscoverable: Bool = false
@@ -93,10 +131,18 @@ struct SkillsView: View {
             .frame(maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // v4: the expand-on-click body float, scoped over the whole page.
+        .overlay { bodyFloatOverlay }
         .onAppear {
             skillsManager.reloadFromUserDefaults()
             loadFileSourceSkills()
             restoreSelectionIfNeeded()
+        }
+        .onChange(of: selection) { _, _ in
+            // A new selection collapses any open body float + resets the tab.
+            expandedBody = false
+            expandedBodyFile = nil
+            bodyTab = .preview
         }
         .onReceive(NotificationCenter.default.publisher(for: .notionBridgeSkillsStorageDidChange)) { _ in
             skillsManager.reloadFromUserDefaults()
@@ -122,166 +168,159 @@ struct SkillsView: View {
         }
     }
 
-    // MARK: - Banners (cross-tab guards — unchanged semantics)
+    // MARK: - Banners (cross-tab guards — unchanged semantics, BridgeBanner skin)
 
     @ViewBuilder
     private var banners: some View {
         let invalidPageSkills = skillsManager.skills.filter { !NotionPageRef.isValidStoredPageId($0.notionPageId) }
         let palettePopulation = skillsManager.skills.filter { $0.enabled && $0.inCommandPalette }.count
             + fileSourceSkills.filter { (fileSkillEnabledMap[$0.path.path] ?? true) && (fileSkillPaletteMap[$0.path.path] ?? false) }.count
+        let showInvalid = !invalidPageSkills.isEmpty
+        let showFetchOff = fetchSkillDisabled && !skillsManager.skills.isEmpty
+        let showPaletteEmpty = !skillsManager.skills.isEmpty && palettePopulation == 0
+        let cacheFailed = cacheIsError && (cacheMessage != nil) && !cacheBusy
 
-        VStack(spacing: 8) {
-            if !invalidPageSkills.isEmpty {
-                inlineBanner(
-                    "Some skills have an invalid Notion page ID (not 32 hex digits). Fix the URL or ID — these skills won\u{2019}t be retrievable by agents until corrected.",
-                    tone: .warn)
+        if showInvalid || showFetchOff || showPaletteEmpty || cacheFailed {
+            VStack(spacing: 8) {
+                if cacheFailed {
+                    // v4: the Notion-fetch-failed guard reads as the error edge
+                    // state — a .bad banner with a Retry that re-runs the real
+                    // workspace cache refresh.
+                    BridgeErrorView(
+                        message: cacheMessage ?? "Notion fetch failed — showing cached skills. Check the credential.",
+                        retryTitle: "Retry",
+                        onRetry: onRefreshCache)
+                }
+                if showInvalid {
+                    BridgeBanner(
+                        signal: .warn,
+                        message: "Some skills have an invalid Notion page ID (not 32 hex digits). Fix the URL or ID — these skills won\u{2019}t be retrievable by agents until corrected.")
+                }
+                if showFetchOff {
+                    BridgeBanner(
+                        signal: .warn,
+                        message: "Skill retrieval is disabled in Tools. Skills won\u{2019}t be available to AI clients until you re-enable it.")
+                }
+                if showPaletteEmpty {
+                    BridgeBanner(
+                        signal: .info,
+                        message: "No skills in the Commands palette yet. Flip a skill\u{2019}s Palette toggle to make it appear in the global hot-key popover. Routing is independent.")
+                }
             }
-            if fetchSkillDisabled && !skillsManager.skills.isEmpty {
-                inlineBanner(
-                    "Skill retrieval is disabled in Tools. Skills won\u{2019}t be available to AI clients until you re-enable it.",
-                    tone: .warn)
-            }
-            if !skillsManager.skills.isEmpty && palettePopulation == 0 {
-                inlineBanner(
-                    "No skills in the Commands palette yet. Flip a skill\u{2019}s Palette toggle to make it appear in the global hot-key popover. Routing is independent.",
-                    tone: .info)
-            }
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
         }
-        .padding(.horizontal, 14)
-        .padding(.top, fetchSkillDisabled || !invalidPageSkills.isEmpty || (!skillsManager.skills.isEmpty && palettePopulation == 0) ? 12 : 0)
-    }
-
-    private enum BannerTone { case warn, info }
-    private func inlineBanner(_ text: String, tone: BannerTone) -> some View {
-        HStack(alignment: .top, spacing: 9) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 12))
-                .foregroundStyle(tone == .warn ? BridgeTokens.warn : BridgeTokens.accentLink)
-            Text(text)
-                .font(.system(size: 11.5))
-                .foregroundStyle(BridgeTokens.fg2)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 12).padding(.vertical, 9)
-        .background((tone == .warn ? BridgeTokens.warn : BridgeTokens.accent).opacity(0.10),
-                    in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9)
-            .strokeBorder((tone == .warn ? BridgeTokens.warn : BridgeTokens.accent).opacity(0.30), lineWidth: 0.5))
     }
 
     // MARK: - LIST COLUMN (master)
 
     private var listColumn: some View {
         VStack(spacing: 0) {
-            // search + add
+            // search + add + overflow (matches `.sk-toolbar`)
             HStack(spacing: 8) {
-                HStack(spacing: 7) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 12))
-                        .foregroundStyle(BridgeTokens.fg4)
-                    TextField("Search skills…", text: $searchText)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(BridgeTokens.fg1)
-                }
-                .padding(.horizontal, 10)
-                .frame(height: 32)
-                .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
-
-                Button {
-                    showAddForm = true
-                    selection = nil
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(showAddForm ? BridgeTokens.onAccent : BridgeTokens.fg2)
-                        .frame(width: 32, height: 32)
-                        .background(showAddForm ? BridgeTokens.accent.opacity(0.85) : BridgeTokens.chipFill,
-                                    in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Add a new skill")
-                .accessibilityLabel("Add a new skill")
-            }
-            .padding(.horizontal, 12).padding(.vertical, 11)
-
-            Divider().overlay(BridgeTokens.hairline)
-
-            // list
-            ScrollView {
-                LazyVStack(spacing: 2) {
-                    let notionRows = filteredSkills
-                    ForEach(Array(notionRows.enumerated()), id: \.element.id) { _, skill in
-                        skillListRow(skill)
-                    }
-
-                    if !filteredFileSkills.isEmpty {
-                        HStack(spacing: 6) {
-                            Image(systemName: "doc.text")
-                                .font(.system(size: 10.5))
-                            Text("FILE-SOURCE")
-                                .font(.system(size: 10.5, weight: .semibold))
-                                .tracking(0.8)
-                            Spacer()
-                            Text("\(fileSourceSkills.count)")
-                                .font(.system(size: 10.5, weight: .semibold))
-                        }
-                        .foregroundStyle(BridgeTokens.fg4)
-                        .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 4)
-
-                        ForEach(filteredFileSkills, id: \.path) { fs in
-                            fileListRow(fs)
-                        }
-                    }
-
-                    if filteredSkills.isEmpty && filteredFileSkills.isEmpty {
-                        emptyListState
-                    }
-                }
-                .padding(.horizontal, 6).padding(.vertical, 6)
-            }
-
-            Divider().overlay(BridgeTokens.hairline)
-
-            // footer: counts + overflow (Sort · Refresh cache demoted here)
-            HStack(spacing: 8) {
-                if let cacheMessage, cacheBusy == false {
-                    Text(cacheMessage)
-                        .font(.system(size: 11))
-                        .foregroundStyle(cacheIsError ? BridgeTokens.badText : BridgeTokens.fg4)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .help(cacheMessage)
-                } else {
-                    Text(listFooterText)
-                        .font(.system(size: 11))
-                        .foregroundStyle(BridgeTokens.fg4)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 4)
+                searchField
+                addButton
                 listOverflowMenu
             }
-            .padding(.horizontal, 14).padding(.vertical, 9)
+            .padding(.horizontal, 14).padding(.vertical, 11)
+
+            // counts banner + source filter (`.sk-counts`)
+            countsAndFilter
+                .padding(.horizontal, 14)
+                .padding(.bottom, 10)
+
+            Divider().overlay(BridgeTokens.hairline)
+
+            // list body — grouped by kind (visibility tier) + file-source group
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    listContent
+                }
+                .padding(.horizontal, 8).padding(.vertical, 6)
+            }
+
+            Divider().overlay(BridgeTokens.hairline)
+
+            // footer: live cache message OR the index health line (`.sk-listfoot`)
+            listFooter
         }
         .background(BridgeTokens.wellFill)
     }
 
-    /// PKT-skills: list-column overflow — Sort alphabetically + the demoted
-    /// "Refresh skill cache" maintenance action (was its own full-width card).
+    private var searchField: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12))
+                .foregroundStyle(BridgeTokens.fg5)
+            TextField("Search skills…", text: $searchText)
+                .textFieldStyle(.plain)
+                .font(BridgeTokens.Typeface.base)
+                .foregroundStyle(BridgeTokens.fg1)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 32)
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: BridgeTokens.Radius.input, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: BridgeTokens.Radius.input, style: .continuous)
+            .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+        .bridgeBevel(BridgeTokens.bevelInset, radius: BridgeTokens.Radius.input)
+    }
+
+    /// `+` new-skill button — the accent-filled `.sk-iconbtn.on` when add-mode
+    /// is active, the neutral glass control otherwise.
+    private var addButton: some View {
+        Button {
+            commitPendingEdit()
+            showAddForm = true
+            selection = nil
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(showAddForm ? BridgeTokens.onAccent : BridgeTokens.fg2)
+                .frame(width: 32, height: 32)
+                .background(addButtonBackground)
+                .clipShape(RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Add a new skill")
+        .accessibilityLabel("Add a new skill")
+    }
+
+    @ViewBuilder
+    private var addButtonBackground: some View {
+        let shape = RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
+        if showAddForm {
+            shape.fill(LinearGradient(colors: [BridgeTokens.accentStrong, BridgeTokens.accent],
+                                      startPoint: .top, endPoint: .bottom))
+                .overlay(shape.strokeBorder(BridgeTokens.accentBorder, lineWidth: 0.5))
+        } else {
+            shape.fill(BridgeTokens.glassControl)
+                .overlay(shape.strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5))
+                .bridgeBevel(BridgeTokens.bevelControl, radius: BridgeTokens.Radius.control)
+        }
+    }
+
+    /// PKT-skills: list-column overflow — Sort alphabetically · Cache all (the
+    /// demoted workspace cache refresh) · Refresh cache. All cache items fire
+    /// the SAME real `onRefreshCache` closure the owning section drives.
     private var listOverflowMenu: some View {
         Menu {
             Button {
                 commitPendingEdit()
                 skillsManager.sortAlphabetically()
             } label: {
-                Label("Sort alphabetically", systemImage: "arrow.up.arrow.down")
+                Label("Sort by name", systemImage: "arrow.up.arrow.down")
             }
             .disabled(skillsManager.skills.isEmpty)
 
             Divider()
+
+            Button {
+                onRefreshCache()
+            } label: {
+                Label("Cache all bodies", systemImage: "externaldrive.badge.timemachine")
+            }
+            .disabled(cacheBusy)
 
             Button {
                 onRefreshCache()
@@ -292,129 +331,237 @@ struct SkillsView: View {
         } label: {
             if cacheBusy {
                 ProgressView().controlSize(.small)
-                    .frame(width: 28, height: 28)
+                    .frame(width: 32, height: 32)
             } else {
-                Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 13))
-                    .foregroundStyle(BridgeTokens.fg3)
-                    .frame(width: 28, height: 28)
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 14))
+                    .foregroundStyle(BridgeTokens.fg2)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
+                            .fill(BridgeTokens.glassControl)
+                            .overlay(RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
+                                .strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5))
+                            .bridgeBevel(BridgeTokens.bevelControl, radius: BridgeTokens.Radius.control))
                     .contentShape(Rectangle())
             }
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("List options — sort, refresh skill cache")
+        .help("List options — sort, cache all, refresh skill cache")
         .accessibilityLabel("List options")
     }
 
-    private var emptyListState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "book.closed")
-                .font(.system(size: 28))
-                .foregroundStyle(BridgeTokens.fg5)
-            Text(searchText.isEmpty ? "No skills configured" : "No matches")
-                .font(.system(size: 12.5))
-                .foregroundStyle(BridgeTokens.fg3)
-            if searchText.isEmpty {
-                Text("Skills are Notion pages and SKILL.md files that AI clients can request by name.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(BridgeTokens.fg4)
-                    .multilineTextAlignment(.center)
+    /// `.sk-counts` — a 3-tile stat strip (Total / Routing / Palette, the real
+    /// visibility taxonomy this install carries) over the source-filter segment.
+    private var countsAndFilter: some View {
+        VStack(spacing: 9) {
+            BridgeStatStrip(spacing: 7) {
+                BridgeStatTile(value: "\(countsTotal)", label: "Total")
+                BridgeStatTile(value: "\(countsRouting)", label: "Routing", signal: .ok)
+                BridgeStatTile(value: "\(countsPalette)", label: "Palette", signal: .info)
+            }
+            BridgeSegmented(
+                selection: $sourceFilter,
+                options: SourceFilter.allCases.map { ($0, $0.label) })
+        }
+    }
+
+    @ViewBuilder
+    private var listContent: some View {
+        let groups = visibleGroups
+        let files = visibleFileSkills
+        if isInitialLoading {
+            // The loading edge state — skeleton rows while the index resolves.
+            BridgeLoadingView(rows: 6)
+                .padding(.horizontal, 4).padding(.top, 12)
+        } else if groups.isEmpty && files.isEmpty {
+            // The empty edge state (`.sk-empty` / BridgeEmptyStateView) — no
+            // skills at all vs. no matches for the current query/filter.
+            if skillsManager.skills.isEmpty && fileSourceSkills.isEmpty {
+                BridgeEmptyStateView(
+                    systemImage: "sparkles",
+                    title: "No skills yet",
+                    message: "Connect Notion or drop a SKILL.md in the skills folder. Add one with the + button.") {
+                    BridgeButton("Add a skill", systemImage: "plus", variant: .primary) {
+                        commitPendingEdit()
+                        showAddForm = true
+                        selection = nil
+                    }
+                }
+                .padding(.top, 12)
+            } else {
+                BridgeEmptyStateView(
+                    systemImage: "magnifyingglass",
+                    title: "No matches",
+                    message: "No skills match \u{201C}\(searchText)\u{201D} in the \(sourceFilter.label.lowercased()) source.")
+                    .padding(.top, 12)
+            }
+        } else {
+            ForEach(groups, id: \.id) { group in
+                groupHeader(group.label, count: group.skills.count)
+                ForEach(group.skills, id: \.id) { skill in
+                    skillListRow(skill)
+                }
+            }
+            if !files.isEmpty {
+                groupHeader("File-source", count: files.count)
+                ForEach(files, id: \.path) { fs in
+                    fileListRow(fs)
+                }
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 14).padding(.vertical, 26)
+    }
+
+    /// `.sk-group-cap` — an uppercase kind caption + count + a trailing rule.
+    private func groupHeader(_ label: String, count: Int) -> some View {
+        HStack(spacing: 8) {
+            Text(label).bridgeCap()
+                .foregroundStyle(BridgeTokens.fg4)
+            Text("\(count)")
+                .font(BridgeTokens.Typeface.micro)
+                .monospacedDigit()
+                .foregroundStyle(BridgeTokens.fg5)
+            Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5)
+        }
+        .padding(.horizontal, 7)
+        .padding(.top, 11).padding(.bottom, 6)
+    }
+
+    private var listFooter: some View {
+        HStack(spacing: 8) {
+            if let cacheMessage, cacheBusy == false {
+                if cacheIsError {
+                    BridgeStatusDot(.bad, size: 7)
+                } else {
+                    BridgeStatusDot(.ok, size: 7)
+                }
+                Text(cacheMessage)
+                    .font(BridgeTokens.Typeface.micro)
+                    .foregroundStyle(cacheIsError ? BridgeTokens.badText : BridgeTokens.fg4)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(cacheMessage)
+            } else {
+                BridgeStatusDot(.ok, size: 7)
+                Text(listFooterText)
+                    .font(BridgeTokens.Typeface.micro)
+                    .foregroundStyle(BridgeTokens.fg4)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 9)
     }
 
     private var listFooterText: String {
         let total = skillsManager.skills.count
         let enabled = skillsManager.enabledSkills.count
-        let routing = skillsManager.skills.filter { $0.enabled && $0.routingDiscoverable }.count
+        let cached = skillsManager.skills.filter { !$0.summary.isEmpty }.count
         if total == 0 { return "No skills" }
-        return "\(enabled)/\(total) enabled · \(routing) routing"
+        return "\(enabled)/\(total) enabled · \(cached) cached"
     }
 
-    /// One master row (~36px): compact platform glyph + name + 4-state status
-    /// dot. The 28px avatar and the 9px uppercase platform tag are dropped —
-    /// platform lives in the leading glyph + the detail badge, status lives in
-    /// the dot. A11y label = name; a11y value = the status description.
+    // MARK: - List rows
+
+    /// One master row (~36px): emoji glyph (or platform-glyph fallback) · name ·
+    /// cache pip · 4-state status dot. A11y label = name; a11y value = the
+    /// status description. (`.sk-row`)
     private func skillListRow(_ skill: SkillsManager.Skill) -> some View {
         let isSel = selection == .skill(skill.name)
+        let cached = !skill.summary.isEmpty
         return Button {
             commitPendingEdit()
             showAddForm = false
             selection = .skill(skill.name)
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 9) {
                 skillLeadingGlyph(for: skill)
-                    .frame(width: 18, alignment: .center)
+                    .frame(width: 20, alignment: .center)
                 Text(skill.name)
-                    .font(.system(size: 13))
+                    .font(BridgeTokens.Typeface.base)
                     .foregroundStyle(skill.enabled ? BridgeTokens.fg1 : BridgeTokens.fg4)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 4)
+                cachePip(cached: cached)
                 statusDot(for: skill)
             }
-            .padding(.horizontal, 10).padding(.vertical, 9)
+            .padding(.horizontal, 8)
+            .frame(height: 36)
             .background(rowBackground(selected: isSel))
-            .overlay(rowRim(selected: isSel))
+            .overlay(rowAccentBar(selected: isSel), alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .opacity(skill.enabled ? 1 : 0.5)
         .accessibilityLabel(skill.name)
-        .accessibilityValue(statusDescription(for: skill))
+        .accessibilityValue(statusDescription(for: skill) + (cached ? ", cached" : ", not cached"))
         .accessibilityAddTraits(isSel ? [.isButton, .isSelected] : .isButton)
     }
 
-    /// WS-3: leading glyph for a skill row. Renders the captured Notion
-    /// EMOJI icon when present; otherwise falls back to the platform
-    /// SF-Symbol glyph (the prior behavior). Both honor the enabled dimming.
+    /// WS-3: leading glyph for a skill row. Renders the captured Notion EMOJI
+    /// icon when present; otherwise falls back to the platform SF-Symbol glyph.
     @ViewBuilder
     private func skillLeadingGlyph(for skill: SkillsManager.Skill) -> some View {
         if let emoji = skill.icon, !emoji.isEmpty {
             Text(emoji)
-                .font(.system(size: 13))
+                .font(.system(size: 15))
                 .opacity(skill.enabled ? 1.0 : 0.45)
         } else {
             Image(systemName: skill.platform.systemImage)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(skill.enabled ? BridgeTokens.fg3 : BridgeTokens.fg5)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(skill.enabled ? BridgeTokens.fg4 : BridgeTokens.fg5)
         }
+    }
+
+    /// `.sk-cachepip` — a tiny offline-cache indicator: emerald filled-disc when
+    /// the body is stored, a faint hollow disc when not.
+    private func cachePip(cached: Bool) -> some View {
+        Image(systemName: cached ? "externaldrive.fill" : "externaldrive")
+            .font(.system(size: 10, weight: .regular))
+            .foregroundStyle(cached ? BridgeTokens.okText : BridgeTokens.fg5)
+            .frame(width: 14, height: 14)
+            .help(cached ? "Body cached for offline use" : "Body not stored")
     }
 
     private func fileListRow(_ fs: ParsedSkill) -> some View {
         let isSel = selection == .file(fs.path.path)
         let enabled = fileSkillEnabledMap[fs.path.path] ?? true
+        // File-source bodies ship on disk — always "cached".
         return Button {
             commitPendingEdit()
             showAddForm = false
             selection = .file(fs.path.path)
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 9) {
                 Image(systemName: "doc.text")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(enabled ? BridgeTokens.fg3 : BridgeTokens.fg5)
-                    .frame(width: 18, alignment: .center)
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(enabled ? BridgeTokens.fg4 : BridgeTokens.fg5)
+                    .frame(width: 20, alignment: .center)
                 Text(fs.name)
-                    .font(.system(size: 13))
+                    .font(BridgeTokens.Typeface.base)
                     .foregroundStyle(enabled ? BridgeTokens.fg1 : BridgeTokens.fg4)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 4)
+                cachePip(cached: true)
                 Circle()
                     .fill(enabled ? BridgeTokens.ok : BridgeTokens.fg5)
-                    .frame(width: 7, height: 7)
+                    .frame(width: 8, height: 8)
+                    .shadow(color: (enabled ? BridgeTokens.ok : .clear).opacity(0.6), radius: 3)
             }
-            .padding(.horizontal, 10).padding(.vertical, 9)
+            .padding(.horizontal, 8)
+            .frame(height: 36)
             .background(rowBackground(selected: isSel))
-            .overlay(rowRim(selected: isSel))
+            .overlay(rowAccentBar(selected: isSel), alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .opacity(enabled ? 1 : 0.5)
         .accessibilityLabel(fs.name)
-        .accessibilityValue((fs.isUserSource ? "User file" : "Bundled") + ", " + (enabled ? "enabled" : "disabled"))
+        .accessibilityValue((fs.isUserSource ? "User file" : "Bundled") + ", " + (enabled ? "enabled" : "disabled") + ", cached")
         .accessibilityAddTraits(isSel ? [.isButton, .isSelected] : .isButton)
     }
 
@@ -426,54 +573,44 @@ struct SkillsView: View {
         return "Enabled"
     }
 
-    /// Status dot: emerald when routing-discoverable, amber when palette-only,
-    /// blue-grey when enabled-but-neither, faint when disabled.
+    /// Status dot via the W2 atom: emerald when routing-discoverable, amber when
+    /// palette-only, accent when enabled-but-neither, neutral when disabled.
     private func statusDot(for skill: SkillsManager.Skill) -> some View {
-        let color: Color = {
-            if !skill.enabled { return BridgeTokens.fg5 }
-            if skill.routingDiscoverable { return BridgeTokens.ok }
-            if skill.inCommandPalette { return BridgeTokens.warn }
-            return BridgeTokens.accentLink
+        let signal: BridgeSignal = {
+            if !skill.enabled { return .neutral }
+            if skill.routingDiscoverable { return .ok }
+            if skill.inCommandPalette { return .warn }
+            return .info
         }()
-        return Circle()
-            .fill(color)
-            .frame(width: 7, height: 7)
-            .shadow(color: color.opacity(0.6), radius: 3)
+        return BridgeStatusDot(signal, size: 8)
     }
 
+    /// Selected-row fill: the neutral raised control glass + a control bevel,
+    /// matching `.sk-row.sel` (selection stays neutral; accent is reserved for
+    /// the leading rail + primary actions).
+    @ViewBuilder
     private func rowBackground(selected: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 8)
-            .fill(selected
-                  ? LinearGradient(colors: [BridgeTokens.accent.opacity(0.30), BridgeTokens.accent.opacity(0.08)],
-                                   startPoint: .top, endPoint: .bottom)
-                  : LinearGradient(colors: [Color.clear, Color.clear], startPoint: .top, endPoint: .bottom))
-    }
-
-    private func rowRim(selected: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 8)
-            .strokeBorder(selected ? BridgeTokens.hairlineStrong : Color.clear, lineWidth: 0.5)
-    }
-
-    /// Glass avatar disc. PKT-skills: the detail header avatar is shrunk from
-    /// 48 → 32; the empty-state placeholder keeps a larger disc via `dim`.
-    private func avatar(systemImage: String, dim: CGFloat = 32, dimmed: Bool) -> some View {
-        let glyph: CGFloat = dim >= 44 ? 19 : (dim >= 30 ? 15 : 12)
-        return ZStack {
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [Color.white.opacity(0.34), Color.white.opacity(0.06), Color.clear],
-                        center: UnitPoint(x: 0.3, y: 0.18),
-                        startRadius: 0, endRadius: dim * 0.9)
-                )
-                .background(Circle().fill(BridgeTokens.chipFill))
-            Circle().strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5)
-            Image(systemName: systemImage)
-                .font(.system(size: glyph, weight: .medium))
-                .foregroundStyle(dimmed ? BridgeTokens.fg4 : BridgeTokens.fg1)
+        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+        if selected {
+            shape.fill(BridgeTokens.glassControl)
+                .overlay(shape.strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+                .bridgeBevel(BridgeTokens.bevelControl, radius: 8)
+        } else {
+            Color.clear
         }
-        .frame(width: dim, height: dim)
-        .opacity(dimmed ? 0.55 : 1)
+    }
+
+    /// `.sk-row.sel::before` — a 2.5px accent rail on the leading edge of the
+    /// selected row.
+    @ViewBuilder
+    private func rowAccentBar(selected: Bool) -> some View {
+        if selected {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(BridgeTokens.accentStrong)
+                .frame(width: 2.5)
+                .padding(.vertical, 8)
+                .padding(.leading, 1)
+        }
     }
 
     // MARK: - DETAIL COLUMN
@@ -503,59 +640,70 @@ struct SkillsView: View {
                     }
                 }
             }
-            .padding(EdgeInsets(top: 18, leading: 22, bottom: 22, trailing: 22))
+            .padding(EdgeInsets(top: 18, leading: 20, bottom: 22, trailing: 20))
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
+    /// `.sk-detail-empty` — the "pick a skill" placeholder (loading · all-empty
+    /// CTA · or the select-a-skill hint).
     private var detailPlaceholder: some View {
-        VStack(spacing: 14) {
-            avatar(systemImage: "sparkles", dim: 48, dimmed: false)
-            Text(skillsManager.skills.isEmpty && fileSourceSkills.isEmpty
-                 ? "No skills yet"
-                 : "Select a skill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(BridgeTokens.fg2)
-            Text(skillsManager.skills.isEmpty && fileSourceSkills.isEmpty
-                 ? "Add a skill with the + button. Skills are documents AI clients can request by name when they need them."
-                 : "Pick a skill from the list to view its routing metadata, triggers, and body preview.")
-                .font(.system(size: 12))
-                .foregroundStyle(BridgeTokens.fg4)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 320)
-            Button {
-                showAddForm = true
-                selection = nil
-            } label: {
-                Label("Add a skill", systemImage: "plus")
-                    .font(.system(size: 12.5, weight: .medium))
+        let allEmpty = skillsManager.skills.isEmpty && fileSourceSkills.isEmpty
+        return VStack(spacing: 14) {
+            if isInitialLoading {
+                BridgeSpinner(large: true)
+                Text("Loading skills…")
+                    .font(BridgeTokens.Typeface.body)
+                    .foregroundStyle(BridgeTokens.fg4)
+            } else if allEmpty {
+                BridgeEmptyStateView(
+                    systemImage: "sparkles",
+                    title: "No skills yet",
+                    message: "Add a skill with the + button. Skills are documents AI clients can request by name when they need them.") {
+                    BridgeButton("Add a skill", systemImage: "plus", variant: .primary) {
+                        commitPendingEdit()
+                        showAddForm = true
+                        selection = nil
+                    }
+                }
+            } else {
+                BridgeEmptyStateView(
+                    systemImage: "book.closed",
+                    title: "Select a skill",
+                    message: "Pick a skill from the list to see its routing metadata, triggers and cached body.")
             }
-            .buttonStyle(.borderedProminent)
-            .tint(BridgeTokens.accent)
         }
         .frame(maxWidth: .infinity, minHeight: 460)
-        .padding(.top, 60)
+        .padding(.top, 40)
     }
 
     // MARK: - Notion-source detail
 
     @ViewBuilder
     private func notionDetail(_ skill: SkillsManager.Skill) -> some View {
-        // header: avatar + name (rename) + slug/url + actions
+        // header: glyph avatar + name (rename) + slug/url + actions
         detailHeader(skill)
 
-        // routing metadata grid
+        // routing metadata grid — 4 cells, Visibility elevated
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 10) {
                 BridgeCardLabel("Routing metadata")
                 metadataGrid(skill)
+                if !skill.notionPageId.isEmpty || skill.url != nil {
+                    dependsOnRow(skill)
+                }
             }
         }
 
-        // triggers / anti-triggers
+        // triggers / anti-triggers (read-only flat tags)
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 10) {
-                BridgeCardLabel("Triggers")
+                HStack(spacing: 6) {
+                    BridgeCardLabel("Triggers")
+                    Text("· read-only")
+                        .font(BridgeTokens.Typeface.micro)
+                        .foregroundStyle(BridgeTokens.fg5)
+                }
                 if skill.triggerPhrases.isEmpty {
                     emptyHint("No trigger phrases. Add them with the `manage_skill` MCP tool to surface this skill in routing.")
                 } else {
@@ -569,32 +717,10 @@ struct SkillsView: View {
             }
         }
 
-        // body preview
-        BridgeGlassCard {
-            VStack(alignment: .leading, spacing: 9) {
-                HStack(spacing: 8) {
-                    BridgeCardLabel("Summary")
-                    Spacer()
-                    Text(skill.platform.displayName)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(BridgeTokens.fg4)
-                }
-                if skill.summary.isEmpty {
-                    emptyHint("No summary set. The summary is the one-line description agents see in the routing list.")
-                } else {
-                    ScrollView {
-                        SOMarkdownView(markdown: skill.summary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(14)
-                    }
-                    .frame(maxHeight: 200)
-                    .background(BridgeTokens.accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
-                    .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(BridgeTokens.accent.opacity(0.24), lineWidth: 0.5))
-                }
-            }
-        }
+        // cache + content (peek → expand-on-click)
+        bodyCacheCard(skill)
 
-        // permissions & behavior (Routing + Palette toggles)
+        // permissions & behavior (Enabled + Routing + Palette toggles)
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 0) {
                 BridgeCardLabel("Permissions & behavior")
@@ -627,27 +753,28 @@ struct SkillsView: View {
     }
 
     private func detailHeader(_ skill: SkillsManager.Skill) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            avatar(systemImage: skill.platform.systemImage, dim: 32, dimmed: !skill.enabled)
+        HStack(alignment: .top, spacing: 12) {
+            glyphAvatar(for: skill, dimmed: !skill.enabled)
 
             VStack(alignment: .leading, spacing: 4) {
-                // name + rename
+                // name + rename + visibility badge
                 if renamingSkillName == skill.name {
                     VStack(alignment: .leading, spacing: 3) {
                         TextField("Skill name", text: $renameText)
                             .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.system(size: 18, weight: .semibold))
                             .frame(maxWidth: 280)
                             .onSubmit { commitRename(for: skill.name) }
                             .onExitCommand { renamingSkillName = nil; renameError = nil }
                         if let renameError {
-                            Text(renameError).font(.system(size: 11)).foregroundStyle(BridgeTokens.bad)
+                            Text(renameError).font(BridgeTokens.Typeface.meta).foregroundStyle(BridgeTokens.badText)
                         }
                     }
                 } else {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 8) {
                         Text(skill.name)
-                            .font(.system(size: 18, weight: .semibold))
+                            .font(BridgeTokens.Typeface.detail)
+                            .tracking(BridgeTokens.Typeface.trackTight)
                             .foregroundStyle(BridgeTokens.fg1)
                             .lineLimit(1)
                             .truncationMode(.tail)
@@ -659,13 +786,14 @@ struct SkillsView: View {
                         } label: {
                             Image(systemName: "pencil")
                                 .font(.system(size: 12))
-                                .foregroundStyle(BridgeTokens.fg4)
-                                .frame(width: 28, height: 28)
+                                .foregroundStyle(BridgeTokens.fg5)
+                                .frame(width: 24, height: 24)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .help("Rename")
                         .accessibilityLabel("Rename skill")
+                        visibilityBadge(skill)
                     }
                 }
 
@@ -680,6 +808,54 @@ struct SkillsView: View {
         }
     }
 
+    /// `.sk-dhead` glyph avatar — a raised-glass disc holding the emoji icon, or
+    /// the platform glyph fallback.
+    @ViewBuilder
+    private func glyphAvatar(for skill: SkillsManager.Skill, dimmed: Bool) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+        ZStack {
+            BridgeTokens.glassRaise.paint(in: shape)
+            shape.strokeBorder(BridgeTokens.edgeRaise, lineWidth: 0.5)
+            if let emoji = skill.icon, !emoji.isEmpty {
+                Text(emoji).font(.system(size: 19))
+            } else {
+                Image(systemName: skill.platform.systemImage)
+                    .font(.system(size: 16, weight: .regular))
+                    .foregroundStyle(BridgeTokens.fg3)
+            }
+        }
+        .frame(width: 32, height: 32)
+        .bridgeBevel(BridgeTokens.bevelRaise, radius: 9)
+        .opacity(dimmed ? 0.55 : 1)
+    }
+
+    /// File-source avatar (no emoji) — same disc, doc glyph.
+    private func fileGlyphAvatar(dimmed: Bool) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+        return ZStack {
+            BridgeTokens.glassRaise.paint(in: shape)
+            shape.strokeBorder(BridgeTokens.edgeRaise, lineWidth: 0.5)
+            Image(systemName: "doc.text")
+                .font(.system(size: 16, weight: .regular))
+                .foregroundStyle(BridgeTokens.fg3)
+        }
+        .frame(width: 32, height: 32)
+        .bridgeBevel(BridgeTokens.bevelRaise, radius: 9)
+        .opacity(dimmed ? 0.55 : 1)
+    }
+
+    /// The visibility tier badge next to the name (`.badge` — routing=ok,
+    /// palette=warn, fetch-only=info, disabled=neutral).
+    private func visibilityBadge(_ skill: SkillsManager.Skill) -> some View {
+        let (label, tone): (String, BridgeBadge.Tone) = {
+            if !skill.enabled { return ("Disabled", .neutral) }
+            if skill.routingDiscoverable { return ("Routing-discoverable", .ok) }
+            if skill.inCommandPalette { return ("Palette-only", .warn) }
+            return ("Fetch-only", .info)
+        }()
+        return BridgeBadge(label, tone: tone, showsDot: true)
+    }
+
     @ViewBuilder
     private func idRow(_ skill: SkillsManager.Skill) -> some View {
         if editingSkillName == skill.name {
@@ -691,7 +867,7 @@ struct SkillsView: View {
                     .onSubmit { commitURLEdit(for: skill.name) }
                     .onExitCommand { editingSkillName = nil; urlValidationError = nil }
                 if let urlValidationError {
-                    Text(urlValidationError).font(.system(size: 11)).foregroundStyle(BridgeTokens.bad)
+                    Text(urlValidationError).font(BridgeTokens.Typeface.meta).foregroundStyle(BridgeTokens.badText)
                 }
             }
         } else {
@@ -705,13 +881,13 @@ struct SkillsView: View {
                 } label: {
                     if skill.notionPageId.isEmpty {
                         Label("Set URL", systemImage: "link.badge.plus")
-                            .font(.system(size: 11))
-                            .foregroundStyle(BridgeTokens.warn)
+                            .font(BridgeTokens.Typeface.meta)
+                            .foregroundStyle(BridgeTokens.warnText)
                     } else {
                         HStack(spacing: 4) {
                             Image(systemName: "link").font(.system(size: 11))
                             Text("ID …\(String(skill.notionPageId.suffix(6)))")
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(BridgeTokens.Typeface.mono)
                         }
                         .foregroundStyle(BridgeTokens.fg3)
                     }
@@ -733,12 +909,12 @@ struct SkillsView: View {
             }
             iconButton("chevron.up", help: "Move up", disabled: index == 0) {
                 commitPendingEdit()
-                skillsManager.moveSkill(from: index, to: index - 1)
+                _ = skillsManager.moveSkill(from: index, to: index - 1)
             }
             iconButton("chevron.down", help: "Move down",
                        disabled: index == skillsManager.skills.count - 1) {
                 commitPendingEdit()
-                skillsManager.moveSkill(from: index, to: index + 1)
+                _ = skillsManager.moveSkill(from: index, to: index + 1)
             }
             iconButton("trash", help: "Delete skill", danger: true) {
                 skillPendingDeletion = skill.name
@@ -746,44 +922,48 @@ struct SkillsView: View {
         }
     }
 
-    /// PKT-skills: 8-cell grid → 4 non-redundant cells. Status / In-palette /
-    /// In-routing / trigger-counts are already shown by the toggles + chip
-    /// sections below, so they are dropped here; the synthesized Visibility
-    /// value is elevated as one of the four kept cells.
+    /// PKT-skills: 4 non-redundant cells; the synthesized Visibility value is
+    /// elevated (`.sk-meta.key`).
     private func metadataGrid(_ skill: SkillsManager.Skill) -> some View {
-        let cells: [(String, String)] = [
-            ("Platform", skill.platform.displayName),
-            ("Visibility", visibilityLabel(skill)),
-            ("Page ID", skill.notionPageId.isEmpty ? "—" : "…\(String(skill.notionPageId.suffix(6)))"),
-            ("Source", "Notion-linked"),
+        let cells: [(String, String, Bool)] = [
+            ("Kind", skill.routingDiscoverable ? "Routing" : (skill.inCommandPalette ? "Palette" : "Fetch"), false),
+            ("Visibility", visibilityLabel(skill), true),
+            ("Source", skill.platform.displayName, false),
+            ("Page", skill.notionPageId.isEmpty ? "—" : "…\(String(skill.notionPageId.suffix(6)))", false),
         ]
         return LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(), spacing: 9), count: 4),
-            spacing: 9
+            columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4),
+            spacing: 8
         ) {
-            ForEach(cells, id: \.0) { cap, val in
-                metaCell(cap: cap, val: val)
+            ForEach(cells, id: \.0) { cap, val, key in
+                metaCell(cap: cap, val: val, key: key)
             }
         }
     }
 
-    private func metaCell(cap: String, val: String) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(cap.uppercased())
-                .font(.system(size: 10.5, weight: .semibold))
-                .tracking(0.6)
-                .foregroundStyle(BridgeTokens.fg4)
+    /// `.sk-meta` inset cell; `key` elevates it with an accent tint (Visibility).
+    private func metaCell(cap: String, val: String, key: Bool = false) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+        return VStack(alignment: .leading, spacing: 5) {
+            Text(cap).bridgeCap()
+                .foregroundStyle(key ? BridgeTokens.infoText : BridgeTokens.fg4)
             Text(val)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(BridgeTokens.fg1)
+                .font(BridgeTokens.Typeface.meta.weight(.semibold))
+                .foregroundStyle(key ? BridgeTokens.infoText : BridgeTokens.fg1)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .help(val)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+        .padding(.horizontal, 11).padding(.vertical, 9)
+        .background(
+            key
+            ? AnyView(shape.fill(BridgeTokens.accent.opacity(0.12))
+                .overlay(shape.strokeBorder(BridgeTokens.accentBorder, lineWidth: 0.5)))
+            : AnyView(shape.fill(BridgeTokens.wellFill)
+                .overlay(shape.strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+                .bridgeBevel(BridgeTokens.bevelInset, radius: 9))
+        )
     }
 
     private func visibilityLabel(_ skill: SkillsManager.Skill) -> String {
@@ -792,6 +972,197 @@ struct SkillsView: View {
         case (true, false):  return "Routing"
         case (false, true):  return "Palette"
         case (false, false): return "Fetch-only"
+        }
+    }
+
+    /// `.sk-deps` — a "Depends on" row of deep-link chips (Notion credential +
+    /// the page link) using the W2 `BridgeDepLink`.
+    private func dependsOnRow(_ skill: SkillsManager.Skill) -> some View {
+        FlowLayout(spacing: 6, lineSpacing: 6) {
+            Text("DEPENDS ON")
+                .font(BridgeTokens.Typeface.micro.weight(.semibold))
+                .tracking(BridgeTokens.Typeface.trackCap)
+                .foregroundStyle(BridgeTokens.fg5)
+                .padding(.trailing, 2)
+            if skill.platform == .notion {
+                BridgeDepLink("Notion credential") { openSkillURL("https://www.notion.so") }
+            }
+            if skill.platform == .googleDocs {
+                BridgeDepLink("Google credential") { openSkillURL("https://docs.google.com") }
+            }
+            if !(skill.url ?? skill.notionPageId).isEmpty {
+                BridgeDepLink("Open page") { openSkillURL(skill.url ?? skill.notionPageId) }
+            }
+        }
+    }
+
+    // MARK: - Body cache card (peek → expand · Not-stored · refresh)
+
+    /// `.sk-content-card` — the offline body-cache surface. When the skill body
+    /// (its MCP summary) is stored, a `BridgePeek` previews it (Preview /
+    /// Markdown tabs) and expands into a `BridgeFloat`; when empty, the
+    /// "Not stored" state offers a Cache-now (which runs the real workspace
+    /// cache refresh). The transient `cacheBusy` flag drives the caching look.
+    @ViewBuilder
+    private func bodyCacheCard(_ skill: SkillsManager.Skill) -> some View {
+        let cached = !skill.summary.isEmpty
+        BridgeGlassCard {
+            VStack(alignment: .leading, spacing: 11) {
+                // cache bar: state on the left, tabs + refresh on the right
+                HStack(spacing: 9) {
+                    if cacheBusy {
+                        HStack(spacing: 6) {
+                            BridgeSpinner()
+                            Text("Caching…")
+                                .font(BridgeTokens.Typeface.sub.weight(.medium))
+                                .foregroundStyle(BridgeTokens.fg3)
+                        }
+                    } else if cached {
+                        HStack(spacing: 6) {
+                            Image(systemName: "externaldrive.fill.badge.checkmark")
+                                .font(.system(size: 12))
+                                .foregroundStyle(BridgeTokens.okText)
+                            Text("Cached")
+                                .font(BridgeTokens.Typeface.sub.weight(.medium))
+                                .foregroundStyle(BridgeTokens.fg2)
+                        }
+                    } else {
+                        HStack(spacing: 6) {
+                            Image(systemName: "externaldrive")
+                                .font(.system(size: 12))
+                                .foregroundStyle(BridgeTokens.fg5)
+                            Text("Not stored")
+                                .font(BridgeTokens.Typeface.sub.weight(.medium))
+                                .foregroundStyle(BridgeTokens.fg3)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    if cached {
+                        bodyTabSegmented
+                        BridgeButton("Refresh", systemImage: "arrow.triangle.2.circlepath",
+                                     variant: .default, isEnabled: !cacheBusy) {
+                            onRefreshCache()
+                        }
+                    }
+                }
+
+                if cached {
+                    // peek → float
+                    BridgePeek(maxHeight: 132, onExpand: { expandedBody = true }) {
+                        bodyContentView(skill.summary)
+                    }
+                } else {
+                    notStoredWell
+                }
+            }
+        }
+    }
+
+    /// `.sk-uncached` — the centered "Body not cached" well with a Cache-now CTA
+    /// (runs the workspace cache refresh). Shows the spinner while caching.
+    private var notStoredWell: some View {
+        let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+        return VStack(spacing: 11) {
+            if cacheBusy {
+                BridgeSpinner(large: true)
+                Text("Fetching & storing bodies…")
+                    .font(BridgeTokens.Typeface.body)
+                    .foregroundStyle(BridgeTokens.fg2)
+            } else {
+                Image(systemName: "externaldrive.badge.xmark")
+                    .font(.system(size: 26, weight: .light))
+                    .foregroundStyle(BridgeTokens.fg5)
+                Text("Body not cached")
+                    .font(BridgeTokens.Typeface.body)
+                    .foregroundStyle(BridgeTokens.fg2)
+                Text("Fetch the body once and keep it for instant, offline preview. Cache now re-pulls every skill body from its source.")
+                    .font(BridgeTokens.Typeface.sub)
+                    .foregroundStyle(BridgeTokens.fg4)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 320)
+                BridgeButton("Cache now", systemImage: "arrow.triangle.2.circlepath",
+                             variant: .primary, isEnabled: !cacheBusy) {
+                    onRefreshCache()
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 26).padding(.horizontal, 18)
+        .background(
+            shape.fill(BridgeTokens.wellFillDeep)
+                .overlay(shape.strokeBorder(BridgeTokens.hairlineStrong,
+                                            style: StrokeStyle(lineWidth: 0.5, dash: [4, 3]))))
+    }
+
+    /// The shared Preview / Markdown tab control for the body peek + float.
+    private var bodyTabSegmented: some View {
+        BridgeSegmented(
+            selection: $bodyTab,
+            options: [(BodyTab.preview, "Preview"), (BodyTab.markdown, "Markdown")])
+            .fixedSize()
+    }
+
+    /// The body renderer for the peek / float — Preview (rendered markdown via
+    /// the W2 `BridgeMarkdown`) or Markdown (raw mono).
+    @ViewBuilder
+    private func bodyContentView(_ md: String) -> some View {
+        if bodyTab == .preview {
+            BridgeMarkdown(md)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text(md)
+                .font(BridgeTokens.Typeface.mono)
+                .foregroundStyle(BridgeTokens.fg2)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// The expand-on-click overlay (`.sk-scrim` + `.sk-float`) — the
+    /// currently-selected skill's stored body floated full-height. Handles both
+    /// the Notion case (body = summary) and the file-source case (body = on-disk
+    /// SKILL.md body).
+    @ViewBuilder
+    private var bodyFloatOverlay: some View {
+        if expandedBody,
+           case .skill(let name) = selection,
+           let skill = skillsManager.skill(named: name),
+           !skill.summary.isEmpty {
+            bodyFloat(name: skill.name,
+                      glyph: AnyView(glyphAvatar(for: skill, dimmed: false).frame(width: 24, height: 24)),
+                      body: skill.summary,
+                      onDismiss: { expandedBody = false })
+        } else if let path = expandedBodyFile,
+                  let fs = fileSourceSkills.first(where: { $0.path.path == path }) {
+            bodyFloat(name: fs.name,
+                      glyph: AnyView(fileGlyphAvatar(dimmed: false).frame(width: 24, height: 24)),
+                      body: fileBody(fs),
+                      onDismiss: { expandedBodyFile = nil })
+        }
+    }
+
+    /// The on-disk SKILL.md body, falling back to the frontmatter description.
+    private func fileBody(_ fs: ParsedSkill) -> String {
+        if !fs.body.isEmpty { return fs.body }
+        if case .string(let d) = fs.frontmatter["description"] { return d }
+        return ""
+    }
+
+    /// Shared `.sk-float` builder for both source kinds.
+    private func bodyFloat(name: String, glyph: AnyView, body: String, onDismiss: @escaping () -> Void) -> some View {
+        BridgeFloat(onDismiss: onDismiss) {
+            glyph
+            Text(name)
+                .font(BridgeTokens.Typeface.name)
+                .foregroundStyle(BridgeTokens.fg1)
+            bodyTabSegmented
+            Text("read-only · cached body")
+                .font(BridgeTokens.Typeface.micro)
+                .foregroundStyle(BridgeTokens.fg5)
+            Spacer(minLength: 8)
+            BridgeButton("Close", variant: .default, action: onDismiss)
+        } body: {
+            bodyContentView(body)
         }
     }
 
@@ -806,16 +1177,24 @@ struct SkillsView: View {
         }()
 
         // header
-        HStack(alignment: .top, spacing: 14) {
-            avatar(systemImage: "doc.text", dim: 32, dimmed: !enabled)
+        HStack(alignment: .top, spacing: 12) {
+            fileGlyphAvatar(dimmed: !enabled)
             VStack(alignment: .leading, spacing: 4) {
-                Text(fs.name)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(BridgeTokens.fg1)
+                HStack(spacing: 8) {
+                    Text(fs.name)
+                        .font(BridgeTokens.Typeface.detail)
+                        .tracking(BridgeTokens.Typeface.trackTight)
+                        .foregroundStyle(BridgeTokens.fg1)
+                        .lineLimit(1)
+                    BridgeBadge(fs.isUserSource ? "User file" : "Bundled",
+                                systemImage: fs.isUserSource ? "person" : "shippingbox",
+                                tone: fs.isUserSource ? .info : .neutral)
+                }
+                Text(fs.displayPath)
+                    .font(BridgeTokens.Typeface.mono)
+                    .foregroundStyle(BridgeTokens.fg4)
                     .lineLimit(1)
-                BridgeBadge(fs.isUserSource ? "User file" : "Bundled",
-                            systemImage: fs.isUserSource ? "person" : "shippingbox",
-                            tone: fs.isUserSource ? .info : .neutral)
+                    .truncationMode(.middle)
             }
             Spacer(minLength: 8)
             iconButton("folder", help: "Reveal SKILL.md in Finder") {
@@ -823,23 +1202,22 @@ struct SkillsView: View {
             }
         }
 
-        // metadata: path + source
+        // metadata: source + status + path
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 10) {
                 BridgeCardLabel("File metadata")
                 LazyVGrid(
-                    columns: Array(repeating: GridItem(.flexible(), spacing: 9), count: 2),
-                    spacing: 9
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2),
+                    spacing: 8
                 ) {
                     metaCell(cap: "Source", val: fs.isUserSource ? "User dir" : "Bundled")
                     metaCell(cap: "Status", val: enabled ? "Enabled" : "Disabled")
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("PATH")
-                        .font(.system(size: 10.5, weight: .semibold)).tracking(0.6)
+                    Text("PATH").bridgeCap()
                         .foregroundStyle(BridgeTokens.fg4)
                     Text(fs.displayPath)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(BridgeTokens.Typeface.mono)
                         .foregroundStyle(BridgeTokens.fg3)
                         .lineLimit(2)
                         .truncationMode(.middle)
@@ -848,18 +1226,8 @@ struct SkillsView: View {
             }
         }
 
-        // summary / body preview
-        if !summary.isEmpty {
-            BridgeGlassCard {
-                VStack(alignment: .leading, spacing: 9) {
-                    BridgeCardLabel("Summary")
-                    Text(summary)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(BridgeTokens.fg2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
+        // body preview (the on-disk body is always available — peek → float)
+        bodyCacheCardForFile(fs, summary: summary)
 
         // permission toggles (file-source — persist per path)
         BridgeGlassCard {
@@ -902,32 +1270,54 @@ struct SkillsView: View {
         }
     }
 
+    /// File-source body card — the body is on disk, so it always shows a peek of
+    /// the SKILL.md body (summary fallback to the frontmatter description).
+    @ViewBuilder
+    private func bodyCacheCardForFile(_ fs: ParsedSkill, summary: String) -> some View {
+        let body = !fs.body.isEmpty ? fs.body : summary
+        if !body.isEmpty {
+            BridgeGlassCard {
+                VStack(alignment: .leading, spacing: 11) {
+                    HStack(spacing: 9) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "externaldrive.fill.badge.checkmark")
+                                .font(.system(size: 12))
+                                .foregroundStyle(BridgeTokens.okText)
+                            Text("Bundled body")
+                                .font(BridgeTokens.Typeface.sub.weight(.medium))
+                                .foregroundStyle(BridgeTokens.fg2)
+                        }
+                        Spacer(minLength: 8)
+                        bodyTabSegmented
+                    }
+                    BridgePeek(maxHeight: 132, onExpand: { expandedBodyFile = fs.path.path }) {
+                        bodyContentView(body)
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Add-skill form (detail pane)
 
     private var addSkillForm: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
-                avatar(systemImage: "plus", dim: 32, dimmed: false)
+                addFormGlyph
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Add a skill")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(BridgeTokens.Typeface.detail)
+                        .tracking(BridgeTokens.Typeface.trackTight)
                         .foregroundStyle(BridgeTokens.fg1)
                     Text("Add a Notion or Google Docs URL to auto-detect the platform, or enter a UUID manually.")
-                        .font(.system(size: 12))
+                        .font(BridgeTokens.Typeface.sub)
                         .foregroundStyle(BridgeTokens.fg3)
                 }
                 Spacer(minLength: 8)
-                Button {
+                iconButton("xmark", help: "Cancel") {
                     showAddForm = false
                     resetAddForm()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 12))
-                        .foregroundStyle(BridgeTokens.fg3)
-                        .frame(width: 28, height: 28)
                 }
-                .buttonStyle(.plain)
-                .help("Cancel")
             }
 
             BridgeGlassCard {
@@ -966,17 +1356,17 @@ struct SkillsView: View {
 
                     if let addError {
                         Text(addError)
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(BridgeTokens.bad)
+                            .font(BridgeTokens.Typeface.sub)
+                            .foregroundStyle(BridgeTokens.badText)
                     }
 
                     HStack {
                         Spacer()
-                        Button("Add skill") { addSkill() }
-                            .buttonStyle(.borderedProminent)
-                            .tint(BridgeTokens.accent)
-                            .disabled(newSkillName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                      || newSkillPageId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        BridgeButton("Add skill", variant: .primary,
+                                     isEnabled: !(newSkillName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                                  || newSkillPageId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)) {
+                            addSkill()
+                        }
                     }
                 }
             }
@@ -987,7 +1377,7 @@ struct SkillsView: View {
                     helpLine("Routing", "appears in the routing discovery list so agents can find it by name.")
                     helpLine("Palette", "appears in the global Commands palette hot-key popover.")
                     Text("Routing and Palette are independent — a skill may be in both, either, or neither. Skills in neither surface are still retrievable by name.")
-                        .font(.system(size: 11.5))
+                        .font(BridgeTokens.Typeface.sub)
                         .foregroundStyle(BridgeTokens.fg4)
                         .padding(.top, 2)
                 }
@@ -995,10 +1385,22 @@ struct SkillsView: View {
         }
     }
 
+    /// Accent-tinted glyph disc for the add-form header.
+    private var addFormGlyph: some View {
+        let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+        return ZStack {
+            shape.fill(BridgeTokens.accent.opacity(0.16))
+            shape.strokeBorder(BridgeTokens.accentBorder, lineWidth: 0.5)
+            Image(systemName: "plus")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(BridgeTokens.infoText)
+        }
+        .frame(width: 32, height: 32)
+    }
+
     private func formField<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(label.uppercased())
-                .font(.system(size: 10.5, weight: .semibold)).tracking(0.6)
+            Text(label).bridgeCap()
                 .foregroundStyle(BridgeTokens.fg4)
             content()
         }
@@ -1007,81 +1409,92 @@ struct SkillsView: View {
     private func helpLine(_ term: String, _ desc: String) -> some View {
         HStack(alignment: .top, spacing: 6) {
             Text(term)
-                .font(.system(size: 11.5, weight: .semibold))
+                .font(BridgeTokens.Typeface.sub.weight(.semibold))
                 .foregroundStyle(BridgeTokens.accentLink)
             Text("— \(desc)")
-                .font(.system(size: 11.5))
+                .font(BridgeTokens.Typeface.sub)
                 .foregroundStyle(BridgeTokens.fg3)
         }
     }
 
     // MARK: - Shared detail bits
 
-    /// PKT-skills: read-only trigger / anti-trigger tags. Flattened from the
-    /// interactive `.chip` pill (which signals tappable) to a low-radius well
-    /// so static routing data no longer reads as clickable.
+    /// PKT-skills: read-only trigger / anti-trigger tags. Flat low-radius wells
+    /// (NOT the interactive `.chip` pill) so static routing data does not read
+    /// as tappable. (`.sk-trig`)
     private func chipFlow(_ phrases: [String], anti: Bool) -> some View {
         FlowLayout(spacing: 6, lineSpacing: 6) {
             ForEach(phrases, id: \.self) { p in
                 Text(p)
-                    .font(.system(size: 12))
-                    .foregroundStyle(anti ? BridgeTokens.badText : BridgeTokens.fg2)
+                    .font(BridgeTokens.Typeface.meta)
+                    .foregroundStyle(anti ? BridgeTokens.badText : BridgeTokens.fg3)
                     .padding(.horizontal, 9)
                     .frame(height: 24)
-                    .background(
-                        (anti ? BridgeTokens.bad.opacity(0.10) : BridgeTokens.wellFill),
-                        in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(
-                        anti ? BridgeTokens.bad.opacity(0.22) : BridgeTokens.hairline,
-                        lineWidth: 0.5))
+                    .background(triggerTagBackground(anti: anti))
                     .accessibilityLabel((anti ? "Anti-trigger: " : "Trigger: ") + p)
             }
         }
     }
 
+    @ViewBuilder
+    private func triggerTagBackground(anti: Bool) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        if anti {
+            shape.fill(BridgeTokens.bad.opacity(0.10))
+                .overlay(shape.strokeBorder(BridgeTokens.bad.opacity(0.22), lineWidth: 0.5))
+        } else {
+            shape.fill(BridgeTokens.wellFill)
+                .overlay(shape.strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+        }
+    }
+
     private func emptyHint(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11.5))
+            .font(BridgeTokens.Typeface.sub)
             .foregroundStyle(BridgeTokens.fg4)
             .fixedSize(horizontal: false, vertical: true)
     }
 
     private var tokenDivider: some View {
         Rectangle()
-            .fill(BridgeTokens.hairline)
+            .fill(BridgeTokens.hairlineFaint)
             .frame(height: 0.5)
             .padding(.vertical, 10)
     }
 
+    /// `.sk-perm` — a permission row: title + sub on the left, the W2
+    /// `BridgeToggle` on the right.
     private func permissionToggleRow(title: String, sub: String, isOn: Binding<Bool>) -> some View {
         HStack(alignment: .center, spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 13.5))
+                    .font(BridgeTokens.Typeface.body)
                     .foregroundStyle(BridgeTokens.fg1)
                 Text(sub)
-                    .font(.system(size: 11.5))
+                    .font(BridgeTokens.Typeface.sub)
                     .foregroundStyle(BridgeTokens.fg4)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
-            Toggle("", isOn: isOn)
-                .toggleStyle(.switch)
-                .labelsHidden()
-                .tint(BridgeTokens.accent)
+            BridgeToggle(isOn: isOn)
                 .accessibilityLabel(title)
                 .accessibilityHint(sub)
         }
+        .padding(.vertical, 10)
     }
 
+    /// Small neutral-glass icon button (`.sk-iconbtn` / `.sk-rename` / actions).
     private func iconButton(_ systemImage: String, help: String, disabled: Bool = false, danger: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        let shape = RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
+        return Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 13))
-                .foregroundStyle(danger ? BridgeTokens.bad.opacity(0.85) : BridgeTokens.fg3)
+                .foregroundStyle(danger ? BridgeTokens.badText : BridgeTokens.fg3)
                 .frame(width: 30, height: 30)
-                .background(BridgeTokens.chipFill, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+                .background(
+                    shape.fill(BridgeTokens.glassControl)
+                        .overlay(shape.strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+                        .bridgeBevel(BridgeTokens.bevelControl, radius: BridgeTokens.Radius.control))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1090,20 +1503,75 @@ struct SkillsView: View {
         .help(help)
     }
 
-    // MARK: - Filtering
+    // MARK: - Counts (real visibility taxonomy)
 
+    /// Counts honor the active source filter so the banner reflects what's shown.
+    private var countableSkills: [SkillsManager.Skill] {
+        switch sourceFilter {
+        case .all:    return skillsManager.skills
+        case .notion: return skillsManager.skills.filter { $0.platform == .notion }
+        case .gdocs:  return skillsManager.skills.filter { $0.platform == .googleDocs }
+        case .file:   return []   // file-source skills are not SkillsManager.Skill
+        }
+    }
+    private var countsTotal: Int {
+        countableSkills.count + (sourceFilter == .all || sourceFilter == .file ? fileSourceSkills.count : 0)
+    }
+    private var countsRouting: Int {
+        countableSkills.filter { $0.enabled && $0.routingDiscoverable }.count
+            + ((sourceFilter == .all || sourceFilter == .file)
+               ? fileSourceSkills.filter { (fileSkillEnabledMap[$0.path.path] ?? true) && (fileSkillRoutingMap[$0.path.path] ?? false) }.count
+               : 0)
+    }
+    private var countsPalette: Int {
+        countableSkills.filter { $0.enabled && $0.inCommandPalette }.count
+            + ((sourceFilter == .all || sourceFilter == .file)
+               ? fileSourceSkills.filter { (fileSkillEnabledMap[$0.path.path] ?? true) && (fileSkillPaletteMap[$0.path.path] ?? false) }.count
+               : 0)
+    }
+
+    // MARK: - Filtering + grouping
+
+    /// Notion / GDocs skills after the search query + source filter.
     private var filteredSkills: [SkillsManager.Skill] {
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return skillsManager.skills }
-        return skillsManager.skills.filter {
-            $0.name.lowercased().contains(q) || $0.summary.lowercased().contains(q)
+        return skillsManager.skills.filter { skill in
+            let matchesQuery = q.isEmpty
+                || skill.name.lowercased().contains(q)
+                || skill.summary.lowercased().contains(q)
+            let matchesSource: Bool = {
+                switch sourceFilter {
+                case .all:    return true
+                case .notion: return skill.platform == .notion
+                case .gdocs:  return skill.platform == .googleDocs
+                case .file:   return false
+                }
+            }()
+            return matchesQuery && matchesSource
         }
     }
 
-    private var filteredFileSkills: [ParsedSkill] {
+    /// File-source skills after the search query + source filter.
+    private var visibleFileSkills: [ParsedSkill] {
+        guard sourceFilter == .all || sourceFilter == .file else { return [] }
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !q.isEmpty else { return fileSourceSkills }
         return fileSourceSkills.filter { $0.name.lowercased().contains(q) }
+    }
+
+    /// Kind grouping — the visibility taxonomy this install actually carries:
+    /// Routing-discoverable · Palette-only · Fetch-only. (`.sk-group-cap`)
+    private struct SkillGroup { let id: String; let label: String; let skills: [SkillsManager.Skill] }
+    private var visibleGroups: [SkillGroup] {
+        let all = filteredSkills
+        let routing = all.filter { $0.routingDiscoverable }
+        let palette = all.filter { !$0.routingDiscoverable && $0.inCommandPalette }
+        let fetch   = all.filter { !$0.routingDiscoverable && !$0.inCommandPalette }
+        return [
+            SkillGroup(id: "routing", label: "Routing & orchestrators", skills: routing),
+            SkillGroup(id: "palette", label: "Palette skills", skills: palette),
+            SkillGroup(id: "fetch",   label: "Fetch-only", skills: fetch),
+        ].filter { !$0.skills.isEmpty }
     }
 
     private func restoreSelectionIfNeeded() {
@@ -1140,8 +1608,15 @@ struct SkillsView: View {
                 self.fileSkillEnabledMap = enabledMap
                 self.fileSkillRoutingMap = routingMap
                 self.fileSkillPaletteMap = paletteMap
+                self.filesLoaded = true
             }
         }
+    }
+
+    /// The genuine first-load window: the async file index hasn't returned yet
+    /// AND there are no Notion skills to show, so the list would read as empty.
+    private var isInitialLoading: Bool {
+        !filesLoaded && skillsManager.skills.isEmpty
     }
 
     // MARK: - Actions (PKT-487) — unchanged
@@ -1239,7 +1714,7 @@ struct SkillsView: View {
                     _ = skillsManager.setRoutingDiscoverable(named: name, to: newSkillRoutingDiscoverable)
                     _ = skillsManager.setInCommandPalette(named: name, to: newSkillInCommandPalette)
                     if storedURL != nil || platform != .notion {
-                        skillsManager.updateSkillExtras(named: name, url: storedURL, platform: platform)
+                        _ = skillsManager.updateSkillExtras(named: name, url: storedURL, platform: platform)
                     }
                     // WS-3: capture the Notion page EMOJI icon in the
                     // background (best-effort; never blocks the add).
@@ -1258,7 +1733,7 @@ struct SkillsView: View {
             if success {
                 _ = skillsManager.setRoutingDiscoverable(named: name, to: newSkillRoutingDiscoverable)
                 _ = skillsManager.setInCommandPalette(named: name, to: newSkillInCommandPalette)
-                skillsManager.updateSkillExtras(named: name, url: storedURL, platform: platform)
+                _ = skillsManager.updateSkillExtras(named: name, url: storedURL, platform: platform)
                 finishAdd(selecting: name)
             } else {
                 addError = "A skill with this name already exists."
@@ -1266,12 +1741,8 @@ struct SkillsView: View {
         }
     }
 
-    /// WS-3: Best-effort background fetch of a Notion page's EMOJI icon,
-    /// stored on the skill when present. Runs detached (the NotionClient is
-    /// an actor and the network call must not block the add); failures are
-    /// swallowed (no token / offline / image-only icon all simply leave the
-    /// skill with its platform-glyph fallback). Hops back to the main actor
-    /// to mutate the @MainActor SkillsManager.
+    /// WS-3: Best-effort background fetch of a Notion page's EMOJI icon, stored
+    /// on the skill when present. Runs detached; failures are swallowed.
     private func captureNotionIcon(forSkill name: String, pageId: String) {
         let manager = skillsManager
         Task.detached(priority: .utility) {
@@ -1310,7 +1781,7 @@ struct SkillsView: View {
 
 /// Minimal flow layout: lays children left-to-right, wrapping to a new line
 /// when the row would overflow. Used for the trigger / anti-trigger chip rows
-/// (the `.sk-chips` flex-wrap idiom from skills.css).
+/// (the `.sk-trigs` flex-wrap idiom from skills.css).
 struct FlowLayout: Layout {
     var spacing: CGFloat = 6
     var lineSpacing: CGFloat = 6

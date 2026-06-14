@@ -126,22 +126,20 @@ public struct PermissionsSection: View {
                     .accessibilityLabel("Manage per-tool gates in Tools")
                 }
                 if activeGrantModules.isEmpty {
-                    Text("No module is set to Always-Allow. Tools follow their per-tool gates (Open · Notify · Request), which you manage on the Tools page.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(BridgeTokens.fg4)
-                        .fixedSize(horizontal: false, vertical: true)
+                    // Design source: a centered "No standing grants" empty state.
+                    BridgeEmptyStateView(
+                        systemImage: "checkmark.shield",
+                        title: "No standing grants",
+                        message: "No module is set to Always-Allow. Tools follow their per-tool gates (Open · Notify · Confirm), which you manage on the Tools page."
+                    )
                 } else {
                     Text("These modules skip the gate prompt — every tool in the module is auto-approved at the granted tier. Revoke to return its tools to their per-tool gates.")
                         .font(.system(size: 11.5))
                         .foregroundStyle(BridgeTokens.fg4)
                         .fixedSize(horizontal: false, vertical: true)
-                    ForEach(activeGrantModules, id: \.self) { module in
-                        grantModuleRow(module)
-                        if module != activeGrantModules.last {
-                            Rectangle()
-                                .fill(BridgeTokens.hairlineFaint)
-                                .frame(height: 0.5)
-                                .padding(.vertical, 1)
+                    VStack(spacing: 6) {
+                        ForEach(activeGrantModules, id: \.self) { module in
+                            grantModuleRow(module)
                         }
                     }
                 }
@@ -153,7 +151,10 @@ public struct PermissionsSection: View {
     private func grantModuleRow(_ module: String) -> some View {
         let tierRaw = moduleGrants[module] ?? ""
         let tier = SecurityTier(rawValue: tierRaw) ?? .notify
+        // SecurityTier rawValues (open/notify/request) round-trip with BridgeTier.
+        let pillTier = BridgeTier(rawValue: tier.rawValue) ?? .notify
         let toolCount = liveTools.filter { ModuleGroupDerivation.resolve(toolName: $0.name).displayName == module }.count
+        let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
         HStack(spacing: 12) {
             moduleIcon(module)
             VStack(alignment: .leading, spacing: 2) {
@@ -165,45 +166,39 @@ public struct PermissionsSection: View {
                     .foregroundStyle(BridgeTokens.fg4)
             }
             Spacer(minLength: 8)
-            tierChip(tier)
-            Button {
-                revokeGrant(module)
-            } label: {
-                Text("Revoke")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(BridgeTokens.badText)
-                    .padding(.horizontal, 10).padding(.vertical, 4)
-                    .background(BridgeTokens.bad.opacity(0.12), in: Capsule())
-                    .overlay(Capsule().strokeBorder(BridgeTokens.bad.opacity(0.30), lineWidth: 0.5))
-                    .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .help("Revoke the Always-Allow grant for \(module) — its tools return to their per-tool gates")
-            .accessibilityLabel("Revoke Always-Allow for \(module)")
+            // W2 `.tier-pill` — read-only tier indicator (open=emerald · notify=
+            // accent · confirm=amber). The Always-Allow tier is shown, not edited.
+            BridgeTierPill(pillTier)
+                .accessibilityLabel("Always-Allow tier: \(pillTier.label.lowercased())")
+            revokeButton(module)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 9)
+        .padding(.horizontal, 12)
+        // Recessed well per the design source (var(--well) + faint hairline).
+        .background(
+            shape.fill(BridgeTokens.wellFill)
+                .overlay(shape.strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+        )
     }
 
-    /// Read-only tier capsule (OPEN/NOTIFY/REQUEST), matching the Tools grammar:
-    /// open=ok, notify=warn, request=bad — signal TEXT via *Text tokens.
+    /// Danger-tinted Revoke pill (W1 bad signal tokens) — clears the grant so the
+    /// module's tools fall back to their per-tool gates.
     @ViewBuilder
-    private func tierChip(_ tier: SecurityTier) -> some View {
-        let (label, fill, text): (String, Color, Color) = {
-            switch tier {
-            case .open:    return ("OPEN", BridgeTokens.ok, BridgeTokens.okText)
-            case .notify:  return ("NOTIFY", BridgeTokens.warn, BridgeTokens.warnText)
-            case .request: return ("REQUEST", BridgeTokens.bad, BridgeTokens.badText)
-            }
-        }()
-        Text(label)
-            .font(.system(size: 11, weight: .semibold))
-            .tracking(0.3)
-            .padding(.horizontal, 9).padding(.vertical, 3)
-            .background(fill.opacity(0.16), in: Capsule())
-            .overlay(Capsule().strokeBorder(fill.opacity(0.30), lineWidth: 0.5))
-            .foregroundStyle(text)
-            .fixedSize()
-            .accessibilityLabel("Always-Allow tier: \(label.lowercased())")
+    private func revokeButton(_ module: String) -> some View {
+        Button {
+            revokeGrant(module)
+        } label: {
+            Text("Revoke")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(BridgeTokens.badText)
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .background(BridgeTokens.bad.opacity(0.12), in: Capsule())
+                .overlay(Capsule().strokeBorder(BridgeTokens.bad.opacity(0.30), lineWidth: 0.5))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("Revoke the Always-Allow grant for \(module) — its tools return to their per-tool gates")
+        .accessibilityLabel("Revoke Always-Allow for \(module)")
     }
 
     @ViewBuilder
@@ -351,13 +346,16 @@ public struct PermissionsSection: View {
             }
             Spacer(minLength: 8)
             if status != .granted && !isChecking {
-                Button(actionLabel(grant: grant, status: status)) {
+                let label = actionLabel(grant: grant, status: status)
+                // Design grammar: an "Allow" affordance is the primary blue CTA;
+                // "Open Settings" is the neutral raised-glass default.
+                BridgeButton(
+                    label,
+                    variant: label == "Allow" ? .primary : .default
+                ) {
                     openSettings(for: grant)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(BridgeTokens.accent)
-                .accessibilityLabel("\(actionLabel(grant: grant, status: status)) — \(grant.displayName)")
+                .accessibilityLabel("\(label) — \(grant.displayName)")
             }
         }
         .padding(.vertical, 11)
@@ -397,21 +395,28 @@ public struct PermissionsSection: View {
         .frame(width: 34, height: 34)
     }
 
+    /// Inline status badge — a W2 signal dot + label. Granted=emerald, denied=red,
+    /// checking/unknown/partial/restart=amber (the design's `.badge` + `.dot`).
     @ViewBuilder
     private func statusBadge(status: PermissionManager.GrantStatus, isChecking: Bool) -> some View {
-        let (text, color): (String, Color) = {
-            if isChecking { return ("Checking\u{2026}", BridgeTokens.warn) }
+        let (text, signal): (String, BridgeSignal) = {
+            if isChecking { return ("Checking\u{2026}", .warn) }
             switch status {
-            case .granted: return ("Granted", BridgeTokens.ok)
-            case .denied: return ("Not granted", BridgeTokens.warn)
-            case .unknown: return ("Unknown", BridgeTokens.warn)
-            case .partiallyGranted: return ("Partial", BridgeTokens.warn)
-            case .restartRecommended: return ("Restart needed", BridgeTokens.warn)
+            case .granted: return ("Granted", .ok)
+            case .denied: return ("Not granted", .bad)
+            case .unknown: return ("Unknown", .warn)
+            case .partiallyGranted: return ("Partial", .warn)
+            case .restartRecommended: return ("Restart needed", .warn)
             }
         }()
-        Text(text)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(color)
+        HStack(spacing: 5) {
+            BridgeStatusDot(signal, size: 6)
+            Text(text)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(signal.text)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(text)
     }
 
     private func systemIcon(for grant: PermissionManager.Grant) -> String {
@@ -557,13 +562,13 @@ public struct PermissionsSection: View {
             VStack(alignment: .leading, spacing: 10) {
                 BridgeCardLabel("Permission management")
                 HStack(spacing: 10) {
-                    Button(role: .destructive) {
+                    BridgeButton(
+                        "Reset all permissions",
+                        systemImage: "arrow.counterclockwise",
+                        variant: .danger
+                    ) {
                         showTCCResetDialog = true
-                    } label: {
-                        Label("Reset all permissions", systemImage: "arrow.counterclockwise")
                     }
-                    .buttonStyle(.bordered)
-                    .tint(BridgeTokens.bad)
                     Spacer()
                 }
                 if let msg = permissionActionMessage {

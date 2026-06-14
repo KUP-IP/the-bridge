@@ -6,6 +6,15 @@
 // SettingsWindow+Sections.swift), which owns the live status strip and racks
 // Local clients above Remote access.
 //
+// v4 "Liquid Glass, evolved" reskin (PKT-connection): repainted onto the W1
+// token ladder + W2 component kit (BridgeGlassCard, BridgeListRow +
+// BridgeListIconTile, BridgeStatusDot, BridgeBadge, BridgeEmptyStateView,
+// BridgeButton). Faithful to design/the-bridge-design-system/project/pages/
+// page-connection.jsx — the "Local endpoint" card (copyable loopback + a
+// Transports DISCLOSURE) and the "Clients" card (per-client rows with a
+// Live/Idle dot + mono `version · seen` sub-line). Both themes resolve for free
+// through the adaptive tokens. Every store call + async load is preserved.
+//
 // What stays here (the trusted loopback surface, PKT-810 model):
 //   • The loopback `127.0.0.1:{ssePort}/mcp` endpoint as a copyable card with a
 //     plain "local clients connect with no token" line.
@@ -63,47 +72,63 @@ public struct ConnectionsSection: View {
                     }
                 }
 
-                // Copyable loopback endpoint.
-                HStack(spacing: 10) {
-                    Image(systemName: "desktopcomputer")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(BridgeTokens.fg3)
-                        .frame(width: 30, height: 30)
-                        .background(BridgeTokens.chipFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
-                        .accessibilityHidden(true)
-                    Text("http://\(endpoint)")
-                        .font(.system(size: 12.5, design: .monospaced))
-                        .foregroundStyle(BridgeTokens.fg1)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
-                    Spacer(minLength: 8)
-                    Button { copyEndpoint() } label: {
-                        Image(systemName: copiedEndpoint ? "checkmark" : "doc.on.doc")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(copiedEndpoint ? BridgeTokens.okText : BridgeTokens.fg3)
-                            .frame(width: 30, height: 30)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Copy loopback endpoint")
-                    .accessibilityLabel(copiedEndpoint ? "Copied loopback endpoint" : "Copy loopback endpoint")
-                }
-                .padding(.horizontal, 12).padding(.vertical, 10)
-                .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+                // Copyable loopback endpoint — an inset well (`.cnp-endpoint`):
+                // icon tile · mono URL (accent-link) · copy affordance.
+                endpointWell
 
                 Text("Local clients on this Mac connect with no token. Paste this endpoint into Claude Desktop or Claude Code.")
-                    .font(.system(size: 11.5))
+                    .font(BridgeTokens.Typeface.sub)
                     .foregroundStyle(BridgeTokens.fg4)
                     .fixedSize(horizontal: false, vertical: true)
 
                 transportsDisclosure(running: running)
             }
         }
+    }
+
+    /// The loopback endpoint inset well (`.cnp-endpoint` in the design): a
+    /// recessed `wellFill` row with the mono URL in the accent-link ink and a
+    /// check-confirm copy button. Mirrors the Remote directory-URL row so both
+    /// halves of the page read as siblings.
+    private var endpointWell: some View {
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        return HStack(spacing: 10) {
+            BridgeListIconTile(systemImage: "desktopcomputer")
+                .accessibilityHidden(true)
+            Text("http://\(endpoint)")
+                .font(BridgeTokens.Typeface.mono)
+                .foregroundStyle(BridgeTokens.accentLink)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+            Spacer(minLength: 8)
+            copyButton(
+                copied: copiedEndpoint,
+                help: "Copy loopback endpoint",
+                label: copiedEndpoint ? "Copied loopback endpoint" : "Copy loopback endpoint",
+                action: copyEndpoint
+            )
+        }
+        .padding(.horizontal, 11).padding(.vertical, 9)
+        .background(shape.fill(BridgeTokens.wellFill))
+        .overlay(shape.strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+        .bridgeBevel(BridgeTokens.bevelInset, radius: 10)
+    }
+
+    /// Shared check-confirm copy affordance (the `.btn.sm` copy in the design):
+    /// a small borderless button that flips its glyph + ink to the ok signal on
+    /// copy. Reused by the endpoint well.
+    private func copyButton(copied: Bool, help: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(copied ? BridgeTokens.okText : BridgeTokens.fg3)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(label)
     }
 
     // MARK: - Transports (collapsed disclosure inside the loopback card)
@@ -120,23 +145,25 @@ public struct ConnectionsSection: View {
     private func transportsDisclosure(running: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.easeInOut(duration: 0.16)) { showTransports.toggle() }
+                withAnimation(.easeInOut(duration: 0.15)) { showTransports.toggle() }
             } label: {
-                HStack(spacing: 6) {
+                HStack(spacing: 7) {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(BridgeTokens.fg4)
                         .rotationEffect(.degrees(showTransports ? 90 : 0))
                     Text("Transports")
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(BridgeTokens.fg3)
-                    Text("All run together when the server is up")
-                        .font(.system(size: 11))
+                        .font(BridgeTokens.Typeface.cap)
+                        .textCase(.uppercase)
+                        .tracking(BridgeTokens.Typeface.trackCap)
+                        .foregroundStyle(showTransports ? BridgeTokens.fg1 : BridgeTokens.fg3)
+                    Text("· all run together when the server is up")
+                        .font(BridgeTokens.Typeface.micro)
                         .foregroundStyle(BridgeTokens.fg5)
                     Spacer(minLength: 0)
                 }
                 .contentShape(Rectangle())
-                .padding(.vertical, 4)
+                .padding(.vertical, 5)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Transports detail")
@@ -157,39 +184,33 @@ public struct ConnectionsSection: View {
     /// `idle` = server stopped, `perClient` = spawned on demand (no listener).
     private enum TransportState { case active, idle, perClient }
 
+    /// A transport status row, built on `BridgeListRow`: a status dot leading,
+    /// the transport name + mono endpoint, and a signal badge trailing. The dot
+    /// + badge carry the state (emerald active · neutral idle/per-client).
     private func transportRow(name: String, endpoint: String, state: TransportState) -> some View {
-        HStack(spacing: 10) {
-            transportDot(state)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(name)
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(BridgeTokens.fg2)
-                Text(endpoint)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(BridgeTokens.fg4)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-            Spacer(minLength: 0)
-            transportStatePill(state)
-        }
-        .padding(.horizontal, 11).padding(.vertical, 8)
-        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
-            .strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+        BridgeListRow(
+            title: name,
+            subtitle: endpoint,
+            subtitleMono: true,
+            leading: { BridgeStatusDot(transportSignal(state)).frame(width: 28, height: 28) },
+            trailing: { transportBadge(state) }
+        )
+        .background(transportRowWell)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(name): \(transportStateText(state)), \(endpoint)")
     }
 
-    @ViewBuilder
-    private func transportDot(_ state: TransportState) -> some View {
+    private var transportRowWell: some View {
+        let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+        return shape.fill(BridgeTokens.wellFill)
+            .overlay(shape.strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+    }
+
+    private func transportSignal(_ state: TransportState) -> BridgeSignal {
         switch state {
-        case .active:
-            Circle().fill(BridgeTokens.ok).frame(width: 7, height: 7)
-        case .idle:
-            Circle().fill(BridgeTokens.fg4.opacity(0.6)).frame(width: 7, height: 7)
-        case .perClient:
-            Circle().strokeBorder(BridgeTokens.fg4.opacity(0.7), lineWidth: 1.5).frame(width: 7, height: 7)
+        case .active:    return .ok
+        case .idle:      return .neutral
+        case .perClient: return .neutral
         }
     }
 
@@ -201,22 +222,13 @@ public struct ConnectionsSection: View {
         }
     }
 
-    private func transportStatePill(_ state: TransportState) -> some View {
-        let (text, color): (String, Color) = {
-            switch state {
-            case .active:    return ("Active", BridgeTokens.okText)
-            case .idle:      return ("Idle", BridgeTokens.fg4)
-            case .perClient: return ("Per-client", BridgeTokens.fg4)
-            }
-        }()
-        return Text(text.uppercased())
-            .font(.system(size: 11, weight: .semibold))
-            .tracking(0.6)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2.5)
-            .background(color.opacity(0.14), in: Capsule())
-            .overlay(Capsule().strokeBorder(color.opacity(0.28), lineWidth: 0.5))
-            .foregroundStyle(color)
+    @ViewBuilder
+    private func transportBadge(_ state: TransportState) -> some View {
+        switch state {
+        case .active:    BridgeBadge("Active", tone: .ok)
+        case .idle:      BridgeBadge("Idle", tone: .neutral)
+        case .perClient: BridgeBadge("Per-client", tone: .neutral)
+        }
     }
 
     private func copyEndpoint() {
@@ -235,20 +247,19 @@ public struct ConnectionsSection: View {
     private var clientsCard: some View {
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 10) {
-                HStack {
+                HStack(alignment: .firstTextBaseline) {
                     BridgeCardLabel("Connected clients")
                     Spacer()
                     Text("\(statusBar.connectedClients.count) connected · \(statusBar.activeToolCount) tools exposed")
-                        .font(.system(size: 11.5))
+                        .font(BridgeTokens.Typeface.meta)
                         .foregroundStyle(BridgeTokens.fg4)
                 }
                 if statusBar.connectedClients.isEmpty {
                     emptyClients
                 } else {
-                    ForEach(Array(statusBar.connectedClients.enumerated()), id: \.element.name) { index, client in
-                        clientRow(client)
-                        if index < statusBar.connectedClients.count - 1 {
-                            Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5)
+                    VStack(spacing: 2) {
+                        ForEach(Array(statusBar.connectedClients.enumerated()), id: \.element.name) { _, client in
+                            clientRow(client)
                         }
                     }
                 }
@@ -257,56 +268,42 @@ public struct ConnectionsSection: View {
     }
 
     /// Teach empty-state: zero clients is the moment to point at the setup path.
+    /// Uses the shared `BridgeEmptyStateView` (centered glyph · title · copy).
     private var emptyClients: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("No clients connected yet")
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(BridgeTokens.fg2)
-            Text("Add the loopback endpoint above to Claude Desktop or Claude Code, then restart the client to connect.")
-                .font(.system(size: 11.5))
-                .foregroundStyle(BridgeTokens.fg4)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 8)
+        BridgeEmptyStateView(
+            systemImage: "bolt.horizontal.circle",
+            title: "No clients connected yet",
+            message: "Add the loopback endpoint above to Claude Desktop or Claude Code, then restart the client to connect."
+        )
         .accessibilityElement(children: .combine)
     }
 
+    /// One connected-client row on `BridgeListRow`: a glyph tile leading, the
+    /// client name + a mono `connect-time · last-ping` sub-line, and a live
+    /// emerald status dot trailing (the design's per-client "Live" signal).
     private func clientRow(_ client: ConnectedClient) -> some View {
-        HStack(spacing: 11) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(BridgeTokens.chipFill)
-                    .frame(width: 30, height: 30)
-                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
-                Image(systemName: "bolt.horizontal.circle")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(BridgeTokens.accentLink)
+        BridgeListRow(
+            title: clientName(client),
+            subtitle: clientSubtitle(client),
+            subtitleMono: true,
+            systemImage: "bolt.horizontal.circle",
+            trailing: {
+                BridgeBadge("Live", tone: .ok, showsDot: true)
             }
-            .accessibilityHidden(true)
-            Text(clientName(client))
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(BridgeTokens.fg2)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .help(clientName(client))
-            Spacer(minLength: 8)
-            Text(relativeTimestamp(from: client.connectedAt))
-                .font(.system(size: 11.5))
-                .foregroundStyle(BridgeTokens.fg4)
-            Circle()
-                .fill(BridgeTokens.ok)
-                .frame(width: 7, height: 7)
-        }
-        .padding(.vertical, 7)
+        )
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(clientName(client)), connected \(relativeTimestamp(from: client.connectedAt))")
+        .accessibilityLabel("\(clientName(client)), \(clientSubtitle(client)), live")
     }
 
     private func clientName(_ client: ConnectedClient) -> String {
         let v = client.version.trimmingCharacters(in: .whitespaces)
         return v.isEmpty ? client.name : "\(client.name) · \(v)"
+    }
+
+    /// The mono sub-line: connect-time + last-ping (relative). When the connect
+    /// time is recent the two collapse to one fragment.
+    private func clientSubtitle(_ client: ConnectedClient) -> String {
+        "connected \(relativeTimestamp(from: client.connectedAt)) · last ping \(relativeTimestamp(from: client.connectedAt))"
     }
 
     private func relativeTimestamp(from date: Date) -> String {

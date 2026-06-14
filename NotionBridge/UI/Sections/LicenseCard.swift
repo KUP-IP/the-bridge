@@ -103,20 +103,38 @@ public struct LicenseCard: View {
     public var body: some View {
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
+                HStack(spacing: 9) {
+                    premiumGlyph
                     BridgeCardLabel("License")
-                    Spacer()
+                    Spacer(minLength: 8)
                     statusPill
                 }
                 content
                 if let err = state.lastError {
-                    Text(err)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(BridgeTokens.badText)
+                    BridgeBanner(signal: .bad, message: err)
                         .accessibilityLabel("License activation error: \(err)")
                 }
             }
         }
+    }
+
+    /// Leading premium glyph — gold "bolt" for licensed/grandfathered (the v4
+    /// gold-premium accent), royal-blue for an active trial, signal-tinted when
+    /// lapsed. Echoes the design source's gold license mark.
+    private var premiumGlyph: some View {
+        let (symbol, tint): (String, Color) = {
+            switch state.kind {
+            case .trial:           return ("bolt.fill", BridgeTokens.accentLink)
+            case .trialExpired:    return ("bolt.slash.fill", BridgeTokens.badText)
+            case .licensed:        return ("bolt.fill", BridgeTokens.goldSoft)
+            case .licenseExpired:  return ("bolt.slash.fill", BridgeTokens.warnText)
+            case .grandfathered:   return ("bolt.fill", BridgeTokens.goldSoft)
+            }
+        }()
+        return Image(systemName: symbol)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(tint)
+            .accessibilityHidden(true)
     }
 
     // MARK: Status pill (visible on every variant)
@@ -185,10 +203,7 @@ public struct LicenseCard: View {
                 }
                 HStack {
                     Spacer()
-                    Button("Remove license", role: .destructive, action: onDeactivate)
-                        .buttonStyle(.bordered)
-                        .tint(BridgeTokens.bad)
-                        .controlSize(.small)
+                    BridgeButton("Remove license", variant: .danger, action: onDeactivate)
                 }
             }
         case .licenseExpired(let subject, let expS):
@@ -200,10 +215,7 @@ public struct LicenseCard: View {
                 pasteRow
                 HStack {
                     Spacer()
-                    Button("Remove license", role: .destructive, action: onDeactivate)
-                        .buttonStyle(.bordered)
-                        .tint(BridgeTokens.bad)
-                        .controlSize(.small)
+                    BridgeButton("Remove license", variant: .danger, action: onDeactivate)
                 }
             }
         case .grandfathered:
@@ -237,16 +249,23 @@ public struct LicenseCard: View {
     private var pasteRow: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
+                // v4 well input (mirrors the credential-sheet field treatment):
+                // recessed fill + hairline, mono face for the key.
                 TextField("License key (paste here)", text: $pasteField)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundStyle(BridgeTokens.fg1)
                     .disableAutocorrection(true)
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
                     .accessibilityLabel("License key input")
-                Button("Activate", action: onActivate)
-                    .buttonStyle(.borderedProminent)
-                    .tint(BridgeTokens.accent)
-                    .controlSize(.small)
-                    .disabled(pasteField.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !state.canPasteActivate)
+                BridgeButton(
+                    "Activate",
+                    variant: .primary,
+                    isEnabled: !pasteField.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && state.canPasteActivate,
+                    action: onActivate
+                )
             }
             if !state.canPasteActivate {
                 Text("Paste-activation is unavailable in this build (no bundled public key). Reach out to support if you have a valid key.")
@@ -259,10 +278,7 @@ public struct LicenseCard: View {
     private var buyRow: some View {
         HStack {
             Spacer()
-            Button("Buy a license", action: onBuy)
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("Opens the kup.solutions store in your browser.")
+            BridgeButton("Buy a license", variant: .default, action: onBuy)
         }
     }
 }
