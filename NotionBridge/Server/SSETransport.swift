@@ -951,7 +951,7 @@ public actor SSEServer {
 
         let router = self.router
         let onToolCall = self.onToolCall
-        let toolAllowlist = self.toolAllowlist
+        let toolAllowlist = (connectorAuth != nil && !connectorAuthed) ? nil : self.toolAllowlist
 
         // MCP resource handlers (Streamable-HTTP path). Bytes come from the
         // same StandingOrdersDelivery SSOT the stdio + legacy paths serve.

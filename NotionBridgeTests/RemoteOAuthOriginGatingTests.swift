@@ -74,6 +74,17 @@ func runRemoteOAuthOriginGatingTests() async {
         )
     }
 
+    func streamText(from response: HTTPResponse) async throws -> String {
+        guard case .stream(let stream, _) = response else {
+            throw TestError.assertion("expected SSE stream response, got status \(response.statusCode)")
+        }
+        var text = ""
+        for try await data in stream {
+            text += String(decoding: data, as: UTF8.self)
+        }
+        return text
+    }
+
     // MARK: - Pure discriminator
 
     await test("OriginGate: Cf-Connecting-Ip OR Cf-Ray ⇒ remote; neither ⇒ local") {
@@ -100,6 +111,59 @@ func runRemoteOAuthOriginGatingTests() async {
         // the point is it is NOT an auth rejection.
         try expect(resp.statusCode != 401, "local+correct-bearer must not 401, got \(resp.statusCode)")
         try expect(resp.statusCode != 403, "local+correct-bearer must not 403, got \(resp.statusCode)")
+    }
+
+    await test("OriginGate: LOCAL static bearer session keeps full local tool surface") {
+        let router = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
+        await router.register(ToolRegistration(
+            name: "local_probe",
+            module: "test",
+            tier: .open,
+            description: "Local-only probe for static bearer sessions.",
+            inputSchema: .object(["type": .string("object")]),
+            handler: { _ in .string("local-ok") }
+        ))
+        let s = SSEServer(
+            router: router,
+            onToolCall: {},
+            toolAllowlist: ConnectorScopeGate.connectorReachableTools,
+            connectorAuth: authWithLocal()
+        )
+        let initBody = Data("""
+        {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"\(BridgeConstants.mcpProtocolVersion)","capabilities":{},"clientInfo":{"name":"codex-local-bridge-check","version":"test"}}}
+        """.utf8)
+        let initResp = await s.handleHTTPRequest(HTTPRequest(
+            method: "POST",
+            headers: [
+                "Authorization": "Bearer \(ogLocalBearer)",
+                "Host": "127.0.0.1:9700",
+                "Accept": "application/json, text/event-stream",
+                "Content-Type": "application/json"
+            ],
+            body: initBody
+        ))
+        guard let sessionID = initResp.headers[HTTPHeaderName.sessionID] else {
+            throw TestError.assertion("local static bearer initialize must return a session id")
+        }
+        _ = try await streamText(from: initResp)
+
+        let callBody = Data(#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"local_probe","arguments":{}}}"#.utf8)
+        let callResp = await s.handleHTTPRequest(HTTPRequest(
+            method: "POST",
+            headers: [
+                "Authorization": "Bearer \(ogLocalBearer)",
+                "Mcp-Session-Id": sessionID,
+                "Host": "127.0.0.1:9700",
+                "Accept": "application/json, text/event-stream",
+                "Content-Type": "application/json"
+            ],
+            body: callBody
+        ))
+        let callText = try await streamText(from: callResp)
+        try expect(!callText.contains("not allowed in this session"),
+                   "loopback static-bearer session must not inherit connector allowlist: \(callText)")
+        try expect(callText.contains("local-ok"),
+                   "local-only tool must dispatch on loopback static-bearer sessions: \(callText)")
     }
 
     await test("OriginGate: LOCAL + wrong static bearer ⇒ 401") {
