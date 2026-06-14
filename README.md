@@ -2,15 +2,15 @@
 
 **A native macOS menu-bar app that turns your Mac into an MCP server for Notion AI agents and local coding clients.**
 
-The Bridge exposes local Mac capabilities and connected services as MCP tools over **Streamable HTTP**, **legacy SSE**, and **stdio**. It is built in Swift 6.2 for macOS 26+ on Apple Silicon and is designed to be always-on, auto-launched, and safe enough for daily operator use.
+The Bridge exposes your local Mac and connected services as Model Context Protocol (MCP) tools over **Streamable HTTP**, **legacy SSE**, and **stdio** — locally on `127.0.0.1` for clients like Claude Code, Cursor, and Notion agents, and **securely from the cloud** (claude.ai and ChatGPT custom connectors) through a customer-owned Cloudflare Tunnel with OAuth. Built in Swift 6.2 for macOS 26+ on Apple Silicon, it is designed to be always-on, auto-launched, and safe enough for daily operator use.
 
-**~173 tools** across 25 module groups · **3 transports** · **3-tier security model** · **Customer-owned Cloudflare Tunnel support** · **Liquid Glass UI** (v3.6+)
+**~220 tools** across 29 module groups · **3 transports + cloud connector** (Claude web · ChatGPT) · **3-tier security model** with on-device approvals · **Liquid Glass UI**
 
-**Latest release:** [v3.6.0](https://github.com/KUP-IP/the-bridge/releases/tag/v3.6.0) — Liquid Glass complete (May 2026). Existing v3.4.x installs auto-update via Sparkle.
+**Latest release:** [v3.7.10](https://github.com/KUP-IP/the-bridge/releases/tag/v3.7.10) (June 2026) — the cloud connector works end-to-end over OAuth for both Claude web and ChatGPT. Existing installs auto-update via Sparkle.
 
 **Product page:** https://kup.solutions/notion-bridge
 
-> **Naming history:** "NotionBridge" was the product's original name. As of v3.6.0 the user-facing brand is **The Bridge**. The Swift target, bundle identifier (`kup.solutions.notion-bridge`), and Keychain service name (`com.notionbridge`) are intentionally preserved — that keeps existing user data continuous across the rename.
+> **Naming history:** "NotionBridge" was the product's original name; the user-facing brand is **The Bridge**. The Swift target and bundle identifier (`kup.solutions.notion-bridge`) are intentionally preserved for data continuity. The Keychain service was renamed `com.notionbridge` → `kup.solutions.the-bridge` (v3.7.8), and all prior services are still read so existing secrets migrate with zero loss.
 
 ---
 
@@ -29,7 +29,7 @@ Current commercial posture:
 
 ## Current product surface
 
-The Bridge currently ships ~173 tools organized into 25 module groups, surfaced collapsibly in **Settings → Tools** (PKT-877 ModuleGroup UI). Highlights below; the full registry is in-app.
+The Bridge currently ships **~220 tools organized into 29 module groups**, surfaced collapsibly in **Settings → Tools**. Highlights below; the full registry is in-app.
 
 | Module | Tools | Notes |
 |---|---:|---|
@@ -49,17 +49,18 @@ The Bridge currently ships ~173 tools organized into 25 module groups, surfaced 
 | SkillsModule | 3 | `fetch_skill`, `list_routing_skills`, `manage_skill` |
 | ConnectionsModule | 5 | connection inventory, health, validation |
 | BuiltinModule | 1 | `echo` (registered in `ServerManager`, not a Swift `*Module` type) |
-| **Total** | **~173** | Across 25 ModuleGroups. Includes dynamic Stripe MCP tools (currently 26 when configured) and the v3.5+ additions: CommandStore (10-slot favorites), StandingOrders (per-client overlays), JobsManager (launchd-backed schedules), Git/Gh, BgProcess, LSP, Snippets, Dev, DevServer, Lighthouse, Playwright, Vitest, Wrangler |
+| **Total** | **~220** | Across 29 module groups. Includes the dynamic Stripe MCP proxy tools (when configured) plus the v3.5–v3.7 additions: the Apple suite (**Calendar**, **Reminders**, **Notes**, **Mail**, **Shortcuts**), **Memory** (recall/remember/export/import), on-device **Automation**, **CommandStore** (10-slot favorites), **StandingOrders** (per-client overlays), **JobsManager** (launchd-backed schedules), **Git/Gh**, **BgProcess**, **LSP**, **Snippets**, **Permissions**, and Swift build tools (`swift_build` / `swift_test` / `make_run`) |
 
 Core product traits:
 - Native macOS menu-bar app with onboarding, settings, and a status popover
 - **Liquid Glass UI** (v3.6+) — BridgeGlassCard, BridgeGlassBubble, dep-link chips, ModuleGroup cards, Standing Orders composer with per-client overlays
-- **Command Bridge popup** — global hotkey (⌃⌥⌘C default) opens a bottom-anchored SwiftUI tray with 10 favorite-slot bubbles + substring search + recents
+- **Command Bridge popup** — global hotkey (**⌃⌘B** default, "B for Bridge") opens a bottom-anchored SwiftUI tray with 10 favorite-slot bubbles + substring search + recents
 - Auto-launch via `SMAppService`
 - Streamable HTTP and legacy SSE on the same local server surface
 - stdio support for local clients such as Claude Code and Cursor
 - Local-first security gate with audit logging + **dispatch fail-closed** (disabled tool groups return typed `BridgeToolError.moduleGroupDisabled`, never silent failure)
-- Optional remote access through a customer-owned Cloudflare Tunnel
+- **Cloud connector** — reachable as a custom connector from **claude.ai** and **ChatGPT** over a customer-owned Cloudflare Tunnel, authorized with WorkOS OAuth and gated per-tool by the on-device security model (see **[Cloud connector](#cloud-connector)** below)
+- Optional remote access through a customer-owned Cloudflare Tunnel (static-bearer path, for non-OAuth clients)
 
 ---
 
@@ -118,7 +119,7 @@ If you are using Notion tools, add a valid Notion integration token through the 
 
 **Factory Reset** clears local config, Keychain entries for The Bridge, resets macOS permissions for the app, and reloads in-memory workspace connection state. **Skills** are cleared to an **empty** list.
 
-**Credentials** (Settings → Credentials) are **opt-in**: enable “Keychain credentials & MCP tools” to use `credential_*` and `payment_execute` with stored payment methods. When disabled, those MCP tools are omitted from listings and fail closed if called.
+**Credentials** (Settings → Security) are **opt-in**: enable “Keychain credentials & MCP tools” to use `credential_*` and `payment_execute` with stored payment methods. When disabled, those MCP tools are omitted from listings and fail closed if called.
 
 If you launch the app with **`NOTION_API_TOKEN`** or **`NOTION_API_KEY`** set in the environment, Notion can still resolve a token after reset (that path is intentional for developers). Unset those variables when testing a truly empty workspace. Restart the app after reset so permission and connection UIs stay consistent.
 
@@ -136,7 +137,7 @@ This is the primary HTTP MCP endpoint. The listener is bound to **loopback** onl
 
 ### Remote MCP security
 
-When a tunnel URL is set, **`POST /mcp` requires** a configured **MCP remote token** in the same settings section (generate/copy there) and matching **`Authorization: Bearer …`** in your MCP client. Without a token, new MCP sessions are rejected (fail closed). With an **empty** tunnel URL, local use is unchanged and a bearer is optional (you can still set a token to harden localhost-only clients). Tokens are stored in the **Keychain** in the app; **`com.notionbridge.mcpBearerToken`** remains a legacy read path. For defense in depth at the edge, operators can put **Cloudflare Access** in front of the tunnel hostname — see [docs/operator/cloudflare-access-notion-bridge.md](docs/operator/cloudflare-access-notion-bridge.md). Browser-based clients such as Claude chat generally cannot supply Cloudflare service-token headers, and Cloudflare browser challenges or Browser Integrity Check on `/mcp` can block valid MCP traffic before it reaches the app. In that case, use a narrow path-scoped bypass for `POST /mcp` and rely on the NotionBridge bearer token at the app layer.
+When a tunnel URL is set, **`POST /mcp` requires** a configured **MCP remote token** in the same settings section (generate/copy there) and matching **`Authorization: Bearer …`** in your MCP client. Without a token, new MCP sessions are rejected (fail closed). With an **empty** tunnel URL, local use is unchanged and a bearer is optional (you can still set a token to harden localhost-only clients). Tokens are stored in the **Keychain** (service `kup.solutions.the-bridge`, account `mcp_bearer_token`); the legacy UserDefaults key `com.notionbridge.mcpBearerToken` remains a fallback read path. This static bearer is for the loopback/tunnel path; cloud clients use OAuth instead (see [Cloud connector](#cloud-connector)). For defense in depth at the edge, operators can put **Cloudflare Access** in front of the tunnel hostname — see [docs/operator/cloudflare-access-notion-bridge.md](docs/operator/cloudflare-access-notion-bridge.md). Browser-based clients such as Claude chat generally cannot supply Cloudflare service-token headers, and Cloudflare browser challenges or Browser Integrity Check on `/mcp` can block valid MCP traffic before it reaches the app. In that case, use a narrow path-scoped bypass for `POST /mcp` and rely on the NotionBridge bearer token at the app layer.
 
 ### Legacy SSE
 
@@ -153,7 +154,7 @@ Use stdio when connecting local clients such as Claude Code or Cursor directly t
 
 #### Using Bridge with Antigravity
 
-Google Antigravity enforces a strict 100-tool limit per MCP server, whereas The Bridge exposes ~173 tools. To use Bridge with Antigravity, we have curated a subset of ~84 tools to stay under the limit.
+Google Antigravity enforces a strict 100-tool limit per MCP server, whereas The Bridge exposes ~220 tools. To use Bridge with Antigravity, we have curated a subset of ~84 tools to stay under the limit.
 
 You can launch the Bridge process with a `--multi-instance` flag (bypasses single-instance GUI guard) and `--allow-tools` flag pointing to the Antigravity allowlist:
 
@@ -171,6 +172,22 @@ You can launch the Bridge process with a `--multi-instance` flag (bypasses singl
   }
 }
 ```
+
+---
+
+## Cloud connector
+
+The Bridge can be added as a **custom connector in claude.ai (web + mobile) and ChatGPT**, letting those hosted assistants operate your Mac's tools securely. Verified end-to-end in v3.7.10 — Claude web and ChatGPT each list and act on local files over the connector.
+
+**How it works:**
+
+- The loopback server (`127.0.0.1:9700`) is published at a stable HTTPS URL (e.g. `https://mcp.kup.solutions/mcp`) through a **customer-owned Cloudflare Tunnel** — the Mac is never exposed directly.
+- Cloud clients authenticate via **OAuth 2.1** against a **WorkOS AuthKit** authorization server: RFC 9728 Protected Resource Metadata, RFC 8707 resource indicators, Dynamic Client Registration, and PKCE. The connector advertises the standard OpenID scopes the authorization server actually mints, so the authorize step never fails with `invalid_scope`.
+- After a valid token, **every `tools/call` is gated by the on-device security model** (tiers + macOS approval prompts). The authenticated principal is the operator; the local approval is the real guardrail.
+- **Local ↔ cloud coexistence:** a direct-loopback request (no Cloudflare tunnel header) can fall back to the local static bearer, so desktop clients keep working while cloud OAuth is on. A tunnelled request always carries the tunnel header, so it can never reach that fallback — the static bearer can never bypass OAuth.
+- Connector clients receive **compact JSON-RPC** responses (ChatGPT's importer cannot parse the SDK's SSE framing); the SSE path is retained for local desktop clients.
+
+**Requirements:** the Mac must be awake with The Bridge running and the Cloudflare Tunnel up. WorkOS access tokens are short-lived, so cloud clients re-authorize periodically (the connector shows a "Connect"/reconnect prompt). See [docs/operator/cloud-deploy-runbook.md](docs/operator/cloud-deploy-runbook.md) and [docs/operator/connector-directory-submission.md](docs/operator/connector-directory-submission.md).
 
 ---
 
