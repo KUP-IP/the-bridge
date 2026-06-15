@@ -11,7 +11,7 @@ import Foundation
 public enum AppVersion {
     /// Marketing version (CFBundleShortVersionString equivalent).
     /// Format: MAJOR.MINOR.PATCH (Semantic Versioning).
-    public static let marketing = "3.7.11"
+    public static let marketing = "3.7.12"
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
@@ -54,7 +54,10 @@ public enum AppVersion {
     ///   set Info.plist CFBundleVersion to 57 + marketing 3.7.10→3.7.11 but
     ///   left this `build` constant at 56 — re-synced here so the SSOT, the
     ///   in-app display, and the bundle agree (Sparkle compares CFBundleVersion).
-    public static let build = "57"
+    /// v3.7.12: 57 → 58 — v4 "Liquid Glass, evolved" UI redesign (foundation
+    ///   tokens + component layer + 7 settings pages + 3 surfaces); ~95% design
+    ///   compliance vs the Claude Design handoff, zero functional regression (1884/0).
+    public static let build = "58"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }

@@ -96,56 +96,103 @@ extension View {
 
 // MARK: - W4 (3.4.1): Shared Components — used across all 7 Settings tabs.
 
-/// Single-pill labeled badge. Replaces ad-hoc HStack badges scattered
-/// across rows; one component = one visual language across the app.
+/// Single-pill labeled badge — the v4 `.badge` status pill. One component =
+/// one visual language across the app.
+///
+/// v4: refined to a 999px pill (20px tall) with a `.5px` signal-tinted border
+/// over a translucent signal fill + the signal *Text token for the label, per
+/// materials.css / preview/cmp-badges-chips.html. The five tones map to the
+/// design's `ok · warn · bad · neutral · info`. The pre-v4 `.success` /
+/// `.warning` cases are kept as back-compat aliases of `ok` / `warn`, and a new
+/// `.bad` (== `.error`) tone is added (additive). Signal colors come from the
+/// W1 tokens, so both carbon + titanium are covered.
 struct BridgeBadge: View {
     let label: String
     let systemImage: String?
     let tone: Tone
+    let showsDot: Bool
 
     enum Tone {
         case neutral
         case info
-        case success
-        case warning
+        case ok
+        case warn
+        case bad
+        // ── back-compat aliases (pre-v4 call sites) ──
+        case success   // == ok
+        case warning   // == warn
 
-        var background: Color {
+        /// Collapse the alias cases to the five canonical signals.
+        fileprivate var canonical: Tone {
             switch self {
-            case .neutral: return Color.secondary.opacity(0.10)
-            case .info:    return BridgeTokens.accent.opacity(0.12)
-            case .success: return BridgeTokens.ok.opacity(0.12)
-            case .warning: return BridgeTokens.warn.opacity(0.14)
+            case .success: return .ok
+            case .warning: return .warn
+            default:       return self
+            }
+        }
+
+        /// Translucent signal fill (`color-mix(in srgb, <signal> ~16%, transparent)`).
+        var background: Color {
+            switch canonical {
+            case .neutral: return BridgeTokens.chipFill
+            case .info:    return BridgeTokens.accent.opacity(0.16)
+            case .ok:      return BridgeTokens.ok.opacity(0.16)
+            case .warn:    return BridgeTokens.warn.opacity(0.16)
+            case .bad:     return BridgeTokens.bad.opacity(0.15)
+            case .success, .warning: return .clear // unreachable (canonicalized)
+            }
+        }
+        /// `.5px` signal-tinted border (`color-mix(<signal> ~32%, transparent)`),
+        /// or the `accentBorder` token for `.info`, the hairline for `.neutral`.
+        var border: Color {
+            switch canonical {
+            case .neutral: return BridgeTokens.hairline
+            case .info:    return BridgeTokens.accentBorder
+            case .ok:      return BridgeTokens.ok.opacity(0.32)
+            case .warn:    return BridgeTokens.warn.opacity(0.34)
+            case .bad:     return BridgeTokens.bad.opacity(0.30)
+            case .success, .warning: return .clear // unreachable
             }
         }
         var foreground: Color {
-            switch self {
-            case .neutral: return Color.secondary
+            switch canonical {
+            case .neutral: return BridgeTokens.fg3
             case .info:    return BridgeTokens.infoText
-            case .success: return BridgeTokens.okText
-            case .warning: return BridgeTokens.warnText
+            case .ok:      return BridgeTokens.okText
+            case .warn:    return BridgeTokens.warnText
+            case .bad:     return BridgeTokens.badText
+            case .success, .warning: return .clear // unreachable
             }
         }
     }
 
-    init(_ label: String, systemImage: String? = nil, tone: Tone = .neutral) {
+    /// `showsDot` prepends a 6px `currentColor` status dot (materials.css
+    /// `.badge .dot`). Off by default to preserve the prior badge silhouette.
+    init(_ label: String, systemImage: String? = nil, tone: Tone = .neutral, showsDot: Bool = false) {
         self.label = label
         self.systemImage = systemImage
         self.tone = tone
+        self.showsDot = showsDot
     }
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
+            if showsDot {
+                Circle().fill(tone.foreground).frame(width: 6, height: 6)
+            }
             if let systemImage {
                 Image(systemName: systemImage)
-                    .font(.caption2)
+                    .font(BridgeTokens.Typeface.cap)
             }
             Text(label)
-                .font(.caption2)
+                .font(BridgeTokens.Typeface.cap)
+                .tracking(0.1)   // `.badge { letter-spacing: .01em }`
         }
         .foregroundStyle(tone.foreground)
-        .padding(.horizontal, BridgeSpacing.xs)
-        .padding(.vertical, 3)
-        .background(tone.background, in: RoundedRectangle(cornerRadius: 4))
+        .frame(height: 20)
+        .padding(.horizontal, 9)
+        .background(tone.background, in: Capsule(style: .continuous))
+        .overlay(Capsule(style: .continuous).strokeBorder(tone.border, lineWidth: 0.5))
         .accessibilityLabel(systemImage == nil ? label : "\(label), \(systemImage!)")
     }
 }

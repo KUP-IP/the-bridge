@@ -1002,7 +1002,14 @@ set -euo pipefail
 # pure/CI-running tests; the 87-test GUI/TCC local-only margin is untouched), so the
 # CI-reliable green moves 1992 → 1992 − 215 = 1777. NOT a regression — legitimate tool
 # removal. staticFeatureModuleToolCount 211 → 161, family count 29 → 26 (Version.swift).
-FLOOR="${BRIDGE_TEST_FLOOR:-1777}"
+# v4 "Liquid Glass, evolved" UI redesign (2026-06-14): the W1 foundation added +20
+# BridgeTokens v4 adaptive-token tests (type scale / 6-rung elevation ladder / material
+# tokens); the UI waves (component layer + 7 settings pages + 3 surfaces + the QA fix-wave)
+# changed no test counts — views are behavior-tested, not unit-tested — and removed no tests
+# (the only test edit was PKT879Dashboard popoverWidth 300→340 to track the design width).
+# Integrated green independently measured 1884 (1864 → 1884), 0 failed. Floor raised
+# 1777 → 1884 per the order-inversion rule to lock the new coverage.
+FLOOR="${BRIDGE_TEST_FLOOR:-1884}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

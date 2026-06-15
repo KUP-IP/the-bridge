@@ -699,9 +699,12 @@ public final class CommandBridgeController: NSObject {
         model.onFireSlug = { [weak self] slug in self?.fireSlug(slug) }
         model.onEscape   = { [weak self] in self?.hide() }
         model.onSettings = { [weak self] in self?.openCommandsSettings() }
-        // (v3.7.6) Leading bridge-mark → present the Dashboard popover. We hide
-        // the palette first so the two surfaces don't overlap, then hand off to
-        // the App-layer presenter (which owns the StatusBar / PermissionManager).
+        // (v3.7.6) Dashboard popover presenter. The pill no longer carries a
+        // leading bridge-mark (the design `.cb-pill` has none — see `pill`), so
+        // this is invoked from the status-bar item path rather than the palette
+        // bar; it stays wired so that entry point keeps working. We hide the
+        // palette first so the two surfaces don't overlap, then hand off to the
+        // App-layer presenter (which owns the StatusBar / PermissionManager).
         model.onBridgeMark = { [weak self] in self?.openDashboard() }
         self.model = model
 
@@ -789,7 +792,9 @@ public final class CommandBridgeViewModel: ObservableObject {
     public var onFireSlug: (String) -> Void = { _ in }
     public var onEscape: () -> Void = {}
     public var onSettings: () -> Void = {}
-    /// (v3.7.6) Leading bridge-mark tap → open the Dashboard popover.
+    /// (v3.7.6) Open the Dashboard popover. No longer fired from a pill glyph
+    /// (the design `.cb-pill` has no leading mark); retained for the status-bar
+    /// entry point that presents the same Dashboard surface.
     public var onBridgeMark: () -> Void = {}
 
     private let store: CommandStore
@@ -894,26 +899,13 @@ public final class CommandBridgeViewModel: ObservableObject {
 public struct CommandBridgeRootView: View {
     @ObservedObject var model: CommandBridgeViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion: Bool
-    // v3.7.6 system-tethered: the pill/panel sheen must adapt — a raw white
-    // sheen over the heavier tint would wash out on the titanium (light)
-    // canvas. DARK keeps the locked white sheen; LIGHT mirrors it dark.
-    @Environment(\.colorScheme) private var colorScheme: ColorScheme
     @FocusState private var queryFocused: Bool
+    /// Drives the leading caret blink (`.cb-caret` / `cb-blink`). Starts true
+    /// (visible) and toggles under a repeating animation; reduce-motion pins it on.
+    @State private var caretOn: Bool = true
 
     private var anim: CommandBridgeAnimation {
         reduceMotion ? .reduced : .locked
-    }
-
-    /// Adaptive sheen stops for the glass pill / results panel. DARK keeps the
-    /// brief's white values; LIGHT uses a faint dark gradient so the surface
-    /// still reads as raised glass on #ECEDEF without blowing out to white.
-    private func sheenTop(_ darkAlpha: Double) -> Color {
-        colorScheme == .dark ? Color.white.opacity(darkAlpha)
-                             : Color.black.opacity(darkAlpha * 0.45)
-    }
-    private func sheenBottom(_ darkAlpha: Double) -> Color {
-        colorScheme == .dark ? Color.white.opacity(darkAlpha)
-                             : Color.black.opacity(darkAlpha * 0.20)
     }
 
     public init(model: CommandBridgeViewModel) {
@@ -930,7 +922,7 @@ public struct CommandBridgeRootView: View {
             // Clear backing — BridgeGlass surfaces draw their own
             // background. Lets the panel's NSWindow shape through.
             Color.clear
-            VStack(spacing: 8) {
+            VStack(spacing: BridgeTokens.Space.s3) {
                 tray
                 pill
                 if case .none = model.panelMode {
@@ -939,6 +931,7 @@ public struct CommandBridgeRootView: View {
                     secondaryPanel
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
+                footer
             }
             .padding(.horizontal, 0)
             .padding(.top, 16)
@@ -985,26 +978,22 @@ public struct CommandBridgeRootView: View {
 
     @ViewBuilder
     private func slotView(_ row: CommandBridgeViewModel.SlotRow, cascadeIndex: Int) -> some View {
-        VStack(spacing: 6) {
+        VStack(spacing: BridgeTokens.Space.s2) {
             if let cmd = row.command {
                 Button { model.onFireSlot(row.storeSlot) } label: {
-                    BridgeGlassBubble(size: 52) {
-                        iconView(for: cmd.icon, color: cmd.color, size: 22)
+                    BridgeGlassBubble(size: Self.bubbleSize) {
+                        iconView(for: cmd.icon, color: cmd.color, size: 25)
                     }
                 }
                 .buttonStyle(.plain)
-                Text("\(row.displayKey)")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(BridgeTokens.fg4)
-                    .monospacedDigit()
+                keycap(row.displayKey, empty: false)
             } else {
-                // Position-stable transparent placeholder (per locked design).
-                BridgeGlassBubble(size: 52) { EmptyView() }
-                    .opacity(0)
-                Text("\(row.displayKey)")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.clear)
-                    .monospacedDigit()
+                // Position-stable EMPTY slot (per v4 design source): a faint
+                // dashed glass well so the tray's keycap row stays evenly spaced
+                // and the slot still reads as an assignable position. The keycap
+                // is dimmed (fg5) rather than hidden so the number remains legible.
+                emptyWell
+                keycap(row.displayKey, empty: true)
             }
         }
         // Bubble cascade — 10ms stagger per slot from the locked spec.
@@ -1016,73 +1005,122 @@ public struct CommandBridgeRootView: View {
         )
     }
 
+    /// Tray bubble edge length — the v4 source draws 54px liquid-glass domes.
+    private static let bubbleSize: CGFloat = 54
+
+    /// Mono numeric keycap shown beneath each tray bubble. fg4 for an assigned
+    /// slot, fg5 (fainter) for an unassigned one — mirrors `.cap` / `.empty .cap`.
+    private func keycap(_ n: Int, empty: Bool) -> some View {
+        Text("\(n)")
+            .font(BridgeTokens.Typeface.micro.monospacedDigit())
+            .foregroundStyle(empty ? BridgeTokens.fg5 : BridgeTokens.fg4)
+    }
+
+    /// Unassigned-slot well: a dashed hairline glass recess (`--well-deep`
+    /// + dashed `--hair-strong` + inset bevel), matching `.cb-bubble.empty`.
+    private var emptyWell: some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(BridgeTokens.wellFillDeep)
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(
+                        BridgeTokens.hairlineStrong,
+                        style: StrokeStyle(lineWidth: 1, dash: [3, 3])
+                    )
+            )
+            .bridgeBevel(BridgeTokens.bevelInset, radius: 18)
+            .frame(width: Self.bubbleSize, height: Self.bubbleSize)
+    }
+
     // MARK: Pill
+    //
+    //   v4 source `.cb-pill`: 70px popover-glass bar (radius 22) whose ONLY
+    //   children are the field area ([blinking accent caret][mono query]) and a
+    //   trailing glass menu-bar mark. The source pill has NO leading glyph —
+    //   the layout is [caret][placeholder] … [trailing mark] — so the prior
+    //   leading bridge-mark button (a v3.7.6 add not present in the design) is
+    //   removed; the caret/field now sit flush at the pill's leading edge exactly
+    //   as `command-bridge.html` draws them. The trailing mark (→ Commands
+    //   settings) renders the Bridge mark IMAGE (`.cb-menubar img`, 24×24), not a
+    //   literal ⌘ glyph. Dashboard remains reachable from the status-bar item /
+    //   menu-bar mark; `model.onBridgeMark` stays defined for that path.
 
     private var pill: some View {
-        HStack(spacing: 14) {
-            // v3.7.6: the LEADING glyph is now the clickable bridge-mark →
-            // opens the standalone Dashboard popover. Falls back to an SF
-            // Symbol when the asset can't be loaded (e.g. headless / Lib bundle).
-            Button {
-                model.onBridgeMark()
-            } label: {
-                bridgeMark
-                    .frame(width: 26, height: 26)
+        HStack(spacing: BridgeTokens.Space.s4) {
+            // Field area — leading blinking caret (`.cb-caret`) sits in front of
+            // the query field; its mono placeholder ("Bridge Command") is drawn by
+            // QueryField itself, so the caret leads the pill exactly as the source
+            // shows (no glyph precedes it).
+            HStack(spacing: BridgeTokens.Space.s3) {
+                caret
+                QueryField(
+                    text: Binding(
+                        get: { model.query },
+                        set: { model.queryDidChange($0) }
+                    ),
+                    placeholder: "Bridge Command",
+                    isFocused: $queryFocused,
+                    onReturn: { commitTopSelection() },
+                    onArrowDown: { model.openRecents() },
+                    onEscape: { model.onEscape() }
+                )
+                .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.plain)
-            .help("Open Bridge dashboard")
-            QueryField(
-                text: Binding(
-                    get: { model.query },
-                    set: { model.queryDidChange($0) }
-                ),
-                placeholder: "Bridge Command",
-                isFocused: $queryFocused,
-                onReturn: { commitTopSelection() },
-                onArrowDown: { model.openRecents() },
-                onEscape: { model.onEscape() }
-            )
-            .frame(maxWidth: .infinity)
+
+            // Trailing menu-bar mark (`.cb-menubar`) → Commands settings. Glass
+            // control tile (40×40, radius 12 = Radius.card, glassControl fill +
+            // hair-strong border + bevel-control) wrapping the 24×24 Bridge mark
+            // image (`.cb-menubar img`) — the brand mark, not a keyboard glyph.
             Button {
                 model.onSettings()
             } label: {
-                Text("⌘")
-                    .font(.system(size: 19, weight: .regular))
-                    .frame(width: 30, height: 30)
-                    .foregroundStyle(BridgeTokens.fg5)
+                menuBarMark
+                    .frame(width: 24, height: 24)
+                    .frame(width: 40, height: 40)
+                    .background(
+                        RoundedRectangle(cornerRadius: BridgeTokens.Radius.card, style: .continuous)
+                            .fill(BridgeTokens.glassControl)
+                            .bridgeBevel(BridgeTokens.bevelControl, radius: BridgeTokens.Radius.card)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: BridgeTokens.Radius.card, style: .continuous)
+                                    .strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5)
+                            )
+                    )
             }
             .buttonStyle(.plain)
             .help("Open Commands settings")
         }
-        .padding(.horizontal, 20)
-        .frame(width: CommandBridgeController.pillWidth, height: 66)
-        .background(
-            ZStack {
-                // v3.7.6 legibility: tint 0.34→0.62 + top sheen 0.14→0.22 so
-                // ONLY the bar paints — and reads as solid glass on a now-
-                // transparent envelope (no square halo to lean on).
-                BridgeTokens.glassWindowTint.opacity(0.62)
-                LinearGradient(
-                    colors: [sheenTop(0.22), sheenBottom(0.02)],
-                    startPoint: .top, endPoint: .bottom
-                )
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5)
-        )
-        // v3.7.6: shadow cut from .black@0.55 / r30 / y18 (which read as a dark
-        // square halo around the transparent panel) to a soft contact shadow.
-        .shadow(color: .black.opacity(0.30), radius: 16, y: 10)
+        .padding(.leading, BridgeTokens.Space.s6)
+        .padding(.trailing, BridgeTokens.Space.s4)
+        .frame(width: CommandBridgeController.pillWidth, height: 70)
+        .popoverGlass(radius: 22)
     }
 
-    /// The leading bridge-mark glyph. Loads `MenuBarIcon` from the app bundle
-    /// (template-rendered so it tints with the adaptive foreground), and falls
-    /// back to the prior `command.circle` SF Symbol when the asset is absent.
+    /// The leading blinking caret (`.cb-caret`): a 2pt accent-strong bar with a
+    /// soft glow, blinking ~1.15s on a forever-repeating fade. Reduce-motion holds
+    /// it steady-on (the source honours `prefers-reduced-motion`).
+    private var caret: some View {
+        RoundedRectangle(cornerRadius: 1, style: .continuous)
+            .fill(BridgeTokens.accentStrong)
+            .frame(width: 2, height: 30)
+            .shadow(color: BridgeTokens.accentStrong.opacity(0.7), radius: 4)
+            .opacity(reduceMotion ? 1 : (caretOn ? 1 : 0))
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 0.575).repeatForever(autoreverses: true)) {
+                    caretOn = false
+                }
+            }
+            .accessibilityHidden(true)
+    }
+
+    /// The trailing menu-bar mark image (`.cb-menubar img`). Loads `MenuBarIcon`
+    /// — the bundled Bridge mark (`assets/bridge-mark-white.png` in the design) —
+    /// template-rendered so it tints with the adaptive foreground at fg2 (mirrors
+    /// the source's `opacity:.92` ink). Falls back to the `command.circle` SF
+    /// Symbol mark only when the asset can't be resolved (e.g. headless).
     @ViewBuilder
-    private var bridgeMark: some View {
+    private var menuBarMark: some View {
         if let icon = Self.bridgeMarkImage {
             Image(nsImage: icon)
                 .renderingMode(.template)
@@ -1091,7 +1129,7 @@ public struct CommandBridgeRootView: View {
                 .foregroundStyle(BridgeTokens.fg2)
         } else {
             Image(systemName: "command.circle")
-                .font(.system(size: 22, weight: .light))
+                .font(BridgeTokens.Typeface.hero)
                 .foregroundStyle(BridgeTokens.fg3)
         }
     }
@@ -1108,6 +1146,52 @@ public struct CommandBridgeRootView: View {
         return img
     }()
 
+    // MARK: Footer hint rail (`.cb-foot`)
+    //
+    //   A non-interactive shortcut legend mirroring the source's keycap rail.
+    //   Pure decoration — no controller wiring; the keys it advertises are the
+    //   ones already handled by `KeyHandler` / `QueryField`.
+
+    private var footer: some View {
+        HStack(spacing: BridgeTokens.Space.s4) {
+            footHint("1–0", "fire favorite")
+            footHint("↑↓", "browse")
+            footHint("↵", "run")
+            Spacer(minLength: 0)
+            footHint("esc", "close")
+        }
+        .frame(width: CommandBridgeController.pillWidth)
+        .padding(.horizontal, BridgeTokens.Space.s2 - 2)
+        .padding(.top, BridgeTokens.Space.s1 / 2)
+        .accessibilityHidden(true)
+    }
+
+    private func footHint(_ key: String, _ label: String) -> some View {
+        HStack(spacing: BridgeTokens.Space.s1 + 1) {
+            kbdChip(key)
+            Text(label)
+                .font(BridgeTokens.Typeface.micro)
+                .foregroundStyle(BridgeTokens.fg5)
+        }
+    }
+
+    /// A `<kbd>` chip from the source footer — mono glyph in a chip-filled pill.
+    private func kbdChip(_ s: String) -> some View {
+        Text(s)
+            .font(.system(size: 10.5, weight: .regular, design: .monospaced))
+            .foregroundStyle(BridgeTokens.fg4)
+            .padding(.horizontal, BridgeTokens.Space.s1 + 1)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(BridgeTokens.chipFill)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
+                    )
+            )
+    }
+
     // MARK: Secondary panel (recents / search)
 
     @ViewBuilder
@@ -1117,7 +1201,7 @@ public struct CommandBridgeRootView: View {
             case .none:
                 EmptyView()
             case .recents:
-                panelHeader("Recently used")
+                panelHeader("Recents")
                 ForEach(model.recentRows) { r in
                     rowView(r, selected: r.id == model.recentRows.first?.id)
                 }
@@ -1134,42 +1218,28 @@ public struct CommandBridgeRootView: View {
                 }
             }
         }
-        .padding(7)
+        .padding(BridgeTokens.Space.s2)
         .frame(width: CommandBridgeController.pillWidth)
-        .background(
-            ZStack {
-                // v3.7.6 legibility: results-panel tint 0.32→0.58 to match the
-                // more-opaque pill now that the envelope is transparent.
-                BridgeTokens.glassWindowTint.opacity(0.58)
-                LinearGradient(
-                    colors: [sheenTop(0.12), sheenBottom(0.02)],
-                    startPoint: .top, endPoint: .bottom
-                )
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5)
-        )
+        .popoverGlass(radius: 18)
     }
 
+    /// Panel section header (`.cb-phead`) — an uppercase cap micro-caption.
     private func panelHeader(_ s: String) -> some View {
-        Text(s.uppercased())
-            .font(.system(size: 11, weight: .semibold))
-            .tracking(1.2)
+        Text(s)
+            .bridgeCap()
             .foregroundStyle(BridgeTokens.fg5)
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-            .padding(.bottom, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, BridgeTokens.Space.s3)
+            .padding(.top, BridgeTokens.Space.s2)
+            .padding(.bottom, BridgeTokens.Space.s1 + 2)
     }
 
     private func panelEmptyHint(_ s: String) -> some View {
         Text(s)
-            .font(.system(size: 12))
+            .font(BridgeTokens.Typeface.meta)
             .foregroundStyle(BridgeTokens.fg4)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .padding(.horizontal, BridgeTokens.Space.s3)
+            .padding(.vertical, BridgeTokens.Space.s1 + 2)
     }
 
     @ViewBuilder
@@ -1179,43 +1249,74 @@ public struct CommandBridgeRootView: View {
         Button {
             model.onFireSlug(r.slug)
         } label: {
-            HStack(spacing: 13) {
+            HStack(spacing: BridgeTokens.Space.s4 - 2) {
+                // Icon tile (`.cb-ic`) — glass control chip with the command glyph.
                 ZStack {
-                    RoundedRectangle(cornerRadius: 7)
-                        .fill(BridgeTokens.chipFill)
+                    RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
+                        .fill(BridgeTokens.glassControl)
+                        .bridgeBevel(BridgeTokens.bevelControl, radius: BridgeTokens.Radius.control)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
+                                .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
+                        )
                     iconView(for: r.icon, color: r.color, size: 15)
                 }
-                .frame(width: 26, height: 26)
+                .frame(width: 28, height: 28)
+
                 highlightedName(r.name, query: highlight)
-                    .font(.system(size: 15))
+                    .font(BridgeTokens.Typeface.name)
                     .foregroundStyle(BridgeTokens.fg1)
-                Spacer(minLength: 4)
+                    .lineLimit(1)
+
+                Spacer(minLength: BridgeTokens.Space.s1)
+
                 Text(Self.relativeHint(for: r.lastUsedAt))
-                    .font(.system(size: 12))
+                    .font(BridgeTokens.Typeface.meta)
                     .foregroundStyle(BridgeTokens.fg5)
+
                 if let slot = r.keySlot {
+                    // Slot keycap badge (`.cb-badge`) — mono, chip-filled.
                     Text("\(slot)")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(BridgeTokens.fg4)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
+                        .font(BridgeTokens.Typeface.micro.monospacedDigit())
+                        .foregroundStyle(BridgeTokens.fg3)
+                        .padding(.horizontal, BridgeTokens.Space.s1 + 1)
+                        .frame(minWidth: 18, minHeight: 18)
                         .background(
-                            RoundedRectangle(cornerRadius: 5)
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
                                 .fill(BridgeTokens.chipFill)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                        .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
+                                )
                         )
-                        .monospacedDigit()
                 }
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, BridgeTokens.Space.s3)
             .frame(height: 46)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(selected
-                          ? BridgeTokens.accent.opacity(0.18)
-                          : Color.clear)
-            )
+            .background(rowBackground(selected: selected))
         }
         .buttonStyle(.plain)
+    }
+
+    /// Selected-row treatment (`.cb-row.on`): faint accent tint + accent hairline
+    /// ring + a 2.5pt accent-strong rail down the leading edge. Unselected is clear.
+    @ViewBuilder
+    private func rowBackground(selected: Bool) -> some View {
+        let shape = RoundedRectangle(cornerRadius: BridgeTokens.Radius.card, style: .continuous)
+        if selected {
+            shape
+                .fill(BridgeTokens.accent.opacity(0.15))
+                .overlay(shape.strokeBorder(BridgeTokens.accent.opacity(0.34), lineWidth: 0.5))
+                .overlay(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(BridgeTokens.accentStrong)
+                        .frame(width: 2.5)
+                        .padding(.vertical, 11)
+                        .padding(.leading, 4)
+                }
+        } else {
+            shape.fill(Color.clear)
+        }
     }
 
     @ViewBuilder
@@ -1278,6 +1379,70 @@ public struct CommandBridgeRootView: View {
 }
 
 // ============================================================
+// MARK: - 7b. Popover-glass surface (`.cb-pill` / `.cb-panel`)
+//
+//   The v4 floating-glass surface used by the pill + recents/search panel.
+//   It is the same 4-ingredient recipe as `BridgeGlassBubble` but on a
+//   rounded rect at an arbitrary corner radius (the source draws 22 for the
+//   pill, 18 for the panel — the `Elevation.popover` rung is pinned to the
+//   12pt card radius, so we consume the rung's INGREDIENTS at a custom radius):
+//     1 — `glassPopover` fill + sheen (the e3 popover material)
+//     2 — `bevelRaise` directional bevel (top rim-light + bottom occlusion)
+//     3 — `edgeRaise` hairline edge
+//     4 — `shadowE3` dual ambient+contact drop shadow
+//   …plus the `--glint` specular hotspot + the diagonal `--sheen` sweep that
+//   `materials.css .glass-popover::before/::after` paint over the fill.
+// ============================================================
+
+private struct PopoverGlass: ViewModifier {
+    let radius: CGFloat
+    private var rung: BridgeTokens.ElevationRung { BridgeTokens.Elevation.popover }
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        return content
+            .background {
+                ZStack {
+                    // Ingredient 1 — e3 popover fill (base tint + 3-stop sheen).
+                    rung.fill?.paint(in: shape)
+                    // Specular hotspot (`--glint`) + diagonal sweep (`--sheen`).
+                    shape.fill(BridgeTokens.glint)
+                    shape.fill(BridgeTokens.sheen)
+                }
+            }
+            // Ingredient 2 — directional bevel.
+            .overlay(rung.bevel.overlay(in: shape).allowsHitTesting(false))
+            // Ingredient 3 — elevation edge hairline.
+            .overlay {
+                if let edge = rung.edge {
+                    shape.strokeBorder(edge, lineWidth: 0.5)
+                }
+            }
+            .clipShape(shape)
+            // Ingredient 4 — e3 dual drop shadow.
+            .modifier(OptionalBridgeShadow(rung.shadow))
+    }
+}
+
+/// Local twin of the (private) `OptionalShadow` in BridgeThemeV2 — applies a
+/// `BridgeShadow` only when present (the rung always carries one for e3).
+private struct OptionalBridgeShadow: ViewModifier {
+    let shadow: BridgeTokens.BridgeShadow?
+    init(_ shadow: BridgeTokens.BridgeShadow?) { self.shadow = shadow }
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let s = shadow { content.bridgeShadow(s) } else { content }
+    }
+}
+
+private extension View {
+    /// Wrap `self` in the v4 floating popover-glass surface at `radius`.
+    func popoverGlass(radius: CGFloat) -> some View {
+        modifier(PopoverGlass(radius: radius))
+    }
+}
+
+// ============================================================
 // MARK: - 8. QueryField — plain NSTextField bridge with key hooks
 // ============================================================
 
@@ -1296,8 +1461,22 @@ private struct QueryField: NSViewRepresentable {
     func makeNSView(context: Context) -> NSTextField {
         let field = BridgeQueryTextField()
         field.delegate = context.coordinator
-        field.placeholderString = placeholder
-        field.font = NSFont.systemFont(ofSize: 25, weight: .light)
+        // v4 source `.cb-ph`: the command field is mono (Space Mono → SF Mono)
+        // at 27pt. Use the monospaced system face so the typed query + the
+        // placeholder both read as the locked lowercase-mono command field.
+        let monoFont = NSFont.monospacedSystemFont(ofSize: 27, weight: .regular)
+        field.font = monoFont
+        // Placeholder ink matches `.cb-ph` (fg-1 @ 34%) — a faint mono prompt.
+        field.placeholderAttributedString = NSAttributedString(
+            string: placeholder,
+            attributes: [
+                .font: monoFont,
+                .foregroundColor: BridgeTokens.adaptiveNSColor(
+                    dark:  { BridgeTokens.whiteAlpha(0.34) },
+                    light: { BridgeTokens.blackAlpha(0.34) }
+                ),
+            ]
+        )
         // v3.7.6: adaptive ink — the query text follows the system appearance
         // (white on carbon, dark on titanium) instead of a hardcoded white that
         // would vanish on the light canvas. Mirrors BridgeTokens.fg1.

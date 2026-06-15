@@ -356,6 +356,45 @@ struct SecuritySection: View {
 
     private enum Tab: String, Hashable, CaseIterable { case vault, gates }
 
+    /// The three security postures shown by the posture control. Title +
+    /// description are ported verbatim from the design's `SE_POSTURE`
+    /// (`design/.../pages/page-security.jsx`). This is a DERIVED read-only
+    /// posture (see `postureControl` / `derivedPosture`), not a stored setting.
+    private enum Posture: String, Hashable, CaseIterable {
+        case locked, balanced, open
+
+        /// Human title (matches the design's segment labels).
+        var title: String {
+            switch self {
+            case .locked:   return "Locked down"
+            case .balanced: return "Balanced"
+            case .open:     return "Open"
+            }
+        }
+
+        /// Live description paragraph — updates with the derived posture.
+        var detail: String {
+            switch self {
+            case .locked:
+                return "Most tools sit at Confirm — the agent asks before it acts. Maximum control, most friction."
+            case .balanced:
+                return "Read-only tools run Open; writes and sends run Notify or Confirm. The recommended operator default."
+            case .open:
+                return "Most tools run Open or Notify; only sends, deletes and credential reads still Confirm. Fastest, least guarded."
+            }
+        }
+
+        /// Posture-tinted ink for the lead glyph + name (matches the design's
+        /// shield tint: locked→ok, balanced→info, open→warn).
+        var tint: Color {
+            switch self {
+            case .locked:   return BridgeTokens.okText
+            case .balanced: return BridgeTokens.infoText
+            case .open:     return BridgeTokens.warnText
+            }
+        }
+    }
+
     @State private var selection: Tab
 
     /// PKT-W3-license — License card lives under the posture header inside
@@ -445,31 +484,96 @@ struct SecuritySection: View {
     private var postureHeader: some View {
         let spec = BridgeSettingsHeaderPreset.spec(for: .security)
         return BridgeGlassCard(cornerRadius: BridgeTokens.Radius.card, padding: 14) {
-            HStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(BridgeTokens.gold.opacity(0.20))
-                        .frame(width: 44, height: 44)
-                    Image(systemName: "lock.shield")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(BridgeTokens.gold.opacity(0.85))
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(BridgeTokens.gold.opacity(0.20))
+                            .frame(width: 44, height: 44)
+                        Image(systemName: "lock.shield")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(BridgeTokens.gold.opacity(0.85))
+                    }
+                    .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(spec.title)
+                            .font(BridgeTokens.Typeface.hero)
+                            .foregroundStyle(BridgeTokens.fg1)
+                            .accessibilityAddTraits(.isHeader)
+                        Text("Stored secrets and the gates that govern what tools can do.")
+                            .font(BridgeTokens.Typeface.meta)
+                            .foregroundStyle(BridgeTokens.fg3)
+                    }
+                    Spacer(minLength: 8)
+                    postureMetrics
+                    touchIDChip
                 }
-                .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(spec.title)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(BridgeTokens.fg1)
-                        .accessibilityAddTraits(.isHeader)
-                    Text("Stored secrets and the gates that govern what tools can do.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(BridgeTokens.fg3)
-                }
-                Spacer(minLength: 8)
-                postureMetrics
-                touchIDChip
+                postureControl
             }
         }
         .accessibilityElement(children: .contain)
+    }
+
+    // MARK: 3-tier posture control (PKT-W4-sec)
+
+    /// The page's most prominent control — the 3-tier posture row
+    /// (`design/.../pages/page-security.jsx` posture header): a
+    /// **Locked down · Balanced · Open** segmented control over a **live
+    /// posture-description paragraph** that updates per posture.
+    ///
+    /// HONEST DERIVED MIRROR (not a setter). There is NO global posture / global
+    /// default-`SecurityTier` in the backend: gating is per-tool
+    /// (`BridgeDefaults.tierOverrides`) + per-module
+    /// (`BridgeDefaults.moduleTierOverrides`) resolved by
+    /// `ToolRouter.resolveEffectiveTier`; the only aggregate that exists is the
+    /// live OPEN/NOTIFY/REQUEST tool-tier distribution (`tierCounts`, the SAME
+    /// resolution Tools/router use — see `refreshTierCounts`). So this control
+    /// REFLECTS that real aggregate rather than writing a fake global setting:
+    /// the selected segment + description are *derived* from `tierCounts` and
+    /// the control is non-interactive (`.disabled`), exactly like `tierCountTile`
+    /// ("a posture mirror, never an editor"). To actually change posture the
+    /// operator edits per-tool / per-module tiers in Tools, which feeds back here
+    /// via `.notionBridgeTierOverridesDidChange`.
+    ///
+    /// Mapping `tierCounts → posture` (documented, see `Self.posture(for:)`):
+    ///   • **Locked down** — REQUEST is the plurality (confirm-heavy surface).
+    ///   • **Open**        — almost nothing confirms (REQUEST ≤ 10% of tools)
+    ///                       AND OPEN leads (fast, least-guarded surface).
+    ///   • **Balanced**    — everything else (reads open, writes notify/confirm)
+    ///                       — the recommended operator default.
+    private var postureControl: some View {
+        let posture = derivedPosture
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                HStack(spacing: 7) {
+                    Image(systemName: "shield.lefthalf.filled")
+                        .font(BridgeTokens.Typeface.body)
+                        .foregroundStyle(posture.tint)
+                    Text(posture.title)
+                        .font(BridgeTokens.Typeface.name)
+                        .foregroundStyle(BridgeTokens.fg1)
+                        .fixedSize()
+                }
+                Spacer(minLength: 8)
+                // W2 .seg, bound to the DERIVED posture and rendered read-only
+                // (an honest reflection of the real tier aggregate — see the
+                // doc comment above). The binding's setter is a no-op so a tap
+                // can never fake a global posture change.
+                BridgeSegmented(
+                    selection: Binding(get: { posture }, set: { _ in }),
+                    options: Posture.allCases.map { ($0, $0.title) }
+                )
+                .frame(maxWidth: 280)
+                .disabled(true)
+                .accessibilityHidden(true)
+            }
+            Text(posture.detail)
+                .font(BridgeTokens.Typeface.sub)
+                .foregroundStyle(BridgeTokens.fg4)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Security posture: \(posture.title). \(posture.detail)")
     }
 
     private var postureMetrics: some View {
@@ -665,6 +769,35 @@ struct SecuritySection: View {
         tierCounts = (open, notify, request)
     }
 
+    /// The posture the posture-control reflects — DERIVED from the live tier
+    /// aggregate (`tierCounts`), never a stored global setting. See the
+    /// `postureControl` doc comment for why this is an honest mirror.
+    private var derivedPosture: Posture {
+        SecuritySection.posture(for: tierCounts)
+    }
+
+    /// Pure `tierCounts → Posture` mapping (extracted so it is testable without a
+    /// live view). Honest reflection of the OPEN/NOTIFY/REQUEST distribution:
+    ///   • **Locked down** — REQUEST is the plurality (the surface is confirm-heavy).
+    ///   • **Open**        — REQUEST is ≤10% of all tools AND OPEN leads (almost
+    ///                       nothing confirms; the surface runs fast).
+    ///   • **Balanced**    — everything else (the default mixed distribution).
+    /// With no tools resolved yet (all-zero) the recommended default is Balanced.
+    private static func posture(for counts: (open: Int, notify: Int, request: Int)) -> Posture {
+        let total = counts.open + counts.notify + counts.request
+        guard total > 0 else { return .balanced }
+        // REQUEST is the strict plurality → confirm-heavy → Locked down.
+        if counts.request > counts.open && counts.request > counts.notify {
+            return .locked
+        }
+        // Almost nothing confirms and OPEN leads → fast, least-guarded → Open.
+        let requestShare = Double(counts.request) / Double(total)
+        if requestShare <= 0.10 && counts.open >= counts.notify {
+            return .open
+        }
+        return .balanced
+    }
+
     /// True when this device can evaluate a biometric (or passcode-fallback)
     /// policy — drives the header chip's "Touch ID unavailable" state. When false
     /// the reveal gate passes through (matches CredentialManager's fallback path).
@@ -755,39 +888,35 @@ struct ConnectionSection: View {
 
     // MARK: Status strip
 
+    /// W2 STATUS STRIP (PKT-W4-conn) — rebuilt on `BridgeStatusStrip`, the W2
+    /// twin of the design's `.statstrip` (`design/.../pages/page-connection.jsx`
+    /// status strip + `pages/cards/connection.html`). It LEADS with a
+    /// **"Bridge endpoint"** label (the strip's dot doubles as the live/offline
+    /// signal), carries an **Online/Offline BADGE** (`BridgeBadge(.ok …,
+    /// showsDot:)`), and the mono counts **"<live> live · <known> known ·
+    /// <calls> calls today"** — the design's exact `m-counts` string. The W2
+    /// component renders the counts in `BridgeTokens.Typeface.mono` for free, so
+    /// there are no raw `.system(size:)` fonts or hand-rolled `Circle()` dots
+    /// anymore.
+    ///
+    /// HONEST count mapping: the app only retains *currently-connected* clients
+    /// (`statusBar.connectedClients`, 4s removal grace), with no idle/known-but-
+    /// gone history. The design's `live` vs `known` split is a mock artifact, so
+    /// BOTH derive from the same live source here (`live == known == connected`)
+    /// — an honest mirror, never a fabricated "known" total.
     private var statusStrip: some View {
         let running = statusBar.isServerRunning
-        let dot = running ? BridgeTokens.ok : BridgeTokens.bad
-        let label = running ? "Online" : "Stopped"
-        let labelText = running ? BridgeTokens.okText : BridgeTokens.badText
-        return BridgeGlassCard(cornerRadius: BridgeTokens.Radius.card, padding: 12) {
-            HStack(spacing: 12) {
-                HStack(spacing: 7) {
-                    Circle().fill(dot).frame(width: 9, height: 9)
-                    Text(label)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(labelText)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Server \(label)")
-
-                metaSeparator
-                clientsMeta
-                if let seen = lastSeen {
-                    metaSeparator
-                    Text(seen)
-                        .font(.system(size: 12))
-                        .foregroundStyle(BridgeTokens.fg4)
-                        .accessibilityLabel("Last seen \(seen)")
-                }
-                metaSeparator
-                Text("\(statusBar.totalToolCalls.formatted()) calls today")
-                    .font(.system(size: 12))
-                    .foregroundStyle(BridgeTokens.fg4)
-                    .lineLimit(1)
-
-                Spacer(minLength: 8)
-
+        let n = statusBar.connectedClients.count
+        let calls = statusBar.totalToolCalls.formatted()
+        return BridgeStatusStrip(
+            signal: running ? .ok : .bad,
+            title: "Bridge endpoint",
+            meta: ["\(n) live", "\(n) known", "\(calls) calls today"]
+        ) {
+            HStack(spacing: 8) {
+                BridgeBadge(running ? "Online" : "Offline",
+                            tone: running ? .ok : .bad,
+                            showsDot: true)
                 HStack(spacing: 4) {
                     iconButton("arrow.clockwise", help: "Restart Bridge", label: "Restart Bridge") {
                         NSApp.restartBridge()
@@ -802,33 +931,7 @@ struct ConnectionSection: View {
             }
         }
         .accessibilityElement(children: .contain)
-    }
-
-    private var clientsMeta: some View {
-        let n = statusBar.connectedClients.count
-        return Text(n == 0 ? "No clients" : "\(n) client\(n == 1 ? "" : "s")")
-            .font(.system(size: 12, weight: n == 0 ? .regular : .medium))
-            .foregroundStyle(n == 0 ? BridgeTokens.fg4 : BridgeTokens.fg2)
-            .lineLimit(1)
-            .accessibilityLabel(n == 0 ? "No clients connected" : "\(n) clients connected")
-    }
-
-    private var metaSeparator: some View {
-        Text("·")
-            .font(.system(size: 12))
-            .foregroundStyle(BridgeTokens.fg5)
-            .accessibilityHidden(true)
-    }
-
-    /// Most-recent client connection as a relative "last-seen" string. Nil when
-    /// no clients are connected (the field is hidden in that case).
-    private var lastSeen: String? {
-        guard let latest = statusBar.connectedClients.map(\.connectedAt).max() else { return nil }
-        let interval = Date().timeIntervalSince(latest)
-        if interval < 60 { return "just now" }
-        if interval < 3600 { return "\(Int(interval / 60))m ago" }
-        if interval < 86400 { return "\(Int(interval / 3600))h ago" }
-        return "\(Int(interval / 86400))d ago"
+        .accessibilityLabel("Bridge endpoint \(running ? "online" : "offline"). \(n) clients connected. \(calls) calls today.")
     }
 
     private func iconButton(_ systemImage: String, help: String, label: String,

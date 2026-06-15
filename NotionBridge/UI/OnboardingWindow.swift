@@ -60,7 +60,9 @@ public final class OnboardingWindowController {
         window.title = "Welcome to The Bridge"
         window.styleMask = [.titled, .closable, .fullSizeContentView]
         window.titlebarAppearsTransparent = true
-        window.setContentSize(NSSize(width: 520, height: 480))
+        // Content size matches the SwiftUI root frame + design `.win` (520×520);
+        // a shorter NSWindow would clip/compress the foot rail (PKT QA: onboarding).
+        window.setContentSize(NSSize(width: 520, height: 520))
         window.center()
         window.isReleasedWhenClosed = false
         window.level = .floating
@@ -192,7 +194,8 @@ struct OnboardingView: View {
                                        startPoint: .top, endPoint: .center), lineWidth: 0.5)
                 .allowsHitTesting(false)
         )
-        .shadow(color: .black.opacity(0.6), radius: 50, y: 30)
+        // `.win` box-shadow → the e4 window elevation rung (dual ambient+contact).
+        .bridgeShadow(BridgeTokens.shadowE4)
         .onChange(of: currentStep) { _, newValue in
             UserDefaults.standard.set(newValue.rawValue, forKey: OnboardingResumeKey.stepRaw)
         }
@@ -329,6 +332,23 @@ struct OnboardingView: View {
 
     private enum HeroTone { case accent, gold }
 
+    /// `.ob-hero.logo` — the welcome medallion carrying the app icon itself
+    /// (78×78, continuous-19 radius, dropped shadow, inner rim). Mirrors the
+    /// design's brand tile rather than a generic glyph.
+    private func obLogoHero() -> some View {
+        let shape = RoundedRectangle(cornerRadius: 19, style: .continuous)
+        return Image(nsImage: NSApp.applicationIconImage)
+            .resizable()
+            .interpolation(.high)
+            .frame(width: 78, height: 78)
+            .clipShape(shape)
+            .overlay(
+                shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                    .allowsHitTesting(false)
+            )
+            .shadow(color: .black.opacity(0.45), radius: 11, y: 8)
+    }
+
     /// `.ob-title` — 23pt semibold display title.
     private func obTitle(_ text: String) -> some View {
         Text(text)
@@ -373,11 +393,30 @@ struct OnboardingView: View {
             .foregroundStyle(BridgeTokens.fg4)
     }
 
+    /// Secure twin of `.ob-input` (W2 `BridgeInput` has no masked variant):
+    /// a `SecureField` in the same inset-well glass chrome — `wellFill` +
+    /// `bevelInset` + `.5px` hairline, `input` radius, mono face, accent-strong
+    /// caret. Used only for the secret token field.
+    private func obSecureField(_ placeholder: String, text: Binding<String>) -> some View {
+        let shape = RoundedRectangle(cornerRadius: BridgeTokens.Radius.input, style: .continuous)
+        return SecureField(placeholder, text: text)
+            .textContentType(.none)
+            .textFieldStyle(.plain)
+            .font(BridgeTokens.Typeface.mono)
+            .foregroundStyle(BridgeTokens.fg1)
+            .tint(BridgeTokens.accentStrong)
+            .frame(height: 32)
+            .padding(.horizontal, 11)
+            .background(shape.fill(BridgeTokens.wellFill))
+            .bridgeBevel(BridgeTokens.bevelInset, radius: BridgeTokens.Radius.input)
+            .overlay(shape.strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+    }
+
     // MARK: - Welcome Step (PKT-357: F6, F7, F8)
 
     private var welcomeStep: some View {
         VStack(spacing: 0) {
-            obHero("bridge.fill")
+            obLogoHero()
                 .padding(.top, 8)
 
             obTitle("Welcome to The Bridge")
@@ -409,18 +448,21 @@ struct OnboardingView: View {
     // MARK: - Legal Acceptance Step (PKT-491)
 
     private var legalAcceptanceStep: some View {
+        // Step 2 is the tallest stack — mirror the design's `.ob-body.t2` compressed
+        // rhythm (title 12 / sub 9 / inset 12 + gap 8 / links 10 / check 10) so the
+        // gating checkbox always fits the fixed 520×520 window without scrolling.
         VStack(spacing: 0) {
             obHero("doc.text.fill")
                 .padding(.top, 8)
 
             obTitle("Privacy & Terms")
-                .padding(.top, 18)
+                .padding(.top, 12)
 
             obSub("Before we set up permissions, here's how The Bridge handles your data.")
-                .padding(.top, 14)
+                .padding(.top, 9)
 
-            // Key points summary — carbon inset card
-            VStack(alignment: .leading, spacing: 12) {
+            // Key points summary — carbon inset card (`.t2 .ob-inset`: gap 8, padding 10/12)
+            VStack(alignment: .leading, spacing: 8) {
                 legalBullet(
                     icon: "lock.shield.fill",
                     color: BridgeTokens.ok,
@@ -438,33 +480,27 @@ struct OnboardingView: View {
                 )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
             .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
-            .padding(.top, 20)
+            .padding(.top, 12)
 
-            // Full document links
+            // Full document links — `.ob-links a` → v4 `.btn.link` (accent-link;
+            // the variant supplies the trailing ↗ external glyph).
             HStack(spacing: 18) {
-                Link(destination: URL(string: "https://kup.solutions/privacy")!) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.up.right.square")
-                        Text("Privacy Policy")
-                    }
-                    .font(.system(size: 12, weight: .medium))
+                BridgeButton("Privacy Policy", variant: .link) {
+                    NSWorkspace.shared.open(URL(string: "https://kup.solutions/privacy")!)
                 }
-                Link(destination: URL(string: "https://kup.solutions/terms")!) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.up.right.square")
-                        Text("Terms of Service")
-                    }
-                    .font(.system(size: 12, weight: .medium))
+                BridgeButton("Terms of Service", variant: .link) {
+                    NSWorkspace.shared.open(URL(string: "https://kup.solutions/terms")!)
                 }
             }
-            .foregroundStyle(BridgeTokens.accentLink)
-            .padding(.top, 16)
+            .padding(.top, 10)
 
-            // Acceptance checkbox
+            // Acceptance checkbox — `.ob-check-row`: native checkbox (binding +
+            // a11y trait preserved) inside an accent-tinted gate row.
             Toggle(isOn: $hasAcceptedLegal) {
                 Text("I have read and agree to the **Privacy Policy** and **Terms of Service**")
                     .font(.system(size: 12.5))
@@ -473,7 +509,14 @@ struct OnboardingView: View {
             }
             .toggleStyle(.checkbox)
             .tint(BridgeTokens.accent)
-            .padding(.top, 16)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(BridgeTokens.accent.opacity(0.09),
+                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .strokeBorder(BridgeTokens.accentBorder, lineWidth: 0.5))
+            .padding(.top, 10)
         }
         .frame(maxWidth: .infinity)
     }
@@ -507,25 +550,22 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 6) {
                     obFieldLabel("Workspace")
-                    TextField(selectedProvider.namePlaceholder, text: $workspaceName)
-                        .textFieldStyle(.roundedBorder)
+                    // `.ob-input` — v4 inset-well field (W2 BridgeInput).
+                    BridgeInput(selectedProvider.namePlaceholder, text: $workspaceName)
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
                     obFieldLabel("Integration token")
-                    SecureField(selectedProvider.tokenPlaceholder, text: $workspaceToken)
-                        .textContentType(.none)
-                        .textFieldStyle(.roundedBorder)
+                    // Secret token: BridgeInput has no secure variant, so this
+                    // wraps SecureField in the same `.ob-input` glass-well chrome
+                    // (wellFill + bevelInset + hairline, mono caret = accentStrong).
+                    obSecureField(selectedProvider.tokenPlaceholder, text: $workspaceToken)
                 }
 
                 if let helpURL = selectedProvider.helpURL {
-                    Link(destination: helpURL) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.up.right.square")
-                            Text(selectedProvider.helpLabel)
-                        }
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(BridgeTokens.accentLink)
+                    // `.ob-help` external link — v4 `.btn.link` (trailing ↗).
+                    BridgeButton(selectedProvider.helpLabel, variant: .link) {
+                        NSWorkspace.shared.open(helpURL)
                     }
                 }
             }
@@ -593,10 +633,15 @@ struct OnboardingView: View {
         }
     }
 
-    // MARK: - Permissions Steps (PKT-388 split)
+    // MARK: - Permissions Steps (PKT-388 split, v4 glass rebuild)
+    // Steps 4 & 5 now render inline V4 glass rows (`.ob-prow` idiom) instead of
+    // the legacy native AutoPermissionsStepView/ManualPermissionsStepView. The
+    // hero/title/sub + `.ob-progress-note` match design/.../onboarding.html steps
+    // 4–5, and the step caption comes from the wizard progress header (no more
+    // stale "Step 2/3" headings). All PermissionManager wiring is preserved.
 
     private var autoPermissionsStep: some View {
-        AutoPermissionsStepView(permissionManager: permissionManager) {
+        OnboardingAutoPermissionsStep(permissionManager: permissionManager) {
             guard currentStep == .autoPermissions, !didAutoAdvanceFromAutoStep else { return }
             didAutoAdvanceFromAutoStep = true
             currentStep = .manualPermissions
@@ -604,7 +649,7 @@ struct OnboardingView: View {
     }
 
     private var manualPermissionsStep: some View {
-        ManualPermissionsStepView(permissionManager: permissionManager)
+        OnboardingManualPermissionsStep(permissionManager: permissionManager)
     }
 
     // MARK: - Connection Step (D3)
@@ -697,19 +742,11 @@ struct OnboardingView: View {
 
             HStack {
                 Spacer()
-                Button {
+                // `.ob-tcopy .btn.sm` — raised-glass copy action (W2 BridgeButton).
+                BridgeButton("Copy", systemImage: "doc.on.doc", variant: .default) {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(config, forType: .string)
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "doc.on.doc")
-                        Text("Copy")
-                    }
-                    .font(.system(size: 12, weight: .medium))
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(BridgeTokens.accent)
             }
         }
         .padding(14)
@@ -761,7 +798,7 @@ struct OnboardingView: View {
                            text: "The menu bar icon opens the **Dashboard** — status, clients, settings.")
                     .padding(.vertical, 8)
                     tipRow(bullet: "⌘",
-                           text: "Press **⌃ ⌥ ⌘ C** to open the **Command Bridge**.")
+                           text: "Press **⌃ ⌘ B** anywhere to open the **Command Bridge**.")
                     .padding(.vertical, 8)
                     tipRow(bullet: "↗",
                            text: "Destructive actions require approval via notification.")
@@ -769,19 +806,13 @@ struct OnboardingView: View {
                 }
                 .padding(.top, 16)
             } else {
-                Button {
+                // `.btn.primary.lg` — the verify CTA (W2 BridgeButton).
+                BridgeButton(healthCheckButtonLabel,
+                             systemImage: "bolt.fill",
+                             variant: .primary,
+                             isEnabled: !healthCheckStatus.isChecking) {
                     runHealthCheck()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "bolt.fill")
-                        Text(healthCheckButtonLabel)
-                    }
-                    .frame(minWidth: 160)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(BridgeTokens.accent)
-                .controlSize(.large)
-                .disabled(healthCheckStatus.isChecking)
                 .padding(.top, 20)
             }
         }
@@ -943,19 +974,42 @@ struct OnboardingView: View {
         }
     }
 
+    /// Accent CTA on the foot rail — the v4 `.btn.primary` (translucent-blue
+    /// glass). Maps to `BridgeButton(variant: .primary)`.
     private func footPrimaryButton(_ title: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(title, action: action)
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .tint(BridgeTokens.accent)
-            .disabled(disabled)
+        BridgeButton(title, variant: .primary, isEnabled: !disabled, action: action)
     }
 
+    /// Secondary foot action (Back / Skip) — the design's `.ob-foot .lnk`: a plain
+    /// text link (fg3 → fg1 on hover), NO raised-glass chrome and NO external-link
+    /// ↗ glyph (that's reserved for the `.link` variant's outbound URLs). Kept local
+    /// so we don't repurpose BridgeButton(.link)'s arrow for in-wizard nav.
     private func footSecondaryButton(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(title, action: action)
-            .buttonStyle(.plain)
-            .controlSize(.large)
-            .foregroundStyle(BridgeTokens.fg3)
+        OBFootLink(title: title, action: action)
+    }
+}
+
+/// `.ob-foot .lnk` — plain-text foot-nav link. 13px/medium, `fg3` resting,
+/// `fg1` on hover, 8×10 hit padding, no glass and no trailing arrow. Mirrors the
+/// design's subdued Back/Skip affordance (distinct from the raised-glass `.btn`
+/// and from the outbound `.link` variant that carries a ↗).
+private struct OBFootLink: View {
+    let title: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(hovering ? BridgeTokens.fg1 : BridgeTokens.fg3)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.easeInOut(duration: 0.15), value: hovering)
     }
 }
 
@@ -990,4 +1044,517 @@ public enum PKT879Onboarding {
     /// The transport that wears the "Recommended" badge on step 6.
     /// Pinned: Streamable HTTP (stdio's modern successor).
     public static let recommendedTransport: String = "Streamable HTTP"
+}
+
+// MARK: - Onboarding permission-step shared glass primitives (V4)
+
+/// `.ob-prow` — the V4 glass permission row: 28×28 `glass-control` icon tile,
+/// name (`fg1`) + one-line description (`fg5`), and a trailing accessory
+/// (a `BridgeBadge` status pill on the auto step, an Open `BridgeButton` on the
+/// manual step). Inset-well chrome: `wellFill` + `bevelInset` + faint hairline.
+private struct OBPermissionRow<Accessory: View>: View {
+    let symbol: String
+    let name: String
+    let detail: String
+    @ViewBuilder var accessory: () -> Accessory
+
+    var body: some View {
+        HStack(spacing: 11) {
+            // `.pic` — glass-control icon tile, 8-radius, hairline edge.
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(BridgeTokens.glassControl)
+                Image(systemName: symbol)
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(BridgeTokens.fg2)
+            }
+            .frame(width: 28, height: 28)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
+            )
+
+            // `.pmain` — name + description, left-aligned, flexes.
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name)
+                    .font(BridgeTokens.Typeface.sub.weight(.medium))
+                    .foregroundStyle(BridgeTokens.fg1)
+                Text(detail)
+                    // `.pd` is 11px/regular; `cap` is 11px/semibold so relax the weight.
+                    .font(BridgeTokens.Typeface.cap.weight(.regular))
+                    .foregroundStyle(BridgeTokens.fg5)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            accessory()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            BridgeTokens.wellFill,
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
+        .bridgeBevel(BridgeTokens.bevelInset, radius: 10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5)
+        )
+    }
+}
+
+/// Shared per-grant glyph + one-line copy for the onboarding permission rows,
+/// mirroring the design's `.ob-prow .pic` icons and `.pd` descriptions.
+private enum OBGrantPresentation {
+    /// Aligned with PermissionView.rowIcon(for:) so the onboarding rows carry the
+    /// same per-grant glyphs the rest of the app uses.
+    static func symbol(for grant: PermissionManager.Grant) -> String {
+        switch grant {
+        case .accessibility:   return "accessibility"
+        case .automation:      return "gearshape.2"
+        case .contacts:        return "person.crop.circle"
+        case .notifications:   return "bell.badge"
+        case .screenRecording: return "rectangle.dashed.badge.record"
+        case .fullDiskAccess:  return "internaldrive"
+        case .reminders:       return "checklist"
+        case .calendar:        return "calendar"
+        }
+    }
+
+    static func detail(for grant: PermissionManager.Grant) -> String {
+        switch grant {
+        case .accessibility:   return "UI control \u{00B7} focus \u{00B7} window management"
+        case .automation:      return "Drive Messages, Mail, Calendar"
+        case .contacts:        return "Look up people for Messages & Mail"
+        case .notifications:   return "Approval prompts for destructive actions"
+        case .screenRecording: return "Read on-screen UI & capture screenshots"
+        case .fullDiskAccess:  return "Read files across protected folders"
+        case .reminders:       return "Create & complete your reminders"
+        case .calendar:        return "Read & write calendar events"
+        }
+    }
+}
+
+// MARK: - Onboarding: Auto Permissions (V4 glass — PKT-388)
+
+/// Step 4 (`.ob-body.tight`): "Grant access as you go". Bridge prompts macOS for
+/// each auto-grantable permission; rows show a live `ok`/`warn`/`bad` badge and a
+/// `.ob-progress-note` summary. Functional wiring (probe deferral, Grant-All
+/// sequence, didBecomeActive re-probe, `onResolved` auto-advance) is preserved
+/// verbatim from the legacy AutoPermissionsStepView.
+private struct OnboardingAutoPermissionsStep: View {
+    let permissionManager: PermissionManager
+    let onResolved: (() -> Void)?
+
+    private enum AutoGrantProgressState { case pending, prompting, granted, denied }
+
+    @State private var isGrantingAll = false
+    @State private var progressState: [PermissionManager.Grant: AutoGrantProgressState] = [:]
+    /// Defers probes on appear — user taps Re-check or Grant All first
+    /// (avoids stale/misleading granted state).
+    @State private var userInitiatedProbe = false
+
+    init(permissionManager: PermissionManager, onResolved: (() -> Void)? = nil) {
+        self.permissionManager = permissionManager
+        self.onResolved = onResolved
+    }
+
+    private var autoGrants: [PermissionManager.Grant] {
+        PermissionManager.Grant.v1Cases.filter(\.isAutoGrantable)
+    }
+
+    private var grantedCount: Int {
+        autoGrants.filter { permissionManager.status(for: $0) == .granted }.count
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            obHero("checkmark.shield.fill")
+                .padding(.top, 8)
+
+            obTitle("Grant access as you go")
+                .padding(.top, 18)
+
+            obSub("Bridge asks macOS for each of these directly. Click Allow when the system prompts \u{2014} we\u{2019}ll move on automatically.")
+                .padding(.top, 14)
+
+            // `.ob-perms` — stacked glass permission rows.
+            VStack(spacing: 7) {
+                ForEach(autoGrants) { grant in
+                    autoPermissionRow(for: grant)
+                }
+            }
+            .padding(.top, 18)
+
+            // `.ob-progress-note` — spinner + "N of M granted".
+            HStack(spacing: 8) {
+                if isGrantingAll {
+                    ProgressView().controlSize(.small).scaleEffect(0.7)
+                        .frame(width: 13, height: 13)
+                }
+                Text("\(grantedCount) of \(autoGrants.count) granted \u{2014} approve the macOS prompt")
+                    .font(BridgeTokens.Typeface.meta)
+                    .foregroundStyle(BridgeTokens.fg4)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 12)
+
+            // Grant-All / Re-check actions — V4 BridgeButtons.
+            HStack(spacing: 8) {
+                BridgeButton(isGrantingAll ? "Granting\u{2026}" : "Grant all",
+                             variant: .primary,
+                             isEnabled: !isGrantingAll) {
+                    Task { await runGrantAllSequentially() }
+                }
+                BridgeButton("Re-check", variant: .default, isEnabled: !isGrantingAll) {
+                    Task {
+                        userInitiatedProbe = true
+                        await permissionManager.recheckAllForTruth()
+                        syncProgressFromManager()
+                        notifyResolvedIfNeeded()
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 12)
+        }
+        .frame(maxWidth: .infinity)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            guard userInitiatedProbe else { return }
+            Task {
+                await permissionManager.recheckAllForTruth()
+                syncProgressFromManager()
+                notifyResolvedIfNeeded()
+            }
+        }
+    }
+
+    private func autoPermissionRow(for grant: PermissionManager.Grant) -> some View {
+        let state = uiState(for: grant)
+        let status = permissionManager.status(for: grant)
+        return OBPermissionRow(
+            symbol: OBGrantPresentation.symbol(for: grant),
+            name: grant.displayName,
+            detail: OBGrantPresentation.detail(for: grant)
+        ) {
+            VStack(alignment: .trailing, spacing: 4) {
+                BridgeBadge(label(for: state, status: status),
+                            tone: badgeTone(for: state),
+                            showsDot: true)
+                if needsRemediation(status: status), grant.systemSettingsURL != nil {
+                    BridgeButton("Open", variant: .link) { openSettings(for: grant) }
+                }
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: state)
+    }
+
+    // MARK: State machine (preserved verbatim from AutoPermissionsStepView)
+
+    private func uiState(for grant: PermissionManager.Grant) -> AutoGrantProgressState {
+        if let inFlightState = progressState[grant], inFlightState == .prompting {
+            return inFlightState
+        }
+        return baselineState(for: grant)
+    }
+
+    private func baselineState(for grant: PermissionManager.Grant) -> AutoGrantProgressState {
+        if !userInitiatedProbe { return .pending }
+        switch permissionManager.status(for: grant) {
+        case .granted:
+            return .granted
+        case .denied, .partiallyGranted, .restartRecommended:
+            return .denied
+        case .unknown:
+            return .pending
+        }
+    }
+
+    private func syncProgressFromManager() {
+        for grant in autoGrants {
+            progressState[grant] = baselineState(for: grant)
+        }
+    }
+
+    private func notifyResolvedIfNeeded() {
+        guard autoGrants.allSatisfy({ permissionManager.status(for: $0).isAutoResolvedOnboarding }) else {
+            return
+        }
+        onResolved?()
+    }
+
+    private func runGrantAllSequentially() async {
+        guard !isGrantingAll else { return }
+        userInitiatedProbe = true
+        isGrantingAll = true
+        defer { isGrantingAll = false }
+
+        await permissionManager.recheckAllForTruth()
+
+        for grant in autoGrants {
+            if permissionManager.status(for: grant).isAutoResolvedOnboarding {
+                progressState[grant] = baselineState(for: grant)
+                continue
+            }
+
+            withAnimation {
+                progressState[grant] = .prompting
+            }
+
+            switch grant {
+            case .contacts:
+                _ = await permissionManager.requestContactsAccess()
+                if permissionManager.status(for: .contacts) != .granted,
+                   let url = PermissionManager.Grant.contacts.systemSettingsURL {
+                    NSWorkspace.shared.open(url)
+                }
+            case .notifications:
+                _ = await permissionManager.requestNotificationAccess()
+            case .automation:
+                await permissionManager.requestAutomationAccess()
+            default:
+                break
+            }
+
+            await permissionManager.recheckAllForTruth()
+            withAnimation {
+                progressState[grant] = baselineState(for: grant)
+            }
+            try? await Task.sleep(nanoseconds: 120_000_000)
+        }
+
+        syncProgressFromManager()
+        notifyResolvedIfNeeded()
+    }
+
+    // MARK: Presentation
+
+    private func badgeTone(for state: AutoGrantProgressState) -> BridgeBadge.Tone {
+        switch state {
+        case .pending, .prompting: return .warn
+        case .granted:             return .ok
+        case .denied:              return .bad
+        }
+    }
+
+    private func label(for state: AutoGrantProgressState, status: PermissionManager.GrantStatus) -> String {
+        switch state {
+        case .pending:
+            return userInitiatedProbe ? "Pending" : "Not verified"
+        case .prompting: return "Waiting\u{2026}"
+        case .granted: return "Granted"
+        case .denied:
+            if status == .partiallyGranted { return "Partial" }
+            return "Denied"
+        }
+    }
+
+    private func needsRemediation(status: PermissionManager.GrantStatus) -> Bool {
+        switch status {
+        case .denied, .partiallyGranted:
+            return true
+        case .granted, .unknown, .restartRecommended:
+            return false
+        }
+    }
+
+    private func openSettings(for grant: PermissionManager.Grant) {
+        guard let url = grant.systemSettingsURL else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    // Shared V4 hero/title/sub primitives (self-contained — see OnboardingView).
+    private func obHero(_ systemName: String) -> some View { OBHero(systemName: systemName, tone: .accent) }
+    private func obTitle(_ text: String) -> some View { OBTitle(text: text) }
+    private func obSub(_ text: String) -> some View { OBSub(text: text) }
+}
+
+// MARK: - Onboarding: Manual Permissions (V4 glass — PKT-388)
+
+/// Step 5 (`.ob-body`): "Two need a manual grant". These can't be requested
+/// in-app, so each row opens the exact System Settings pane via an Open
+/// `BridgeButton`. A status badge reflects the live grant; an info
+/// `.ob-progress-note` reminds the user they can grant later. Wiring (deep-link
+/// open, `.task`/didBecomeActive re-probe) is preserved from the legacy view.
+private struct OnboardingManualPermissionsStep: View {
+    let permissionManager: PermissionManager
+
+    private var manualGrants: [PermissionManager.Grant] {
+        PermissionManager.Grant.v1Cases.filter { !$0.isAutoGrantable }
+    }
+
+    /// `.ob-title` copy, agreeing in number with the REAL manual-grant count
+    /// ("One needs…" / "N need…"). Spelled-out for small counts, numeric beyond.
+    private var manualGrantTitle: String {
+        let count = manualGrants.count
+        let word: String
+        switch count {
+        case 1: word = "One"
+        case 2: word = "Two"
+        case 3: word = "Three"
+        case 4: word = "Four"
+        case 5: word = "Five"
+        default: word = "\(count)"
+        }
+        let verb = count == 1 ? "needs" : "need"
+        return "\(word) \(verb) a manual grant"
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            obHero("gearshape.fill")
+                .padding(.top, 8)
+
+            // Title is data-driven off the REAL manual-grant set (5 today), not the
+            // design mock's count of 2 — singular/plural agree with manualGrants.count.
+            // This step carries 5 rows (vs the mock's 2), so the surrounding rhythm
+            // is compressed (design `.tight` rung) to fit 520×520 without scrolling.
+            obTitle(manualGrantTitle)
+                .padding(.top, 14)
+
+            obSub("These can\u{2019}t be requested in-app. We\u{2019}ll open the exact System Settings pane \u{2014} switch The Bridge on, then come back here.")
+                .padding(.top, 9)
+
+            // `.ob-perms` — stacked glass permission rows.
+            VStack(spacing: 6) {
+                ForEach(manualGrants) { grant in
+                    manualPermissionRow(for: grant)
+                }
+            }
+            .padding(.top, 12)
+
+            // `.ob-progress-note` (info) — grant-later reminder.
+            HStack(spacing: 8) {
+                BridgeStatusDot(.info, size: 9)
+                Text("You can grant these later in Settings \u{2192} Security.")
+                    .font(BridgeTokens.Typeface.meta)
+                    .foregroundStyle(BridgeTokens.fg4)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 10)
+
+            BridgeButton("Re-check", variant: .default) {
+                Task { await permissionManager.recheckAllForTruth() }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 10)
+        }
+        .frame(maxWidth: .infinity)
+        .task {
+            await permissionManager.recheckAllForTruth()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await permissionManager.recheckAllForTruth() }
+        }
+    }
+
+    private func manualPermissionRow(for grant: PermissionManager.Grant) -> some View {
+        let status = permissionManager.status(for: grant)
+        return OBPermissionRow(
+            symbol: OBGrantPresentation.symbol(for: grant),
+            name: grant.displayName,
+            detail: OBGrantPresentation.detail(for: grant)
+        ) {
+            HStack(spacing: 8) {
+                if status == .granted {
+                    BridgeBadge("Granted", tone: .ok, showsDot: true)
+                }
+                // `.ob-prow .btn.sm` — open the exact System Settings pane.
+                BridgeButton("Open", variant: .default) {
+                    guard let url = grant.systemSettingsURL else { return }
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        }
+    }
+
+    // Shared V4 hero/title/sub primitives (self-contained — see OnboardingView).
+    private func obHero(_ systemName: String) -> some View { OBHero(systemName: systemName, tone: .gold) }
+    private func obTitle(_ text: String) -> some View { OBTitle(text: text) }
+    private func obSub(_ text: String) -> some View { OBSub(text: text) }
+}
+
+// MARK: - Reusable onboarding hero/title/sub (shared by the inline step structs)
+
+/// `.ob-hero` — 78×78 glass hero tile holding an SF Symbol (accent tint by
+/// default, gold variant for the manual-grant step). Standalone twin of
+/// `OnboardingView.obHero` so the inline step structs are self-contained.
+private struct OBHero: View {
+    let systemName: String
+    enum Tone { case accent, gold }
+    var tone: Tone = .accent
+
+    var body: some View {
+        let tint = tone == .gold ? BridgeTokens.gold : BridgeTokens.accent
+        let glyph = tone == .gold ? BridgeTokens.gold : BridgeTokens.accentLink
+        ZStack {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(tint.opacity(0.18))
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(
+                    RadialGradient(
+                        colors: [Color.white.opacity(0.30), Color.white.opacity(0.06), .clear],
+                        center: UnitPoint(x: 0.3, y: 0.18), startRadius: 2, endRadius: 70
+                    )
+                )
+        }
+        .frame(width: 78, height: 78)
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 1)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .inset(by: 0.5)
+                .stroke(LinearGradient(colors: [Color.white.opacity(0.40), .clear],
+                                       startPoint: .top, endPoint: .center), lineWidth: 0.5)
+                .allowsHitTesting(false)
+        )
+        .shadow(color: .black.opacity(0.4), radius: 11, y: 8)
+        .overlay(
+            Image(systemName: systemName)
+                .font(.system(size: 32, weight: .medium))
+                .foregroundStyle(glyph)
+        )
+    }
+}
+
+/// `.ob-title` — 23pt semibold display title.
+private struct OBTitle: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .font(.system(size: 23, weight: .semibold))
+            .tracking(-0.4)
+            .foregroundStyle(BridgeTokens.fg1)
+            .multilineTextAlignment(.center)
+    }
+}
+
+/// `.ob-sub` — 13.5pt secondary subtitle.
+private struct OBSub: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .font(.system(size: 13.5))
+            .foregroundStyle(BridgeTokens.fg3)
+            .multilineTextAlignment(.center)
+            .lineSpacing(2)
+            .frame(maxWidth: 390)
+    }
+}
+
+// MARK: - GrantStatus resolution helper (onboarding auto step)
+
+private extension PermissionManager.GrantStatus {
+    /// A grant is "resolved" for onboarding auto-advance once the user has acted
+    /// on it (granted/denied/partial) — matches the legacy step's semantics.
+    var isAutoResolvedOnboarding: Bool {
+        switch self {
+        case .granted, .denied, .partiallyGranted:
+            return true
+        case .unknown, .restartRecommended:
+            return false
+        }
+    }
 }

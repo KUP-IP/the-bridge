@@ -113,6 +113,25 @@ func runBridgeTokensAdaptiveTests() async {
             Case(name: "infoText", color: BridgeTokens.infoText,
                  dark: RGBA(r: 0.616, g: 0.706, b: 0.961, a: 1),   // == accentLink #9DB4F5
                  light: RGBA(r: 0.165, g: 0.282, b: 0.753, a: 1)), // == accent #2A48C0
+
+            // ── v4 NEW adaptive color tokens ──
+            // accentLink became ADAPTIVE in v4 (was a fixed #9DB4F5): dark keeps
+            // the pale link, light flips to the deep royal so it reads on titanium.
+            Case(name: "accentLink", color: BridgeTokens.accentLink,
+                 dark: RGBA(r: 0.616, g: 0.706, b: 0.961, a: 1),   // #9DB4F5
+                 light: RGBA(r: 0.165, g: 0.282, b: 0.753, a: 1)), // #2A48C0
+            // goldSoft — light gold on carbon, deep gold on titanium (`--gold-soft`).
+            Case(name: "goldSoft", color: BridgeTokens.goldSoft,
+                 dark: RGBA(r: 0.878, g: 0.706, b: 0.345, a: 1),   // #E0B458
+                 light: RGBA(r: 0.541, g: 0.392, b: 0.063, a: 1)), // #8A6410
+            // accentBorder — #3A5AE0 @.45 dark / #2A48C0 @.40 light (`--accent-border`).
+            Case(name: "accentBorder", color: BridgeTokens.accentBorder,
+                 dark: RGBA(r: 0.227, g: 0.353, b: 0.878, a: 0.45),   // rgba(58,90,224,.45)
+                 light: RGBA(r: 0.165, g: 0.282, b: 0.753, a: 0.40)), // rgba(42,72,192,.40)
+            // focusRing — #3A5AE0 @.30 dark / #2A48C0 @.22 light (`--focus` fill).
+            Case(name: "focusRing", color: BridgeTokens.focusRing,
+                 dark: RGBA(r: 0.227, g: 0.353, b: 0.878, a: 0.30),   // rgba(58,90,224,.30)
+                 light: RGBA(r: 0.165, g: 0.282, b: 0.753, a: 0.22)), // rgba(42,72,192,.22)
         ]
     }
 
@@ -163,8 +182,11 @@ func runBridgeTokensAdaptiveTests() async {
     let fixed: [Fixed] = await MainActor.run {
         [
             Fixed(name: "accent", color: BridgeTokens.accent),
+            // accentStrong stays appearance-agnostic (its VALUE changed in v4:
+            // #3A5AE0 → #5B7BFF — the caret color — but it's still one fixed hue).
             Fixed(name: "accentStrong", color: BridgeTokens.accentStrong),
-            Fixed(name: "accentLink", color: BridgeTokens.accentLink),
+            // accentLink moved to the ADAPTIVE `cases` list in v4 (was here) —
+            // it now flips dark↔light, so it must NOT be asserted as fixed.
             Fixed(name: "gold", color: BridgeTokens.gold),
             Fixed(name: "titanium", color: BridgeTokens.titanium),
             Fixed(name: "ok", color: BridgeTokens.ok),
@@ -178,5 +200,89 @@ func runBridgeTokensAdaptiveTests() async {
             let l = await resolve(f.color, under: .aqua)
             try expect(d.matches(l), "\(f.name) unexpectedly adapts — light \(l) != dark \(d)")
         }
+    }
+
+    // ========================================================================
+    // v4 ("Liquid Glass, evolved") — token-port coverage
+    // ========================================================================
+    print("\n\u{1F48E} BridgeTokens v4 token-port coverage")
+
+    // 6. accentStrong's VALUE changed to #5B7BFF (the caret). Pin it in both
+    //    appearances (fixed hue) so the reconcile can't silently regress.
+    await test("v4: accentStrong == #5B7BFF (caret) in both appearances") {
+        let want = RGBA(r: 0.357, g: 0.482, b: 1.0, a: 1)
+        let d = await resolve(BridgeTokens.accentStrong, under: .darkAqua)
+        let l = await resolve(BridgeTokens.accentStrong, under: .aqua)
+        try expect(d.matches(want), "accentStrong dark resolved \(d), expected \(want)")
+        try expect(l.matches(want), "accentStrong light resolved \(l), expected \(want)")
+    }
+
+    // 7. Spacing — the 8-step scale (`--sp-1…8`) + sidebarW, exact values.
+    await test("v4: Space 8-step scale == --sp-1…8 (4,8,10,14,18,22,32,48)") {
+        try expect(BridgeTokens.Space.s1 == 4,  "s1 \(BridgeTokens.Space.s1)")
+        try expect(BridgeTokens.Space.s2 == 8,  "s2 \(BridgeTokens.Space.s2)")
+        try expect(BridgeTokens.Space.s3 == 10, "s3 \(BridgeTokens.Space.s3)")
+        try expect(BridgeTokens.Space.s4 == 14, "s4 \(BridgeTokens.Space.s4)")
+        try expect(BridgeTokens.Space.s5 == 18, "s5 \(BridgeTokens.Space.s5)")
+        try expect(BridgeTokens.Space.s6 == 22, "s6 \(BridgeTokens.Space.s6)")
+        try expect(BridgeTokens.Space.s7 == 32, "s7 \(BridgeTokens.Space.s7)")
+        try expect(BridgeTokens.Space.s8 == 48, "s8 \(BridgeTokens.Space.s8)")
+    }
+    await test("v4: Space.sidebarW == 188 and named geometry preserved") {
+        try expect(BridgeTokens.Space.sidebarW == 188, "sidebarW \(BridgeTokens.Space.sidebarW)")
+        // regression: the pre-existing named geometry is untouched.
+        try expect(BridgeTokens.Space.paneV == 18 && BridgeTokens.Space.paneH == 20, "pane padding drifted")
+        try expect(BridgeTokens.Space.titleBar == 38 && BridgeTokens.Space.footBar == 30, "bar heights drifted")
+        try expect(BridgeTokens.Space.trafficGutter == 78, "trafficGutter drifted")
+    }
+
+    // 8. Type — tracking constants (`--track-tight` / `--track-cap` @ 11pt).
+    await test("v4: Typeface tracking constants (trackTight -.2, trackCap 1.1pt)") {
+        try expect(BridgeTokens.Typeface.trackTight == -0.2, "trackTight \(BridgeTokens.Typeface.trackTight)")
+        try expect(BridgeTokens.Typeface.trackCap == 1.1,    "trackCap \(BridgeTokens.Typeface.trackCap)")
+    }
+
+    // 9. Elevation/material ladder — structural sanity: the dual shadows carry
+    //    two distinct layers, blur specs carry the tokens.css radius+saturation,
+    //    weave step is 4px, focus-ring spread is 3px. (Per-stop color fidelity
+    //    is asserted via the adaptive `cases` above for the color-bearing
+    //    tokens; here we lock the non-color structure that can't regress quietly.)
+    await test("v4: dual drop shadows carry two layers with tokens.css radii") {
+        try expect(BridgeTokens.shadowE1.a.radius == 3   && BridgeTokens.shadowE1.b.radius == 9,   "sh-e1 radii")
+        try expect(BridgeTokens.shadowE2.a.radius == 6   && BridgeTokens.shadowE2.b.radius == 33,  "sh-e2 radii")
+        try expect(BridgeTokens.shadowE3.a.radius == 21  && BridgeTokens.shadowE3.b.radius == 90,  "sh-e3 radii")
+        try expect(BridgeTokens.shadowE4.a.radius == 42  && BridgeTokens.shadowE4.b.radius == 156, "sh-e4 radii")
+        try expect(BridgeTokens.shadowE1.a.y == 1.5 && BridgeTokens.shadowE4.b.y == 66, "shadow y-offsets")
+    }
+    await test("v4: blur specs == --blur-* (radius + saturation)") {
+        try expect(BridgeTokens.blurWindow.radius == 12  && BridgeTokens.blurWindow.saturation == 1.18,  "blur-window")
+        try expect(BridgeTokens.blurCard.radius == 8     && BridgeTokens.blurCard.saturation == 1.14,    "blur-card")
+        try expect(BridgeTokens.blurPopover.radius == 10 && BridgeTokens.blurPopover.saturation == 1.17, "blur-popover")
+    }
+    await test("v4: weave step 4px · focus-ring spread 3px") {
+        try expect(BridgeTokens.Weave.step == 4, "weave step \(BridgeTokens.Weave.step)")
+        try expect(BridgeTokens.focusRingWidth == 3, "focusRingWidth \(BridgeTokens.focusRingWidth)")
+    }
+    // 10. Glass fills carry the right sheen-stop count (card=2, popover/window=3)
+    //     and their base tints are adaptive (dark tint != light tint).
+    await test("v4: glass fills — sheen-stop counts + adaptive base tints") {
+        try expect(BridgeTokens.glassCard.stops.count == 2,    "card stops")
+        try expect(BridgeTokens.glassRaise.stops.count == 2,   "raise stops")
+        try expect(BridgeTokens.glassPopover.stops.count == 3, "popover stops")
+        try expect(BridgeTokens.glassWindow.stops.count == 3,  "window stops")
+        let cardBaseD = await resolve(BridgeTokens.glassCard.base, under: .darkAqua)
+        let cardBaseL = await resolve(BridgeTokens.glassCard.base, under: .aqua)
+        try expect(!cardBaseD.matches(cardBaseL), "glassCard base does not adapt (\(cardBaseD) == \(cardBaseL))")
+    }
+    // 11. Elevation ladder grouping wires the right ingredients per rung.
+    await test("v4: Elevation rungs wire fill/edge/shadow/blur correctly") {
+        try expect(BridgeTokens.Elevation.card.shadow != nil && BridgeTokens.Elevation.card.blur == nil,
+                   "e1 card: e1 shadow, no blur")
+        try expect(BridgeTokens.Elevation.window.radius == BridgeTokens.Radius.window,
+                   "e4 window radius == window radius")
+        try expect(BridgeTokens.Elevation.control.fill == nil && BridgeTokens.Elevation.control.controlFill != nil,
+                   "control rung: flat controlFill, no glass fill")
+        try expect(BridgeTokens.Elevation.inset.shadow == nil && BridgeTokens.Elevation.inset.edge == nil,
+                   "inset rung: recessed, no drop shadow / edge")
     }
 }

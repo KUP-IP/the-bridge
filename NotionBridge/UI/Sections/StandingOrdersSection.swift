@@ -100,42 +100,24 @@ public struct OrdersSection: View {
         }
     }
 
-    /// Segmented `Orders | Commands` control — mirrors the doctrine mode toggle
-    /// visual at full-section scope, focus-ring suppressed to match the sidebar.
+    /// Segmented `Orders | Commands` control — the canonical W2 `BridgeSegmented`
+    /// (raised neutral thumb on an inset well). A bridging binding routes the
+    /// selection through `setTab` so the `@AppStorage` persistence + the animated
+    /// switch are preserved (the component writes the value; `setTab` records it).
     private var segmented: some View {
-        HStack(spacing: 0) {
-            tabButton("Orders", .orders)
-            tabButton("Commands", .commands)
-        }
-        .padding(2)
-        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+        let bound = Binding<Tab>(
+            get: { selection },
+            set: { newValue in
+                withAnimation(.easeInOut(duration: 0.16)) { setTab(newValue) }
+            }
+        )
+        return BridgeSegmented(
+            selection: bound,
+            options: [(Tab.orders, "Orders"), (Tab.commands, "Commands")]
+        )
+        .fixedSize()
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Orders section tabs")
-    }
-
-    private func tabButton(_ label: String, _ value: Tab) -> some View {
-        let on = selection == value
-        return Button {
-            withAnimation(.easeInOut(duration: 0.16)) { setTab(value) }
-        } label: {
-            Text(label)
-                .font(.system(size: 12.5, weight: on ? .semibold : .regular))
-                .foregroundStyle(on ? BridgeTokens.fg1 : BridgeTokens.fg3)
-                .padding(.horizontal, 16).padding(.vertical, 6)
-                .frame(minHeight: 28)
-                .background {
-                    if on {
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(BridgeTokens.accent.opacity(0.18))
-                            .overlay(RoundedRectangle(cornerRadius: 6)
-                                .strokeBorder(BridgeTokens.accent.opacity(0.45), lineWidth: 0.5))
-                    }
-                }
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(on ? [.isSelected] : [])
     }
 
     /// Per-tab meta: Orders → token + skills stats; Commands → command/favorite
@@ -160,11 +142,11 @@ public struct OrdersSection: View {
     private func metaStat(value: String, label: String, color: Color) -> some View {
         HStack(spacing: 6) {
             Text(value)
-                .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                .font(BridgeTokens.Typeface.body.monospaced())
                 .foregroundStyle(color)
                 .monospacedDigit()
             Text(label)
-                .font(.system(size: 11, weight: .medium))
+                .font(BridgeTokens.Typeface.cap)
                 .foregroundStyle(BridgeTokens.fg4)
         }
         .padding(.horizontal, 10).padding(.vertical, 5)
@@ -180,7 +162,7 @@ public struct OrdersSection: View {
     private var commandBridgeSwitch: some View {
         HStack(spacing: 8) {
             Text("Command Bridge")
-                .font(.system(size: 12, weight: .medium))
+                .font(BridgeTokens.Typeface.meta.weight(.medium))
                 .foregroundStyle(BridgeTokens.fg2)
             Toggle("", isOn: $paletteEnabled)
                 .labelsHidden()
@@ -398,39 +380,22 @@ struct StandingOrdersBody: View {
         .accessibilityLabel(help)
     }
 
-    /// Segmented [Preview | Edit] control.
+    /// Segmented [Preview | Edit] control — the canonical W2 `BridgeSegmented`
+    /// (the same `.seg` component the outer Orders/Commands strip uses), routed
+    /// through an animated bridging binding so the mode swap stays smooth.
     private var modeToggle: some View {
-        HStack(spacing: 0) {
-            modeTab("Preview", .preview)
-            modeTab("Edit", .edit)
-        }
-        .padding(2)
-        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
-    }
-
-    private func modeTab(_ label: String, _ value: PanelMode) -> some View {
-        let on = mode == value
-        return Button {
-            withAnimation(.easeInOut(duration: 0.16)) { mode = value }
-        } label: {
-            Text(label)
-                .font(.system(size: 12, weight: on ? .semibold : .regular))
-                .foregroundStyle(on ? BridgeTokens.fg1 : BridgeTokens.fg3)
-                .padding(.horizontal, 14).padding(.vertical, 5)
-                .frame(minHeight: 28)
-                .background {
-                    if on {
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(BridgeTokens.accent.opacity(0.18))
-                            .overlay(RoundedRectangle(cornerRadius: 6)
-                                .strokeBorder(BridgeTokens.accent.opacity(0.45), lineWidth: 0.5))
-                    }
-                }
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(on ? [.isSelected] : [])
+        let bound = Binding<PanelMode>(
+            get: { mode },
+            set: { newValue in
+                withAnimation(.easeInOut(duration: 0.16)) { mode = newValue }
+            }
+        )
+        return BridgeSegmented(
+            selection: bound,
+            options: [(PanelMode.preview, "Preview"), (PanelMode.edit, "Edit")]
+        )
+        .fixedSize()
+        .accessibilityLabel("Doctrine view")
     }
 
     /// "Open" → expand the panel into the centered full overlay.
@@ -441,7 +406,7 @@ struct StandingOrdersBody: View {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
                     .font(.system(size: 11, weight: .semibold))
-                Text("Open").font(.system(size: 12))
+                Text("Open").font(BridgeTokens.Typeface.meta)
             }
             .foregroundStyle(BridgeTokens.fg2)
             .padding(.horizontal, 11).padding(.vertical, 5)
@@ -459,7 +424,9 @@ struct StandingOrdersBody: View {
         switch mode {
         case .preview:
             ScrollView {
-                SOMarkdownView(markdown: composedText)
+                // Canonical W2 doctrine renderer (H2 rules, bullets, inline
+                // **bold**/`code`). Same composed source as before.
+                BridgeMarkdown(composedText)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(expandedStyle ? 18 : 14)
             }
@@ -616,7 +583,7 @@ struct StandingOrdersBody: View {
 
             if sessions.isEmpty {
                 Text("No clients connected.")
-                    .font(.system(size: 12.5))
+                    .font(BridgeTokens.Typeface.sub)
                     .foregroundStyle(BridgeTokens.fg4)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 6)
@@ -641,7 +608,7 @@ struct StandingOrdersBody: View {
                 .padding(.top, 4)
             VStack(alignment: .leading, spacing: 3) {
                 Text(row.clientName ?? "Unknown client")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(BridgeTokens.Typeface.base600)
                     .foregroundStyle(BridgeTokens.fg1)
                 HStack(spacing: 6) {
                     if let delivered = DeliveryAuditLabels.deliveredLabel(for: row),
@@ -698,7 +665,7 @@ struct StandingOrdersBody: View {
                     Image(systemName: timelineExpanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
                     Text("Debug timeline")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(BridgeTokens.Typeface.cap)
                         .tracking(0.4)
                     Text("\(events.count) recent")
                         .font(.system(size: 11))
@@ -790,7 +757,7 @@ struct StandingOrdersBody: View {
                         draft = t.body; selectedTemplate = t
                     } label: {
                         VStack(alignment: .leading, spacing: 5) {
-                            Text(t.label).font(.system(size: 13, weight: .semibold)).foregroundStyle(BridgeTokens.fg1)
+                            Text(t.label).font(BridgeTokens.Typeface.base600).foregroundStyle(BridgeTokens.fg1)
                             Text(snippet(of: t.body))
                                 .font(.system(size: 11.5)).foregroundStyle(BridgeTokens.fg3)
                                 .lineLimit(3)
@@ -859,80 +826,5 @@ struct StandingOrdersBody: View {
                 self.saveIsError = true
             }
         }
-    }
-}
-
-// MARK: - Lightweight markdown renderer (composed preview, "for human eyes")
-
-/// Renders the composed standing-orders markdown as rich blocks — H1/H2 display
-/// headers, bullet/numbered lists, and paragraphs with inline emphasis/code —
-/// mirroring the design's `.so-preview`. Inline syntax (**bold**, `code`, *em*)
-/// is parsed via AttributedString; block structure is line-driven.
-struct SOMarkdownView: View {
-    let markdown: String
-
-    private enum Block: Identifiable {
-        case h1(String), h2(String), bullet(String), numbered(String, String), paragraph(String), spacer
-        var id: String { UUID().uuidString }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(parse().enumerated()), id: \.offset) { _, block in
-                row(block)
-            }
-        }
-    }
-
-    @ViewBuilder private func row(_ block: Block) -> some View {
-        switch block {
-        case .h1(let t):
-            Text(inline(t)).font(.system(size: 19, weight: .semibold)).foregroundStyle(BridgeTokens.fg1)
-                .padding(.bottom, 1)
-        case .h2(let t):
-            VStack(alignment: .leading, spacing: 8) {
-                Rectangle().fill(BridgeTokens.hairline).frame(height: 0.5).padding(.top, 4)
-                Text(inline(t)).font(.system(size: 14, weight: .semibold)).foregroundStyle(BridgeTokens.fg1)
-            }
-        case .bullet(let t):
-            HStack(alignment: .top, spacing: 8) {
-                Text("•").foregroundStyle(BridgeTokens.infoText.opacity(0.8))
-                Text(inline(t)).foregroundStyle(BridgeTokens.fg2)
-            }.font(.system(size: 12.5))
-        case .numbered(let n, let t):
-            HStack(alignment: .top, spacing: 8) {
-                Text("\(n).").foregroundStyle(BridgeTokens.infoText.opacity(0.8)).monospacedDigit()
-                Text(inline(t)).foregroundStyle(BridgeTokens.fg2)
-            }.font(.system(size: 12.5))
-        case .paragraph(let t):
-            Text(inline(t)).font(.system(size: 12.5)).foregroundStyle(BridgeTokens.fg2)
-                .fixedSize(horizontal: false, vertical: true)
-        case .spacer:
-            Spacer().frame(height: 2)
-        }
-    }
-
-    private func inline(_ s: String) -> AttributedString {
-        (try? AttributedString(
-            markdown: s,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        )) ?? AttributedString(s)
-    }
-
-    private func parse() -> [Block] {
-        var out: [Block] = []
-        for raw in markdown.components(separatedBy: "\n") {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty { out.append(.spacer); continue }
-            if line.hasPrefix("## ") { out.append(.h2(String(line.dropFirst(3)))) }
-            else if line.hasPrefix("### ") { out.append(.h2(String(line.dropFirst(4)))) }
-            else if line.hasPrefix("# ") { out.append(.h1(String(line.dropFirst(2)))) }
-            else if line.hasPrefix("- ") || line.hasPrefix("* ") { out.append(.bullet(String(line.dropFirst(2)))) }
-            else if let m = line.firstMatch(of: /^(\d+)\.\s+(.*)$/) {
-                out.append(.numbered(String(m.1), String(m.2)))
-            }
-            else { out.append(.paragraph(line)) }
-        }
-        return out
     }
 }

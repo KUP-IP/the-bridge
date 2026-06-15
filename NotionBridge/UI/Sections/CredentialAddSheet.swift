@@ -95,10 +95,7 @@ public struct CredentialAddSheet: View {
                     }
                     formFields
                     if let errorText {
-                        Label(errorText, systemImage: "exclamationmark.triangle.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(BridgeTokens.badText)
-                            .fixedSize(horizontal: false, vertical: true)
+                        BridgeBanner(signal: .bad, message: errorText)
                     }
                 }
                 .padding(20)
@@ -128,10 +125,10 @@ public struct CredentialAddSheet: View {
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(BridgeTokens.Typeface.hero)
                     .foregroundStyle(BridgeTokens.fg1)
                 Text(subtitle)
-                    .font(.system(size: 12))
+                    .font(BridgeTokens.Typeface.meta)
                     .foregroundStyle(BridgeTokens.fg4)
             }
             Spacer()
@@ -168,13 +165,17 @@ public struct CredentialAddSheet: View {
     private var typePicker: some View {
         VStack(alignment: .leading, spacing: 6) {
             fieldLabel("Type")
-            Picker("", selection: $selectedType) {
-                Text("API key").tag(CredentialType.apiKey)
-                Text("Password").tag(CredentialType.password)
-                Text("Card").tag(CredentialType.card)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            // W2 `.seg` — raised neutral-thumb segmented control bound directly to
+            // the CredentialType enum (api key · password · card; `.unknown` is
+            // never user-selectable).
+            BridgeSegmented(
+                selection: $selectedType,
+                options: [
+                    (CredentialType.apiKey, "API key"),
+                    (CredentialType.password, "Password"),
+                    (CredentialType.card, "Card"),
+                ]
+            )
         }
     }
 
@@ -199,7 +200,7 @@ public struct CredentialAddSheet: View {
             }
             field("ZIP / postal code", text: $cardZip, placeholder: "Billing ZIP")
             Text("The raw card number is tokenized through Stripe before storage — only the token + last 4 are kept.")
-                .font(.system(size: 11))
+                .font(BridgeTokens.Typeface.cap.weight(.regular))
                 .foregroundStyle(BridgeTokens.fg4)
                 .fixedSize(horizontal: false, vertical: true)
         case .unknown:
@@ -212,28 +213,36 @@ public struct CredentialAddSheet: View {
     private var footer: some View {
         HStack {
             Spacer()
-            Button("Cancel") { dismiss() }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-            Button {
-                Task { await save() }
-            } label: {
-                HStack(spacing: 6) {
-                    if saving { ProgressView().controlSize(.small) }
-                    Text(saveLabel)
-                }
-                .frame(minWidth: 80)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(saving || !isValid)
-            .keyboardShortcut(.defaultAction)
+            BridgeButton("Cancel", variant: .default) { dismiss() }
+            saveButton
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
     }
 
+    /// Primary save action — the canonical W2 primary button (translucent accent
+    /// gradient · onAccent ink · accentBorder edge · control radius), no longer a
+    /// hand-rolled re-implementation of that chrome. In-flight feedback comes from
+    /// the disabled-dim + a "Saving…/Rotating…/Reconnecting…" label swap, since
+    /// the keychain write + biometric gate are near-instant. The Return-to-save
+    /// shortcut is preserved via the host `.sheet` default-action behavior.
+    private var saveButton: some View {
+        BridgeButton(
+            saveLabel,
+            variant: .primary,
+            isEnabled: !saving && isValid
+        ) {
+            Task { await save() }
+        }
+        .keyboardShortcut(.defaultAction)
+    }
+
     private var saveLabel: String {
+        if saving {
+            if isReconnect { return "Reconnecting\u{2026}" }
+            if isReplace { return "Rotating\u{2026}" }
+            return "Saving\u{2026}"
+        }
         if isReconnect { return "Reconnect" }
         if isReplace { return "Rotate" }
         return "Save"
@@ -258,17 +267,34 @@ public struct CredentialAddSheet: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             fieldLabel(label)
-            TextField(placeholder, text: text)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13, design: mono ? .monospaced : .default))
-                .foregroundStyle(disabled ? BridgeTokens.fg4 : BridgeTokens.fg1)
-                .padding(.horizontal, 10).padding(.vertical, 8)
-                .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
-                .disabled(disabled)
+            if disabled {
+                // Replace-mode locked identity field (an enhancement over the
+                // design) — a read-only recessed well; BridgeInput has no disabled
+                // variant, so this single case stays inline.
+                Text(text.wrappedValue)
+                    .font(mono ? BridgeTokens.Typeface.mono : BridgeTokens.Typeface.base)
+                    .foregroundStyle(BridgeTokens.fg4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 32)
+                    .padding(.horizontal, 11)
+                    .background(RoundedRectangle(cornerRadius: BridgeTokens.Radius.input, style: .continuous)
+                        .fill(BridgeTokens.wellFill))
+                    .bridgeBevel(BridgeTokens.bevelInset, radius: BridgeTokens.Radius.input)
+                    .overlay(RoundedRectangle(cornerRadius: BridgeTokens.Radius.input, style: .continuous)
+                        .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+            } else {
+                // W2 `.input` — recessed well + bevel-inset + focus ring + accent
+                // caret, mono face when requested.
+                BridgeInput(placeholder, text: text, mono: mono)
+            }
         }
     }
 
+    /// Secure-entry field. BridgeInput wraps a plain `TextField` (no secure
+    /// variant), so the secret fields keep a hand-rolled `SecureField` that mirrors
+    /// the BridgeInput chrome exactly (wellFill + bevel-inset + hairline, control
+    /// radius, mono face) — the documented exception, identical to the onboarding
+    /// token field.
     @ViewBuilder
     private func secureField(_ label: String, text: Binding<String>, placeholder: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -276,11 +302,16 @@ public struct CredentialAddSheet: View {
             SecureField(placeholder, text: text)
                 .textContentType(.none)
                 .textFieldStyle(.plain)
-                .font(.system(size: 13, design: .monospaced))
+                .font(BridgeTokens.Typeface.mono)
                 .foregroundStyle(BridgeTokens.fg1)
-                .padding(.horizontal, 10).padding(.vertical, 8)
-                .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+                .tint(BridgeTokens.accentStrong)
+                .frame(height: 32)
+                .padding(.horizontal, 11)
+                .background(RoundedRectangle(cornerRadius: BridgeTokens.Radius.input, style: .continuous)
+                    .fill(BridgeTokens.wellFill))
+                .bridgeBevel(BridgeTokens.bevelInset, radius: BridgeTokens.Radius.input)
+                .overlay(RoundedRectangle(cornerRadius: BridgeTokens.Radius.input, style: .continuous)
+                    .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
         }
     }
 

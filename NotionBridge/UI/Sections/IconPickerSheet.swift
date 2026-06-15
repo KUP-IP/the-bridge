@@ -85,7 +85,8 @@ public struct IconPickerSheet: View {
     private var header: some View {
         HStack {
             Text("Choose an icon")
-                .font(.system(size: 14, weight: .semibold))
+                .font(BridgeTokens.Typeface.body)
+                .foregroundStyle(BridgeTokens.fg1)
             Spacer()
             Button("Done") {
                 isPresented = false
@@ -99,29 +100,17 @@ public struct IconPickerSheet: View {
 
     // MARK: - Tab bar
 
+    /// Emoji | Symbol tab strip — the canonical W2 `BridgeSegmented` (the same
+    /// `.seg` component the design uses for the Appearance Emoji/Symbol toggle),
+    /// replacing the bespoke HStack-of-buttons.
     private var tabBar: some View {
-        HStack(spacing: 4) {
-            ForEach(PickerTab.allCases, id: \.self) { t in
-                Button {
-                    tab = t
-                } label: {
-                    Text(t.label)
-                        .font(.system(size: 12, weight: .medium))
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 5)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(tab == t ? BridgeTokens.selectionFill : Color.clear)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                        .strokeBorder(tab == t ? BridgeTokens.hairlineStrong : Color.clear,
-                                                      lineWidth: 0.5)
-                                )
-                        )
-                        .foregroundStyle(tab == t ? .primary : BridgeTokens.fg3)
-                }
-                .buttonStyle(.plain)
-            }
+        HStack(spacing: 0) {
+            BridgeSegmented(
+                selection: $tab,
+                options: PickerTab.allCases.map { ($0, $0.label) }
+            )
+            .fixedSize()
+            .accessibilityLabel("Icon kind")
             Spacer()
         }
         .padding(.horizontal, 14)
@@ -145,13 +134,25 @@ public struct IconPickerSheet: View {
                     Circle()
                         .fill(NotionPalette.color(named: c.rawValue) ?? .gray)
                         .frame(width: 18, height: 18)
+                        // Selected swatch ring (`.cmdp-sw.on`): a canvas-colored
+                        // gap then an fg-3 halo — adaptive in both themes (the
+                        // raw white ring vanished on titanium).
                         .overlay(
                             Circle()
-                                .strokeBorder(
-                                    selectedColor == c ? Color.white : BridgeTokens.hairline,
-                                    lineWidth: selectedColor == c ? 2 : 0.5
-                                )
+                                .strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5)
                         )
+                        .overlay {
+                            if selectedColor == c {
+                                Circle()
+                                    .inset(by: -3.5)
+                                    .strokeBorder(BridgeTokens.fg3, lineWidth: 1.5)
+                                    .overlay(
+                                        Circle()
+                                            .inset(by: -2)
+                                            .strokeBorder(BridgeTokens.bgRaised, lineWidth: 2)
+                                    )
+                            }
+                        }
                         .opacity(tab == .emoji ? 0.40 : 1.0)
                 }
                 .buttonStyle(.plain)
@@ -161,8 +162,8 @@ public struct IconPickerSheet: View {
             }
             Spacer()
             Text("Color applies to symbols, not emoji")
-                .font(.system(size: 10.5))
-                .foregroundStyle(.tertiary)
+                .font(BridgeTokens.Typeface.micro)
+                .foregroundStyle(BridgeTokens.fg5)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -178,14 +179,15 @@ public struct IconPickerSheet: View {
                 .accessibilityHidden(true)
             TextField(searchPlaceholder, text: $query)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(BridgeTokens.Typeface.meta)
+                .foregroundStyle(BridgeTokens.fg2)
                 .accessibilityLabel("Search \(tab == .emoji ? "emoji" : "symbols")")
             if !query.isEmpty {
                 Button {
                     query = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(BridgeTokens.fg5)
                         .font(.system(size: 11))
                 }
                 .buttonStyle(.plain)
@@ -238,11 +240,7 @@ public struct IconPickerSheet: View {
                     Text(e.emoji)
                         .font(.system(size: 18))
                         .frame(width: 28, height: 28)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(isCurrentEmoji(e.emoji) ? Color(red: 0.47, green: 0.63, blue: 0.86).opacity(0.30)
-                                                              : Color.clear)
-                        )
+                        .background(gridCellBackground(selected: isCurrentEmoji(e.emoji)))
                 }
                 .buttonStyle(.plain)
                 .help(e.label)
@@ -268,19 +266,15 @@ public struct IconPickerSheet: View {
                                 .resizable()
                                 .scaledToFit()
                                 .frame(width: 16, height: 16)
-                                .foregroundStyle(NotionPalette.color(named: selectedColor.rawValue) ?? .primary)
+                                .foregroundStyle(NotionPalette.color(named: selectedColor.rawValue) ?? BridgeTokens.fg1)
                         } else {
                             // Defensive fallback if the symbol is absent on this OS build.
                             Image(systemName: "questionmark.square")
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(BridgeTokens.fg5)
                         }
                     }
                     .frame(width: 28, height: 28)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(isCurrentSymbol(name) ? Color(red: 0.47, green: 0.63, blue: 0.86).opacity(0.30)
-                                                        : Color.clear)
-                    )
+                    .background(gridCellBackground(selected: isCurrentSymbol(name)))
                 }
                 .buttonStyle(.plain)
                 .help(name)
@@ -289,13 +283,28 @@ public struct IconPickerSheet: View {
         .padding(.vertical, 6)
     }
 
+    /// Selected grid-cell background (`.cmdp-gi.on`): a tinted accent wash
+    /// (`color-mix(accent 18%)`) ringed in `accentBorder` — token-driven so it
+    /// reads on carbon AND titanium (the old hand-mixed steel-blue washed out).
+    @ViewBuilder
+    private func gridCellBackground(selected: Bool) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        if selected {
+            shape
+                .fill(BridgeTokens.accent.opacity(0.18))
+                .overlay(shape.strokeBorder(BridgeTokens.accentBorder, lineWidth: 0.5))
+        } else {
+            shape.fill(Color.clear)
+        }
+    }
+
     // MARK: - Footer
 
     private var footer: some View {
         HStack {
             Text(footerHint)
-                .font(.system(size: 10.5))
-                .foregroundStyle(.tertiary)
+                .font(BridgeTokens.Typeface.micro)
+                .foregroundStyle(BridgeTokens.fg5)
             Spacer()
         }
         .padding(.horizontal, 14)

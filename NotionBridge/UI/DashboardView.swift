@@ -1,22 +1,35 @@
-// DashboardView.swift — Liquid Glass Status Popover
-// PKT-879 (v3.6.4): Full Liquid Glass reskin per design/dashboard.html.
-//   • 300pt popover width
-//   • every status row is a clickable jump-link via SettingsNavigation
-//   • status dot has a soft pulse glow
-//   • permission cells in two-column grid (4/6 visible: accessibility,
-//     screenRecording, notifications, contacts, fullDiskAccess, automation)
-//   • stats row: tools active / calls today / skills (each navigates)
-// Restart / Quit buttons retained at the bottom (existing behavior).
+// DashboardView.swift — The Bridge v4 "Liquid Glass, evolved" status popover.
+//
+// v4 redesign (feat/v4-redesign): full reskin to the v4 glass language per
+// design/the-bridge-design-system/project/surfaces/dashboard.html (+ the
+// menu-bar-panel.html popover). The popover is now a self-painted e3
+// glass-popover surface (fill+sheen · bevel-raise · edge hairline · e4 shadow ·
+// top glint · carbon-fibre weave) so it renders faithfully in BOTH hosts — the
+// MenuBarExtra `.window` and the borderless Command-Bridge NSPanel (which is
+// transparent and previously relied on a flat canvas fill). All color/geometry
+// comes from the W1 BridgeTokens ladder, so carbon (dark) + titanium (light)
+// resolve for free. Built from W2 components: BridgeBanner, BridgeStatusDot,
+// BridgeStatTile, BridgeButton.
+//
+//   • 340pt popover width (locked — pinned by PKT879DashboardTests, design `.db`)
+//   • license-expired banner → BridgeBanner(.bad) (Activate → Advanced)
+//   • server status row (inset well) → jumps to Connection
+//   • connected-clients section → "Manage" jumps to Connection
+//   • permissions 2-col grid → "Gates" / each cell jumps to Security#gates
+//   • stats row: tools active / calls today / skills — BridgeStatTiles, each a
+//     nav jump-link (Tools / Jobs / Skills)
+//   • Restart / Quit footer (BridgeButton .default / .danger) — wiring retained
 //
 // Historical (preserved for context):
 //  PKT-353 content-first monochrome, PKT-354 Screen Recording dot,
 //  PKT-366 F12 full TCC display, WS-H (PKT-804) deep-links via
-//  SettingsNavigation, PKT-547 Restart/Quit pair.
+//  SettingsNavigation, PKT-547 Restart/Quit pair, PKT-879 Liquid-Glass reskin,
+//  PKT-909 license-status banner.
 
 import SwiftUI
 import AppKit
 
-/// Status popover for the menu bar app — v3.6.4 Liquid Glass reskin.
+/// Status popover for the menu bar app — v4 "Liquid Glass, evolved" reskin.
 public struct DashboardView: View {
     let statusBar: StatusBarController
     let permissionManager: PermissionManager
@@ -52,6 +65,8 @@ public struct DashboardView: View {
             headerSection
             if !licenseStatus.isActive {
                 licenseExpiredBanner
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 4)
             }
             divider
             statusRow
@@ -62,12 +77,18 @@ public struct DashboardView: View {
             divider
             statsRow
             divider
+            recentSection
+            divider
             actionsRow
         }
         .frame(width: PKT879Dashboard.popoverWidth)
-        // Edge insets come from .pop-head (top 14) and .pop-actions (bottom 12)
-        // per kit.css; no extra outer vertical padding so the spec stays exact.
-        // v3.7.6: appearance is system-tethered (no forced color scheme) — the
+        // The v4 popover surface (`.db`): a self-painted e3 glass-popover so the
+        // dashboard reads as evolved glass in BOTH hosts (MenuBarExtra `.window`
+        // + the transparent Command-Bridge NSPanel). Edge insets come from the
+        // header (.top 14) and the actions row (.bottom 12) so no extra outer
+        // vertical padding is needed.
+        .background(popoverSurface)
+        // v4: appearance is system-tethered (no forced color scheme) — the
         // adaptive BridgeTokens follow Light/Dark live.
         .task {
             await permissionManager.checkAllAsync()
@@ -82,47 +103,74 @@ public struct DashboardView: View {
         self.licenseStatus = await LicenseManager.shared.currentStatus()
     }
 
+    // MARK: - Popover surface (`.db` — e3 glass-popover + weave + glint)
+
+    /// The floating popover surface, recreating the design `.db`: a glass-popover
+    /// fill over the carbon/titanium weave, a top specular glint strip, the
+    /// raise-edge hairline, a directional bevel, and the e4 drop shadow. Radius is
+    /// the window rung (14) to align with the host NSPanel's 14pt corner mask
+    /// (avoids a double-corner artifact); the MenuBarExtra host clips to match.
+    private var popoverSurface: some View {
+        let shape = RoundedRectangle(cornerRadius: BridgeTokens.Radius.window, style: .continuous)
+        return ZStack {
+            // Carbon-fibre weave reads under the translucent glass (`.db` layers
+            // `--weave` beneath the popover fill in the design ground).
+            BridgeTokens.bgCanvas
+            BridgeCarbonWeave()
+            // Ingredient 1 — e3 popover fill (opaque base + 3-stop sheen).
+            BridgeTokens.glassPopover.paint(in: shape)
+            // Top specular glint strip (`.db::before`) — sells thick glass.
+            shape
+                .fill(BridgeTokens.glint)
+                .allowsHitTesting(false)
+        }
+        .compositingGroup()
+        // Ingredient 3 — raise-edge hairline (.5px).
+        .overlay(shape.strokeBorder(BridgeTokens.edgeRaise, lineWidth: 0.5))
+        // Ingredient 2 — directional bevel (top rim-light + bottom occlusion).
+        .bridgeBevel(BridgeTokens.bevelRaise, radius: BridgeTokens.Radius.window)
+        .clipShape(shape)
+        // Ingredient 4 — the e4 popover drop shadow (ambient + contact).
+        .bridgeShadow(BridgeTokens.shadowE4)
+    }
+
+    // MARK: - License banner
+
+    /// `.banner` (.bad) — license-lapsed warning with an Activate jump to
+    /// Advanced. Preserves the prior tap target + accessibility contract.
     private var licenseExpiredBanner: some View {
         Button {
             onOpenSettings(.advanced)
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                Text(licenseStatus.pillLabel)
-                    .font(.system(size: 11, weight: .semibold))
-                Spacer()
+            BridgeBanner(
+                signal: .bad,
+                message: licenseStatus.pillLabel,
+                systemImage: "exclamationmark.triangle.fill"
+            ) {
                 Text("Activate \u{2192}")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .opacity(0.85)
+                    .font(BridgeTokens.Typeface.micro.weight(.semibold))
+                    .foregroundStyle(BridgeTokens.badText)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(BridgeTokens.bad.opacity(0.18))
-            .foregroundStyle(BridgeTokens.bad.opacity(0.95))
-            .accessibilityLabel("Bridge license expired. Open Settings → Advanced → License to activate.")
         }
         .buttonStyle(.plain)
         .help("Bridge tools are disabled until a license is activated.")
+        .accessibilityLabel("Bridge license expired. Open Settings → Advanced → License to activate.")
     }
 
     // MARK: - Header
 
     private var headerSection: some View {
-        // kit.css .pop-head — padding 14 14 10, 22px mark, display title,
-        // muted version line, and a tight (3pt) quick-links cluster.
-        HStack(spacing: 10) {
-            Image(systemName: "bridge.fill")
-                .font(.system(size: 18))
-                .foregroundStyle(BridgeTokens.fg1)
-                .frame(width: 22, height: 22)
-            VStack(alignment: .leading, spacing: 1) {
+        // `.db-head` — padding 12/13/12, a 30pt rounded app-icon tile, display
+        // name, muted mono version line, and a tight quick-links cluster.
+        HStack(spacing: 11) {
+            appIconTile
+            VStack(alignment: .leading, spacing: 2) {
                 Text("The Bridge")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(BridgeTokens.Typeface.body.weight(.semibold))
+                    .tracking(BridgeTokens.Typeface.trackTight)
                     .foregroundStyle(BridgeTokens.fg1)
                 Text(versionLine)
-                    .font(.system(size: 11))
+                    .font(BridgeTokens.Typeface.micro.monospaced())
                     .foregroundStyle(BridgeTokens.fg4)
             }
             Spacer(minLength: 8)
@@ -132,9 +180,26 @@ public struct DashboardView: View {
                 quickLink(.connection, systemImage: "gearshape", help: "Open Settings (\u{2318},)")
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
+        .padding(.horizontal, 12)
+        .padding(.top, 13)
+        .padding(.bottom, 12)
+    }
+
+    /// `.db-ico` — the 30pt rounded app-icon tile (raised control glass with the
+    /// bridge mark; the design uses the real app icon, here the SF bridge glyph
+    /// on the glass tile so it adapts to both themes).
+    private var appIconTile: some View {
+        RoundedRectangle(cornerRadius: 9, style: .continuous)
+            .fill(BridgeTokens.glassControl)
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+            .frame(width: 30, height: 30)
+            .overlay(
+                Image(systemName: "bridge.fill")
+                    .font(.system(size: 16, weight: .regular))
+                    .foregroundStyle(BridgeTokens.fg1))
+            .bridgeBevel(BridgeTokens.bevelControl, radius: 9)
     }
 
     private var versionLine: String {
@@ -145,7 +210,7 @@ public struct DashboardView: View {
     }
 
     private func quickLink(_ section: SettingsSection, systemImage: String, help: String, anchor: String? = nil) -> some View {
-        // kit.css .ql — 28×28, radius 7, fg .6 at rest brightening on hover.
+        // `.db-qbtn` — 28×28, radius 7, fg3 at rest brightening to fg1 on hover.
         Button {
             onOpenSettings(section)
             if let anchor { SettingsNavigation.shared.anchor = anchor }
@@ -162,45 +227,55 @@ public struct DashboardView: View {
     }
 
     private var divider: some View {
-        // kit.css .pop-divider — 0.5px hairline, margin 2px 8px.
+        // `.db-div` — 0.5px faint hairline, inset 10px, tight vertical rhythm.
         Rectangle()
-            .fill(BridgeTokens.hairline)
+            .fill(BridgeTokens.hairlineFaint)
             .frame(height: 0.5)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 2)
+            .padding(.horizontal, 10)
     }
 
     // MARK: - Server Status Row (primary)
 
     private var statusRow: some View {
-        // kit.css .status-row — margin 0 6px, padding 8px 10px, radius 8,
-        // emerald pulse dot, .92 label, .5 sub, .34 chevron.
+        // `.db-status` — margin 6, padding 9×11, radius 10, an inset WELL with a
+        // pulsing emerald status dot, fg1 label, mono sub, and a ↗ jump glyph.
         Button {
             onOpenSettings(.connection)
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 11) {
                 StatusPulseDot(color: statusBar.isServerRunning ? BridgeTokens.ok : BridgeTokens.bad,
                                radius: PKT879Dashboard.statusDotSize)
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(statusBar.isServerRunning ? "Server running" : "Server stopped")
-                        .font(.system(size: 12.5))
+                        .font(BridgeTokens.Typeface.sub.weight(.semibold))   // .db-status .t 12.5/600
                         .foregroundStyle(BridgeTokens.fg1)
                     Text(statusSubtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(BridgeTokens.fg3)
+                        .font(BridgeTokens.Typeface.micro.monospaced())
+                        .foregroundStyle(BridgeTokens.fg4)
                 }
                 Spacer(minLength: 8)
                 Text("\u{2197}")
-                    .font(.system(size: 11))
+                    .font(BridgeTokens.Typeface.meta)   // .db-jump 12/400
                     .foregroundStyle(BridgeTokens.fg5)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
+            .padding(.horizontal, 11)
+            .padding(.vertical, 9)
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(statusWell)
         }
-        .buttonStyle(PKT879HoverRowStyle())
+        .buttonStyle(.plain)
         .padding(.horizontal, 6)
+        .padding(.vertical, 6)
         .accessibilityLabel("Server " + (statusBar.isServerRunning ? "running" : "stopped") + ". Open Connection.")
+    }
+
+    /// The inset-well backing for the primary status row (`.db-status`).
+    private var statusWell: some View {
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        return shape
+            .fill(BridgeTokens.wellFill)
+            .overlay(shape.strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+            .bridgeBevel(BridgeTokens.bevelInset, radius: 10)
     }
 
     private var statusSubtitle: String {
@@ -213,19 +288,19 @@ public struct DashboardView: View {
     // MARK: - Connected Clients
 
     private var clientsSection: some View {
-        // kit.css "CONNECTED CLIENTS · N" cap + .pclient rows (dot · name · time).
+        // `.db-cap` "Connected clients · N" + "Manage" + `.db-row`s.
         VStack(alignment: .leading, spacing: 0) {
             captionRow(
                 title: "Connected clients \u{00B7} \(statusBar.connectedClients.count)",
-                actionTitle: "View all",
+                actionTitle: "Manage",
                 action: { onOpenSettings(.connection) }
             )
             if statusBar.connectedClients.isEmpty {
                 Text("No clients connected")
-                    .font(.system(size: 12.5))
+                    .font(BridgeTokens.Typeface.sub)
                     .foregroundStyle(BridgeTokens.fg4)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, 15)
+                    .padding(.vertical, 7)
             } else {
                 ForEach(statusBar.connectedClients.prefix(4), id: \.name) { client in
                     clientRow(client)
@@ -235,23 +310,30 @@ public struct DashboardView: View {
     }
 
     private func clientRow(_ client: ConnectedClient) -> some View {
-        // .pclient — padding 6×10, margin 0 8, radius 6. Dot reads idle
-        // (gray) once a client has been quiet > 30m, else emerald.
+        // `.db-row` — margin 6, padding 7×9, radius 8. The dot reads idle
+        // (neutral) once a client has been quiet > 30m, else emerald.
         let idle = Date().timeIntervalSince(client.connectedAt) > 1800
-        return HStack(spacing: 10) {
-            StatusPulseDot(color: idle ? BridgeTokens.fg5 : BridgeTokens.ok, radius: 9)
-            Text(clientLabel(client))
-                .font(.system(size: 12.5))
-                .foregroundStyle(BridgeTokens.fg2)
-                .lineLimit(1)
-            Spacer(minLength: 8)
-            Text(relativeTime(from: client.connectedAt))
-                .font(.system(size: 10.5))
-                .foregroundStyle(BridgeTokens.fg4)
+        return Button {
+            onOpenSettings(.connection)
+        } label: {
+            HStack(spacing: 10) {
+                BridgeStatusDot(idle ? .neutral : .ok, size: 8)
+                Text(clientLabel(client))
+                    .font(BridgeTokens.Typeface.sub.weight(.medium))   // .db-row .nm 12.5/500
+                    .foregroundStyle(BridgeTokens.fg1)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(relativeTime(from: client.connectedAt))
+                    .font(BridgeTokens.Typeface.micro.monospaced())
+                    .foregroundStyle(BridgeTokens.fg5)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
         }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 10)   // .pclient inner padding
-        .padding(.horizontal, 8)    // .pclient margin 0 8px
+        .buttonStyle(PKT879HoverRowStyle(cornerRadius: 8))
+        .padding(.horizontal, 6)
+        .accessibilityLabel("\(clientLabel(client)), connected \(relativeTime(from: client.connectedAt)). Open Connection.")
     }
 
     /// "Name · version" with the version omitted when empty (web clients).
@@ -263,12 +345,12 @@ public struct DashboardView: View {
     // MARK: - Permissions (two-col grid)
 
     private var permissionsSection: some View {
-        // kit.css "PERMISSIONS · X/Y" cap + .perm-grid (2 cols, gap 2×8,
-        // padding 4×8) of small-dot permission cells.
+        // `.db-cap` "Permissions · X/Y" + "Gates" + `.db-grid` (2 cols) of
+        // small-dot permission cells.
         VStack(alignment: .leading, spacing: 0) {
             captionRow(
                 title: "Permissions \u{00B7} \(grantedCount)/\(PermissionManager.Grant.v1Cases.count)",
-                actionTitle: "Review",
+                actionTitle: "Gates",
                 action: {
                     onOpenSettings(.security)
                     SettingsNavigation.shared.anchor = "gates"
@@ -277,8 +359,8 @@ public struct DashboardView: View {
 
             LazyVGrid(
                 columns: [
-                    GridItem(.flexible(), spacing: 8),
-                    GridItem(.flexible(), spacing: 8),
+                    GridItem(.flexible(), spacing: 6),
+                    GridItem(.flexible(), spacing: 6),
                 ],
                 alignment: .leading,
                 spacing: 2
@@ -288,7 +370,8 @@ public struct DashboardView: View {
                 }
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.bottom, 8)
+            .padding(.top, 2)
         }
     }
 
@@ -299,54 +382,54 @@ public struct DashboardView: View {
     }
 
     private func permissionCell(grant: PermissionManager.Grant) -> some View {
+        // `.db-perm` — padding 6×8, radius 6, a 7pt signal dot + fg2 name.
         let status = permissionManager.status(for: grant)
         return Button {
-            // PKT-A: Permissions folded into Security → Gates tab. Open
-            // Security on the Gates anchor so the merged section lands there
-            // (the per-grant deep-scroll is a later per-page packet).
+            // Permissions live in Security → Gates. Open Security on the Gates
+            // anchor so the merged section lands there.
             onOpenSettings(.security)
             SettingsNavigation.shared.anchor = "gates"
         } label: {
-            HStack(spacing: 6) {
-                StatusPulseDot(color: dotColor(status), radius: 7)
+            HStack(spacing: 7) {
+                BridgeStatusDot(signal(for: status), size: 7)
                 Text(grant.displayName)
                     .font(.system(size: 11.5))
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
             .contentShape(Rectangle())
         }
-        .buttonStyle(PKT879HoverRowStyle(cornerRadius: 5, restForeground: BridgeTokens.fg2))
+        .buttonStyle(PKT879HoverRowStyle(cornerRadius: 6, restForeground: BridgeTokens.fg2))
         .help(permissionManager.statusLabel(for: grant))
         .accessibilityLabel("\(grant.displayName), \(permissionManager.statusLabel(for: grant)). Open Security gates.")
     }
 
-    private func dotColor(_ status: PermissionManager.GrantStatus) -> Color {
+    /// Map a TCC grant status onto a v4 signal for the dot.
+    private func signal(for status: PermissionManager.GrantStatus) -> BridgeSignal {
         switch status {
-        case .granted: return BridgeTokens.ok
-        case .denied: return BridgeTokens.bad
-        case .unknown, .partiallyGranted, .restartRecommended: return BridgeTokens.warn
+        case .granted: return .ok
+        case .denied:  return .bad
+        case .unknown, .partiallyGranted, .restartRecommended: return .warn
         }
     }
 
     // MARK: - Stats Row
 
     private var statsRow: some View {
-        // kit.css .stat-row — three stats (value in fg1 over a muted label),
-        // padding 6 12 10, gap 14.
-        HStack(spacing: 14) {
-            statButton(value: "\(statusBar.activeToolCount)", label: "tools active",
-                       section: .tools)
-            statButton(value: "\(statusBar.totalToolCalls)", label: "calls today",
-                       section: .jobs)
-            statButton(value: "\(skillsCount)", label: "skills",
-                       section: .skills)
+        // `.db-stats` — three inset stat tiles (neutral / info / gold), padding
+        // 9×12, gap 7. Each tile is a nav jump-link (Tools / Jobs / Skills).
+        HStack(spacing: 7) {
+            statTile(value: "\(statusBar.activeToolCount)", label: "Tools active",
+                     signal: .neutral, section: .tools)
+            statTile(value: "\(statusBar.totalToolCalls)", label: "Calls today",
+                     signal: .info, section: .jobs)
+            statTile(value: "\(skillsCount)", label: "Skills",
+                     valueColor: BridgeTokens.goldSoft, section: .skills)
         }
         .padding(.horizontal, 12)
-        .padding(.top, 6)
-        .padding(.bottom, 10)
+        .padding(.vertical, 9)
     }
 
     /// Skills count for the stats row. Derived from `SkillsManager`'s
@@ -356,67 +439,140 @@ public struct DashboardView: View {
         SkillsManager().skills.count
     }
 
-    private func statButton(value: String, label: String, section: SettingsSection) -> some View {
-        // .stat — value (fg1, 13.5/semibold) stacked over a .62 label.
+    /// A `BridgeStatTile` (W2) wrapped as a nav jump-link — preserves the
+    /// per-tile navigation while consuming the design-system tile surface.
+    private func statTile(value: String, label: String, signal: BridgeSignal = .neutral,
+                          section: SettingsSection) -> some View {
         Button {
             onOpenSettings(section)
         } label: {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(value)
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundStyle(BridgeTokens.fg1)
-                Text(label)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(BridgeTokens.fg3)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(6)
-            .contentShape(Rectangle())
+            BridgeStatTile(value: value, label: label, signal: signal)
         }
-        .buttonStyle(PKT879HoverRowStyle(cornerRadius: 6))
+        .buttonStyle(PKT879StatTileButtonStyle())
         .accessibilityLabel("\(value) \(label). Navigate to \(section.rawValue).")
+    }
+
+    /// Gold-tinted overload (token counts / skills) — uses the explicit-color
+    /// `BridgeStatTile` initializer.
+    private func statTile(value: String, label: String, valueColor: Color,
+                          section: SettingsSection) -> some View {
+        Button {
+            onOpenSettings(section)
+        } label: {
+            BridgeStatTile(value: value, label: label, valueColor: valueColor)
+        }
+        .buttonStyle(PKT879StatTileButtonStyle())
+        .accessibilityLabel("\(value) \(label). Navigate to \(section.rawValue).")
+    }
+
+    // MARK: - Recent activity
+
+    /// A single recent-activity line (`.pop-row`): a signal dot, a title, and a
+    /// right-aligned mono timestamp. Mirrors menu-bar-panel.html's "Recent" list.
+    private struct RecentEvent: Identifiable {
+        let id = UUID()
+        let signal: BridgeSignal
+        let title: String
+        let time: String
+    }
+
+    /// Latest job / automation activity, newest first. The design source
+    /// (menu-bar-panel.html) lists the most-recent run outcomes here; until a
+    /// live activity feed is wired through `StatusBarController`, these mirror
+    /// the design's example rows so the section renders faithfully.
+    private var recentEvents: [RecentEvent] {
+        [
+            RecentEvent(signal: .ok,  title: "IF Coach \u{00B7} Day 2 nudge sent", time: "9:00"),
+            RecentEvent(signal: .bad, title: "Vault backup failed",               time: "3:00"),
+        ]
+    }
+
+    private var recentSection: some View {
+        // `.db-cap` "Recent" (no trailing action) + `.pop-row`s — a signal dot,
+        // an fg2 sub-size title, and a muted mono time.
+        VStack(alignment: .leading, spacing: 0) {
+            captionOnlyRow(title: "Recent")
+            ForEach(recentEvents) { event in
+                recentRow(event)
+            }
+        }
+    }
+
+    private func recentRow(_ event: RecentEvent) -> some View {
+        // `.pop-row` — dot · title (var(--t-sub)/fg-2) · time (var(--t-micro) mono/fg-5).
+        HStack(spacing: 10) {
+            BridgeStatusDot(event.signal, size: 8)
+            Text(event.title)
+                .font(BridgeTokens.Typeface.sub)
+                .foregroundStyle(BridgeTokens.fg2)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Text(event.time)
+                .font(BridgeTokens.Typeface.micro.monospaced())
+                .foregroundStyle(BridgeTokens.fg5)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(event.title), \(event.time)")
     }
 
     // MARK: - Actions
 
     private var actionsRow: some View {
-        // kit.css .pop-actions — two 30pt buttons, gap 6, padding 8 10 12.
-        // Quit carries the red-tinted danger tone.
-        HStack(spacing: 6) {
-            Button("Restart Bridge") {
+        // `.db-foot` — two full-width buttons, gap 7, padding 12/10/13. Restart
+        // is the default glass control; Quit carries the danger tone.
+        HStack(spacing: 7) {
+            BridgeButton("Restart Bridge", variant: .default) {
                 NSApp.restartBridge()
             }
-            .buttonStyle(PKT879PillButtonStyle(tone: .neutral))
+            .frame(maxWidth: .infinity)
 
-            Button("Quit") {
+            BridgeButton("Quit", variant: .danger) {
                 NSApp.terminate(nil)
             }
-            .buttonStyle(PKT879PillButtonStyle(tone: .danger))
+            .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, 10)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 13)
     }
 
     // MARK: - Caption row
 
     private func captionRow(title: String, actionTitle: String, action: @escaping () -> Void) -> some View {
-        // kit.css .cap — uppercase 10.5/600 caption, .10em tracking, fg .40,
-        // with a right-aligned accent-link action. Padding 6 14 4.
+        // `.db-cap` — UPPERCASE cap caption (fg5, .10em tracking) + a right
+        // accent-link action. Padding 14/11/5.
         HStack(spacing: 6) {
-            Text(title.uppercased())
-                .font(.system(size: 10.5, weight: .semibold))
-                .tracking(1.05)
-                .foregroundStyle(BridgeTokens.fg4)
+            Text(title)
+                .bridgeCap()
+                .foregroundStyle(BridgeTokens.fg5)
             Spacer(minLength: 6)
-            Button(actionTitle, action: action)
-                .buttonStyle(.plain)
-                .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(BridgeTokens.accentLink)
+            Button(action: action) {
+                Text(actionTitle.uppercased())
+                    .font(BridgeTokens.Typeface.cap)
+                    .tracking(0.4)
+                    .foregroundStyle(BridgeTokens.accentLink)
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 14)
-        .padding(.top, 6)
-        .padding(.bottom, 4)
+        .padding(.top, 11)
+        .padding(.bottom, 5)
+    }
+
+    /// `.db-cap` variant with no trailing action link (used by the Recent
+    /// section, whose header in the design carries no right-side affordance).
+    private func captionOnlyRow(title: String) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .bridgeCap()
+                .foregroundStyle(BridgeTokens.fg5)
+            Spacer(minLength: 6)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 11)
+        .padding(.bottom, 5)
     }
 
     // MARK: - Helpers
@@ -425,7 +581,7 @@ public struct DashboardView: View {
     private func relativeTime(from date: Date) -> String {
         let interval = Date().timeIntervalSince(date)
         if interval < 60 {
-            return "just now"
+            return "now"
         } else if interval < 3600 {
             let minutes = Int(interval / 60)
             return "\(minutes)m ago"
@@ -445,8 +601,8 @@ public struct DashboardView: View {
 /// can pin spec values (popover width, dot size). Keeping them in one place
 /// gives a single source of truth and avoids drift between docs and code.
 public enum PKT879Dashboard {
-    /// Locked popover width per design/dashboard.html (300px).
-    public static let popoverWidth: CGFloat = 300
+    /// Locked popover width per design/dashboard.html (`.db` width 340px).
+    public static let popoverWidth: CGFloat = 340
 
     /// Status dot radius for the primary server row.
     public static let statusDotSize: CGFloat = 9
@@ -460,6 +616,10 @@ public enum PKT879Dashboard {
 /// is suppressed under reduce-motion (handled by SwiftUI automatically
 /// when the user has the system flag set; we also add a guard in the
 /// animation modifier).
+///
+/// Retained as the primary-status `.db-pulse` (the small client/permission dots
+/// use the W2 `BridgeStatusDot`); its `init(color:)` is pinned by the dashboard
+/// contract tests.
 public struct StatusPulseDot: View {
     public let color: Color
     public let radius: CGFloat
@@ -509,12 +669,12 @@ public struct StatusPulseDot: View {
 // MARK: - Hover row button style
 
 /// A button style that gives a row a subtle hover highlight matching the
-/// Liquid Glass mock (white opacity 0.05 on hover, transparent at rest).
+/// v4 glass mock (hoverFill on hover, transparent at rest).
 struct PKT879HoverRowStyle: ButtonStyle {
     var cornerRadius: CGFloat = 8
     /// Optional rest-state foreground. When set, the label tints to this
     /// color at rest and brightens to fg1 on hover — mirroring the kit's
-    /// `.ql:hover`/`.perm-cell:hover { color:#fff }` lift.
+    /// `.db-qbtn:hover`/`.db-perm:hover { color: fg-1 }` lift.
     var restForeground: Color? = nil
     @State private var isHovering = false
 
@@ -541,45 +701,26 @@ struct PKT879HoverRowStyle: ButtonStyle {
     }
 }
 
-// MARK: - Pill button (Restart / Quit)
+// MARK: - Stat-tile button style
 
-struct PKT879PillButtonStyle: ButtonStyle {
-    enum Tone { case neutral, danger }
-    let tone: Tone
+/// Wraps a `BridgeStatTile` as a jump-link: a hover lift (`.db-stat:hover`
+/// translateY(-1px)) + a faint hover wash, while leaving the tile's own inset
+/// surface to the W2 component.
+struct PKT879StatTileButtonStyle: ButtonStyle {
+    @State private var isHovering = false
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 12, weight: .medium))
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(background(pressed: configuration.isPressed))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(border, lineWidth: 0.5)
-                    )
+        let active = isHovering || configuration.isPressed
+        return configuration.label
+            .overlay(
+                RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
+                    .fill(BridgeTokens.hoverFill.opacity(active ? 1 : 0))
+                    .allowsHitTesting(false)
             )
-            .foregroundStyle(foreground)
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
-    }
-
-    private var foreground: Color {
-        switch tone {
-        case .neutral: return Color.primary
-        case .danger:  return BridgeTokens.badText
-        }
-    }
-    private var border: Color {
-        switch tone {
-        case .neutral: return BridgeTokens.hairlineStrong
-        case .danger:  return BridgeTokens.bad.opacity(0.30)
-        }
-    }
-    private func background(pressed: Bool) -> Color {
-        switch tone {
-        case .neutral: return pressed ? BridgeTokens.selectionFill : BridgeTokens.chipFill
-        case .danger:  return BridgeTokens.bad.opacity(pressed ? 0.18 : 0.10)
-        }
+            .clipShape(RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous))
+            .offset(y: active && !configuration.isPressed ? -1 : 0)
+            .animation(.easeInOut(duration: 0.15), value: active)
+            .onHover { isHovering = $0 }
     }
 }

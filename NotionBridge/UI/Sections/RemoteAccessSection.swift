@@ -11,6 +11,18 @@
 // sidebar without new design primitives. The live wiring to a running
 // `BridgeCloudManager` instance is a later slice; this compiles, renders,
 // and states the security contract the user is opting into.
+//
+// v4 "Liquid Glass, evolved" reskin (PKT-connection): repainted onto the W1
+// token ladder + W2 component kit (BridgeGlassCard, BridgeStatusStrip,
+// BridgeBadge, BridgeListIconTile, BridgeBanner). Faithful to the "Remote
+// access" card in design/the-bridge-design-system/project/pages/
+// page-connection.jsx — the mcp.kup.solutions/mcp directory URL (muted, served
+// over a Cloudflare tunnel, WorkOS sign-in), an honest coming-soon state, and
+// the capability-scoped / passkey-gated / credentials-stay-local posture rows.
+// When the cloud tenant is provisioned the live authenticated BridgeStatusStrip
+// + login/re-auth flow re-appear. Both themes resolve through the adaptive
+// tokens. Every controller branch (RemoteAccessToggleDecision, the flow state
+// machine, the disable/first-run gates, Add-to-Claude.ai) is preserved verbatim.
 
 import SwiftUI
 import AppKit
@@ -87,6 +99,18 @@ public struct RemoteAccessSection: View {
             case .connecting: return BridgeTokens.warn
             case .offline:    return BridgeTokens.bad
             case .disabled:   return BridgeTokens.fg3
+            }
+        }
+
+        /// The W2 `BridgeSignal` for this state — drives the `BridgeStatusStrip`
+        /// dot + (warn/bad) border tint. Mirrors `dotColor`.
+        var signal: BridgeSignal {
+            switch self {
+            case .online:     return .ok
+            case .degraded:   return .warn
+            case .connecting: return .warn
+            case .offline:    return .bad
+            case .disabled:   return .neutral
             }
         }
     }
@@ -186,15 +210,17 @@ public struct RemoteAccessSection: View {
     @State private var copiedDirectoryURL = false
 
     public var body: some View {
-        ScrollView {
-            VStack(spacing: BridgeTokens.Space.cardGap) {
-                statusCard
-                securityCard
-            }
-            .padding(BridgeTokens.Space.paneH)
-            .padding(.top, 4)
+        // Hosted inside the ConnectionSection composite's outer scroll (it racks
+        // ConnectionsSection above this and supplies the scroll + bottom inset),
+        // so NO inner ScrollView here — it would nest scrolls. We mirror the
+        // ConnectionsSection sibling: just the card stack + horizontal pane pad.
+        VStack(spacing: BridgeTokens.Space.cardGap) {
+            statusCard
+            securityCard
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, BridgeTokens.Space.paneH)
+        .padding(.top, 4)
+        .frame(maxWidth: .infinity)
         .background(Color.clear)
         // WS-G: one-time first-run guide, shown on the first transition to
         // .online (gated by hasSeenCloudAccessFirstRun).
@@ -224,20 +250,28 @@ public struct RemoteAccessSection: View {
     private var statusCard: some View {
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 10) {
-                BridgeCardLabel("Remote access")
+                HStack(alignment: .firstTextBaseline) {
+                    BridgeCardLabel("Remote access")
+                    Spacer()
+                    // Coming-soon badge in the head act-slot (design: `.badge.warn`)
+                    // only while the cloud tenant isn't provisioned.
+                    if !cloudConfigured {
+                        BridgeBadge("Coming soon", tone: .warn, showsDot: true)
+                    }
+                }
 
                 // Blessed directory-connector URL as static copyable reference.
                 directoryURLRow
 
-                Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5)
-
-                // Model A: a "Coming soon" STATE PILL when cloud isn't
-                // configured (today's default) — never a dead switch. When the
-                // cloud tenant IS provisioned, the real Enable toggle + flow
-                // re-appear (preserving RemoteAccessToggleDecision).
+                // Model A: an honest "Coming soon" BANNER + posture-context line
+                // when cloud isn't configured (today's default) — never a dead
+                // switch. When the cloud tenant IS provisioned, the live
+                // authenticated status strip + Enable toggle + flow re-appear
+                // (preserving RemoteAccessToggleDecision).
                 if cloudConfigured {
+                    Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5)
+                    authenticatedStrip
                     enableToggleRow
-                    statusRow
                     if let flow, ProvisioningPresentation.make(for: flow.state).indicator != .none {
                         ProvisioningProgressView(
                             state: flow.state,
@@ -256,20 +290,18 @@ public struct RemoteAccessSection: View {
         .onChange(of: flowStateKey) { _, _ in syncFromFlow() }
     }
 
-    /// The blessed cloud path, copyable today even though sign-in is gated.
+    /// The blessed cloud path, copyable today even though sign-in is gated. An
+    /// inset well (`.cnp-endpoint`) with a cloud glyph tile, the mono URL in a
+    /// MUTED ink (the design renders the not-yet-live URL `code.muted`), and a
+    /// check-confirm copy button — sibling to the loopback endpoint well.
     private var directoryURLRow: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "cloud")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(BridgeTokens.fg3)
-                .frame(width: 30, height: 30)
-                .background(BridgeTokens.chipFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        return HStack(spacing: 10) {
+            BridgeListIconTile(systemImage: "cloud")
                 .accessibilityHidden(true)
             Text(Self.directoryConnectorURL)
-                .font(.system(size: 12.5, design: .monospaced))
-                .foregroundStyle(BridgeTokens.fg1)
+                .font(BridgeTokens.Typeface.mono)
+                .foregroundStyle(cloudConfigured ? BridgeTokens.accentLink : BridgeTokens.fg3)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .textSelection(.enabled)
@@ -285,44 +317,49 @@ public struct RemoteAccessSection: View {
             .help("Copy directory-connector URL")
             .accessibilityLabel(copiedDirectoryURL ? "Copied directory connector URL" : "Copy directory connector URL")
         }
-        .padding(.horizontal, 12).padding(.vertical, 10)
-        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+        .padding(.horizontal, 11).padding(.vertical, 9)
+        .background(shape.fill(BridgeTokens.wellFill))
+        .overlay(shape.strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+        .bridgeBevel(BridgeTokens.bevelInset, radius: 10)
     }
 
-    /// Honest "coming soon" state — a pill + one explanatory line, no switch.
+    /// Honest "coming soon" state — a `.warn` banner + one explanatory line,
+    /// no switch. The directory URL above is the path users will add once cloud
+    /// sign-in (Cloudflare tunnel + WorkOS) ships.
     private var comingSoonRow: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 5) {
-                Circle().fill(BridgeTokens.warn).frame(width: 7, height: 7)
-                Text("Cloud access — Coming soon")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(BridgeTokens.warnText)
-            }
-            .padding(.horizontal, 9).padding(.vertical, 4)
-            .background(BridgeTokens.warn.opacity(0.14), in: Capsule())
-            .overlay(Capsule().strokeBorder(BridgeTokens.warn.opacity(0.28), lineWidth: 0.5))
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Cloud access: coming soon")
+        BridgeBanner(
+            signal: .warn,
+            message: "Cloud sign-in isn't enabled on this build yet. The hosted connector will front this Mac over a Cloudflare tunnel — no port opened, sign-in through WorkOS. The URL above is the directory address it will live at.",
+            systemImage: "clock"
+        )
+    }
 
-            Text("Cloud sign-in isn't enabled on this build yet. The URL above is the path you'll add once it ships.")
-                .font(.system(size: 11.5))
-                .foregroundStyle(BridgeTokens.fg4)
-                .fixedSize(horizontal: false, vertical: true)
+    /// The live authenticated status strip (`BridgeStatusStrip`) shown once the
+    /// cloud tenant is provisioned: the state dot + label, the org + tunnel meta
+    /// (mono), and a trailing tunnel badge. Replaces the old bespoke status row
+    /// with the W2 component so it matches every other status surface.
+    private var authenticatedStrip: some View {
+        BridgeStatusStrip(
+            signal: displayState.signal,
+            title: displayState.rawValue,
+            meta: ["mcp.kup.solutions", "cloudflared"]
+        ) {
+            BridgeBadge("WorkOS", tone: displayState == .online ? .ok : .neutral)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Live Enable toggle — only shown when the cloud tenant is provisioned.
+    /// The login/logout/re-auth switch: ON starts the cloudflared tunnel + sign-in
+    /// flow, OFF tears it down (confirmed). Uses the native switch tinted to the
+    /// one accent so it reads as the page's single primary control.
     private var enableToggleRow: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Enable remote access")
-                    .font(.system(size: 13, weight: .medium))
+                Text(displayState == .online ? "Remote access is on" : "Enable remote access")
+                    .font(BridgeTokens.Typeface.body)
                     .foregroundStyle(BridgeTokens.fg1)
-                Text("Starts a cloudflared tunnel so cloud agents can delegate work to this Mac.")
-                    .font(.system(size: 11.5))
+                Text("Starts a cloudflared tunnel and signs in through WorkOS so cloud agents can delegate work to this Mac.")
+                    .font(BridgeTokens.Typeface.sub)
                     .foregroundStyle(BridgeTokens.fg3)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -458,20 +495,17 @@ public struct RemoteAccessSection: View {
     private var addToClaudeRow: some View {
         if displayState == .online {
             VStack(alignment: .leading, spacing: 6) {
-                Button {
+                BridgeButton(
+                    "Add to Claude.ai",
+                    systemImage: "plus.circle",
+                    variant: .primary,
+                    isEnabled: cloudTunnelHostname != nil
+                ) {
                     addToClaude()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "plus.circle")
-                        Text("Add to Claude.ai")
-                    }
-                    .font(.system(size: 12, weight: .semibold))
                 }
-                .buttonStyle(.borderless)
-                .disabled(cloudTunnelHostname == nil)
                 if didCopyMCPURL {
                     Text(ClaudeAIIntegration.pasteHint)
-                        .font(.system(size: 11))
+                        .font(BridgeTokens.Typeface.micro)
                         .foregroundStyle(BridgeTokens.fg3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -495,21 +529,6 @@ public struct RemoteAccessSection: View {
             if let url = ClaudeAIIntegration.deepLink(forHostname: cloudTunnelHostname) {
                 NSWorkspace.shared.open(url)
             }
-        }
-    }
-
-    private var statusRow: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(displayState.dotColor)
-                .frame(width: 8, height: 8)
-            Text(displayState.rawValue)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(displayState.dotColor)
-            Spacer()
-            Text("Tunnel: cloudflared")
-                .font(.system(size: 11))
-                .foregroundStyle(BridgeTokens.fg3)
         }
     }
 
@@ -556,29 +575,31 @@ public struct RemoteAccessSection: View {
     @ViewBuilder
     private func postureRow(icon: String, title: String, detail: String) -> some View {
         HStack(alignment: .top, spacing: 11) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(BridgeTokens.chipFill)
-                    .frame(width: 30, height: 30)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5)
-                    )
-                Image(systemName: icon)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(NotionPalette.green)
-            }
-            .accessibilityHidden(true)
+            // Leading tile with the posture glyph tinted to the ok signal — the
+            // design's `.cnp-posture` "this is a guarantee" green check read.
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(BridgeTokens.wellFill)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5)
+                )
+                .frame(width: 28, height: 28)
+                .overlay(
+                    Image(systemName: icon)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(BridgeTokens.okText)
+                )
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(BridgeTokens.Typeface.body.weight(.semibold))
                     .foregroundStyle(BridgeTokens.fg1)
                 Text(detail)
-                    .font(.system(size: 11.5))
+                    .font(BridgeTokens.Typeface.sub)
                     .foregroundStyle(BridgeTokens.fg3)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer()
+            Spacer(minLength: 0)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(title): \(detail)")
