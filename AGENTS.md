@@ -106,7 +106,9 @@ Trunk = `origin/main`. Branches are short-lived and **rebased onto current main 
 - **One owner per shared subsystem per release cycle.** The connector/OAuth/transport surface gets a single owner at a time; parallel agents coordinate via PR against main, not parallel rewrites of the same files.
 - **After each release: delete merged branches and prune merged worktrees.** A branch with `git rev-list --count origin/main..<branch>` == 0 is fully merged — delete it. Target ≤ 2 active worktrees. See `docs/operator/BRANCHING-STRATEGY-REVIEW.md` for the standing audit + cleanup commands.
 
-### Release flow (the v3.7.x pattern)
+### Release flow (the v3.7.x → 3.8.x pattern)
+
+**Versioning (operator rule, 2026-06-15):** each merged branch bumps the marketing version **+1 patch**, but segments are **single-digit and roll at 9** — never double digits. Patch 9 → `X.(Y+1).0`; minor 9 → `(X+1).0.0` (so `3.8.9 → 3.9.0`, `3.9.9 → 4.0.0`). **The next version is `3.8.0`** — the `3.7.10`–`3.7.12` double-digit patches were pre-rule legacy, so restart clean at 3.8.0. **`4.0.0` is the sale-ready "V4" destination, reached incrementally** (each patch advances the product toward ready-for-sale). `CFBundleVersion` (build) is monotonic +1, independent of the marketing roll. Override only when Isaiah specifies.
 
 1. `git switch -c release/vX.Y.Z origin/main` (off current main).
 2. One atomic version commit: `Version.swift` (marketing + build) **and** root `Info.plist` (`CFBundleShortVersionString` + `CFBundleVersion`) in the SAME commit (see `### Version surfaces`), plus the `CHANGELOG.md` entry.
