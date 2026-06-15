@@ -199,7 +199,7 @@ func runSettingsSectionsLGTests() async {
 
     // 11. Locked SF Symbols per section (pinned for visual contract).
     await test("PKT-A: BridgeSectionIcon SF Symbols locked for the 7 sections") {
-        try expect(BridgeSectionIcon.systemImage(for: .orders) == "scroll")
+        try expect(BridgeSectionIcon.systemImage(for: .orders) == "command")
         try expect(BridgeSectionIcon.systemImage(for: .skills) == "sparkles")
         try expect(BridgeSectionIcon.systemImage(for: .jobs) == "clock.badge.checkmark")
         try expect(BridgeSectionIcon.systemImage(for: .tools) == "hammer")

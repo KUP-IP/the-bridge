@@ -64,7 +64,7 @@ struct SkillsView: View {
             case .all:    return "All"
             case .file:   return "File"
             case .notion: return "Notion"
-            case .gdocs:  return "Google Docs"
+            case .gdocs:  return "Docs"
             }
         }
     }

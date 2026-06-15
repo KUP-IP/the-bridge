@@ -652,7 +652,7 @@ public struct BridgeInput: View {
 public enum BridgeSectionIcon {
     public static func systemImage(for section: SettingsSection) -> String {
         switch section {
-        case .orders:     return "scroll"
+        case .orders:     return "command"
         case .skills:     return "sparkles"
         case .jobs:       return "clock.badge.checkmark"
         case .tools:      return "hammer"
