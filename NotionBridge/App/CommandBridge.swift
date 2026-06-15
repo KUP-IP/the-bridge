@@ -699,9 +699,12 @@ public final class CommandBridgeController: NSObject {
         model.onFireSlug = { [weak self] slug in self?.fireSlug(slug) }
         model.onEscape   = { [weak self] in self?.hide() }
         model.onSettings = { [weak self] in self?.openCommandsSettings() }
-        // (v3.7.6) Leading bridge-mark → present the Dashboard popover. We hide
-        // the palette first so the two surfaces don't overlap, then hand off to
-        // the App-layer presenter (which owns the StatusBar / PermissionManager).
+        // (v3.7.6) Dashboard popover presenter. The pill no longer carries a
+        // leading bridge-mark (the design `.cb-pill` has none — see `pill`), so
+        // this is invoked from the status-bar item path rather than the palette
+        // bar; it stays wired so that entry point keeps working. We hide the
+        // palette first so the two surfaces don't overlap, then hand off to the
+        // App-layer presenter (which owns the StatusBar / PermissionManager).
         model.onBridgeMark = { [weak self] in self?.openDashboard() }
         self.model = model
 
@@ -789,7 +792,9 @@ public final class CommandBridgeViewModel: ObservableObject {
     public var onFireSlug: (String) -> Void = { _ in }
     public var onEscape: () -> Void = {}
     public var onSettings: () -> Void = {}
-    /// (v3.7.6) Leading bridge-mark tap → open the Dashboard popover.
+    /// (v3.7.6) Open the Dashboard popover. No longer fired from a pill glyph
+    /// (the design `.cb-pill` has no leading mark); retained for the status-bar
+    /// entry point that presents the same Dashboard surface.
     public var onBridgeMark: () -> Void = {}
 
     private let store: CommandStore
@@ -1029,28 +1034,23 @@ public struct CommandBridgeRootView: View {
 
     // MARK: Pill
     //
-    //   v4 source `.cb-pill`: 70px popover-glass bar (radius 22), a leading
-    //   blinking accent caret + faint mono placeholder in the field area, and a
-    //   trailing glass menu-bar mark. The leading bridge-mark (→ dashboard) and
-    //   the trailing mark (→ Commands settings) keep their existing wiring; only
-    //   the surface + caret + mono type are restyled to the locked glass look.
+    //   v4 source `.cb-pill`: 70px popover-glass bar (radius 22) whose ONLY
+    //   children are the field area ([blinking accent caret][mono query]) and a
+    //   trailing glass menu-bar mark. The source pill has NO leading glyph —
+    //   the layout is [caret][placeholder] … [trailing mark] — so the prior
+    //   leading bridge-mark button (a v3.7.6 add not present in the design) is
+    //   removed; the caret/field now sit flush at the pill's leading edge exactly
+    //   as `command-bridge.html` draws them. The trailing mark (→ Commands
+    //   settings) renders the Bridge mark IMAGE (`.cb-menubar img`, 24×24), not a
+    //   literal ⌘ glyph. Dashboard remains reachable from the status-bar item /
+    //   menu-bar mark; `model.onBridgeMark` stays defined for that path.
 
     private var pill: some View {
         HStack(spacing: BridgeTokens.Space.s4) {
-            // The LEADING glyph is the clickable bridge-mark → Dashboard popover.
-            // Falls back to an SF Symbol when the asset can't be loaded.
-            Button {
-                model.onBridgeMark()
-            } label: {
-                bridgeMark
-                    .frame(width: 26, height: 26)
-            }
-            .buttonStyle(.plain)
-            .help("Open Bridge dashboard")
-
             // Field area — leading blinking caret (`.cb-caret`) sits in front of
             // the query field; its mono placeholder ("Bridge Command") is drawn by
-            // QueryField itself, so the caret leads exactly as the source shows.
+            // QueryField itself, so the caret leads the pill exactly as the source
+            // shows (no glyph precedes it).
             HStack(spacing: BridgeTokens.Space.s3) {
                 caret
                 QueryField(
@@ -1068,13 +1068,14 @@ public struct CommandBridgeRootView: View {
             }
 
             // Trailing menu-bar mark (`.cb-menubar`) → Commands settings. Glass
-            // control tile (40×40, control radius, glassControl + control bevel).
+            // control tile (40×40, radius 12 = Radius.card, glassControl fill +
+            // hair-strong border + bevel-control) wrapping the 24×24 Bridge mark
+            // image (`.cb-menubar img`) — the brand mark, not a keyboard glyph.
             Button {
                 model.onSettings()
             } label: {
-                Text("⌘")
-                    .font(.system(size: 19, weight: .regular))
-                    .foregroundStyle(BridgeTokens.fg4)
+                menuBarMark
+                    .frame(width: 24, height: 24)
                     .frame(width: 40, height: 40)
                     .background(
                         RoundedRectangle(cornerRadius: BridgeTokens.Radius.card, style: .continuous)
@@ -1113,11 +1114,13 @@ public struct CommandBridgeRootView: View {
             .accessibilityHidden(true)
     }
 
-    /// The leading bridge-mark glyph. Loads `MenuBarIcon` from the app bundle
-    /// (template-rendered so it tints with the adaptive foreground), and falls
-    /// back to the prior `command.circle` SF Symbol when the asset is absent.
+    /// The trailing menu-bar mark image (`.cb-menubar img`). Loads `MenuBarIcon`
+    /// — the bundled Bridge mark (`assets/bridge-mark-white.png` in the design) —
+    /// template-rendered so it tints with the adaptive foreground at fg2 (mirrors
+    /// the source's `opacity:.92` ink). Falls back to the `command.circle` SF
+    /// Symbol mark only when the asset can't be resolved (e.g. headless).
     @ViewBuilder
-    private var bridgeMark: some View {
+    private var menuBarMark: some View {
         if let icon = Self.bridgeMarkImage {
             Image(nsImage: icon)
                 .renderingMode(.template)
@@ -1126,7 +1129,7 @@ public struct CommandBridgeRootView: View {
                 .foregroundStyle(BridgeTokens.fg2)
         } else {
             Image(systemName: "command.circle")
-                .font(.system(size: 22, weight: .light))
+                .font(BridgeTokens.Typeface.hero)
                 .foregroundStyle(BridgeTokens.fg3)
         }
     }
@@ -1198,7 +1201,7 @@ public struct CommandBridgeRootView: View {
             case .none:
                 EmptyView()
             case .recents:
-                panelHeader("Recently used")
+                panelHeader("Recents")
                 ForEach(model.recentRows) { r in
                     rowView(r, selected: r.id == model.recentRows.first?.id)
                 }

@@ -139,13 +139,15 @@ public struct LicenseCard: View {
 
     // MARK: Status pill (visible on every variant)
 
-    private var statusPillColor: Color {
+    /// W2 `.badge` tone per license state — trial=accent(info), expired=bad,
+    /// licensed/grandfathered=ok, lapsed=warn.
+    private var statusPillTone: BridgeBadge.Tone {
         switch state.kind {
-        case .trial:           return BridgeTokens.accent
-        case .trialExpired:    return BridgeTokens.bad
-        case .licensed:        return BridgeTokens.ok
-        case .licenseExpired:  return BridgeTokens.warn
-        case .grandfathered:   return BridgeTokens.ok
+        case .trial:           return .info
+        case .trialExpired:    return .bad
+        case .licensed:        return .ok
+        case .licenseExpired:  return .warn
+        case .grandfathered:   return .ok
         }
     }
 
@@ -160,13 +162,8 @@ public struct LicenseCard: View {
     }
 
     private var statusPill: some View {
-        Text(statusPillLabel)
-            .font(.system(size: 11, weight: .semibold))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .background(statusPillColor.opacity(0.18), in: Capsule(style: .continuous))
-            .overlay(Capsule(style: .continuous).strokeBorder(statusPillColor.opacity(0.45), lineWidth: 0.5))
-            .foregroundStyle(statusPillColor.opacity(0.95))
+        BridgeBadge(statusPillLabel, tone: statusPillTone)
+            .fixedSize()
             .accessibilityLabel("License status: \(statusPillLabel)")
     }
 
@@ -180,7 +177,7 @@ public struct LicenseCard: View {
                 Text(d == 1
                      ? "Your Bridge trial ends within 24 hours. Activate a license to keep automating after the trial ends."
                      : "Your Bridge trial has \(d) days left. Bring a license now to skip the countdown later.")
-                    .font(.system(size: 12.5))
+                    .font(BridgeTokens.Typeface.sub)
                     .foregroundStyle(BridgeTokens.fg3)
                 pasteRow
                 buyRow
@@ -188,7 +185,7 @@ public struct LicenseCard: View {
         case .trialExpired:
             VStack(alignment: .leading, spacing: 8) {
                 Text("Your trial has ended. The Bridge will refuse to dispatch tools until a license is activated. Local data is untouched and will resume the moment a key activates.")
-                    .font(.system(size: 12.5))
+                    .font(BridgeTokens.Typeface.sub)
                     .foregroundStyle(BridgeTokens.fg3)
                 pasteRow
                 buyRow
@@ -209,9 +206,9 @@ public struct LicenseCard: View {
         case .licenseExpired(let subject, let expS):
             VStack(alignment: .leading, spacing: 8) {
                 Text("Your license\(expS.map { " (expired \($0))" } ?? "") has lapsed. Activate a renewed key or remove the expired one.")
-                    .font(.system(size: 12.5))
+                    .font(BridgeTokens.Typeface.sub)
                     .foregroundStyle(BridgeTokens.fg3)
-                Text(subject).font(.system(size: 12)).foregroundStyle(BridgeTokens.fg4)
+                Text(subject).font(BridgeTokens.Typeface.meta).foregroundStyle(BridgeTokens.fg4)
                 pasteRow
                 HStack {
                     Spacer()
@@ -221,7 +218,7 @@ public struct LicenseCard: View {
         case .grandfathered:
             VStack(alignment: .leading, spacing: 6) {
                 Text("You upgraded from a previous version of The Bridge — your install is licensed automatically and no trial countdown will appear. Thank you for being an early user.")
-                    .font(.system(size: 12.5))
+                    .font(BridgeTokens.Typeface.sub)
                     .foregroundStyle(BridgeTokens.fg3)
             }
         }
@@ -233,11 +230,11 @@ public struct LicenseCard: View {
     private func licenseKVRow(_ key: String, _ value: String, muted: Bool) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(key)
-                .font(.system(size: 12.5))
+                .font(BridgeTokens.Typeface.sub)
                 .foregroundStyle(BridgeTokens.fg3)
                 .frame(width: 110, alignment: .leading)
             Text(value)
-                .font(.system(size: 13))
+                .font(BridgeTokens.Typeface.base)
                 .foregroundStyle(muted ? BridgeTokens.fg4 : BridgeTokens.fg1)
                 .textSelection(.enabled)
             Spacer()
@@ -249,16 +246,9 @@ public struct LicenseCard: View {
     private var pasteRow: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                // v4 well input (mirrors the credential-sheet field treatment):
-                // recessed fill + hairline, mono face for the key.
-                TextField("License key (paste here)", text: $pasteField)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13, design: .monospaced))
-                    .foregroundStyle(BridgeTokens.fg1)
-                    .disableAutocorrection(true)
-                    .padding(.horizontal, 10).padding(.vertical, 8)
-                    .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+                // W2 `.input` — recessed well + bevel-inset + focus ring + accent
+                // caret, mono face for the key (replaces the hand-rolled field).
+                BridgeInput("License key (paste here)", text: $pasteField, mono: true)
                     .accessibilityLabel("License key input")
                 BridgeButton(
                     "Activate",

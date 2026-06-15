@@ -443,15 +443,15 @@ public struct BridgeStatTile: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(value)
-                .font(BridgeTokens.Typeface.display)
-                .tracking(-0.5)
+                .font(BridgeTokens.Typeface.hero)
+                .tracking(-0.3)
                 .monospacedDigit()
                 .foregroundStyle(valueColor)
             Text(label).bridgeCap().foregroundStyle(BridgeTokens.fg4)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 10)
-        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .padding(.horizontal, 10)
         .background(insetWell)
     }
 

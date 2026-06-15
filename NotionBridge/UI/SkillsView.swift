@@ -353,14 +353,16 @@ struct SkillsView: View {
         .accessibilityLabel("List options")
     }
 
-    /// `.sk-counts` — a 3-tile stat strip (Total / Routing / Palette, the real
-    /// visibility taxonomy this install carries) over the source-filter segment.
+    /// `.sk-counts` — a 3-tile stat strip (Total / Routing / Specialist) over the
+    /// source-filter segment. Matches the design's `SK_COUNTS` (total · routing ·
+    /// specialist) and `.sk-count.spec` info-tint; the kind taxonomy is the
+    /// model's derived `skillKind` (routing / specialist / plain).
     private var countsAndFilter: some View {
         VStack(spacing: 9) {
             BridgeStatStrip(spacing: 7) {
                 BridgeStatTile(value: "\(countsTotal)", label: "Total")
                 BridgeStatTile(value: "\(countsRouting)", label: "Routing", signal: .ok)
-                BridgeStatTile(value: "\(countsPalette)", label: "Palette", signal: .info)
+                BridgeStatTile(value: "\(countsSpecialist)", label: "Specialist", signal: .info)
             }
             BridgeSegmented(
                 selection: $sourceFilter,
@@ -720,33 +722,47 @@ struct SkillsView: View {
         // cache + content (peek → expand-on-click)
         bodyCacheCard(skill)
 
-        // permissions & behavior (Enabled + Routing + Palette toggles)
+        // permissions & behavior — the design's three `.sk-perm` rows
+        // (Auto-load · Cache body · Fetch on activation), each wired to a real
+        // binding, plus the retained Enabled master switch (the only writer of
+        // `enabled`; the design keeps a disabled state but folds the toggle).
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 0) {
                 BridgeCardLabel("Permissions & behavior")
                     .padding(.bottom, 10)
                 permissionToggleRow(
-                    title: "Enabled",
-                    sub: "When off, the skill is hidden from every surface and is not retrievable by name.",
-                    isOn: Binding(
-                        get: { skill.enabled },
-                        set: { _ in skillsManager.toggleSkill(named: skill.name) }
-                    ))
-                tokenDivider
-                permissionToggleRow(
                     title: "Auto-load into routing context",
-                    sub: "Include this skill in `list_routing_skills` so MCP clients can discover it by name.",
+                    sub: "List this skill when an MCP client enumerates routing skills.",
                     isOn: Binding(
                         get: { skill.routingDiscoverable },
                         set: { _ = skillsManager.setRoutingDiscoverable(named: skill.name, to: $0) }
                     ))
                 tokenDivider
                 permissionToggleRow(
-                    title: "Show in Commands palette",
-                    sub: "Appear in the global hot-key popover (copies the page body to your clipboard).",
+                    title: "Cache body for offline use",
+                    sub: "Keep the full body on disk for instant, offline preview \u{0026} fetch.",
+                    isOn: Binding(
+                        get: { !skill.summary.isEmpty },
+                        // Enabling fetches + stores the body (the workspace cache
+                        // refresh — this install's per-skill cache analog). The
+                        // store is the SSOT, so toggling off is a no-op here.
+                        set: { newValue in if newValue && skill.summary.isEmpty { onRefreshCache() } }
+                    ))
+                tokenDivider
+                permissionToggleRow(
+                    title: "Fetch on activation",
+                    sub: "Pull the latest body from the source on every invoke, via the Commands palette.",
                     isOn: Binding(
                         get: { skill.inCommandPalette },
                         set: { _ = skillsManager.setInCommandPalette(named: skill.name, to: $0) }
+                    ))
+                tokenDivider
+                permissionToggleRow(
+                    title: "Enabled",
+                    sub: "When off, the skill is hidden from every surface and is not retrievable by name.",
+                    isOn: Binding(
+                        get: { skill.enabled },
+                        set: { _ in skillsManager.toggleSkill(named: skill.name) }
                     ))
             }
         }
@@ -762,7 +778,7 @@ struct SkillsView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         TextField("Skill name", text: $renameText)
                             .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 18, weight: .semibold))
+                            .font(BridgeTokens.Typeface.detail)
                             .frame(maxWidth: 280)
                             .onSubmit { commitRename(for: skill.name) }
                             .onExitCommand { renamingSkillName = nil; renameError = nil }
@@ -844,14 +860,15 @@ struct SkillsView: View {
         .opacity(dimmed ? 0.55 : 1)
     }
 
-    /// The visibility tier badge next to the name (`.badge` — routing=ok,
-    /// palette=warn, fetch-only=info, disabled=neutral).
+    /// The visibility tier badge next to the name (`.badge` — matches the
+    /// design's `SK_DOT`: routing=ok "Routing-discoverable", palette=warn
+    /// "Palette-only", enabled=info "Enabled", disabled=neutral).
     private func visibilityBadge(_ skill: SkillsManager.Skill) -> some View {
         let (label, tone): (String, BridgeBadge.Tone) = {
             if !skill.enabled { return ("Disabled", .neutral) }
             if skill.routingDiscoverable { return ("Routing-discoverable", .ok) }
             if skill.inCommandPalette { return ("Palette-only", .warn) }
-            return ("Fetch-only", .info)
+            return ("Enabled", .info)
         }()
         return BridgeBadge(label, tone: tone, showsDot: true)
     }
@@ -862,7 +879,7 @@ struct SkillsView: View {
             VStack(alignment: .leading, spacing: 4) {
                 TextField("Notion URL or UUID", text: $editingURL)
                     .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(BridgeTokens.Typeface.mono)
                     .frame(maxWidth: 320)
                     .onSubmit { commitURLEdit(for: skill.name) }
                     .onExitCommand { editingSkillName = nil; urlValidationError = nil }
@@ -926,7 +943,7 @@ struct SkillsView: View {
     /// elevated (`.sk-meta.key`).
     private func metadataGrid(_ skill: SkillsManager.Skill) -> some View {
         let cells: [(String, String, Bool)] = [
-            ("Kind", skill.routingDiscoverable ? "Routing" : (skill.inCommandPalette ? "Palette" : "Fetch"), false),
+            ("Kind", kindLabel(skill), false),
             ("Visibility", visibilityLabel(skill), true),
             ("Source", skill.platform.displayName, false),
             ("Page", skill.notionPageId.isEmpty ? "—" : "…\(String(skill.notionPageId.suffix(6)))", false),
@@ -972,6 +989,17 @@ struct SkillsView: View {
         case (true, false):  return "Routing"
         case (false, true):  return "Palette"
         case (false, false): return "Fetch-only"
+        }
+    }
+
+    /// The design's `Kind` meta value, from the model's derived `skillKind`
+    /// (Routing / Specialist / Plain) — consistent with the list grouping + the
+    /// Specialist count tile.
+    private func kindLabel(_ skill: SkillsManager.Skill) -> String {
+        switch skill.skillKind {
+        case .routing:    return "Routing"
+        case .specialist: return "Specialist"
+        case .plain:      return "Plain"
         }
     }
 
@@ -1229,25 +1257,16 @@ struct SkillsView: View {
         // body preview (the on-disk body is always available — peek → float)
         bodyCacheCardForFile(fs, summary: summary)
 
-        // permission toggles (file-source — persist per path)
+        // permission toggles (file-source — persist per path). The design's
+        // three `.sk-perm` rows (Auto-load · Cache body · Fetch on activation),
+        // plus the retained Enabled per-path flag (wiring preserved).
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 0) {
                 BridgeCardLabel("Permissions & behavior")
                     .padding(.bottom, 10)
                 permissionToggleRow(
-                    title: "Enabled",
-                    sub: "Stores a per-path enable flag. Toggling here does NOT modify the SKILL.md file.",
-                    isOn: Binding(
-                        get: { fileSkillEnabledMap[fs.path.path] ?? true },
-                        set: { v in
-                            fileSkillEnabledMap[fs.path.path] = v
-                            SkillsModule.setFileSkillEnabled(path: fs.path, enabled: v)
-                        }
-                    ))
-                tokenDivider
-                permissionToggleRow(
                     title: "Auto-load into routing context",
-                    sub: "Include this file-source skill in the merged routing discovery list.",
+                    sub: "List this skill when an MCP client enumerates routing skills.",
                     isOn: Binding(
                         get: { fileSkillRoutingMap[fs.path.path] ?? false },
                         set: { v in
@@ -1257,13 +1276,32 @@ struct SkillsView: View {
                     ))
                 tokenDivider
                 permissionToggleRow(
-                    title: "Show in Commands palette",
-                    sub: "Stage palette membership. Advisory for file-source skills until the commit pipeline lands.",
+                    title: "Cache body for offline use",
+                    sub: "Keep the full body on disk for instant, offline preview \u{0026} fetch.",
+                    // File-source bodies always ship on disk — the body is
+                    // bundled, so this reads on and is not user-evictable.
+                    isOn: .constant(true),
+                    isEnabled: false)
+                tokenDivider
+                permissionToggleRow(
+                    title: "Fetch on activation",
+                    sub: "Pull the latest body from the source on every invoke, via the Commands palette.",
                     isOn: Binding(
                         get: { fileSkillPaletteMap[fs.path.path] ?? false },
                         set: { v in
                             fileSkillPaletteMap[fs.path.path] = v
                             SkillsModule.setFileSkillInCommandPalette(path: fs.path, value: v)
+                        }
+                    ))
+                tokenDivider
+                permissionToggleRow(
+                    title: "Enabled",
+                    sub: "Stores a per-path enable flag. Toggling here does NOT modify the SKILL.md file.",
+                    isOn: Binding(
+                        get: { fileSkillEnabledMap[fs.path.path] ?? true },
+                        set: { v in
+                            fileSkillEnabledMap[fs.path.path] = v
+                            SkillsModule.setFileSkillEnabled(path: fs.path, enabled: v)
                         }
                     ))
             }
@@ -1463,8 +1501,9 @@ struct SkillsView: View {
     }
 
     /// `.sk-perm` — a permission row: title + sub on the left, the W2
-    /// `BridgeToggle` on the right.
-    private func permissionToggleRow(title: String, sub: String, isOn: Binding<Bool>) -> some View {
+    /// `BridgeToggle` on the right. `isEnabled: false` renders a non-interactive
+    /// row (e.g. a bundled file body that is always cached and not evictable).
+    private func permissionToggleRow(title: String, sub: String, isOn: Binding<Bool>, isEnabled: Bool = true) -> some View {
         HStack(alignment: .center, spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -1477,6 +1516,8 @@ struct SkillsView: View {
             }
             Spacer(minLength: 8)
             BridgeToggle(isOn: isOn)
+                .disabled(!isEnabled)
+                .opacity(isEnabled ? 1 : 0.5)
                 .accessibilityLabel(title)
                 .accessibilityHint(sub)
         }
@@ -1523,11 +1564,12 @@ struct SkillsView: View {
                ? fileSourceSkills.filter { (fileSkillEnabledMap[$0.path.path] ?? true) && (fileSkillRoutingMap[$0.path.path] ?? false) }.count
                : 0)
     }
-    private var countsPalette: Int {
-        countableSkills.filter { $0.enabled && $0.inCommandPalette }.count
-            + ((sourceFilter == .all || sourceFilter == .file)
-               ? fileSourceSkills.filter { (fileSkillEnabledMap[$0.path.path] ?? true) && (fileSkillPaletteMap[$0.path.path] ?? false) }.count
-               : 0)
+    /// `.sk-count.spec` — specialists per the model's derived `skillKind`
+    /// (`.specialist` = curated/palette-pinned but NOT routing-discoverable).
+    /// File-source skills are `plain` by the design taxonomy, so they do not
+    /// add to the specialist count.
+    private var countsSpecialist: Int {
+        countableSkills.filter { $0.enabled && $0.skillKind == .specialist }.count
     }
 
     // MARK: - Filtering + grouping
@@ -1559,18 +1601,20 @@ struct SkillsView: View {
         return fileSourceSkills.filter { $0.name.lowercased().contains(q) }
     }
 
-    /// Kind grouping — the visibility taxonomy this install actually carries:
-    /// Routing-discoverable · Palette-only · Fetch-only. (`.sk-group-cap`)
+    /// Kind grouping — the design's `SK_KINDS` taxonomy (Routing & orchestrators
+    /// · Specialists · Plain skills), driven by the model's derived `skillKind`
+    /// (`.routing` = routing-discoverable · `.specialist` = palette-pinned but
+    /// not routing · `.plain` = neither). (`.sk-group-cap`)
     private struct SkillGroup { let id: String; let label: String; let skills: [SkillsManager.Skill] }
     private var visibleGroups: [SkillGroup] {
         let all = filteredSkills
-        let routing = all.filter { $0.routingDiscoverable }
-        let palette = all.filter { !$0.routingDiscoverable && $0.inCommandPalette }
-        let fetch   = all.filter { !$0.routingDiscoverable && !$0.inCommandPalette }
+        let routing    = all.filter { $0.skillKind == .routing }
+        let specialist = all.filter { $0.skillKind == .specialist }
+        let plain      = all.filter { $0.skillKind == .plain }
         return [
-            SkillGroup(id: "routing", label: "Routing & orchestrators", skills: routing),
-            SkillGroup(id: "palette", label: "Palette skills", skills: palette),
-            SkillGroup(id: "fetch",   label: "Fetch-only", skills: fetch),
+            SkillGroup(id: "routing",    label: "Routing & orchestrators", skills: routing),
+            SkillGroup(id: "specialist", label: "Specialists",             skills: specialist),
+            SkillGroup(id: "plain",      label: "Plain skills",            skills: plain),
         ].filter { !$0.skills.isEmpty }
     }
 

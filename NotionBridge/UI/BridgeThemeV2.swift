@@ -107,10 +107,9 @@ public struct BridgeCardLabel: View {
     private let text: String
     public init(_ text: String) { self.text = text }
     public var body: some View {
-        Text(text.uppercased())
-            .font(.system(size: 11, weight: .semibold))
-            .tracking(1.2)
-            .foregroundStyle(BridgeTokens.fg3)
+        Text(text)
+            .bridgeCap()
+            .foregroundStyle(BridgeTokens.fg4)
     }
 }
 
@@ -275,9 +274,11 @@ public struct PartialToggle: View {
 
 // MARK: - Glass bubble (Command Bridge popup tray)
 
-/// One favorite-slot bubble in the Command Bridge tray. 52pt circle with
-/// the icon centered. Empty slots render as `visibility:hidden` so spatial
-/// position is preserved (per locked design).
+/// One favorite-slot bubble in the Command Bridge tray. A rounded-square
+/// squircle (18px radius, matching `.cb-bubble` in command-bridge.html — NOT a
+/// circle) with the icon centered; this also matches the empty-slot well so
+/// assigned and unassigned slots share one silhouette. Empty slots render as
+/// `visibility:hidden` so spatial position is preserved (per locked design).
 public struct BridgeGlassBubble<Content: View>: View {
     private let content: Content?
     private let size: CGFloat
@@ -311,11 +312,12 @@ public struct BridgeGlassBubble<Content: View>: View {
         let domeColors: [Color] = isDark
             ? [Color.white.opacity(0.42), Color.white.opacity(0.10), Color.white.opacity(0.02)]
             : [Color.white.opacity(0.70), Color.white.opacity(0.22), Color.white.opacity(0.0)]
+        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)  // .cb-bubble squircle (command-bridge.html:28)
         return ZStack {
             // Ingredient 1 — e2 raise surface fill (token-driven base + sheen).
-            rung.fill?.paint(in: Circle())
+            rung.fill?.paint(in: shape)
             // Signature specular dome on top of the raised glass.
-            Circle()
+            shape
                 .fill(
                     RadialGradient(
                         colors: domeColors,
@@ -324,14 +326,14 @@ public struct BridgeGlassBubble<Content: View>: View {
                     )
                 )
             // Top-left specular glint (`--glint`) — the raise-rung highlight.
-            Circle().fill(BridgeTokens.glint).allowsHitTesting(false)
+            shape.fill(BridgeTokens.glint).allowsHitTesting(false)
             // Ingredient 3 — elevation EDGE hairline at the raise rung.
-            (rung.edge.map { Circle().strokeBorder($0, lineWidth: 1) })
+            (rung.edge.map { shape.strokeBorder($0, lineWidth: 1) })
             content
         }
         .frame(width: size, height: size)
         // Ingredient 2 — directional bevel (top rim-light + bottom occlusion).
-        .overlay(rung.bevel.overlay(in: Circle()).allowsHitTesting(false))
+        .overlay(rung.bevel.overlay(in: shape).allowsHitTesting(false))
         // Ingredient 4 — dual ambient + contact drop shadow (e2). Keep dark's
         // prior single soft shadow feel; the dual layer reads richer on titanium.
         .modifier(OptionalShadow(rung.shadow))

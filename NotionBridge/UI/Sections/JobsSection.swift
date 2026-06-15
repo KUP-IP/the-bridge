@@ -71,9 +71,11 @@ public struct JobsSection: View {
 
     public init() {}
 
-    // Jobs density targets (spec: pane pad 18→14, inter-card gap →12). Kept
-    // local so they don't perturb the shared BridgeTokens.Space scale.
-    private let paneInset: CGFloat = 14
+    // Jobs density targets (spec: pane pad 18→14, inter-card gap →12). The pane
+    // inset lands exactly on the W1 scale (Space.s4 = 14); the 12pt inter-card gap
+    // is an off-ladder density literal mirroring the design's `.jbp-body { gap:12px }`
+    // (Space has no 12 twin — s3=10, cardGap=14), kept local by design.
+    private let paneInset: CGFloat = BridgeTokens.Space.s4
     private let cardGap: CGFloat = 12
 
     public var body: some View {
@@ -143,7 +145,7 @@ public struct JobsSection: View {
                     .font(.system(size: 14))
                     .foregroundStyle(BridgeTokens.fg2)
                 Text("Scheduler")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(BridgeTokens.Typeface.body)
                     .foregroundStyle(BridgeTokens.fg1)
                     .fixedSize()
                 if failingCount > 0 {
@@ -199,18 +201,18 @@ public struct JobsSection: View {
 
     private func countNum(_ s: String, color: Color) -> some View {
         Text(s)
-            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+            .font(BridgeTokens.Typeface.mono.weight(.semibold))
             .monospacedDigit()
             .foregroundStyle(color)
     }
     private func countSep(_ s: String) -> some View {
         Text(s)
-            .font(.system(size: 12, design: .monospaced))
+            .font(BridgeTokens.Typeface.mono)
             .foregroundStyle(BridgeTokens.fg4)
     }
     private func countDot() -> some View {
         Text("  ·  ")
-            .font(.system(size: 12, design: .monospaced))
+            .font(BridgeTokens.Typeface.mono)
             .foregroundStyle(BridgeTokens.fg5)
     }
 
@@ -265,7 +267,7 @@ public struct JobsSection: View {
                 content
                 if let msg = bulkMessage {
                     Text(msg)
-                        .font(.system(size: 11.5))
+                        .font(BridgeTokens.Typeface.meta)
                         .foregroundStyle(msg.localizedCaseInsensitiveContains("failed")
                                          ? BridgeTokens.badText : BridgeTokens.fg4)
                         .lineLimit(2)
@@ -310,7 +312,7 @@ public struct JobsSection: View {
                 .foregroundStyle(BridgeTokens.fg5)
             TextField("Filter jobs", text: $searchText)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12.5))
+                .font(BridgeTokens.Typeface.sub)
                 .foregroundStyle(BridgeTokens.fg1)
                 .tint(BridgeTokens.accentStrong)
                 .accessibilityLabel("Filter jobs")
@@ -390,7 +392,7 @@ public struct JobsSection: View {
                         BridgeCardLabel("Recent runs")
                         Spacer()
                         Text("Last 24 hours")
-                            .font(.system(size: 11.5))
+                            .font(BridgeTokens.Typeface.meta)
                             .foregroundStyle(BridgeTokens.fg4)
                         Image(systemName: runLogExpanded ? "chevron.up" : "chevron.down")
                             .font(.system(size: 11, weight: .semibold))
@@ -403,7 +405,7 @@ public struct JobsSection: View {
 
                 if recentRuns.isEmpty {
                     Text("No runs recorded yet.")
-                        .font(.system(size: 11.5))
+                        .font(BridgeTokens.Typeface.meta)
                         .foregroundStyle(BridgeTokens.fg4)
                 } else {
                     let shown = runLogExpanded ? recentRuns : Array(recentRuns.prefix(5))
@@ -411,14 +413,14 @@ public struct JobsSection: View {
                         ForEach(shown) { line in
                             HStack(alignment: .firstTextBaseline, spacing: 10) {
                                 Text(line.ok ? "✓" : "✗")
-                                    .font(.system(size: 11.5, weight: .bold, design: .monospaced))
+                                    .font(BridgeTokens.Typeface.mono.weight(.bold))
                                     .foregroundStyle(line.ok ? BridgeTokens.okText : BridgeTokens.badText)
                                 Text(line.time)
-                                    .font(.system(size: 11.5, design: .monospaced))
+                                    .font(BridgeTokens.Typeface.mono)
                                     .foregroundStyle(BridgeTokens.fg4)
                                     .monospacedDigit()
                                 Text(line.text)
-                                    .font(.system(size: 11.5, design: .monospaced))
+                                    .font(BridgeTokens.Typeface.mono)
                                     .foregroundStyle(line.ok ? BridgeTokens.fg2 : BridgeTokens.badText)
                                     .lineLimit(line.ok ? 1 : 2)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -429,7 +431,7 @@ public struct JobsSection: View {
                     }
                     if !runLogExpanded && recentRuns.count > 5 {
                         Text("+\(recentRuns.count - 5) more")
-                            .font(.system(size: 11))
+                            .font(BridgeTokens.Typeface.cap)
                             .foregroundStyle(BridgeTokens.fg4)
                     }
                 }
@@ -599,7 +601,7 @@ private struct RetryNowButton: View {
             HStack(spacing: 5) {
                 if retrying { ProgressView().controlSize(.mini) }
                 Text(retrying ? "Retrying…" : "Retry now")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(BridgeTokens.Typeface.meta.weight(.semibold))
                     .foregroundStyle(BridgeTokens.badText)
             }
             .padding(.horizontal, 11).padding(.vertical, 5)

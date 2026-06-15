@@ -4,7 +4,7 @@
 // The dashboard is a SwiftUI view; we cannot diff pixels in this harness.
 // Instead we pin the load-bearing structural contracts the design spec
 // requires:
-//   • locked popover width (300pt — design/dashboard.html)
+//   • locked popover width (340pt — design/dashboard.html)
 //   • locked dot-pulse size
 //   • every navigable section is a real `SettingsSection` case
 //   • status row → connections, permissions cells → permissions,
@@ -20,8 +20,8 @@ func runPKT879DashboardTests() async {
     print("\n\u{1F9F1} PKT-879 Dashboard Tests (Liquid Glass reskin)")
 
     // ── Constants surface ─────────────────────────────────────────────
-    await test("PKT-879 dashboard popover width is locked to 300pt") {
-        try expect(PKT879Dashboard.popoverWidth == 300,
+    await test("PKT-879 dashboard popover width is locked to 340pt") {
+        try expect(PKT879Dashboard.popoverWidth == 340,
                    "popover width drifted: \(PKT879Dashboard.popoverWidth)")
     }
 

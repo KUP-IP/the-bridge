@@ -53,10 +53,10 @@ struct JobsFailingBanner: View {
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 11))
+                .font(BridgeTokens.Typeface.cap)
                 .foregroundStyle(BridgeTokens.badText)
             Text(summary)
-                .font(.system(size: 11.5))
+                .font(BridgeTokens.Typeface.meta)
                 .foregroundStyle(BridgeTokens.badText)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -133,16 +133,6 @@ struct JobGlassRow: View {
         .background(rowBackground)
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .onHover { hovering = $0 }
-        .confirmationDialog(
-            "Run “\(job.name)” now?",
-            isPresented: $showRunConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("Run now", role: .destructive) { Task { await runNow() } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This job can send messages, move money, or delete data. Running it now executes those actions immediately.")
-        }
     }
 
     /// `.jbp-row` background: open → `well-deep` + raise edge + inset bevel;
@@ -166,7 +156,7 @@ struct JobGlassRow: View {
             iconTile
             VStack(alignment: .leading, spacing: 3) {
                 Text(job.name)
-                    .font(.system(size: 13.5, weight: .medium))
+                    .font(BridgeTokens.Typeface.body)
                     .foregroundStyle(BridgeTokens.fg1)
                     .lineLimit(1)
                     .help(job.name)
@@ -177,12 +167,21 @@ struct JobGlassRow: View {
                     )
                     .padding(.top, 7)
                 }
+                if showRunConfirm {
+                    confirmStrip
+                        .padding(.top, 7)
+                }
             }
             Spacer(minLength: 8)
             trailingGrid
         }
         .contentShape(Rectangle())
-        .onTapGesture { onToggle() }
+        .onTapGesture {
+            // Mirror the design's rowhead `setConfirming(null)`: tapping the head
+            // to expand/collapse also dismisses a pending run-confirm strip.
+            if showRunConfirm { showRunConfirm = false }
+            onToggle()
+        }
         // The whole header is a combined element: a VO user hears one summary,
         // then the action buttons (their own elements) follow.
         .accessibilityElement(children: .contain)
@@ -210,15 +209,51 @@ struct JobGlassRow: View {
     private var subline: some View {
         HStack(spacing: 5) {
             Text(job.schedule)
-                .font(.system(size: 11.5, design: .monospaced))
+                .font(BridgeTokens.Typeface.mono)
                 .foregroundStyle(BridgeTokens.fg2)
             Text("·").foregroundStyle(BridgeTokens.fg5)
             Text(detailText)
-                .font(.system(size: 11.5))
+                .font(BridgeTokens.Typeface.meta)
                 .foregroundStyle(BridgeTokens.fg4)
                 .lineLimit(1)
                 .help(detailText)
         }
+    }
+
+    /// `.jbp-confirm`: the inline run-confirm strip the design draws under the
+    /// subline when a side-effecting job is asked to run. A warn-tinted well with
+    /// per-job tailored copy ("This chain can **{effect}** — it runs immediately")
+    /// + inline Cancel / Run-now, replacing a modal so the affordance stays in the
+    /// row (the still-destructive Run-now is the same gated `runNow()` path).
+    private var confirmStrip: some View {
+        HStack(alignment: .center, spacing: 9) {
+            (Text("Run ")
+             + Text(job.name).fontWeight(.semibold)
+             + Text(" now? This chain can ")
+             + Text(confirmEffect).fontWeight(.semibold)
+             + Text(" — it executes immediately."))
+                .font(BridgeTokens.Typeface.meta)
+                .foregroundStyle(BridgeTokens.warnText)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            BridgeButton("Cancel") { showRunConfirm = false }
+            BridgeButton("Run now", variant: .primary) {
+                showRunConfirm = false
+                Task { await runNow() }
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // `.jbp-confirm`: warn@11% fill, warn@30% border.
+        .background(BridgeTokens.warn.opacity(0.11),
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .strokeBorder(BridgeTokens.warn.opacity(0.30), lineWidth: 0.5))
+        // Keep taps inside the strip from toggling the row open/closed.
+        .contentShape(Rectangle())
+        .onTapGesture {}
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Confirm running \(job.name) — this chain can \(confirmEffect)")
     }
 
     /// Fixed trailing grid {next-run · status badge · action cluster} so the
@@ -228,7 +263,7 @@ struct JobGlassRow: View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .trailing, spacing: 6) {
                 Text(nextRunText)
-                    .font(.system(size: 11.5, design: .monospaced))
+                    .font(BridgeTokens.Typeface.mono)
                     .foregroundStyle(job.status == .active && !isFailing
                                      ? BridgeTokens.fg3 : BridgeTokens.fg5)
                     .monospacedDigit()
@@ -337,7 +372,7 @@ struct JobGlassRow: View {
     private var toastOverlay: some View {
         if let toast {
             Text(toast)
-                .font(.system(size: 11, weight: .medium))
+                .font(BridgeTokens.Typeface.cap)
                 .foregroundStyle(BridgeTokens.fg1)
                 .padding(.horizontal, 9).padding(.vertical, 4)
                 .background(BridgeTokens.glassPopover.paint(in: Capsule(style: .continuous)))
@@ -365,10 +400,23 @@ struct JobGlassRow: View {
         }
     }
 
+    /// The per-job side-effect phrase the inline `.jbp-confirm` strip highlights
+    /// (e.g. "send messages", "move money", "delete data") — keyed off the chain's
+    /// tools so the confirm copy is tailored to THIS job, matching the design's
+    /// "This chain can **send messages**" wording rather than a generic warning.
+    private var confirmEffect: String {
+        let tools = job.actionChain.map { $0.tool.lowercased() }
+        func any(_ needles: [String]) -> Bool { tools.contains { t in needles.contains { t.contains($0) } } }
+        if any(["payment", "invoice", "charge", "refund", "subscription", "stripe"]) { return "move money" }
+        if any(["delete", "remove", "cancel"]) { return "delete data" }
+        if any(["send", "message", "mail"]) { return "send messages" }
+        return "take real actions"
+    }
+
     private func requestRun() {
         guard !running else { return }
         if needsRunConfirm {
-            showRunConfirm = true
+            withAnimation(.easeInOut(duration: 0.15)) { showRunConfirm = true }
         } else {
             Task { await runNow() }
         }
@@ -537,10 +585,10 @@ struct NewJobSheet: View {
                 BridgeInput("* * * * *", text: $schedule, mono: true)
                     .onChange(of: schedule) { _, v in validateSchedule(v) }
                 if let err = scheduleError {
-                    Text(err).font(.system(size: 11.5)).foregroundStyle(BridgeTokens.badText)
+                    Text(err).font(BridgeTokens.Typeface.meta).foregroundStyle(BridgeTokens.badText)
                 } else {
                     Text((CronHumanizer.describe(schedule) ?? schedule))
-                        .font(.system(size: 11.5)).foregroundStyle(BridgeTokens.fg3)
+                        .font(BridgeTokens.Typeface.meta).foregroundStyle(BridgeTokens.fg3)
                 }
             }
 
@@ -548,13 +596,13 @@ struct NewJobSheet: View {
                 HStack {
                     BridgeCardLabel("Action chain")
                     Spacer()
-                    Text("JSON").font(.system(size: 11)).foregroundStyle(BridgeTokens.fg5)
+                    Text("JSON").font(BridgeTokens.Typeface.cap).foregroundStyle(BridgeTokens.fg5)
                 }
                 jsonEditor(text: $actionsJSON)
                     .frame(minHeight: 140)
                     .onChange(of: actionsJSON) { _, v in validateActions(v) }
                 if let err = actionsError {
-                    Text(err).font(.system(size: 11.5)).foregroundStyle(BridgeTokens.badText)
+                    Text(err).font(BridgeTokens.Typeface.meta).foregroundStyle(BridgeTokens.badText)
                 }
             }
 
@@ -562,7 +610,7 @@ struct NewJobSheet: View {
                 .toggleStyle(.switch).controlSize(.small)
 
             if let err = errorMsg {
-                Text(err).font(.system(size: 11.5)).foregroundStyle(BridgeTokens.badText)
+                Text(err).font(BridgeTokens.Typeface.meta).foregroundStyle(BridgeTokens.badText)
             }
             HStack(spacing: 8) {
                 Spacer()
@@ -679,7 +727,7 @@ struct JobDetailView: View {
             footerActions
             if let msg = saveMessage {
                 Text(msg)
-                    .font(.system(size: 11.5))
+                    .font(BridgeTokens.Typeface.meta)
                     .foregroundStyle(msg.localizedCaseInsensitiveContains("failed")
                                      ? BridgeTokens.badText : BridgeTokens.fg3)
             }
@@ -697,7 +745,7 @@ struct JobDetailView: View {
                 .accessibilityLabel("Job name")
             HStack(spacing: 8) {
                 Label(job.id, systemImage: "number")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(BridgeTokens.Typeface.mono)
                     .foregroundStyle(BridgeTokens.fg4)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -727,10 +775,10 @@ struct JobDetailView: View {
                 .accessibilityLabel("Cron schedule")
             // `.jbp-echo`: humanized echo or the validation error.
             if let err = scheduleError {
-                Text(err).font(.system(size: 11.5)).foregroundStyle(BridgeTokens.badText)
+                Text(err).font(BridgeTokens.Typeface.meta).foregroundStyle(BridgeTokens.badText)
             } else {
                 Text((CronHumanizer.describe(editedSchedule) ?? editedSchedule))
-                    .font(.system(size: 11.5)).foregroundStyle(BridgeTokens.fg3)
+                    .font(BridgeTokens.Typeface.meta).foregroundStyle(BridgeTokens.fg3)
             }
         }
     }
@@ -740,7 +788,7 @@ struct JobDetailView: View {
             HStack {
                 BridgeCardLabel("Action chain")
                 Spacer()
-                Text("JSON").font(.system(size: 11)).foregroundStyle(BridgeTokens.fg5)
+                Text("JSON").font(BridgeTokens.Typeface.cap).foregroundStyle(BridgeTokens.fg5)
             }
             // `.jbp-json`: deep-well mono editor with inset bevel.
             TextEditor(text: $editedActionsJSON)
@@ -754,7 +802,7 @@ struct JobDetailView: View {
                 .onChange(of: editedActionsJSON) { _, newValue in validateActions(newValue) }
                 .accessibilityLabel("Action chain JSON")
             if let err = actionsError {
-                Text(err).font(.system(size: 11.5)).foregroundStyle(BridgeTokens.badText)
+                Text(err).font(BridgeTokens.Typeface.meta).foregroundStyle(BridgeTokens.badText)
             }
         }
     }
@@ -766,7 +814,7 @@ struct JobDetailView: View {
                 .controlSize(.small)
                 .accessibilityLabel("Skip when on battery")
             Text("launchd will defer the job if the Mac is running on battery power.")
-                .font(.system(size: 11.5)).foregroundStyle(BridgeTokens.fg4)
+                .font(BridgeTokens.Typeface.meta).foregroundStyle(BridgeTokens.fg4)
         }
     }
 
@@ -776,23 +824,23 @@ struct JobDetailView: View {
         VStack(alignment: .leading, spacing: 6) {
             BridgeCardLabel("Recent runs")
             if !historyLoaded {
-                HStack { ProgressView().controlSize(.mini); Text("Loading…").font(.system(size: 11.5)).foregroundStyle(BridgeTokens.fg4) }
+                HStack { ProgressView().controlSize(.mini); Text("Loading…").font(BridgeTokens.Typeface.meta).foregroundStyle(BridgeTokens.fg4) }
             } else if history.isEmpty {
                 Text("No runs recorded for this job yet.")
-                    .font(.system(size: 11.5)).foregroundStyle(BridgeTokens.fg4)
+                    .font(BridgeTokens.Typeface.meta).foregroundStyle(BridgeTokens.fg4)
             } else {
                 VStack(alignment: .leading, spacing: 5) {
                     ForEach(history) { line in
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
                             Text(line.ok ? "✓" : "✗")
-                                .font(.system(size: 11.5, weight: .bold, design: .monospaced))
+                                .font(BridgeTokens.Typeface.mono.weight(.bold))
                                 .foregroundStyle(line.ok ? BridgeTokens.okText : BridgeTokens.badText)
                             Text(line.time)
-                                .font(.system(size: 11.5, design: .monospaced))
+                                .font(BridgeTokens.Typeface.mono)
                                 .foregroundStyle(BridgeTokens.fg4)
                                 .monospacedDigit()
                             Text(line.text)
-                                .font(.system(size: 11.5, design: .monospaced))
+                                .font(BridgeTokens.Typeface.mono)
                                 .foregroundStyle(line.ok ? BridgeTokens.fg2 : BridgeTokens.badText)
                                 .lineLimit(line.ok ? 1 : 2)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -991,7 +1039,7 @@ struct ImportSheet: View {
             Text("Import jobs").font(BridgeTokens.Typeface.hero)
                 .foregroundStyle(BridgeTokens.fg1)
             Text("Paste a jobs export JSON envelope. IDs will be regenerated to avoid collisions.")
-                .font(.system(size: 11.5)).foregroundStyle(BridgeTokens.fg3)
+                .font(BridgeTokens.Typeface.meta).foregroundStyle(BridgeTokens.fg3)
             TextEditor(text: $jsonText)
                 .font(.body.monospaced())
                 .scrollContentBackground(.hidden)

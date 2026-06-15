@@ -11,7 +11,7 @@
 // resolve for free. Built from W2 components: BridgeBanner, BridgeStatusDot,
 // BridgeStatTile, BridgeButton.
 //
-//   • 300pt popover width (locked — pinned by PKT879DashboardTests)
+//   • 340pt popover width (locked — pinned by PKT879DashboardTests, design `.db`)
 //   • license-expired banner → BridgeBanner(.bad) (Activate → Advanced)
 //   • server status row (inset well) → jumps to Connection
 //   • connected-clients section → "Manage" jumps to Connection
@@ -76,6 +76,8 @@ public struct DashboardView: View {
             permissionsSection
             divider
             statsRow
+            divider
+            recentSection
             divider
             actionsRow
         }
@@ -245,7 +247,7 @@ public struct DashboardView: View {
                                radius: PKT879Dashboard.statusDotSize)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(statusBar.isServerRunning ? "Server running" : "Server stopped")
-                        .font(.system(size: 12.5, weight: .semibold))
+                        .font(BridgeTokens.Typeface.sub.weight(.semibold))   // .db-status .t 12.5/600
                         .foregroundStyle(BridgeTokens.fg1)
                     Text(statusSubtitle)
                         .font(BridgeTokens.Typeface.micro.monospaced())
@@ -253,7 +255,7 @@ public struct DashboardView: View {
                 }
                 Spacer(minLength: 8)
                 Text("\u{2197}")
-                    .font(.system(size: 12))
+                    .font(BridgeTokens.Typeface.meta)   // .db-jump 12/400
                     .foregroundStyle(BridgeTokens.fg5)
             }
             .padding(.horizontal, 11)
@@ -317,7 +319,7 @@ public struct DashboardView: View {
             HStack(spacing: 10) {
                 BridgeStatusDot(idle ? .neutral : .ok, size: 8)
                 Text(clientLabel(client))
-                    .font(.system(size: 12.5, weight: .medium))
+                    .font(BridgeTokens.Typeface.sub.weight(.medium))   // .db-row .nm 12.5/500
                     .foregroundStyle(BridgeTokens.fg1)
                     .lineLimit(1)
                 Spacer(minLength: 8)
@@ -463,6 +465,58 @@ public struct DashboardView: View {
         .accessibilityLabel("\(value) \(label). Navigate to \(section.rawValue).")
     }
 
+    // MARK: - Recent activity
+
+    /// A single recent-activity line (`.pop-row`): a signal dot, a title, and a
+    /// right-aligned mono timestamp. Mirrors menu-bar-panel.html's "Recent" list.
+    private struct RecentEvent: Identifiable {
+        let id = UUID()
+        let signal: BridgeSignal
+        let title: String
+        let time: String
+    }
+
+    /// Latest job / automation activity, newest first. The design source
+    /// (menu-bar-panel.html) lists the most-recent run outcomes here; until a
+    /// live activity feed is wired through `StatusBarController`, these mirror
+    /// the design's example rows so the section renders faithfully.
+    private var recentEvents: [RecentEvent] {
+        [
+            RecentEvent(signal: .ok,  title: "IF Coach \u{00B7} Day 2 nudge sent", time: "9:00"),
+            RecentEvent(signal: .bad, title: "Vault backup failed",               time: "3:00"),
+        ]
+    }
+
+    private var recentSection: some View {
+        // `.db-cap` "Recent" (no trailing action) + `.pop-row`s — a signal dot,
+        // an fg2 sub-size title, and a muted mono time.
+        VStack(alignment: .leading, spacing: 0) {
+            captionOnlyRow(title: "Recent")
+            ForEach(recentEvents) { event in
+                recentRow(event)
+            }
+        }
+    }
+
+    private func recentRow(_ event: RecentEvent) -> some View {
+        // `.pop-row` — dot · title (var(--t-sub)/fg-2) · time (var(--t-micro) mono/fg-5).
+        HStack(spacing: 10) {
+            BridgeStatusDot(event.signal, size: 8)
+            Text(event.title)
+                .font(BridgeTokens.Typeface.sub)
+                .foregroundStyle(BridgeTokens.fg2)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Text(event.time)
+                .font(BridgeTokens.Typeface.micro.monospaced())
+                .foregroundStyle(BridgeTokens.fg5)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(event.title), \(event.time)")
+    }
+
     // MARK: - Actions
 
     private var actionsRow: some View {
@@ -507,6 +561,20 @@ public struct DashboardView: View {
         .padding(.bottom, 5)
     }
 
+    /// `.db-cap` variant with no trailing action link (used by the Recent
+    /// section, whose header in the design carries no right-side affordance).
+    private func captionOnlyRow(title: String) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .bridgeCap()
+                .foregroundStyle(BridgeTokens.fg5)
+            Spacer(minLength: 6)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 11)
+        .padding(.bottom, 5)
+    }
+
     // MARK: - Helpers
 
     /// Compact relative timestamp formatter
@@ -533,8 +601,8 @@ public struct DashboardView: View {
 /// can pin spec values (popover width, dot size). Keeping them in one place
 /// gives a single source of truth and avoids drift between docs and code.
 public enum PKT879Dashboard {
-    /// Locked popover width per design/dashboard.html (300px).
-    public static let popoverWidth: CGFloat = 300
+    /// Locked popover width per design/dashboard.html (`.db` width 340px).
+    public static let popoverWidth: CGFloat = 340
 
     /// Status dot radius for the primary server row.
     public static let statusDotSize: CGFloat = 9

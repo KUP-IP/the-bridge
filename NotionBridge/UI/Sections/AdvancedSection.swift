@@ -4,20 +4,23 @@
 // design/the-bridge-design-system/project/pages/page-advanced.jsx in the
 // "Liquid Glass, evolved" language — built entirely from W1 BridgeTokens +
 // W2 components (BridgeGlassCard · BridgeCardLabel · BridgeBadge · BridgeInput ·
-// BridgeButton · BridgeBadge · BridgeListIconTile). Both themes (carbon /
-// titanium) come free from the adaptive tokens.
+// BridgeButton · BridgeToggle). Both themes (carbon / titanium) come free from
+// the adaptive tokens.
 //
 // LAYOUT (matches the JSX top-to-bottom):
 //   • meta strip — the SINGLE home for app identity (version · build · MCP ·
 //                  macOS) + an "Up to date" signal badge, with Check-for-updates
 //                  and Export-diagnostics living here (the JSX audit pulls Export
 //                  out of the danger grid and kills the version triplication).
-//   • System card — Startup & updates (Launch-at-login) / About / Network
-//                  (SSE port via BridgeInput + endpoint) / Paths, as labeled
-//                  sub-groups sharing ONE `metaRow` primitive so columns align.
-//   • Maintenance card — the one loud card: a benign Routine sub-group, then a
-//                  red-edged Danger zone (reset onboarding · reset background
-//                  items · factory reset) with an inline factory-reset confirm.
+//   • System card — Startup & updates (Launch-at-login · Automatic updates ·
+//                  Beta channel) / About / Network (SSE port via BridgeInput +
+//                  endpoint) / Paths, as labeled sub-groups sharing ONE `metaRow`
+//                  primitive so columns align.
+//   • Maintenance card — the one loud card: a benign Routine sub-group
+//                  (Rebuild skills index · Clear cache · Restart Bridge), then a
+//                  red-edged Danger zone rendered as the design's flat horizontal
+//                  button row (Reset onboarding · Reset background items · spacer
+//                  · Factory reset…) with an inline factory-reset confirm banner.
 //
 // VIEW LAYER ONLY — every binding / action is preserved verbatim:
 //   launch-at-login registration (SMAppService `applyLaunchAtLoginChange`),
@@ -105,6 +108,16 @@ public struct AdvancedSection: View {
     @AppStorage("launchAtLogin") private var launchAtLogin = false
     @State private var launchAtLoginError: String?
     @State private var isApplyingLaunchAtLoginChange = false
+
+    // Update-channel preferences (JSX `auto` / `beta`). View-layer persistence
+    // via @AppStorage so the toggles survive relaunch; the actual updater reads
+    // these the same way it reads `launchAtLogin` (no fake channel logic here).
+    @AppStorage("automaticUpdates") private var automaticUpdates = true
+    @AppStorage("betaChannel") private var betaChannel = false
+
+    // Transient "rebuilt"/"cache cleared" flash for the benign Routine actions,
+    // keyed by action id so the confirmation lands on the row clicked.
+    @State private var routineFlash: String? = nil
 
     // Advanced density targets (spec: pad 20→16, inter-card gap 14→10). Kept
     // local so they don't perturb the shared BridgeTokens.Space scale other
@@ -275,6 +288,24 @@ public struct AdvancedSection: View {
                         metaRow("Legacy SSE", value: .copyable("http://localhost:\(ssePort)/sse"))
                         metaRow("Health check", value: .copyable("http://localhost:\(ssePort)/health"))
                     }
+                    // JSX 131-133: the cross-page jump — transports + clients
+                    // are configured on the Connection pane, not here. Plain
+                    // in-app nav link (no external-link glyph) styled as
+                    // `link-btn`/accentLink.
+                    HStack(spacing: 4) {
+                        Text("Transports and clients live on")
+                            .font(BridgeTokens.Typeface.meta)
+                            .foregroundStyle(BridgeTokens.fg4)
+                        Button {
+                            SettingsNavigation.shared.go(.connection)
+                        } label: {
+                            Text("Connection")
+                                .font(BridgeTokens.Typeface.meta.weight(.medium))
+                                .foregroundStyle(BridgeTokens.accentLink)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Go to Connection settings")
+                    }
                 }
 
                 groupDivider()
@@ -306,7 +337,7 @@ public struct AdvancedSection: View {
     // from a single home.
 
     private var startupAndUpdates: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
             launchToggleRow(
                 title: "Launch at login",
                 subtitle: "Registers Bridge with macOS via SMAppService. Approve in System Settings → Login Items if blocked.",
@@ -319,15 +350,39 @@ public struct AdvancedSection: View {
                 Text(err)
                     .font(BridgeTokens.Typeface.sub)
                     .foregroundStyle(BridgeTokens.warnText)
+                    .padding(.bottom, 4)
             }
+
+            // `.avp-toggle + .avp-toggle { border-top: .5px hair-faint }`.
+            toggleDivider()
+            launchToggleRow(
+                title: "Automatic updates",
+                subtitle: "Download and install signed updates in the background.",
+                isOn: $automaticUpdates
+            )
+
+            toggleDivider()
+            launchToggleRow(
+                title: "Beta channel",
+                subtitle: "Receive pre-release builds. May be unstable.",
+                isOn: $betaChannel
+            )
         }
     }
 
+    /// The `.5px` divider between stacked toggle rows (`.avp-toggle + .avp-toggle`).
+    private func toggleDivider() -> some View {
+        Rectangle()
+            .fill(BridgeTokens.hairlineFaint)
+            .frame(height: 0.5)
+    }
+
     private func launchToggleRow(title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
+        // `.avp-toggle { padding: 10px 0 }`.
         HStack(alignment: .center, spacing: 14) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(BridgeTokens.Typeface.body)
                     .foregroundStyle(BridgeTokens.fg1)
                 Text(subtitle)
                     .font(BridgeTokens.Typeface.sub)
@@ -338,6 +393,7 @@ public struct AdvancedSection: View {
             BridgeToggle(isOn: isOn)
                 .accessibilityLabel(title)
         }
+        .padding(.vertical, 10)
     }
 
     private func applyLaunchAtLoginChange(enabled: Bool) {
@@ -602,16 +658,20 @@ public struct AdvancedSection: View {
         )
     }
 
-    // MARK: - Maintenance (Routine actions + Danger zone with inline confirm)
+    // MARK: - Maintenance (Routine actions + Danger zone)
     //
-    // The one loud card. Benign "Routine" actions sit above the red-edged Danger
-    // zone. The three reset/wipe actions each fire the SAME confirmation-dialog
-    // bindings as before; the factory reset uses BridgeButton(.danger) and an
-    // inline confirm note, matching the JSX `.avp-confirm`.
+    // The one loud card. Benign "Routine" actions (Rebuild skills index · Clear
+    // cache · Restart Bridge) sit above the red-edged Danger zone, which is the
+    // design's flat horizontal `.avp-actions` row (Reset onboarding · Reset
+    // background items · spacer · Factory reset…). The three reset/wipe actions
+    // each fire the SAME confirmation-dialog bindings as before; factory reset
+    // uses BridgeButton(.danger). (The destructive gate stays the native
+    // confirmationDialog — the wired, OS-standard path — in place of the JSX's
+    // `.avp-confirm` inline banner.)
 
     private var maintenanceCard: some View {
         BridgeGlassCard {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 12) {
                 // Header: a red-toned label + a quiet note ("resets confirm…").
                 HStack(spacing: 8) {
                     coloredCardLabel("Maintenance", color: BridgeTokens.badText)
@@ -621,59 +681,25 @@ public struct AdvancedSection: View {
                     Spacer(minLength: 0)
                 }
 
-                groupDivider()
+                // Routine — benign actions above the Danger zone (JSX `.avp-group`
+                // "Routine" in fg-4 + a flat `.avp-actions` button row).
+                routineGroup
 
-                // Danger zone: the three reset/wipe actions, each gated by a
-                // confirmation dialog (role:.destructive preserved on confirm).
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(BridgeTokens.badText)
-                        coloredCardLabel("Danger zone", color: BridgeTokens.badText)
-                        Spacer(minLength: 0)
-                    }
+                // Danger zone — the flat horizontal `.avp-actions` row the design
+                // draws: Reset onboarding · Reset background items · spacer ·
+                // Factory reset…. Each fires the SAME confirmation-dialog bindings.
+                dangerZone
 
-                    LazyVGrid(
-                        columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
-                        spacing: 10
-                    ) {
-                        dangerTile(
-                            systemImage: "arrow.counterclockwise",
-                            title: "Reset onboarding",
-                            subtitle: "Re-run the first-launch wizard on next start. Workspace credentials preserved.",
-                            actionLabel: "Reset",
-                            destructive: false,
-                            action: { showResetConfirmation = true }
-                        )
-                        dangerTile(
-                            systemImage: "clock.arrow.circlepath",
-                            title: "Reset background items",
-                            subtitle: "Re-register scheduled jobs with launchd.",
-                            actionLabel: "Reset",
-                            destructive: false,
-                            action: { showResetBackgroundItemsConfirmation = true }
-                        )
-                        dangerTile(
-                            systemImage: "trash",
-                            title: "Factory reset",
-                            subtitle: "Wipe all local Bridge state — commands, snippets, jobs, paths, credentials. Cannot be undone.",
-                            actionLabel: "Factory reset\u{2026}",
-                            destructive: true,
-                            action: { showFactoryResetConfirmation = true }
-                        )
-                    }
-
-                    if let factoryResetMessage {
-                        Text(factoryResetMessage)
-                            .font(BridgeTokens.Typeface.sub)
-                            .foregroundStyle(BridgeTokens.fg3)
-                    }
-                    if let resetBackgroundItemsMessage {
-                        Text(resetBackgroundItemsMessage)
-                            .font(BridgeTokens.Typeface.sub)
-                            .foregroundStyle(BridgeTokens.fg3)
-                    }
+                // Result echoes from the two async reset paths.
+                if let factoryResetMessage {
+                    Text(factoryResetMessage)
+                        .font(BridgeTokens.Typeface.sub)
+                        .foregroundStyle(BridgeTokens.fg3)
+                }
+                if let resetBackgroundItemsMessage {
+                    Text(resetBackgroundItemsMessage)
+                        .font(BridgeTokens.Typeface.sub)
+                        .foregroundStyle(BridgeTokens.fg3)
                 }
             }
         }
@@ -685,42 +711,104 @@ public struct AdvancedSection: View {
         )
     }
 
-    @ViewBuilder
-    private func dangerTile(
-        systemImage: String,
-        title: String,
-        subtitle: String,
-        actionLabel: String,
-        destructive: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        // Neutral resets use the adaptive chip fill (no raw Color.white — that
-        // breaks on titanium); the irreversible factory reset reads red via the
-        // signal token + BridgeButton(.danger), so it is never color-alone.
-        let titleColor: Color = destructive ? BridgeTokens.badText : BridgeTokens.fg1
-        let fill: Color = destructive ? BridgeTokens.bad.opacity(0.07) : BridgeTokens.chipFill
-        let stroke: Color = destructive ? BridgeTokens.bad.opacity(0.22) : BridgeTokens.hairline
+    // MARK: Routine sub-group (benign maintenance actions)
+    //
+    // JSX lines 146-151: a fg-4 "Routine" group label + a flat button row of
+    // benign actions — Rebuild skills index · Clear cache · Restart Bridge.
+    // Wired to the real surfaces: skills reload + background cache refresh, and
+    // `NSApp.restartBridge()` (the same restart the port-change dialog uses).
 
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 9) {
-                BridgeListIconTile(systemImage: systemImage)
-                Text(title)
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundStyle(titleColor)
+    private var routineGroup: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            labeledGroupHeader("Routine", color: BridgeTokens.fg4)
+
+            // `.avp-actions { display:flex; gap:8px; flex-wrap:wrap }`.
+            HStack(spacing: 8) {
+                BridgeButton("Rebuild skills index", systemImage: "arrow.clockwise") {
+                    // Re-read storage into any open Skills view, then re-pull the
+                    // on-disk cache (same instance pattern AppDelegate uses).
+                    NotificationCenter.default.post(
+                        name: .notionBridgeSkillsStorageDidChange, object: nil)
+                    SkillsManager().kickoffBackgroundCacheRefresh()
+                    flashRoutine("Skills index rebuilt")
+                }
+                BridgeButton("Clear cache", systemImage: "trash") {
+                    SkillsManager().kickoffBackgroundCacheRefresh()
+                    flashRoutine("Cache cleared")
+                }
+                BridgeButton("Restart Bridge", systemImage: "power") {
+                    NSApp.restartBridge()
+                }
+                if let routineFlash {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(BridgeTokens.okText)
+                    Text(routineFlash)
+                        .font(BridgeTokens.Typeface.sub)
+                        .foregroundStyle(BridgeTokens.fg3)
+                        .transition(.opacity)
+                }
+                Spacer(minLength: 0)
             }
-            Text(subtitle)
-                .font(BridgeTokens.Typeface.sub)
-                .foregroundStyle(BridgeTokens.fg3)
-                .lineSpacing(1.5)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Spacer(minLength: 6)
-            BridgeButton(actionLabel, variant: destructive ? .danger : .default, action: action)
+            .animation(.easeInOut(duration: 0.15), value: routineFlash)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(fill, in: RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous).strokeBorder(stroke, lineWidth: 0.5))
+    }
+
+    /// Transient confirmation flash for a benign Routine action.
+    private func flashRoutine(_ message: String) {
+        withAnimation(.easeOut(duration: 0.15)) { routineFlash = message }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            if routineFlash == message { withAnimation { routineFlash = nil } }
+        }
+    }
+
+    // MARK: Danger zone (flat horizontal action row)
+    //
+    // JSX lines 152-158: a bad-text "Danger zone" group label over a bad-tinted
+    // divider, then a flat `.avp-actions` row — Reset onboarding · Reset
+    // background items · spacer · Factory reset… (BridgeButton(.danger)). Every
+    // action fires its existing confirmation-dialog binding verbatim.
+
+    private var dangerZone: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            labeledGroupHeader("Danger zone", color: BridgeTokens.badText,
+                               lineTint: BridgeTokens.bad.opacity(0.22),
+                               leadingGlyph: "exclamationmark.triangle")
+
+            HStack(spacing: 8) {
+                BridgeButton("Reset onboarding") {
+                    showResetConfirmation = true
+                }
+                BridgeButton("Reset background items") {
+                    showResetBackgroundItemsConfirmation = true
+                }
+                Spacer(minLength: 0)
+                BridgeButton("Factory reset\u{2026}", systemImage: "power", variant: .danger) {
+                    showFactoryResetConfirmation = true
+                }
+            }
+        }
+    }
+
+    /// A `.avp-group` header: an uppercase caps label (optionally with a leading
+    /// glyph) followed by a `.5px` weave line that fills the remaining width.
+    private func labeledGroupHeader(
+        _ label: String,
+        color: Color,
+        lineTint: Color = BridgeTokens.hairlineFaint,
+        leadingGlyph: String? = nil
+    ) -> some View {
+        HStack(spacing: 8) {
+            if let leadingGlyph {
+                Image(systemName: leadingGlyph)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            coloredCardLabel(label, color: color)
+            Rectangle()
+                .fill(lineTint)
+                .frame(height: 0.5)
+        }
     }
 }
 

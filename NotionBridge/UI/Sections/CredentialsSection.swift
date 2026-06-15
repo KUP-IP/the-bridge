@@ -147,68 +147,40 @@ public struct CredentialsSection: View {
         }
     }
 
-    /// Truthful "auto-validates" status pill — green only when the weekly policy
-    /// is actually ON (mirrors the design's "Auto-validates every 6h" badge, but
-    /// honest to the real cadence + toggle).
+    /// Truthful "auto-validates" status pill — the W2 `.badge` (ok, dot), shown
+    /// only when the weekly policy is actually ON (mirrors the design's
+    /// "Auto-validates every 6h" badge, but honest to the real cadence + toggle).
     @ViewBuilder
     private var autoValidateBadge: some View {
         if autoValidateWeekly {
-            HStack(spacing: 5) {
-                BridgeStatusDot(.ok, size: 6)
-                Text("Auto-validates weekly")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(BridgeTokens.okText)
-            }
-            .padding(.horizontal, 9).padding(.vertical, 3)
-            .background(BridgeTokens.ok.opacity(0.14), in: Capsule())
-            .overlay(Capsule().strokeBorder(BridgeTokens.ok.opacity(0.28), lineWidth: 0.5))
-            .help("Bridge re-checks each service about every 7 days. Toggle in Credential policy below.")
-            .accessibilityLabel("Auto-validates weekly is on")
+            BridgeBadge("Auto-validates weekly", tone: .ok, showsDot: true)
+                .help("Bridge re-checks each service about every 7 days. Toggle in Credential policy below.")
+                .accessibilityLabel("Auto-validates weekly is on")
         }
     }
 
+    /// "Validate all" affordance — the W2 neutral-glass chip (design `.btn sm`).
+    /// Shows a transient "Validating…" label while the sweep runs.
+    @ViewBuilder
     private var validateAllButton: some View {
-        Button {
-            Task { await validateAll() }
-        } label: {
-            HStack(spacing: 4) {
-                if isValidatingAll {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: "checkmark.shield").font(.system(size: 10, weight: .bold))
-                }
-                Text("Validate all").font(.system(size: 12, weight: .medium))
+        if isValidatingAll {
+            BridgeChip("Validating\u{2026}", systemImage: "checkmark.shield")
+                .help("Re-validate every stored credential against its service")
+        } else if !stored.isEmpty {
+            BridgeChip("Validate all", systemImage: "checkmark.shield") {
+                Task { await validateAll() }
             }
-            .foregroundStyle(BridgeTokens.fg2)
-            .padding(.horizontal, 10).padding(.vertical, 4)
-            .background(BridgeTokens.chipFill, in: Capsule())
-            .overlay(Capsule().strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+            .help("Re-validate every stored credential against its service")
         }
-        .buttonStyle(.plain)
-        .disabled(isValidatingAll || stored.isEmpty)
-        .help("Re-validate every stored credential against its service")
     }
 
+    /// Add affordance — the canonical W2 primary button (translucent accent
+    /// gradient · onAccent ink · accentBorder edge), no longer a hand-rolled
+    /// re-implementation of the same chrome.
     private var addCredentialPill: some View {
-        Button {
+        BridgeButton("Add credential", systemImage: "plus", variant: .primary) {
             sheetMode = .add
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "plus").font(.system(size: 10, weight: .bold))
-                Text("Add credential").font(.system(size: 12, weight: .medium))
-            }
-            .foregroundStyle(BridgeTokens.onAccent)
-            .padding(.horizontal, 10).padding(.vertical, 4)
-            .background(
-                LinearGradient(
-                    colors: [BridgeTokens.accent.opacity(0.55), BridgeTokens.accent.opacity(0.40)],
-                    startPoint: .top, endPoint: .bottom),
-                in: Capsule())
-            // accentBorder is the adaptive edge token for accent surfaces; use it
-            // for the border (accentStrong is reserved for the caret/ink seed).
-            .overlay(Capsule().strokeBorder(BridgeTokens.accentBorder, lineWidth: 0.5))
         }
-        .buttonStyle(.plain)
         .help("Add a new credential")
     }
 
@@ -233,14 +205,14 @@ public struct CredentialsSection: View {
         HStack(alignment: .top, spacing: 12) {
             credentialIcon(for: entry)
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
+                HStack(spacing: BridgeTokens.Space.s2) {
                     Text(displayName(for: entry))
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(BridgeTokens.Typeface.body.weight(.semibold))
                         .foregroundStyle(BridgeTokens.fg1)
                     statusBadge(record.health)
                 }
                 Text(maskedSubtitle(for: entry))
-                    .font(.system(size: 11.5, design: .monospaced))
+                    .font(BridgeTokens.Typeface.mono)
                     .foregroundStyle(BridgeTokens.fg4)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -275,23 +247,23 @@ public struct CredentialsSection: View {
     private func checkedLine(for entry: CredentialEntry, record: CredentialHealthRecord) -> some View {
         let key = CredentialHealthStore.key(service: entry.service, account: entry.account)
         let isBusy = revalidating.contains(key)
-        HStack(spacing: 5) {
+        HStack(spacing: BridgeTokens.Space.s1 + 1) {
             if isBusy {
                 ProgressView().controlSize(.small)
                 Text("Checking…")
-                    .font(.system(size: 11))
+                    .font(BridgeTokens.Typeface.cap.weight(.regular))
                     .foregroundStyle(BridgeTokens.fg5)
             } else if let checkedAt = record.checkedAt {
                 Text("checked \(Self.relative(checkedAt))")
-                    .font(.system(size: 11))
+                    .font(BridgeTokens.Typeface.cap.weight(.regular))
                     .foregroundStyle(BridgeTokens.fg5)
             } else if isValidatable(entry) {
                 Text("not yet validated")
-                    .font(.system(size: 11))
+                    .font(BridgeTokens.Typeface.cap.weight(.regular))
                     .foregroundStyle(BridgeTokens.fg5)
             } else {
                 Text("no automatic check for this service")
-                    .font(.system(size: 11))
+                    .font(BridgeTokens.Typeface.cap.weight(.regular))
                     .foregroundStyle(BridgeTokens.fg5)
             }
             if isValidatable(entry) && !isBusy {
@@ -299,7 +271,7 @@ public struct CredentialsSection: View {
                     Task { await revalidate(entry) }
                 } label: {
                     Text("Revalidate")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(BridgeTokens.Typeface.cap)
                         .foregroundStyle(BridgeTokens.infoText)
                 }
                 .buttonStyle(.plain)
@@ -326,9 +298,9 @@ public struct CredentialsSection: View {
                     }
                 } label: {
                     Text("Reconnect")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(BridgeTokens.Typeface.cap)
                         .foregroundStyle(BridgeTokens.onAccent)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .padding(.horizontal, BridgeTokens.Space.s3).padding(.vertical, 5)
                         .background(BridgeTokens.accent, in: Capsule())
                 }
                 .buttonStyle(.plain)
@@ -429,25 +401,20 @@ public struct CredentialsSection: View {
         }
     }
 
-    /// Status pill driven by the LAST-KNOWN validation result. unchecked →
-    /// neutral (truthful), valid → ok, expiring → warn, revoked/error → bad.
+    /// Status pill driven by the LAST-KNOWN validation result, rendered with the
+    /// W2 `.badge` (`BridgeBadge`). unchecked → neutral (truthful), valid → ok,
+    /// expiring → warn, revoked/error → bad.
     @ViewBuilder
     private func statusBadge(_ health: CredentialHealth) -> some View {
-        let (fill, text): (Color, Color) = {
+        let tone: BridgeBadge.Tone = {
             switch health.badgeTone {
-            case .ok:      return (BridgeTokens.ok, BridgeTokens.okText)
-            case .warn:    return (BridgeTokens.warn, BridgeTokens.warnText)
-            case .bad:     return (BridgeTokens.bad, BridgeTokens.badText)
-            case .neutral: return (BridgeTokens.fg4, BridgeTokens.fg3)
+            case .ok:      return .ok
+            case .warn:    return .warn
+            case .bad:     return .bad
+            case .neutral: return .neutral
             }
         }()
-        Text(health.badgeLabel)
-            .font(.system(size: 11, weight: .semibold))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 3)
-            .background(fill.opacity(0.16), in: Capsule())
-            .overlay(Capsule().strokeBorder(fill.opacity(0.30), lineWidth: 0.5))
-            .foregroundStyle(text)
+        BridgeBadge(health.badgeLabel, tone: tone)
             .fixedSize()
     }
 
