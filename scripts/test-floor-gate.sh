@@ -1023,7 +1023,14 @@ set -euo pipefail
 # clobber a registered status; the enable ordering settles Active with no false-warning interim.
 # (Root cause: header read a non-@Observable status box, so SwiftUI never refreshed the warning.)
 # Integrated green 1921 → 1924, 0 failed. Floor raised.
-FLOOR="${BRIDGE_TEST_FLOOR:-1924}"
+# v3.8.0 shortcut controller-instance fix (2026-06-15): +2 tests — registering CommandsController
+# === the UI-observed instance (a published .registered reads as .active through the UI ref); +a
+# regression guard modeling the old `?? CommandsController()` phantom-instance fallback (separate
+# instance → false .shortcutUnavailable). Root cause: SettingsWindowController re-resolved the
+# controller via a fragile NSApp.delegate cast + `?? CommandsController()`, spinning up a phantom
+# instance the UI observed while registration published into the real one. Fix: inject the one
+# AppDelegate.commandsController directly. Integrated green 1924 → 1926, 0 failed. Floor raised.
+FLOOR="${BRIDGE_TEST_FLOOR:-1926}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

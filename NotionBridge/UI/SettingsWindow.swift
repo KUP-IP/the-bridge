@@ -29,9 +29,32 @@ public final class SettingsWindowController {
     private let statusBar: StatusBarController
     private let permissionManager: PermissionManager
 
-    public init(statusBar: StatusBarController, permissionManager: PermissionManager) {
+    /// cmd-ux W1 (instance-identity fix): the AppDelegate's ONE
+    /// `@Observable` CommandsController, passed in directly at construction.
+    /// Previously `show()` re-resolved this via `(NSApp.delegate as?
+    /// AppDelegate)?.commandsController ?? CommandsController()`. When that
+    /// cast returned a non-AppDelegate delegate (the `@NSApplicationDelegate-
+    /// Adaptor` instance the launch registration runs on is not guaranteed to
+    /// be the exact object `NSApp.delegate` hands back here), the `??`
+    /// silently fell back to a BRAND-NEW controller — instance B — that no
+    /// registration path ever publishes into. The launch
+    /// `publishRegistration(.registered)` updated the AppDelegate's instance
+    /// A, but the Settings UI observed the fresh instance B (forever
+    /// `.unattempted`), so the header latched the false "⚠ Shortcut not
+    /// active". Holding the AppDelegate's instance directly makes the
+    /// registering controller and the UI-observed controller the SAME object
+    /// — a true single source of truth, with no fragile delegate cast and no
+    /// fresh-instance fallback.
+    private let commandsController: CommandsController
+
+    public init(
+        statusBar: StatusBarController,
+        permissionManager: PermissionManager,
+        commandsController: CommandsController
+    ) {
         self.statusBar = statusBar
         self.permissionManager = permissionManager
+        self.commandsController = commandsController
     }
 
     /// Show the Settings window, or bring it to front if already open.
@@ -55,9 +78,12 @@ public final class SettingsWindowController {
         // the exact view passed into NSHostingController(rootView:).
         // SettingsView reads it via `@Environment`; this is what makes
         // the Commands status row reactive (Bug 2 structural fix).
-        let commandsController = (NSApp.delegate as? AppDelegate)?.commandsController
-            ?? CommandsController()
-
+        //
+        // Instance-identity fix: `commandsController` is now the AppDelegate's
+        // ONE instance, handed in at construction (see the stored property
+        // above) — NOT re-resolved here via a `NSApp.delegate` cast that
+        // could fall back to a fresh, never-published instance the UI would
+        // then observe forever as `.unattempted`.
         let settingsView = SettingsView(
             statusBar: statusBar,
             permissionManager: permissionManager

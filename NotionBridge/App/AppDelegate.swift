@@ -202,9 +202,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     )
 
     /// V1-QUALITY-C2: Settings window controller for gear icon / Cmd+, access.
+    /// cmd-ux W1 (instance-identity fix): pass THIS AppDelegate's single
+    /// `commandsController` straight in, so the Settings UI observes the exact
+    /// instance the launch/enable/rebind registration paths publish into. The
+    /// controller previously self-resolved this via `NSApp.delegate as?
+    /// AppDelegate` with a `?? CommandsController()` fallback; when the cast
+    /// missed it observed a fresh, never-registered controller and the header
+    /// falsely read "⚠ Shortcut not active" even though ⌃⌘B was live.
     private lazy var settingsController = SettingsWindowController(
         statusBar: statusBar,
-        permissionManager: permissionManager
+        permissionManager: permissionManager,
+        commandsController: commandsController
     )
 
     /// Detect the standalone NotionBridgeTests executable. The test harness

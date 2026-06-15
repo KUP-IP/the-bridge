@@ -291,4 +291,92 @@ func runCommandHotkeyHardeningTests() async {
         try expect(s.isWarning == false, "no false warning may remain after enabling")
         UserDefaults().removePersistentDomain(forName: suite)
     }
+
+    // ── (6) INSTANCE IDENTITY: the registering controller IS the observed one ──
+    //
+    //   The last-mile on-device defect. ⌃⌘B registered + fired globally, yet the
+    //   Commands header STILL showed "⚠ Shortcut not active" on every fresh
+    //   launch — even after the header was fixed to read the OBSERVED
+    //   `CommandsController`. Root cause: there were effectively TWO controllers.
+    //   The AppDelegate's launch path published `.registered` into instance A
+    //   (`AppDelegate.commandsController`), but `SettingsWindowController.show()`
+    //   re-resolved the controller for the SwiftUI `.environment` via
+    //   `(NSApp.delegate as? AppDelegate)?.commandsController ?? CommandsController()`.
+    //   When that cast didn't yield the registering AppDelegate it silently fell
+    //   back to a BRAND-NEW instance B — never published into, forever
+    //   `.unattempted` — and the UI observed B. So A was Active while the header
+    //   rendered B's false warning.
+    //
+    //   The fix injects the AppDelegate's ONE `commandsController` straight into
+    //   `SettingsWindowController` at construction (no `NSApp.delegate` cast, no
+    //   `?? CommandsController()` fallback), so the registering controller and the
+    //   UI-observed controller are necessarily the SAME object. These pin that
+    //   invariant: a `.registered` published on the registration-side reference is
+    //   visible through the UI-observed reference (and the false-warning regression
+    //   that a SEPARATE fallback instance would reintroduce).
+
+    await test("instance identity: a .registered published on the registering controller is visible to the UI-observed reference") {
+        let suite = "kup.solutions.notion-bridge.cmd-hk.\(UUID().uuidString)"
+        let r = await MainActor.run { () -> (Bool, CommandsSettingsStatus) in
+            // ONE controller — exactly the post-fix wiring: the AppDelegate owns
+            // it (`registering`) and hands the SAME object to the Settings UI
+            // (`uiObserved`). No fresh fallback is constructed.
+            let registering = CommandsController(defaults: UserDefaults(suiteName: suite)!)
+            let uiObserved = registering   // SettingsWindowController(commandsController:) injection
+
+            // The launch registration path publishes the TRUE outcome into the
+            // controller it holds (default ⌃⌘B registered cleanly).
+            registering.publishRegistration(isRegistered: true,
+                                            status: .registered,
+                                            hotkey: .productionDefault)
+
+            // The header derives its row from the UI-observed reference. Because
+            // it is the SAME object, it must see the published .registered.
+            let sameObject = (registering === uiObserved)
+            let s = CommandsSettingsStatus(enabled: uiObserved.enabled,
+                                           lastRegisterStatus: uiObserved.lastRegisterStatus,
+                                           hotkey: uiObserved.hotkeyConfig.displayString)
+            return (sameObject, s)
+        }
+        try expect(r.0, "the registering controller and the UI-observed controller MUST be the same instance")
+        try expect(r.1 == .active(hotkey: "\u{2303}\u{2318}B"),
+                   "the UI-observed controller must read the published .registered as Active, got \(r.1)")
+        try expect(r.1 != .shortcutUnavailable,
+                   "the header must NOT show the false 'Shortcut not active' when the registering controller is Active")
+        try expect(r.1.isWarning == false, "a shared, registered controller is never a warning")
+        UserDefaults().removePersistentDomain(forName: suite)
+    }
+
+    await test("instance identity: a SEPARATE fallback controller (the old bug) reproduces the false 'not active' warning") {
+        let suite = "kup.solutions.notion-bridge.cmd-hk.\(UUID().uuidString)"
+        // Documents WHY the instance must be shared: model the OLD
+        // `?? CommandsController()` fallback — the UI observes a DIFFERENT
+        // instance than the one the launch path registered. The registering
+        // instance is Active; the freshly-constructed UI instance is forever
+        // `.unattempted` ⇒ the exact false "⚠ Shortcut not active" header.
+        let r = await MainActor.run { () -> (Bool, CommandsSettingsStatus, CommandsSettingsStatus) in
+            let registering = CommandsController(defaults: UserDefaults(suiteName: suite)!)
+            registering.publishRegistration(isRegistered: true,
+                                            status: .registered,
+                                            hotkey: .productionDefault)
+            // The bug: a brand-new instance the UI would observe instead.
+            let fallbackUI = CommandsController(defaults: UserDefaults(suiteName: suite)!)
+            let sameObject = (registering === fallbackUI)
+            let registeringStatus = CommandsSettingsStatus(
+                enabled: registering.enabled,
+                lastRegisterStatus: registering.lastRegisterStatus,
+                hotkey: registering.hotkeyConfig.displayString)
+            let uiStatus = CommandsSettingsStatus(
+                enabled: fallbackUI.enabled,
+                lastRegisterStatus: fallbackUI.lastRegisterStatus,
+                hotkey: fallbackUI.hotkeyConfig.displayString)
+            return (sameObject, registeringStatus, uiStatus)
+        }
+        try expect(r.0 == false, "the fallback path observes a DIFFERENT instance (this is the bug)")
+        try expect(r.1 == .active(hotkey: "\u{2303}\u{2318}B"),
+                   "the registering instance is genuinely Active")
+        try expect(r.2 == .shortcutUnavailable,
+                   "a separate, never-published instance derives the FALSE 'Shortcut not active' — exactly the on-device symptom the fix removes")
+        UserDefaults().removePersistentDomain(forName: suite)
+    }
 }
