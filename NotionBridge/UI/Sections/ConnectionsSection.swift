@@ -339,7 +339,7 @@ public struct ConnectionsSection: View {
                 HStack(alignment: .firstTextBaseline) {
                     BridgeCardLabel("Clients")
                     Spacer()
-                    Text("standing orders assigned per client · \(liveCount) live · \(statusBar.activeToolCount) tools exposed")
+                    Text("standing orders assigned per client · \(liveCount) live · \(liveCount) known")
                         .font(BridgeTokens.Typeface.meta)
                         .foregroundStyle(BridgeTokens.fg4)
                         .lineLimit(1)

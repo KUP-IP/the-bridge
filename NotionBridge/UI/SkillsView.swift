@@ -8,8 +8,9 @@
 //   from design/.../skills/skills-window.jsx faithfully on the W1 token ladder
 //   (BridgeTokens) + the W2 component kit (BridgeUIKit / BridgeTheme*). The
 //   surface gains: emoji skill glyphs, KIND grouping (by visibility tier),
-//   a SOURCE filter (Notion · Google Docs · File), a counts banner
-//   (BridgeStatStrip), and the offline body-cache pattern — a peek (BridgePeek)
+//   a SOURCE filter (Notion · Google Docs · File), a slim meta row (Skills-index
+//   label + Synced badge · live counts incl. cached · Cache all — Commands-v2
+//   anatomy), and the offline body-cache pattern — a peek (BridgePeek)
 //   that expands into a float (BridgeFloat), a "Not stored" state, a list-level
 //   "Cache all" action, plus the empty / loading / error edge states
 //   (BridgeEmptyStateView / BridgeLoadingView / BridgeErrorView).
@@ -119,6 +120,7 @@ struct SkillsView: View {
     var body: some View {
         VStack(spacing: 0) {
             banners
+            slimMetaRow
             HStack(spacing: 0) {
                 listColumn
                     .frame(width: 268)
@@ -212,6 +214,74 @@ struct SkillsView: View {
         }
     }
 
+    // MARK: - Slim meta row (`.skp-meta`)
+
+    /// Commands-v2 anatomy: the page's single status/summary home — a compact
+    /// "Skills index" label + a Synced badge · live counts that INCLUDE the
+    /// cached total · a list-level "Cache all" action. Replaces the in-pane
+    /// stat-tile banner (the cached count was previously only in the footer).
+    /// All counts are the real values the view already computes and honor the
+    /// active source filter; "Cache all" fires the same `onRefreshCache` closure.
+    private var slimMetaRow: some View {
+        HStack(spacing: 14) {
+            HStack(spacing: 9) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 13))
+                    .foregroundStyle(BridgeTokens.fg2)
+                Text("Skills index")
+                    .font(BridgeTokens.Typeface.base.weight(.medium))
+                    .foregroundStyle(BridgeTokens.fg1)
+                    .lineLimit(1)
+                BridgeBadge("Synced", tone: .ok, showsDot: true)
+            }
+            .fixedSize()
+
+            metaCountsLabel
+
+            Spacer(minLength: 8)
+
+            BridgeButton("Cache all", systemImage: "externaldrive.badge.timemachine",
+                         variant: .default, isEnabled: !cacheBusy) {
+                onRefreshCache()
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5)
+        }
+    }
+
+    /// Inline mono counts: `N total · N routing · N specialist · N cached`
+    /// (`.m-counts`). The leading value of each pair is emphasized (fg2).
+    private var metaCountsLabel: some View {
+        HStack(spacing: 0) {
+            metaCountPair(countsTotal, " total")
+            Text(" · ").font(BridgeTokens.Typeface.micro).foregroundStyle(BridgeTokens.fg5)
+            metaCountPair(countsRouting, " routing")
+            Text(" · ").font(BridgeTokens.Typeface.micro).foregroundStyle(BridgeTokens.fg5)
+            metaCountPair(countsSpecialist, " specialist")
+            Text(" · ").font(BridgeTokens.Typeface.micro).foregroundStyle(BridgeTokens.fg5)
+            metaCountPair(countsCached, " cached")
+        }
+        .lineLimit(1)
+        .truncationMode(.tail)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(countsTotal) total, \(countsRouting) routing, \(countsSpecialist) specialist, \(countsCached) cached")
+    }
+
+    private func metaCountPair(_ value: Int, _ label: String) -> some View {
+        HStack(spacing: 0) {
+            Text("\(value)")
+                .font(BridgeTokens.Typeface.micro.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(BridgeTokens.fg2)
+            Text(label)
+                .font(BridgeTokens.Typeface.micro)
+                .foregroundStyle(BridgeTokens.fg4)
+        }
+    }
+
     // MARK: - LIST COLUMN (master)
 
     private var listColumn: some View {
@@ -224,8 +294,10 @@ struct SkillsView: View {
             }
             .padding(.horizontal, 14).padding(.vertical, 11)
 
-            // counts banner + source filter (`.sk-counts`)
-            countsAndFilter
+            // source filter (`.sk-filter`). The live counts moved to the slim
+            // meta row (Commands-v2 anatomy), so the list column carries only
+            // the source segment here — no duplicated stat-tile banner.
+            sourceFilterControl
                 .padding(.horizontal, 14)
                 .padding(.bottom, 10)
 
@@ -353,21 +425,14 @@ struct SkillsView: View {
         .accessibilityLabel("List options")
     }
 
-    /// `.sk-counts` — a 3-tile stat strip (Total / Routing / Specialist) over the
-    /// source-filter segment. Matches the design's `SK_COUNTS` (total · routing ·
-    /// specialist) and `.sk-count.spec` info-tint; the kind taxonomy is the
-    /// model's derived `skillKind` (routing / specialist / plain).
-    private var countsAndFilter: some View {
-        VStack(spacing: 9) {
-            BridgeStatStrip(spacing: 7) {
-                BridgeStatTile(value: "\(countsTotal)", label: "Total")
-                BridgeStatTile(value: "\(countsRouting)", label: "Routing", signal: .ok)
-                BridgeStatTile(value: "\(countsSpecialist)", label: "Specialist", signal: .info)
-            }
-            BridgeSegmented(
-                selection: $sourceFilter,
-                options: SourceFilter.allCases.map { ($0, $0.label) })
-        }
+    /// `.sk-filter` — the full-width source-filter segment (All · File · Notion ·
+    /// Docs), neutral-thumb (Golden-Gate). The live counts (total · routing ·
+    /// specialist · cached) now live in the page's slim meta row, so the stat-tile
+    /// banner that used to sit above this segment was removed (Commands-v2 anatomy).
+    private var sourceFilterControl: some View {
+        BridgeSegmented(
+            selection: $sourceFilter,
+            options: SourceFilter.allCases.map { ($0, $0.label) })
     }
 
     @ViewBuilder
@@ -1122,11 +1187,13 @@ struct SkillsView: View {
                                             style: StrokeStyle(lineWidth: 0.5, dash: [4, 3]))))
     }
 
-    /// The shared Preview / Markdown tab control for the body peek + float.
+    /// The shared body tab control for the peek + float. Per detail-polish:
+    /// **Preview first** (the default), **Edit second** (the raw-markdown view,
+    /// renamed from "Markdown"). The `.markdown` enum case is unchanged.
     private var bodyTabSegmented: some View {
         BridgeSegmented(
             selection: $bodyTab,
-            options: [(BodyTab.preview, "Preview"), (BodyTab.markdown, "Markdown")])
+            options: [(BodyTab.preview, "Preview"), (BodyTab.markdown, "Edit")])
             .fixedSize()
     }
 
@@ -1570,6 +1637,13 @@ struct SkillsView: View {
     /// add to the specialist count.
     private var countsSpecialist: Int {
         countableSkills.filter { $0.enabled && $0.skillKind == .specialist }.count
+    }
+    /// Bodies stored for offline use — Notion/GDocs skills with a non-empty
+    /// summary, plus file-source skills (their bodies always ship on disk).
+    /// Honors the active source filter, like the other counts.
+    private var countsCached: Int {
+        countableSkills.filter { !$0.summary.isEmpty }.count
+            + ((sourceFilter == .all || sourceFilter == .file) ? fileSourceSkills.count : 0)
     }
 
     // MARK: - Filtering + grouping
