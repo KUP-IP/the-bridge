@@ -1,5 +1,19 @@
 # Changelog
 
+## v3.7.12 — v4 "Liquid Glass, evolved" UI redesign
+
+Full implementation of the v4 design system across the app, in both system-tethered themes (carbon dark / titanium light). Foundation tokens (type scale · 8-step spacing · 6-rung elevation/material ladder) → a component layer (segmented control · 3-tier security control · stat strip · list/table rows · banner · peek/float · markdown) → all 7 settings pages (Orders+Commands · Skills · Jobs · Tools · Security · Connection · Advanced) → 3 surfaces (menu-bar Dashboard · Command Bridge · Onboarding). **~95% design compliance** vs the Claude Design handoff; **zero functional regression** (test-floor 1884/0, floor raised 1777→1884). Build 58.
+
+### Notable
+- **Tools** → database/table view with the per-tool/family **3-tier security control** (Open · Notify · Confirm), bound to the live registry.
+- **Security** → posture header + **Vault | Gates** tabs (credentials vault · TCC permission grid · module-scoped always-allow grants) + relocated License.
+- **Connection** → Agent-handshake card + per-client standing-orders profiles + doctrine overlay; remote access (mcp.kup.solutions, Cloudflare + WorkOS).
+- **Skills** → emoji glyphs, kind-grouping, source filter, offline body-cache (peek→expand).
+- **Onboarding / Command Bridge / Dashboard** reskinned to the glass idiom.
+
+### Truthful UI
+Where the design mock implied backend features that don't exist (a global "posture" setting, idle-client state, interactive transport toggles), the implementation honestly reflects real state — a read-only derived posture mirror, the real manual-grant count, transports as status disclosure — rather than fabricating dead controls.
+
 ## v3.7.11 — Tool-surface resurface: 223→163 tools + compact `tools_list`
 
 Reshapes the MCP tool surface to the product positioning — a centralized auth hub (Mac moat + Notion infrastructure + automation engine + a lean chat-to-code kit), direct-API integrations only, no MCP-proxy hops, and no competing with Claude Code / Codex on dev tooling. Live surface **223 → 163 tools**; static module surface 211 → 161 across **26 families** (was 29). Suite 1864/0; test floor reset 1992 → 1777 (−215 tests tracking the pruned tools, recorded with provenance in `scripts/test-floor-gate.sh`).
