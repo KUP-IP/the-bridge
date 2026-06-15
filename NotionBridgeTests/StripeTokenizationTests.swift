@@ -132,6 +132,84 @@ func runStripeTokenizationTests() async {
             metadata: CredentialMetadata(brand: "visa", expMonth: 1, expYear: 2031)
         )
     }
+
+    // ============================================================
+    // MARK: - Finding 3 (T1 audit): card-number validation + form-injection
+    //
+    // The MCP credential_save card path must Luhn/digit-validate BEFORE
+    // tokenizing (parity with the UI path) and must build the Stripe POST body
+    // so an attacker-supplied value cannot break out of its key=value position.
+    // ============================================================
+
+    await test("Finding3: a form-injection card number is rejected before any network call") {
+        TokenizationMockURLProtocol.reset()
+        // If the request reaches Stripe, fail loudly — validation must stop it first.
+        TokenizationMockURLProtocol.requestHandler = { _ in
+            throw TestError.assertion("tokenizeCard must NOT POST an unvalidated card number")
+        }
+
+        let manager = CredentialManager.shared
+        do {
+            _ = try await manager.save(
+                service: "stripe-injection-attempt",
+                account: "card_inj",
+                // Tries to inject an extra form field / override `type`.
+                password: "4242424242424242&type=evil",
+                type: .card,
+                metadata: CredentialMetadata(brand: "visa", expMonth: 12, expYear: 2030)
+            )
+            throw TestError.assertion("Expected validation to reject the injected card number")
+        } catch let error as CredentialError {
+            if case .stripeTokenizationFailed = error { /* expected */ }
+            else { throw TestError.assertion("Expected stripeTokenizationFailed, got \(error)") }
+        }
+    }
+
+    await test("Finding3: a non-Luhn (but digits-only) card number is rejected before network") {
+        TokenizationMockURLProtocol.reset()
+        TokenizationMockURLProtocol.requestHandler = { _ in
+            throw TestError.assertion("tokenizeCard must NOT POST a number that fails Luhn")
+        }
+
+        let manager = CredentialManager.shared
+        do {
+            _ = try await manager.save(
+                service: "stripe-bad-luhn",
+                account: "card_bad",
+                password: "4242424242424241", // last digit flipped → fails Luhn
+                type: .card,
+                metadata: CredentialMetadata(brand: "visa", expMonth: 12, expYear: 2030)
+            )
+            throw TestError.assertion("Expected validation to reject the non-Luhn card number")
+        } catch let error as CredentialError {
+            if case .stripeTokenizationFailed = error { /* expected */ }
+            else { throw TestError.assertion("Expected stripeTokenizationFailed, got \(error)") }
+        }
+    }
+
+    await test("Finding3: card number with spaces/dashes is normalized then accepted (Luhn passes)") {
+        TokenizationMockURLProtocol.reset()
+        TokenizationMockURLProtocol.requestHandler = { request in
+            guard let body = readRequestBody(request), let bodyString = String(data: body, encoding: .utf8) else {
+                throw TestError.assertion("Missing request body")
+            }
+            // Normalized digits reach the body; no spaces/dashes survive.
+            try expect(bodyString.contains("card[number]=4242424242424242"),
+                       "spaces/dashes must be stripped before tokenization")
+            let responseBody = #"{"id":"pm_norm","card":{"last4":"4242","brand":"visa"}}"#
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, Data(responseBody.utf8))
+        }
+
+        let manager = CredentialManager.shared
+        _ = try await manager.save(
+            service: "stripe-normalize",
+            account: "card_norm",
+            password: "4242-4242 4242-4242",
+            type: .card,
+            metadata: CredentialMetadata(brand: "visa", expMonth: 1, expYear: 2031)
+        )
+    }
 }
 
 private final class TokenizationMockURLProtocol: URLProtocol {

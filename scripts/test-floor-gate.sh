@@ -1009,7 +1009,12 @@ set -euo pipefail
 # (the only test edit was PKT879Dashboard popoverWidth 300→340 to track the design width).
 # Integrated green independently measured 1884 (1864 → 1884), 0 failed. Floor raised
 # 1777 → 1884 per the order-inversion rule to lock the new coverage.
-FLOOR="${BRIDGE_TEST_FLOOR:-1884}"
+# v3.8.0 security hardening (2026-06-15): +23 net-new regression tests — path-traversal
+# gate (9: ../ escapes, symlinks, component-boundary matching for ~/.ssh|~/.aws|Keychains),
+# safe-command metacharacter rejection (9: ; & | backtick $ ( ) < > { } newline +
+# -exec/-execdir/-ok), Stripe card tokenization (3: Luhn validate + percent-encode).
+# Integrated green 1884 → 1907, 0 failed. Floor raised to lock the new coverage.
+FLOOR="${BRIDGE_TEST_FLOOR:-1907}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
