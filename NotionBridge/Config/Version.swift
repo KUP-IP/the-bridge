@@ -5,11 +5,12 @@
 // Info.plist CFBundleShortVersionString must be kept in sync (stamped at build time or manually).
 // Hardcoded fallback strings (e.g. ?? "1.1.0") are eliminated — use AppVersion.marketing instead.
 //
-// VERSIONING (operator rule, 2026-06-15): +1 patch per merge to main, but
-// single-digit segments — roll at 9 (3.8.9→3.9.0, 3.9.9→4.0.0), never double
-// digits. NEXT version is 3.8.0 (3.7.10–3.7.12 were pre-rule legacy). 4.0.0 =
-// sale-ready "V4", reached incrementally. Build (CFBundleVersion) is monotonic
-// +1. See AGENTS.md "Release flow" + the versioning-per-branch memory.
+// VERSIONING (operator rule, 2026-06-15): +1 patch per PUBLISHED INSTALL
+// (release), NOT per branch — several task branches can merge to main and ship
+// together as one install increment. Single-digit segments roll at 9 (3.8.9→
+// 3.9.0, 3.9.9→4.0.0), never double digits. NEXT install is 3.8.0 (3.7.10–3.7.12
+// were pre-rule legacy). 4.0.0 = sale-ready "V4", reached incrementally. Build
+// (CFBundleVersion) monotonic +1. See AGENTS.md "Release flow" + versioning memory.
 
 import Foundation
 
