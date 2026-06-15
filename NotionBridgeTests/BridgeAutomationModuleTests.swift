@@ -106,8 +106,10 @@ func runBridgeAutomationModuleTests() async {
     }
 
     await test("sectionDisplayNames are the 7 friendly redesign labels") {
+        // IA change 2026-06-12: the top page's label is "Commands" (the
+        // standing-orders doctrine moved to Connection).
         let names = await MainActor.run { BridgeSettingsAutomation.sectionDisplayNames }
-        try expect(names == ["Orders", "Skills", "Jobs", "Tools",
+        try expect(names == ["Commands", "Skills", "Jobs", "Tools",
                              "Security", "Connection", "Advanced"],
                    "sectionDisplayNames drift: \(names)")
     }

@@ -19,13 +19,16 @@
 // resolve for free through the adaptive tokens. Every store call + async load is
 // preserved.
 //
-// Standing-orders model note: the design source carries the doctrine/profile
-// state as page-level React `useState` (no backing persistence — `setProfile`
-// and `setDoctrine` mutate session state only). We mirror that contract exactly
-// with SwiftUI `@State` so the page is byte-faithful to the spec; persisting
-// per-client overrides + the edited global doctrine to disk is future wiring
-// (there is no standing-orders store on the Mac yet) and is called out in the
-// packet receipt rather than invented here.
+// Standing-orders model note (IA change 2026-06-12): the GLOBAL default doctrine
+// shown in the handshake peek and edited in the Preview|Edit overlay is now
+// STORE-BACKED — it loads from and saves to the real `StandingOrdersStore` (the
+// same single-document store the standing_orders_* MCP tools and the handshake
+// `instructions` read), reusing the optimistic-concurrency load/save wiring that
+// used to live in the Commands page's doctrine editor. Editing it here persists
+// to disk and is delivered to every MCP client at the next handshake. The
+// trusted/locked profiles remain read-only DESIGN PRESETS (`defaultDoctrine`).
+// Per-client profile *assignment* is still design-ahead session `@State` (the
+// operator is building that backend) and is called out in the packet receipt.
 //
 // What stays here (the trusted loopback surface, PKT-810 model):
 //   • The loopback `127.0.0.1:{ssePort}/mcp` endpoint as a copyable card with a
@@ -186,12 +189,21 @@ public struct ConnectionsSection: View {
     @State private var showTransports = false
 
     // ── Agent-handshake / per-client standing-orders state ──────────────────
-    // Mirrors the design's page-level useState (session-scoped; see file note).
-    /// The editable GLOBAL doctrine (the `.global` default body, mutated by Save).
+    /// The editable GLOBAL doctrine, STORE-BACKED: loaded from `StandingOrdersStore`
+    /// on appear and rewritten on Save. The `defaultDoctrine` seed is only a
+    /// pre-load placeholder shown for the brief moment before the async read lands.
     @State private var globalDoctrine = CnProfile.global.defaultDoctrine
-    /// The in-flight Edit-tab draft (committed to `globalDoctrine` on Save).
+    /// The in-flight Edit-tab draft (committed to the store + `globalDoctrine` on Save).
     @State private var doctrineDraft = CnProfile.global.defaultDoctrine
+    /// The last-read store snapshot — carries the hash for optimistic-concurrency
+    /// writes (so a Save can't silently stomp an out-of-band edit). nil until loaded.
+    @State private var doctrineSnapshot: StandingOrdersStore.Snapshot? = nil
+    /// One-shot load guard so re-renders don't re-read (and clobber an open draft).
+    @State private var doctrineLoaded = false
+    /// A transient store-load/save error surfaced in the overlay, if any.
+    @State private var doctrineError: String? = nil
     /// Per-client profile assignment, keyed by client name. Absent ⇒ `.global`.
+    /// (Design-ahead: session-scoped until the per-client backend lands.)
     @State private var clientProfiles: [String: CnProfile] = [:]
     /// The currently-expanded client row (name), or nil.
     @State private var openClient: String? = nil
@@ -235,6 +247,8 @@ public struct ConnectionsSection: View {
         .padding(.top, 4)
         .frame(maxWidth: .infinity)
         .background(Color.clear)
+        // Load the store-backed global doctrine once on appear.
+        .task { await loadDoctrine() }
         // The doctrine overlay (`.scrim` + `.float`) floats over the whole page.
         .overlay { doctrineOverlay }
     }
@@ -646,8 +660,7 @@ public struct ConnectionsSection: View {
         if target == .global && docTab == .edit {
             BridgeButton("Save", systemImage: "checkmark", variant: .primary,
                          isEnabled: doctrineDraft != globalDoctrine) {
-                globalDoctrine = doctrineDraft
-                docTab = .preview
+                Task { await saveDoctrine() }
             }
         }
         BridgeButton("Close", variant: .default, action: closeDoc)
@@ -655,11 +668,27 @@ public struct ConnectionsSection: View {
 
     @ViewBuilder
     private func doctrineFloatBody(_ target: CnProfile) -> some View {
-        if target == .global && docTab == .edit {
-            doctrineEditor
-        } else {
-            BridgeMarkdown(doctrineBody(target))
-                .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 10) {
+            // Surface a store load/save failure (global only — presets can't fail).
+            if target == .global, let err = doctrineError {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(BridgeTokens.badText)
+                    Text(err)
+                        .font(BridgeTokens.Typeface.sub)
+                        .foregroundStyle(BridgeTokens.badText)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 9)
+                .background(BridgeTokens.bad.opacity(0.10), in: RoundedRectangle(cornerRadius: BridgeTokens.Radius.input))
+                .overlay(RoundedRectangle(cornerRadius: BridgeTokens.Radius.input).strokeBorder(BridgeTokens.bad.opacity(0.30), lineWidth: 0.5))
+            }
+            if target == .global && docTab == .edit {
+                doctrineEditor
+            } else {
+                BridgeMarkdown(doctrineBody(target))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 
@@ -693,6 +722,61 @@ public struct ConnectionsSection: View {
     }
 
     private func closeDoc() { docView = nil }
+
+    // MARK: - Store-backed global doctrine (StandingOrdersStore)
+    //
+    // The global default doctrine is the SAME single-document standing orders the
+    // handshake `instructions` and the standing_orders_* MCP tools read. Load/save
+    // reuse the optimistic-concurrency wiring (`read` carries a hash; `write`
+    // passes `expectedHash`) lifted from the former Commands-page doctrine editor.
+
+    /// Load the global doctrine from the store once on appear. Seeds the editor
+    /// snapshot (for the optimistic-concurrency hash), the previewed body, and the
+    /// Edit draft — but never clobbers an in-flight draft the user already opened.
+    private func loadDoctrine() async {
+        guard !doctrineLoaded else { return }
+        do {
+            try StandingOrdersStore.shared.seedIfEmpty()
+            let s = try StandingOrdersStore.shared.read()
+            await MainActor.run {
+                self.doctrineSnapshot = s
+                self.globalDoctrine = s.markdown
+                // Only seed the draft if the overlay isn't already mid-edit.
+                if self.docView == nil || self.docTab != .edit {
+                    self.doctrineDraft = s.markdown
+                }
+                self.doctrineError = nil
+                self.doctrineLoaded = true
+            }
+        } catch {
+            await MainActor.run { self.doctrineError = error.localizedDescription }
+        }
+    }
+
+    /// Persist the edited draft to the store (optimistic concurrency via the
+    /// snapshot hash), then mirror it into `globalDoctrine` and return to Preview.
+    /// A `write` also fans out a `resources/updated` notification so connected MCP
+    /// clients re-fetch the new doctrine — i.e. the edit is delivered, not just
+    /// shown.
+    private func saveDoctrine() async {
+        // Without a snapshot we have no hash to guard against; refuse rather than
+        // risk stomping (the load runs on appear, so this is the rare race).
+        guard let s = doctrineSnapshot else {
+            await MainActor.run { self.doctrineError = "Standing orders not loaded yet — reopen and try again." }
+            return
+        }
+        do {
+            let new = try StandingOrdersStore.shared.write(doctrineDraft, expectedHash: s.hash)
+            await MainActor.run {
+                self.doctrineSnapshot = new
+                self.globalDoctrine = new.markdown
+                self.doctrineError = nil
+                self.docTab = .preview
+            }
+        } catch {
+            await MainActor.run { self.doctrineError = error.localizedDescription }
+        }
+    }
 
     // MARK: - Loopback MCP endpoint (PKT-810: bearer-exempt on loopback)
 

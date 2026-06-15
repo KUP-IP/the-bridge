@@ -121,10 +121,10 @@ public final class SettingsWindowController {
 /// deep-link / MCP `bridge_settings_navigate` identifier and must not churn
 /// (e.g. `orders` keeps the legacy "Standing Orders" id so existing
 /// automations still resolve via the MCP back-compat aliases). The UI
-/// (sidebar + title bar) renders `displayName` instead — "Orders",
+/// (sidebar + title bar) renders `displayName` instead — "Commands",
 /// "Security", "Connection".
 public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
-    case orders     = "Standing Orders"   // display "Orders"; stable legacy MCP id
+    case orders     = "Standing Orders"   // display "Commands"; stable legacy MCP id
     case skills     = "Skills"
     case jobs       = "Jobs"
     case tools      = "Tools"
@@ -139,7 +139,7 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
     /// show the snappier redesign names.
     public var displayName: String {
         switch self {
-        case .orders:     return "Orders"
+        case .orders:     return "Commands"
         case .skills:     return "Skills"
         case .jobs:       return "Jobs"
         case .tools:      return "Tools"
@@ -151,7 +151,7 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
 
     public var icon: String {
         switch self {
-        case .orders:     return "scroll"
+        case .orders:     return "command"
         case .skills:     return "sparkles"
         case .jobs:       return "clock.badge.checkmark"
         case .tools:      return "hammer"
@@ -165,9 +165,9 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
 /// Shared selection model so the menu-bar quick-page can drive which Settings
 /// section is shown even when the window is already open (WS-H, PKT-804).
 ///
-/// PKT-A: opens by default to .orders (top of the conceptual-flow sidebar
-/// order). The deep-link API also accepts an optional `anchor` string so
-/// cross-page nav can land on a sub-section (e.g. Commands inside Orders,
+/// PKT-A: opens by default to .orders (the Commands page — top of the
+/// conceptual-flow sidebar order). The deep-link API also accepts an optional
+/// `anchor` string so cross-page nav can land on a sub-section (e.g.
 /// Vault/Gates inside Security, Local/Remote inside Connection, or a
 /// credential row by slug).
 @MainActor
@@ -250,7 +250,7 @@ public struct SettingsView: View {
     @ViewBuilder
     private var detailContent: some View {
         switch nav.section {
-        case .orders: ordersSection
+        case .orders: commandsSection
         case .skills: SkillsSection()
         case .jobs: jobsSection
         case .tools: toolsSection

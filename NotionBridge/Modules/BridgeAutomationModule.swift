@@ -137,8 +137,8 @@ public enum BridgeSettingsAutomation {
     }
 
     /// The friendly display names advertised to agents (Settings Redesign
-    /// PKT-A) — "Orders", "Skills", "Jobs", "Tools", "Security",
-    /// "Connection", "Advanced". The resolver accepts these too.
+    /// PKT-A; IA change 2026-06-12) — "Commands", "Skills", "Jobs", "Tools",
+    /// "Security", "Connection", "Advanced". The resolver accepts these too.
     public static var sectionDisplayNames: [String] {
         SettingsSection.allCases.map(\.displayName)
     }

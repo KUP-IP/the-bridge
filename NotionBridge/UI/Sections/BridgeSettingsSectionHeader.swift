@@ -106,10 +106,15 @@ public enum BridgeSettingsHeaderPreset {
     public static func spec(for section: SettingsSection) -> Spec {
         switch section {
         case .orders:
+            // IA change 2026-06-12: the `.orders` page is now the COMMANDS
+            // manager (doctrine moved to Connection). The enum case keeps its
+            // legacy name for stable MCP ids; the header reads "Commands" with
+            // the command glyph (the sidebar/title use the same "command" SF
+            // Symbol via `SettingsSection.icon`).
             return Spec(
-                title: "Orders",
-                subtitle: "Standing orders & operating doctrine, plus the command palette.",
-                systemImage: BridgeSectionIcon.systemImage(for: .orders),
+                title: "Commands",
+                subtitle: "Your command library — fire any command from the Command Bridge (⌃⌘B).",
+                systemImage: "command",
                 tint: NotionPalette.purple
             )
         case .skills:

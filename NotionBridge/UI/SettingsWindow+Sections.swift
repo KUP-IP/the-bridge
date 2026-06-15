@@ -19,13 +19,15 @@ extension SettingsView {
     // segmented tab switches between the two child surfaces, and the deep-link
     // `anchor` selects which tab opens first.
 
-    /// Orders = Standing Orders doctrine + Commands palette config.
-    /// Bespoke single-surface composite (replaces the generic BridgeMergedSection
-    /// for this section): one shared header, a segmented Orders | Commands strip,
-    /// a per-tab meta row, and unsaved-draft-safe tab switching. The deep-link
-    /// `anchor` selects the starting tab (e.g. `commands` → Commands).
+    /// Commands = the command palette manager.
+    /// Bespoke single-surface page: a slim meta row (labeled Command Bridge
+    /// master switch + recordable ⌃⌘B + command/favorite counts) over the
+    /// full-height command master–detail. The standing-orders doctrine moved
+    /// OUT to Connection's Agent handshake (IA change 2026-06-12); this page is
+    /// commands only. The enum case + rawValue keep the legacy `.orders` /
+    /// "Standing Orders" id for stable MCP deep-links.
     @ViewBuilder
-    var ordersSection: some View {
+    var commandsSection: some View {
         OrdersSection(anchor: nav.anchor)
     }
 
