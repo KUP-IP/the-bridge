@@ -1014,7 +1014,16 @@ set -euo pipefail
 # safe-command metacharacter rejection (9: ; & | backtick $ ( ) < > { } newline +
 # -exec/-execdir/-ok), Stripe card tokenization (3: Luhn validate + percent-encode).
 # Integrated green 1884 → 1907, 0 failed. Floor raised to lock the new coverage.
-FLOOR="${BRIDGE_TEST_FLOOR:-1907}"
+# v3.8.0 global-shortcut hardening (2026-06-15): +14 net-new tests (CommandHotkeyHardeningTests)
+# — Cocoa↔Carbon keyCode/modifier mapping round-trip, persistence load/save (incl. corrupt-bytes
+# fallback to ⌃⌘B), register-failure classification (-9878 collision vs plumbing), status-truth
+# derivation, and live-rebind no-churn. Integrated green 1907 → 1921, 0 failed. Floor raised.
+# v3.8.0 shortcut status-truth (2026-06-15): +3 net-new tests — a published .registered derives
+# .active (never the false .shortcutUnavailable warning); applyEnabledPreference(true) doesn't
+# clobber a registered status; the enable ordering settles Active with no false-warning interim.
+# (Root cause: header read a non-@Observable status box, so SwiftUI never refreshed the warning.)
+# Integrated green 1921 → 1924, 0 failed. Floor raised.
+FLOOR="${BRIDGE_TEST_FLOOR:-1924}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

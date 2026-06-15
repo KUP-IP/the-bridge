@@ -519,9 +519,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // WS-5b: stop the periodic auto-validate timer + wake observer.
         stopCredentialAutoValidateScheduling()
 
-        // cmd-w3: tear down the palette hot-key if it was registered.
-        // No-op when the gate was off (commandBridge == nil).
-        commandBridge?.unregisterHotkey()
+        // cmd-w3: tear down the palette hot-key AND its single Carbon event
+        // handler if it was registered. No-op when the gate was off
+        // (commandBridge == nil). Full teardown (not just unregisterHotkey)
+        // so no application-level handler outlives the controller.
+        commandBridge?.teardownEventHandler()
         commandBridge = nil
 
         // PKT-357 F15: End activity assertion
@@ -868,8 +870,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         // Change B: load the operator-recorded hot-key (falls back to
-        // productionDefault when unset/corrupt) so a rebind survives a
-        // relaunch and a fresh install still gets the default ⌃⌥⌘C.
+        // productionDefault ⌃⌘B when unset/corrupt) so a rebind survives a
+        // relaunch and a fresh install still gets the default ⌃⌘B.
         let hotkey = HotkeyConfig.loadPersisted()
         let provider = RegistrySkillsCommandProvider()
         let manager = CommandsManager()
@@ -891,7 +893,49 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             status: box.lastRegisterStatus,
             hotkey: box.hotkeyConfig
         )
+        // v4 enterprise-grade: if the FIRST launch registration failed with a
+        // transient collision (another login-item / app racing for ⌃⌘B at
+        // boot, which then releases it), schedule a single bounded retry. This
+        // closes the real-world "registered nothing at launch, stayed inactive
+        // forever" gap without the operator having to toggle Commands off/on.
+        if !box.isRegistered, case .collision = box.lastRegisterStatus {
+            scheduleLaunchHotkeyRetry()
+        }
         print("[The Bridge] Commands palette enabled — registry-backed, clipboard-only — hot-key \(registered ? "registered" : "registration FAILED") (\(hotkey.displayString))")
+    }
+
+    /// Number of launch-retry attempts remaining for a transient ⌃⌘B
+    /// collision. Bounded so a genuine, persistent collision (the combo is
+    /// really owned by another app) surfaces the `.comboInUse` warning rather
+    /// than retrying forever.
+    private var launchHotkeyRetriesRemaining = 3
+
+    /// v4 enterprise-grade: re-attempt the launch hot-key registration after a
+    /// short delay when the first attempt hit a transient collision. Re-runs
+    /// the idempotent `registerHotkey()` (the handler is install-once, so this
+    /// is a single clean Carbon call) and republishes the real outcome so the
+    /// status row flips to Active the instant the combo frees up. Stops after a
+    /// bounded number of tries OR as soon as registration succeeds.
+    private func scheduleLaunchHotkeyRetry() {
+        guard launchHotkeyRetriesRemaining > 0 else {
+            print("[The Bridge] Commands hot-key still unavailable after launch retries — leaving the conflict surfaced")
+            return
+        }
+        launchHotkeyRetriesRemaining -= 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, let box = self.commandBridge, !box.isRegistered else { return }
+            let ok = box.registerHotkey()
+            self.commandsController.publishRegistration(
+                isRegistered: box.isRegistered,
+                status: box.lastRegisterStatus,
+                hotkey: box.hotkeyConfig
+            )
+            if ok {
+                print("[The Bridge] Commands hot-key registered on launch retry (\(box.hotkeyConfig.displayString))")
+            } else if case .collision = box.lastRegisterStatus {
+                self.scheduleLaunchHotkeyRetry()   // still taken — try again (bounded)
+            }
+        }
     }
 
     /// v3.7.6: present the standalone Dashboard popover for the Command Bridge
@@ -1027,20 +1071,40 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // `commandBridge`); the controller publishes the REAL resulting
         // registration so Settings is always live.
         //
-        // We persist the pref via the controller (registrar nil here so
-        // it only writes the pref + a clean interim state), then do the
-        // Carbon work and let `startCommandsPalette()` /
-        // `publishUnregistered()` publish the authoritative final state.
-        commandsController.setEnabled(enabled, registrar: nil)
+        // We persist the pref via the controller (`applyEnabledPreference`,
+        // which writes the pref + `enabled` WITHOUT touching the registration
+        // status), then do the Carbon work and let `startCommandsPalette()` /
+        // `publishUnregistered()` publish the authoritative final status.
+        //
+        // Ordering note (v4 status-truth fix): when `enabled == true` is
+        // requested but a `BRIDGE_ENABLE_COMMANDS=0` kill-switch forces it
+        // OFF, the controller must NOT be left at `enabled=true` +
+        // `.unattempted` — that renders as a permanent false "⚠ Shortcut not
+        // active". So on the kill-switch path we re-publish a clean disabled
+        // state instead of returning with the interim enabled flag set.
         if enabled {
+            // Persist + reflect the master toggle WITHOUT clobbering the
+            // registration-status fields: the registrar-nil `setEnabled(true)`
+            // we used to call here ran `publishUnregistered()` as an interim,
+            // momentarily resetting a just-published `.registered` to
+            // `.unattempted` before `startCommandsPalette()` re-published. The
+            // sole writer of registration truth on this path is the
+            // `publishRegistration` inside `startCommandsPalette()` below.
+            commandsController.applyEnabledPreference(true)
             // Honor a kill-switch env override even on a live toggle:
             // if the env explicitly forces OFF, don't construct.
             guard Self.shouldStartCommandsPalette() else {
                 print("[The Bridge] Commands palette toggle ON ignored — \(CommandsPaletteGate.enableEnvKey)=0 forces it OFF")
+                // Don't leave a false "enabled but unattempted" warning state —
+                // settle to a clean disabled state (toggle off + clean status).
+                commandBridge?.unregisterHotkey()
+                commandBridge = nil
+                commandsController.setEnabled(false, registrar: nil)
                 return
             }
             startCommandsPalette() // builds box + publishes real registration
         } else {
+            commandsController.applyEnabledPreference(false)
             commandBridge?.unregisterHotkey()
             commandBridge = nil
             commandsController.publishUnregistered()

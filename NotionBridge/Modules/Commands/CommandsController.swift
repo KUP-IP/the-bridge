@@ -236,6 +236,22 @@ public final class CommandsController {
         }
     }
 
+    /// Persist + reflect ONLY the master-toggle `enabled` value, WITHOUT
+    /// touching `isRegistered` / `lastRegisterStatus`. Used by the AppDelegate's
+    /// `setCommandsPaletteEnabled(true)` path, which performs the Carbon
+    /// construction + registration itself and then publishes the REAL outcome
+    /// via `publishRegistration`. Routing that path through `setEnabled(_:
+    /// registrar: nil)` used to call `publishUnregistered()` as an interim,
+    /// momentarily clobbering a just-published `.registered` back to
+    /// `.unattempted` — a fragile ordering that risked the header latching the
+    /// false "⚠ Shortcut not active". This keeps the status fields untouched so
+    /// the only writer of registration truth on that path is the subsequent
+    /// `publishRegistration`.
+    public func applyEnabledPreference(_ enabled: Bool) {
+        self.enabled = enabled
+        defaults.set(enabled, forKey: enabledKey)
+    }
+
     /// Live-rebind the global hot-key from the Settings recorder.
     /// Persists the new `HotkeyConfig` FIRST (so a relaunch keeps it even
     /// if the live re-register loses a race), then re-registers via the

@@ -337,26 +337,45 @@ public final class CommandBridgeController: NSObject {
 
     // MARK: - Hot-key registration (Carbon — no Input Monitoring)
     //
-    //   Reused verbatim in semantics from `CommandBoxController.registerHotkey`.
-    //   The Carbon callback trampolines back to `handleHotkey()` on the
-    //   main actor; the `HotkeyConfig.signature` ('NBcb') is unchanged.
+    //   v4 enterprise-grade hardening. Two changes from the prior shape that
+    //   were the surface of the persistent "⚠ Shortcut not active" defect:
+    //
+    //   1. INSTALL-ONCE event handler. The Carbon `InstallEventHandler` is
+    //      idempotent here — it runs at most ONCE for the lifetime of the
+    //      controller (tracked by `eventHandler`), decoupled from per-combo
+    //      `RegisterEventHotKey`. Before, every register()/rebind() installed a
+    //      FRESH application-level handler; a rebind (unregister→register) or a
+    //      double-start could leave multiple live handlers, each trampolining
+    //      `handleHotkey()` → the palette opened-then-immediately-closed on a
+    //      single press and read as "the shortcut doesn't work". Unregistering
+    //      now drops ONLY the hot-key (`UnregisterEventHotKey`); the single
+    //      handler persists, so re-register is a clean one-call op.
+    //
+    //   2. PRECISE collision-vs-plumbing classification. Only the real
+    //      "combo owned by another app" OSStatus (`eventHotKeyExistsErr`,
+    //      -9878) maps to `.collision`; every other non-noErr maps to
+    //      `.plumbingFailure`. A false "in use by another app" message is
+    //      thus impossible for a non-collision failure.
+    //
+    //   The Carbon callback trampolines back to `handleHotkey()` on the main
+    //   actor; the `HotkeyConfig.signature` ('NBcb') is unchanged.
 
+    /// Carbon's "this hot-key is already registered (by us or another app)"
+    /// result. Named locally so the classification doesn't depend on the
+    /// constant being importable everywhere.
+    nonisolated private static let eventHotKeyExists: Int32 = -9878  // eventHotKeyExistsErr
+
+    /// Install the application-level Carbon event handler exactly once. Returns
+    /// `noErr` when the handler is already installed (idempotent) or the install
+    /// succeeds; a non-noErr OSStatus on a genuine install failure. Decoupling
+    /// this from `RegisterEventHotKey` is the fix for the multi-handler churn
+    /// that made a single key-press toggle the palette twice.
     @discardableResult
-    public func registerHotkey() -> Bool {
-        guard hotkey.hasModifier else {
-            print("[CommandBridge] refusing modifier-less hot-key")
-            lastRegisterStatus = .plumbingFailure(osStatus: Int32(paramErr))
-            return false
-        }
-        guard !isRegistered else {
-            lastRegisterStatus = .registered
-            return true
-        }
-
+    private func installEventHandlerIfNeeded() -> OSStatus {
+        if eventHandler != nil { return noErr }   // already installed — idempotent
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
                                  eventKind: UInt32(kEventHotKeyPressed))
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
-
         let installStatus = InstallEventHandler(
             GetApplicationEventTarget(),
             { _, eventRef, userData -> OSStatus in
@@ -376,6 +395,23 @@ public final class CommandBridgeController: NSObject {
             },
             1, &spec, selfPtr, &eventHandler
         )
+        return installStatus
+    }
+
+    @discardableResult
+    public func registerHotkey() -> Bool {
+        guard hotkey.hasModifier else {
+            print("[CommandBridge] refusing modifier-less hot-key")
+            lastRegisterStatus = .plumbingFailure(osStatus: Int32(paramErr))
+            return false
+        }
+        guard !isRegistered else {
+            lastRegisterStatus = .registered
+            return true
+        }
+
+        // (1) Install-once handler — NOT re-installed on every register/rebind.
+        let installStatus = installEventHandlerIfNeeded()
         guard installStatus == noErr else {
             print("[CommandBridge] InstallEventHandler failed: \(installStatus)")
             lastRegisterStatus = .plumbingFailure(osStatus: Int32(installStatus))
@@ -388,9 +424,13 @@ public final class CommandBridgeController: NSObject {
             GetApplicationEventTarget(), 0, &hotKeyRef
         )
         guard regStatus == noErr else {
-            print("[CommandBridge] RegisterEventHotKey failed: \(regStatus) (combo likely taken)")
-            if let h = eventHandler { RemoveEventHandler(h); eventHandler = nil }
-            lastRegisterStatus = .collision(osStatus: Int32(regStatus))
+            // (2) Precise classification: ONLY the real already-registered code
+            // is a collision; anything else is a plumbing failure. The handler
+            // is install-once, so we do NOT tear it down here (a later retry /
+            // rebind reuses it).
+            lastRegisterStatus = Self.classifyRegisterFailure(regStatus)
+            print("[CommandBridge] RegisterEventHotKey failed: \(regStatus) → \(lastRegisterStatus)")
+            hotKeyRef = nil
             return false
         }
 
@@ -400,19 +440,48 @@ public final class CommandBridgeController: NSObject {
         return true
     }
 
+    /// Map a non-noErr `RegisterEventHotKey` OSStatus to the structured
+    /// outcome. Pure + nonisolated so the collision-vs-plumbing rule is
+    /// unit-tested headlessly (no Carbon call needed to assert the mapping).
+    public nonisolated static func classifyRegisterFailure(_ osStatus: OSStatus) -> HotkeyRegisterStatus {
+        osStatus == eventHotKeyExists
+            ? .collision(osStatus: Int32(osStatus))
+            : .plumbingFailure(osStatus: Int32(osStatus))
+    }
+
+    /// Drop the live hot-key registration. The install-once event handler is
+    /// intentionally RETAINED (removing + re-adding it on every disable/enable
+    /// or rebind was the source of handler churn); it is torn down only by
+    /// `teardownEventHandler()` (called on app termination). Idempotent.
     public func unregisterHotkey() {
         if let ref = hotKeyRef { UnregisterEventHotKey(ref); hotKeyRef = nil }
-        if let h = eventHandler { RemoveEventHandler(h); eventHandler = nil }
         isRegistered = false
         lastRegisterStatus = .unattempted
     }
 
+    /// Full teardown — unregister the hot-key AND remove the single Carbon
+    /// event handler. Called on app termination so no application-level
+    /// handler outlives the controller.
+    public func teardownEventHandler() {
+        unregisterHotkey()
+        if let h = eventHandler { RemoveEventHandler(h); eventHandler = nil }
+    }
+
     @discardableResult
     public func rebind(to newHotkey: HotkeyConfig) -> Bool {
+        // No-op fast path: re-binding to the SAME already-live combo is a
+        // success without churning the registration.
+        if isRegistered, newHotkey == hotkey {
+            lastRegisterStatus = .registered
+            return true
+        }
         let previous = hotkey
         unregisterHotkey()
         hotkey = newHotkey
         if registerHotkey() { return true }
+        // New combo failed — restore the prior working combo and surface the
+        // NEW combo's failure reason (so the status row names why the rebind
+        // was rejected, while the palette keeps working on the old combo).
         let failureOfNewCombo = lastRegisterStatus
         hotkey = previous
         _ = registerHotkey()

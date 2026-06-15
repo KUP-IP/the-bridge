@@ -696,6 +696,7 @@ await runW4ComponentAndStorageTests()    // cmd-ux W4 (3.4.1): kbd-chip splitter
 await runSkillsMCPFlagRoundTripTests()    // 3.4.2 W3 H1 fix: SkillConfig MCP reconstruction preserves combined-state flag pair
 await runHotkeyRecorderFocusTests()        // 3.4.2 W4 H5 fix: RecorderFocusModel contract locks the button-binding focus path
 await runHotkeyRebindUITests()             // v3.7.6: mount the Commands "Global shortcut" card — HotkeyConfig.from validation + persist round-trip + status-row mapping
+await runCommandHotkeyHardeningTests()     // v4: ⌃⌘B enterprise hardening — Cocoa↔Carbon map round-trip, persist relaunch survival, collision-vs-plumbing classification, status-truth invariants + live-rebind no-churn
 await runFrontmatterParserTests()   // W2 D8: SKILL.md YAML frontmatter parser
 await runSkillIconAndKindTests()    // WS-3/WS-4: Skill emoji icon (Codable + extract) + derived skillKind/sourceKind accessors
 await runSkillSourceTests()         // W2 D2: SkillSource enum + legacy notionPageId backward-compat
