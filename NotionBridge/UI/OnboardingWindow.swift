@@ -448,18 +448,21 @@ struct OnboardingView: View {
     // MARK: - Legal Acceptance Step (PKT-491)
 
     private var legalAcceptanceStep: some View {
+        // Step 2 is the tallest stack — mirror the design's `.ob-body.t2` compressed
+        // rhythm (title 12 / sub 9 / inset 12 + gap 8 / links 10 / check 10) so the
+        // gating checkbox always fits the fixed 520×520 window without scrolling.
         VStack(spacing: 0) {
             obHero("doc.text.fill")
                 .padding(.top, 8)
 
             obTitle("Privacy & Terms")
-                .padding(.top, 18)
+                .padding(.top, 12)
 
             obSub("Before we set up permissions, here's how The Bridge handles your data.")
-                .padding(.top, 14)
+                .padding(.top, 9)
 
-            // Key points summary — carbon inset card
-            VStack(alignment: .leading, spacing: 12) {
+            // Key points summary — carbon inset card (`.t2 .ob-inset`: gap 8, padding 10/12)
+            VStack(alignment: .leading, spacing: 8) {
                 legalBullet(
                     icon: "lock.shield.fill",
                     color: BridgeTokens.ok,
@@ -477,11 +480,12 @@ struct OnboardingView: View {
                 )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
             .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
-            .padding(.top, 20)
+            .padding(.top, 12)
 
             // Full document links — `.ob-links a` → v4 `.btn.link` (accent-link;
             // the variant supplies the trailing ↗ external glyph).
@@ -493,7 +497,7 @@ struct OnboardingView: View {
                     NSWorkspace.shared.open(URL(string: "https://kup.solutions/terms")!)
                 }
             }
-            .padding(.top, 16)
+            .padding(.top, 10)
 
             // Acceptance checkbox — `.ob-check-row`: native checkbox (binding +
             // a11y trait preserved) inside an accent-tinted gate row.
@@ -512,7 +516,7 @@ struct OnboardingView: View {
                         in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .strokeBorder(BridgeTokens.accentBorder, lineWidth: 0.5))
-            .padding(.top, 16)
+            .padding(.top, 10)
         }
         .frame(maxWidth: .infinity)
     }
@@ -794,7 +798,7 @@ struct OnboardingView: View {
                            text: "The menu bar icon opens the **Dashboard** — status, clients, settings.")
                     .padding(.vertical, 8)
                     tipRow(bullet: "⌘",
-                           text: "Press **⌃ ⌥ ⌘ C** to open the **Command Bridge**.")
+                           text: "Press **⌃ ⌘ B** anywhere to open the **Command Bridge**.")
                     .padding(.vertical, 8)
                     tipRow(bullet: "↗",
                            text: "Destructive actions require approval via notification.")
@@ -976,10 +980,36 @@ struct OnboardingView: View {
         BridgeButton(title, variant: .primary, isEnabled: !disabled, action: action)
     }
 
-    /// Secondary foot action (Back / Skip) — the v4 raised-glass `.btn`
-    /// (`BridgeButton(variant: .default)`), the design's subdued nav affordance.
+    /// Secondary foot action (Back / Skip) — the design's `.ob-foot .lnk`: a plain
+    /// text link (fg3 → fg1 on hover), NO raised-glass chrome and NO external-link
+    /// ↗ glyph (that's reserved for the `.link` variant's outbound URLs). Kept local
+    /// so we don't repurpose BridgeButton(.link)'s arrow for in-wizard nav.
     private func footSecondaryButton(_ title: String, action: @escaping () -> Void) -> some View {
-        BridgeButton(title, variant: .default, action: action)
+        OBFootLink(title: title, action: action)
+    }
+}
+
+/// `.ob-foot .lnk` — plain-text foot-nav link. 13px/medium, `fg3` resting,
+/// `fg1` on hover, 8×10 hit padding, no glass and no trailing arrow. Mirrors the
+/// design's subdued Back/Skip affordance (distinct from the raised-glass `.btn`
+/// and from the outbound `.link` variant that carries a ↗).
+private struct OBFootLink: View {
+    let title: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(hovering ? BridgeTokens.fg1 : BridgeTokens.fg3)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.easeInOut(duration: 0.15), value: hovering)
     }
 }
 
@@ -1353,24 +1383,45 @@ private struct OnboardingManualPermissionsStep: View {
         PermissionManager.Grant.v1Cases.filter { !$0.isAutoGrantable }
     }
 
+    /// `.ob-title` copy, agreeing in number with the REAL manual-grant count
+    /// ("One needs…" / "N need…"). Spelled-out for small counts, numeric beyond.
+    private var manualGrantTitle: String {
+        let count = manualGrants.count
+        let word: String
+        switch count {
+        case 1: word = "One"
+        case 2: word = "Two"
+        case 3: word = "Three"
+        case 4: word = "Four"
+        case 5: word = "Five"
+        default: word = "\(count)"
+        }
+        let verb = count == 1 ? "needs" : "need"
+        return "\(word) \(verb) a manual grant"
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             obHero("gearshape.fill")
                 .padding(.top, 8)
 
-            obTitle("Two need a manual grant")
-                .padding(.top, 18)
-
-            obSub("These can\u{2019}t be requested in-app. We\u{2019}ll open the exact System Settings pane \u{2014} switch The Bridge on, then come back here.")
+            // Title is data-driven off the REAL manual-grant set (5 today), not the
+            // design mock's count of 2 — singular/plural agree with manualGrants.count.
+            // This step carries 5 rows (vs the mock's 2), so the surrounding rhythm
+            // is compressed (design `.tight` rung) to fit 520×520 without scrolling.
+            obTitle(manualGrantTitle)
                 .padding(.top, 14)
 
+            obSub("These can\u{2019}t be requested in-app. We\u{2019}ll open the exact System Settings pane \u{2014} switch The Bridge on, then come back here.")
+                .padding(.top, 9)
+
             // `.ob-perms` — stacked glass permission rows.
-            VStack(spacing: 7) {
+            VStack(spacing: 6) {
                 ForEach(manualGrants) { grant in
                     manualPermissionRow(for: grant)
                 }
             }
-            .padding(.top, 18)
+            .padding(.top, 12)
 
             // `.ob-progress-note` (info) — grant-later reminder.
             HStack(spacing: 8) {
@@ -1380,13 +1431,13 @@ private struct OnboardingManualPermissionsStep: View {
                     .foregroundStyle(BridgeTokens.fg4)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 12)
+            .padding(.top, 10)
 
             BridgeButton("Re-check", variant: .default) {
                 Task { await permissionManager.recheckAllForTruth() }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 12)
+            .padding(.top, 10)
         }
         .frame(maxWidth: .infinity)
         .task {
