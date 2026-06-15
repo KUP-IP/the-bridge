@@ -3,14 +3,14 @@
     <channel>
         <title>NotionBridge</title>
         <item>
-            <title>3.7.11</title>
-            <pubDate>Sun, 14 Jun 2026 19:05:39 +0000</pubDate>
+            <title>3.7.12</title>
+            <pubDate>Mon, 15 Jun 2026 04:04:51 +0000</pubDate>
             <link>https://github.com/KUP-IP/the-bridge/releases</link>
-            <sparkle:version>57</sparkle:version>
-            <sparkle:shortVersionString>3.7.11</sparkle:shortVersionString>
+            <sparkle:version>58</sparkle:version>
+            <sparkle:shortVersionString>3.7.12</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/KUP-IP/the-bridge/releases/download/v3.7.11/the-bridge-v3.7.11.dmg" length="17941077" type="application/octet-stream" sparkle:edSignature="RYl03XpnTiGcFkj5kvHYJo/kPGMpz5rpaeTqGArr2W+QxIJgCL9YSiyHsRXFktySwCUgtH8S6Wj47s/k0aVwBA=="/>
+            <enclosure url="https://github.com/KUP-IP/the-bridge/releases/download/v3.7.12/the-bridge-v3.7.12.dmg" length="18295163" type="application/octet-stream" sparkle:edSignature="Sd2KBMPnG1Ci+sbT/n0ibqfABlYsbWGYv9PhzKh4tcQAaDta3aqp2SgDtbGvqz0TOfgS2cddkFnMFtpa/MueDQ=="/>
         </item>
     </channel>
 </rss>
