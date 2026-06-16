@@ -1030,7 +1030,11 @@ set -euo pipefail
 # controller via a fragile NSApp.delegate cast + `?? CommandsController()`, spinning up a phantom
 # instance the UI observed while registration published into the real one. Fix: inject the one
 # AppDelegate.commandsController directly. Integrated green 1924 → 1926, 0 failed. Floor raised.
-FLOOR="${BRIDGE_TEST_FLOOR:-1926}"
+# v3.8.0 Command Bridge liquid-glass redesign (2026-06-15): +2 tests — the ⌃⌘B palette keyboard
+# selection model (CommandBridgeViewModel.moveSelection / commitSelected): ↓ opens recents + selects
+# the first row; ↓/↑ traverse + clamp; Enter fires the SELECTED row (not just the first). Locks the
+# operator's "can't arrow into recents" fix. Integrated green 1926 → 1928, 0 failed. Floor raised.
+FLOOR="${BRIDGE_TEST_FLOOR:-1928}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

@@ -316,24 +316,37 @@ public struct BridgeGlassBubble<Content: View>: View {
         return ZStack {
             // Ingredient 1 — e2 raise surface fill (token-driven base + sheen).
             rung.fill?.paint(in: shape)
-            // Signature specular dome on top of the raised glass.
+            // Signature specular dome — centred so the lens reads thick in the middle.
             shape
                 .fill(
                     RadialGradient(
                         colors: domeColors,
-                        center: UnitPoint(x: 0.3, y: 0.18),
-                        startRadius: 0, endRadius: size * 0.9
+                        center: UnitPoint(x: 0.42, y: 0.28),
+                        startRadius: 0, endRadius: size * 0.92
                     )
                 )
             // Top-left specular glint (`--glint`) — the raise-rung highlight.
             shape.fill(BridgeTokens.glint).allowsHitTesting(false)
-            // Ingredient 3 — elevation EDGE hairline at the raise rung.
-            (rung.edge.map { shape.strokeBorder($0, lineWidth: 1) })
             content
         }
         .frame(width: size, height: size)
         // Ingredient 2 — directional bevel (top rim-light + bottom occlusion).
         .overlay(rung.bevel.overlay(in: shape).allowsHitTesting(false))
+        // LENS edge-dissolve — the glass thins to nothing at the rim (thick clear
+        // centre → thin edge). Borderless: the edge hairline is GONE; definition is
+        // the dome + bevel + float shadow, never an outline (operator: no border).
+        .mask(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(RadialGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: .black, location: 0.0),
+                        .init(color: .black, location: 0.62),
+                        .init(color: .black.opacity(0.4), location: 0.84),
+                        .init(color: .clear, location: 1.0),
+                    ]),
+                    center: .center, startRadius: 0, endRadius: size * 0.72
+                ))
+        )
         // Ingredient 4 — dual ambient + contact drop shadow (e2). Keep dark's
         // prior single soft shadow feel; the dual layer reads richer on titanium.
         .modifier(OptionalShadow(rung.shadow))

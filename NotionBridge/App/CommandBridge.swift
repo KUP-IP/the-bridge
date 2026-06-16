@@ -833,6 +833,9 @@ public final class CommandBridgeViewModel: ObservableObject {
     @Published public var slotRows: [SlotRow] = []
     @Published public var recentRows: [Row] = []
     @Published public var searchRows: [Row] = []
+    /// Keyboard-selected row in the active panel (recents/search), by slug.
+    /// ↓/↑ move it; Enter fires it. nil → no selection (closed tray).
+    @Published public var selectedSlug: String? = nil
     /// (v3.7.6) Monotonic focus token. The controller bumps this on EVERY
     /// show() (the panel is reused, so `.onAppear` only fires once); the view
     /// observes it and re-claims first responder on the query field.
@@ -897,19 +900,54 @@ public final class CommandBridgeViewModel: ObservableObject {
         if trimmed.isEmpty {
             // typing-stopped path collapses back to whichever secondary
             // panel was last open (recents stays open if it was open).
-            if case .search = panelMode { panelMode = .none }
+            if case .search = panelMode { panelMode = .none; selectedSlug = nil }
             searchRows = []
             return
         }
         let hits = (try? store.search(trimmed)) ?? []
         searchRows = hits.map(Self.row(from:))
         panelMode = .search(query: trimmed)
+        selectedSlug = searchRows.first?.slug
     }
 
-    /// ↓ → open recents (140ms slide-in handled by the view).
+    /// ↓ → open recents (140ms slide-in handled by the view), selecting the
+    /// first row so ↑/↓ can traverse and Enter fires it.
     public func openRecents() {
         if recentRows.isEmpty { return }
         panelMode = .recents
+        selectedSlug = recentRows.first?.slug
+    }
+
+    /// Rows currently shown in the secondary panel (recents or search).
+    private var activeRows: [Row] {
+        switch panelMode {
+        case .recents: return recentRows
+        case .search:  return searchRows
+        case .none:    return []
+        }
+    }
+
+    /// ↓ (+1) / ↑ (−1) move the keyboard selection within the open panel,
+    /// clamped to the ends. ↓ from the closed tray opens recents.
+    public func moveSelection(_ delta: Int) {
+        if case .none = panelMode {
+            if delta > 0 { openRecents() }
+            return
+        }
+        let rows = activeRows
+        guard !rows.isEmpty else { return }
+        let cur = selectedSlug.flatMap { s in rows.firstIndex(where: { $0.slug == s }) } ?? 0
+        let next = min(max(cur + delta, 0), rows.count - 1)
+        selectedSlug = rows[next].slug
+    }
+
+    /// Enter fires the keyboard-selected row (falling back to the first).
+    public func commitSelected() {
+        let rows = activeRows
+        guard !rows.isEmpty else { return }
+        let slug = selectedSlug.flatMap { s in rows.contains(where: { $0.slug == s }) ? s : nil }
+            ?? rows.first?.slug
+        if let slug { onFireSlug(slug) }
     }
 
     /// Esc / focus-loss / fire → reset to closed-tray state.
@@ -969,9 +1007,6 @@ public struct CommandBridgeRootView: View {
     @ObservedObject var model: CommandBridgeViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion: Bool
     @FocusState private var queryFocused: Bool
-    /// Drives the leading caret blink (`.cb-caret` / `cb-blink`). Starts true
-    /// (visible) and toggles under a repeating animation; reduce-motion pins it on.
-    @State private var caretOn: Bool = true
 
     private var anim: CommandBridgeAnimation {
         reduceMotion ? .reduced : .locked
@@ -1015,7 +1050,8 @@ public struct CommandBridgeRootView: View {
                alignment: .top)
         .background(KeyHandler(
             onNumber: { n in model.onFireSlot(n) },
-            onArrowDown: { model.openRecents() },
+            onArrowDown: { model.moveSelection(1) },
+            onArrowUp: { model.moveSelection(-1) },
             onReturn: { commitTopSelection() },
             onEscape: { model.onEscape() }
         ))
@@ -1090,13 +1126,6 @@ public struct CommandBridgeRootView: View {
     private var emptyWell: some View {
         RoundedRectangle(cornerRadius: 18, style: .continuous)
             .fill(BridgeTokens.wellFillDeep)
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(
-                        BridgeTokens.hairlineStrong,
-                        style: StrokeStyle(lineWidth: 1, dash: [3, 3])
-                    )
-            )
             .bridgeBevel(BridgeTokens.bevelInset, radius: 18)
             .frame(width: Self.bubbleSize, height: Self.bubbleSize)
     }
@@ -1121,7 +1150,6 @@ public struct CommandBridgeRootView: View {
             // QueryField itself, so the caret leads the pill exactly as the source
             // shows (no glyph precedes it).
             HStack(spacing: BridgeTokens.Space.s3) {
-                caret
                 QueryField(
                     text: Binding(
                         get: { model.query },
@@ -1130,7 +1158,8 @@ public struct CommandBridgeRootView: View {
                     placeholder: "Bridge Command",
                     isFocused: $queryFocused,
                     onReturn: { commitTopSelection() },
-                    onArrowDown: { model.openRecents() },
+                    onArrowDown: { model.moveSelection(1) },
+                    onArrowUp: { model.moveSelection(-1) },
                     onEscape: { model.onEscape() }
                 )
                 .frame(maxWidth: .infinity)
@@ -1150,10 +1179,6 @@ public struct CommandBridgeRootView: View {
                         RoundedRectangle(cornerRadius: BridgeTokens.Radius.card, style: .continuous)
                             .fill(BridgeTokens.glassControl)
                             .bridgeBevel(BridgeTokens.bevelControl, radius: BridgeTokens.Radius.card)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: BridgeTokens.Radius.card, style: .continuous)
-                                    .strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5)
-                            )
                     )
             }
             .buttonStyle(.plain)
@@ -1165,23 +1190,8 @@ public struct CommandBridgeRootView: View {
         .popoverGlass(radius: 22)
     }
 
-    /// The leading blinking caret (`.cb-caret`): a 2pt accent-strong bar with a
-    /// soft glow, blinking ~1.15s on a forever-repeating fade. Reduce-motion holds
-    /// it steady-on (the source honours `prefers-reduced-motion`).
-    private var caret: some View {
-        RoundedRectangle(cornerRadius: 1, style: .continuous)
-            .fill(BridgeTokens.accentStrong)
-            .frame(width: 2, height: 30)
-            .shadow(color: BridgeTokens.accentStrong.opacity(0.7), radius: 4)
-            .opacity(reduceMotion ? 1 : (caretOn ? 1 : 0))
-            .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.easeInOut(duration: 0.575).repeatForever(autoreverses: true)) {
-                    caretOn = false
-                }
-            }
-            .accessibilityHidden(true)
-    }
+    // (Fake blinking caret removed — the real QueryField shows the only caret,
+    //  on focus. Operator: kill the double-cursor.)
 
     /// The trailing menu-bar mark image (`.cb-menubar img`). Loads `MenuBarIcon`
     /// — the bundled Bridge mark (`assets/bridge-mark-white.png` in the design) —
@@ -1254,10 +1264,6 @@ public struct CommandBridgeRootView: View {
             .background(
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .fill(BridgeTokens.chipFill)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
-                    )
             )
     }
 
@@ -1272,7 +1278,7 @@ public struct CommandBridgeRootView: View {
             case .recents:
                 panelHeader("Recents")
                 ForEach(model.recentRows) { r in
-                    rowView(r, selected: r.id == model.recentRows.first?.id)
+                    rowView(r, selected: r.slug == model.selectedSlug)
                 }
                 if model.recentRows.isEmpty {
                     panelEmptyHint("No recents yet — fire a command to start the history.")
@@ -1280,7 +1286,7 @@ public struct CommandBridgeRootView: View {
             case .search(let q):
                 panelHeader("Matches — sorted by recency")
                 ForEach(model.searchRows) { r in
-                    rowView(r, selected: r.id == model.searchRows.first?.id, highlight: q)
+                    rowView(r, selected: r.slug == model.selectedSlug, highlight: q)
                 }
                 if model.searchRows.isEmpty {
                     panelEmptyHint("No match for \"\(q)\".")
@@ -1324,10 +1330,6 @@ public struct CommandBridgeRootView: View {
                     RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
                         .fill(BridgeTokens.glassControl)
                         .bridgeBevel(BridgeTokens.bevelControl, radius: BridgeTokens.Radius.control)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
-                                .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
-                        )
                     iconView(for: r.icon, color: r.color, size: 15)
                 }
                 .frame(width: 28, height: 28)
@@ -1353,10 +1355,6 @@ public struct CommandBridgeRootView: View {
                         .background(
                             RoundedRectangle(cornerRadius: 5, style: .continuous)
                                 .fill(BridgeTokens.chipFill)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                        .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
-                                )
                         )
                 }
             }
@@ -1435,15 +1433,8 @@ public struct CommandBridgeRootView: View {
     }
 
     private func commitTopSelection() {
-        switch model.panelMode {
-        case .search:
-            if let top = model.searchRows.first { model.onFireSlug(top.slug) }
-        case .recents:
-            if let top = model.recentRows.first { model.onFireSlug(top.slug) }
-        case .none:
-            // No selection → Enter is a no-op (matches Spotlight / cmd-sb).
-            return
-        }
+        // Fires the keyboard-selected row (↑/↓), falling back to the first.
+        model.commitSelected()
     }
 }
 
@@ -1477,18 +1468,24 @@ private struct PopoverGlass: ViewModifier {
                     // Specular hotspot (`--glint`) + diagonal sweep (`--sheen`).
                     shape.fill(BridgeTokens.glint)
                     shape.fill(BridgeTokens.sheen)
+                    // LENS — frost pooled at the thick CENTRE, fading to a thin edge
+                    // (the "thicker glass in the middle" gradient). Sized to the box.
+                    GeometryReader { geo in
+                        shape.fill(RadialGradient(
+                            colors: [Color.white.opacity(0.10),
+                                     Color.white.opacity(0.03),
+                                     Color.clear],
+                            center: UnitPoint(x: 0.5, y: 0.34),
+                            startRadius: 0,
+                            endRadius: max(geo.size.width, geo.size.height) * 0.62))
+                    }
                 }
             }
-            // Ingredient 2 — directional bevel.
+            // Ingredient 2 — directional bevel (top rim-light + bottom occlusion).
+            // The bevel + float shadow define the BORDERLESS edge — no hairline.
             .overlay(rung.bevel.overlay(in: shape).allowsHitTesting(false))
-            // Ingredient 3 — elevation edge hairline.
-            .overlay {
-                if let edge = rung.edge {
-                    shape.strokeBorder(edge, lineWidth: 0.5)
-                }
-            }
             .clipShape(shape)
-            // Ingredient 4 — e3 dual drop shadow.
+            // Ingredient 4 — e3 dual drop shadow (the floating-glass depth).
             .modifier(OptionalBridgeShadow(rung.shadow))
     }
 }
@@ -1521,6 +1518,7 @@ private struct QueryField: NSViewRepresentable {
     var isFocused: FocusState<Bool>.Binding
     var onReturn: () -> Void
     var onArrowDown: () -> Void
+    var onArrowUp: () -> Void
     var onEscape: () -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -1591,6 +1589,8 @@ private struct QueryField: NSViewRepresentable {
             switch commandSelector {
             case #selector(NSResponder.moveDown(_:)):
                 parent.onArrowDown(); return true
+            case #selector(NSResponder.moveUp(_:)):
+                parent.onArrowUp(); return true
             case #selector(NSResponder.insertNewline(_:)):
                 parent.onReturn(); return true
             case #selector(NSResponder.cancelOperation(_:)):
@@ -1621,6 +1621,7 @@ private final class BridgeQueryTextField: NSTextField {
 private struct KeyHandler: NSViewRepresentable {
     let onNumber: (Int) -> Void
     let onArrowDown: () -> Void
+    let onArrowUp: () -> Void
     let onReturn: () -> Void
     let onEscape: () -> Void
 
@@ -1628,6 +1629,7 @@ private struct KeyHandler: NSViewRepresentable {
         let v = MonitorView()
         v.onNumber = onNumber
         v.onArrowDown = onArrowDown
+        v.onArrowUp = onArrowUp
         v.onReturn = onReturn
         v.onEscape = onEscape
         return v
@@ -1638,6 +1640,7 @@ private struct KeyHandler: NSViewRepresentable {
     final class MonitorView: NSView {
         var onNumber: ((Int) -> Void)?
         var onArrowDown: (() -> Void)?
+        var onArrowUp: (() -> Void)?
         var onReturn: (() -> Void)?
         var onEscape: (() -> Void)?
         private var monitor: Any?
@@ -1709,6 +1712,8 @@ private struct KeyHandler: NSViewRepresentable {
             switch event.keyCode {
             case UInt16(kVK_DownArrow):
                 v.onArrowDown?(); return true
+            case UInt16(kVK_UpArrow):
+                v.onArrowUp?(); return true
             case UInt16(kVK_Return), UInt16(kVK_ANSI_KeypadEnter):
                 v.onReturn?(); return true
             case UInt16(kVK_Escape):
