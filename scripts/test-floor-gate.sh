@@ -1037,7 +1037,14 @@ set -euo pipefail
 # v4 Command Bridge round-2 (2026-06-15): +2 tests — adaptive palette width clamp (favorite count →
 # bar width, [half, full]) + remembered drag-origin clamp (keep the panel on-screen on reopen). Locks
 # the operator's "adaptive width + draggable with session memory" asks. Green 1928 → 1930, 0 failed.
-FLOOR="${BRIDGE_TEST_FLOOR:-1930}"
+# PKT-1003 / Skills Truth-Up Wave A (2026-06-16): metadata-sync remediation —
+# read+write repointed off the phantom "Bridge *" columns onto the real live
+# SKILLS columns (Description → Summary fallback, Activation Examples,
+# Anti-Triggers); pull made gate-safe so an empty Notion value can no longer
+# blank local metadata. +7 pure parse/build tests (SkillNotionMetadataSyncTests).
+# Measured integrated green = 1937 passed, 0 failed. FLOOR raised 1930 -> 1937
+# per the order-inversion rule.
+FLOOR="${BRIDGE_TEST_FLOOR:-1937}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

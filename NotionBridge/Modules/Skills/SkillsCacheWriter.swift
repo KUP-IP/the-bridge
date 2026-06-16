@@ -237,9 +237,11 @@ extension SkillsCacheWriter.ChildEnumerator {
                let props = json["properties"] as? [String: Any] {
                 let t = NotionJSON.extractTitle(from: props)
                 if !t.isEmpty && t != "Untitled" { title = t }
-                // Best-effort one-line summary: prefer the curated `Summary`
-                // rich_text, then `Description`, then any `description` key.
-                summary = firstRichText(props, keys: ["Summary", "Description", "description"])
+                // Best-effort one-line summary: SSOT = Notion "Description"
+                // (the single agent-facing field). Fall back to the legacy
+                // "Summary" column while it still exists (Phase-0 gate), then
+                // any lowercase `description` key.
+                summary = firstRichText(props, keys: ["Description", "Summary", "description"])
                 isActive = SpecialistFilter.isActiveSpecialist(properties: props)
             }
             // Two hydration-time guards (belt + suspenders): drop doc-pages by
