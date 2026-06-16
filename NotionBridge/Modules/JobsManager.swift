@@ -1034,6 +1034,11 @@ public actor JobsManager {
             // helper. One-shot; re-running is a no-op because migrated plists
             // no longer reference /usr/bin/curl.
             await migrateLegacyCurlPlists()
+            // PKT-1004 Wave 4: seed the first running-report job exactly once
+            // (idempotent — never clobbers operator edits). Seeded BEFORE the
+            // reconcile so a fresh install's first 06:00 slot is itself eligible
+            // for missed-occurrence recovery.
+            await seedRunningReportJobIfNeeded()
             // PKT-381: REAL missed-occurrence handling replaces the old dead scan
             // (`_ = listAll(.active)` that discarded its result). Reconcile every
             // active job's missed occurrences (last-success → now) into the

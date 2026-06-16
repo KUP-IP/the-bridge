@@ -1074,10 +1074,27 @@ set -euo pipefail
 # The two reconciler tests that assert concrete UTC instants pin timeZone: utc
 # via the new injectable seam (production defaults to .current to match launchd's
 # local-time firing). Measured integrated green = 1972 passed, 0 failed (on the
-# America/Chicago host). FLOOR raised 1947 -> 1972 (+25) per the order-inversion
-# rule. Wave 4 (first running-report job) ships as a registered template +
-# Run-now; its Strava data path is operator-pending (REVIEW) and adds no tests.
-FLOOR="${BRIDGE_TEST_FLOOR:-1972}"
+# America/Chicago host). FLOOR raised 1947 -> 1972 (+25) for Waves 1-3 per the
+# order-inversion rule.
+# PKT-1004 Wave 4 (first running-report job, 2026-06-16): RunningReportJob —
+# an idempotently-seeded daily 06:00 job (stable id first-job-running-report)
+# whose 2-step action chain builds a running-performance summary (shell_exec
+# scaffold; the default metric set is latest run / trailing-7-day mileage /
+# pace vs prior week) and delivers it via messages_send (iMessage-to-self,
+# confirm:SEND). The Bridge has no server-side Strava/HealthKit data path
+# (verified), so the report is an HONEST scaffold (no fabricated metrics; the
+# data source is flagged operator-pending) and the recipient is an obvious
+# REPLACE_WITH_YOUR_IMESSAGE_HANDLE placeholder. Seeded active so Run-now works
+# and launchd schedules it; the seeder takes an injectable LaunchAgentInstaller
+# (default = real launchd path; tests pass a no-op so seeding stays hermetic).
+# +6 SchedulerResilienceTests Wave-4 blocks (record fields, chain shape +
+# $prev_result wiring, unattended-validation pass, honest-scaffold/no-fabrication
+# assertion, placeholder-recipient assertion, seed-once idempotency). Measured
+# integrated green = 1978 passed, 0 failed. FLOOR raised 1972 -> 1978 (+6) per
+# the order-inversion rule. On-device verification (sleep/wake + force-quit
+# across a slot) and the Strava-source + self-handle wiring remain operator
+# REVIEW items.
+FLOOR="${BRIDGE_TEST_FLOOR:-1978}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

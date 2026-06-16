@@ -435,4 +435,86 @@ func runSchedulerResilienceTests() async {
         try expect(execsAfterFirst == execsAfterSecond, "no new execution row on the second drain — occurrence fired at most once")
         try await JobStore.shared.delete(id: id)
     }
+
+    // ---------------------------------------------------------------
+    // Wave 4 — First job: running report → iMessage (scaffold + delivery)
+    // ---------------------------------------------------------------
+
+    await test("FirstJob: default record uses the packet schedule + stable id + active") {
+        let job = RunningReportJob.defaultJobRecord()
+        try expect(job.id == "first-job-running-report", "stable id keeps seeding idempotent")
+        try expect(job.schedule == "0 6 * * *", "packet default schedule is 06:00 daily")
+        try expect(job.status == .active, "active so Run-now works + launchd schedules it")
+        try expect(job.actionChain.count == 2, "expected build-report + send-iMessage steps")
+    }
+
+    await test("FirstJob: action chain is report-builder → iMessage with $prev_result wiring") {
+        let chain = RunningReportJob.defaultActionChain()
+        // Step 0 builds the report text.
+        try expect(chain[0].tool == "shell_exec", "step 0 builds the running summary")
+        try expect(chain[0].onFail == .stop, "abort delivery if the report can't be built")
+        // Step 1 delivers via iMessage to self.
+        try expect(chain[1].tool == "messages_send", "step 1 delivers via iMessage")
+        try expect(chain[1].onFail == .continue, "an un-wired placeholder records a failed send, not an abort")
+        if case .string(let body)? = chain[1].arguments["body"] {
+            try expect(body == "$prev_result", "delivery body must read the previous step's report output")
+        } else { try expect(false, "messages_send must have a 'body'") }
+        if case .string(let confirm)? = chain[1].arguments["confirm"] {
+            try expect(confirm == "SEND", "unattended messages_send requires confirm: SEND")
+        } else { try expect(false, "messages_send must carry the SEND gate") }
+    }
+
+    await test("FirstJob: chain passes the same unattended validation as createJob") {
+        // The seeder runs this exact gate; if it throws the build fails.
+        let chain = RunningReportJob.defaultActionChain()
+        for step in chain {
+            try JobsManager.validateUnattended(tool: step.tool, args: step.arguments)
+        }
+    }
+
+    await test("FirstJob: report scaffold is honest — no fabricated metrics, flags the data source") {
+        let chain = RunningReportJob.defaultActionChain()
+        guard case .string(let script)? = chain[0].arguments["command"] else {
+            try expect(false, "report builder must carry a shell command"); return
+        }
+        // Honesty contract: the scaffold must NOT invent numbers and must mark
+        // the data source as operator-pending.
+        try expect(script.contains("operator: wire data source") || script.contains("Data source not yet connected"),
+                   "report must flag the Strava data path as operator-pending")
+        try expect(script.contains("7-day mileage") && script.contains("Pace vs last week") && script.contains("Latest run"),
+                   "report must lay out the default metric set (latest run / 7-day mileage / pace vs last week)")
+    }
+
+    await test("FirstJob: recipient is an obvious operator-pending placeholder (no real contact)") {
+        let chain = RunningReportJob.defaultActionChain()
+        if case .string(let recip)? = chain[1].arguments["recipient"] {
+            try expect(recip == RunningReportJob.selfHandlePlaceholder)
+            try expect(recip.uppercased() == recip && recip.contains("REPLACE"),
+                       "placeholder must be obviously fake so a stray fire can't message a real contact")
+        } else { try expect(false, "messages_send must have a recipient") }
+    }
+
+    await test("FirstJob: seeder inserts once, registers, and is idempotent") {
+        // Hermetic: inject a NO-OP launch-agent installer so the test never
+        // writes a real plist to ~/Library/LaunchAgents or calls launchctl.
+        // (Production uses RunningReportJob.realLaunchAgentInstaller.)
+        let noopInstaller: @Sendable (String, [CronParser.CalendarInterval]) throws -> Void = { _, _ in }
+        try await JobStore.shared.open()
+        try? await JobStore.shared.delete(id: RunningReportJob.jobId)
+
+        let firstSeed = await JobsManager.shared.seedRunningReportJobIfNeeded(installLaunchAgent: noopInstaller)
+        try expect(firstSeed == true, "first seed should insert the job")
+        let seeded = try await JobStore.shared.fetch(id: RunningReportJob.jobId)
+        try expect(seeded != nil, "seeded job must be present in the store (visible in Jobs UI)")
+        try expect(seeded?.schedule == "0 6 * * *")
+        try expect(seeded?.status == .active, "Run-now requires an active job")
+
+        let secondSeed = await JobsManager.shared.seedRunningReportJobIfNeeded(installLaunchAgent: noopInstaller)
+        try expect(secondSeed == false, "second seed must be a no-op (idempotent — never clobbers operator edits)")
+        let all = try await JobStore.shared.listAll().filter { $0.id == RunningReportJob.jobId }
+        try expect(all.count == 1, "exactly one seeded job, got \(all.count)")
+
+        // Cleanup (DB only — no plist was written).
+        try? await JobStore.shared.delete(id: RunningReportJob.jobId)
+    }
 }
