@@ -1582,7 +1582,7 @@ private struct PopoverGlass: ViewModifier {
         // 45%-white ≈ white-on-white in light) and only a barely-there film over
         // busy content. The favorites (BridgeGlassBubble) carry the liquid-glass
         // signature; the container all but disappears — no fill box, no bevel, no
-        // edge hairline. The only definition is a soft, faint float halo.
+        // edge hairline, no float halo. Over white the frost + lens vanish entirely.
         let frost = isDark ? Color.white.opacity(0.06) : Color.white.opacity(0.45)
         return content
             .background {
@@ -1599,7 +1599,11 @@ private struct PopoverGlass: ViewModifier {
                 }
             }
             .clipShape(shape)
-            .shadow(color: .black.opacity(isDark ? 0.20 : 0.10), radius: 11, y: 6)
+            // No float shadow — definition-of-perfect pillar 4: "the field and
+            // recents are AIR; no halo that reads as an edge." The frost + lens are
+            // invisible over white, so without the shadow the container fully
+            // disappears. The favorites keep their own glass shadow — only the orbs
+            // read as glass; everything else floats as air with self-legible text.
     }
 }
 
