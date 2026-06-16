@@ -76,7 +76,10 @@ public final class CommandBridgePanel: NSPanel {
         isFloatingPanel = true
         level = .floating
         hidesOnDeactivate = false
-        isMovableByWindowBackground = false
+        // (v4 round-2) Draggable — the operator can reposition the palette; the
+        // controller remembers the spot for the session and resets to the default
+        // placement on app boot (rememberedOrigin is per-launch, never persisted).
+        isMovableByWindowBackground = true
         backgroundColor = .clear
         isOpaque = false
         hasShadow = false   // shadows are baked into BridgeGlass surfaces
@@ -254,6 +257,13 @@ public final class CommandBridgeController: NSObject {
     /// (v3.7.6) Global mouse-down monitor installed while the palette is open.
     /// Fires on a click OUTSIDE the panel and dismisses (Spotlight behaviour).
     private var globalClickMonitor: Any?
+    /// (v4 round-2) Observes the panel moving so a drag updates `rememberedOrigin`.
+    private var didMoveObserver: Any?
+    /// (v4 round-2) Where the operator last dragged the palette THIS app run. nil
+    /// until the first drag; restored on every open within the session. It is an
+    /// instance var (not UserDefaults), so it resets to the default placement on
+    /// the next app boot — the "standard boot-up location" the operator asked for.
+    private var rememberedOrigin: CGPoint?
 
     /// (v3.7.6) The app that was frontmost the instant before we showed, so
     /// paste-into-app can re-activate it and synthesize ⌘V. Captured in
@@ -333,6 +343,32 @@ public final class CommandBridgeController: NSObject {
         if let hit = screens.first(where: { $0.contains(mouseLocation) }) { return hit }
         if let main = mainScreenFrame { return main }
         return screens.first
+    }
+
+    /// Adaptive palette width (operator round-2): the bar tracks the favorite
+    /// count and centres in the transparent envelope, clamped to [half, full].
+    /// ~5 favorites ≈ half width; 10 ≈ full. Pure so the clamp is unit-tested.
+    public nonisolated static func paletteWidth(favoriteCount: Int, full: CGFloat) -> CGFloat {
+        let pitch: CGFloat = 64                       // 54 bubble + 10 gap
+        let content = CGFloat(max(favoriteCount, 1)) * pitch
+        let floorW = (full / 2).rounded()             // never narrower than half
+        return min(max(content, floorW), full)
+    }
+
+    /// Clamp a remembered drag origin so a display change can't strand the panel
+    /// off-screen. Picks the screen under the panel's centre (else the first) and
+    /// keeps the frame fully inside it. Pure + nonisolated for headless tests.
+    public nonisolated static func clampOrigin(
+        _ origin: CGPoint, toScreens screens: [CGRect], panelSize: CGSize
+    ) -> CGPoint {
+        let centre = CGPoint(x: origin.x + panelSize.width / 2,
+                             y: origin.y + panelSize.height / 2)
+        guard let screen = screens.first(where: { $0.contains(centre) }) ?? screens.first
+        else { return origin }
+        let maxX = max(screen.minX, screen.maxX - panelSize.width)
+        let maxY = max(screen.minY, screen.maxY - panelSize.height)
+        return CGPoint(x: min(max(origin.x, screen.minX), maxX),
+                       y: min(max(origin.y, screen.minY), maxY))
     }
 
     // MARK: - Hot-key registration (Carbon — no Input Monitoring)
@@ -514,7 +550,14 @@ public final class CommandBridgeController: NSObject {
         // PURE, unit-tested `pickScreenFrame` / `placementOrigin`; this
         // is only the glue.
         let screenFrames = NSScreen.screens.map { $0.visibleFrame }
-        if let target = Self.pickScreenFrame(
+        if let remembered = rememberedOrigin {
+            // (v4 round-2) Session memory — reopen where the operator last dragged
+            // it, clamped so a display change can't strand it off-screen.
+            panel.setFrameOrigin(
+                Self.clampOrigin(remembered, toScreens: screenFrames,
+                                 panelSize: panel.frame.size)
+            )
+        } else if let target = Self.pickScreenFrame(
             screens: screenFrames,
             keyWindowFrame: NSApp.keyWindow?.frame,
             mouseLocation: NSEvent.mouseLocation,
@@ -541,6 +584,7 @@ public final class CommandBridgeController: NSObject {
         installFocusLossObserver()
         installBecomeKeyObserver()
         installGlobalClickMonitor()
+        installDidMoveObserver()
         // Re-assert field focus on EVERY show() — the panel is reused, so the
         // SwiftUI `.onAppear` only fires the first time. Nudging the model's
         // focus token + asking the view-model to reset to the tray makes the
@@ -567,6 +611,7 @@ public final class CommandBridgeController: NSObject {
         removeFocusLossObserver()
         removeBecomeKeyObserver()
         removeGlobalClickMonitor()
+        removeDidMoveObserver()
         model?.didOpen = false
         panel?.orderOut(nil)
         lifecycle = .closed
@@ -646,6 +691,33 @@ public final class CommandBridgeController: NSObject {
         if let m = globalClickMonitor {
             NSEvent.removeMonitor(m)
             globalClickMonitor = nil
+        }
+    }
+
+    // MARK: - Drag-to-reposition with session memory (v4 round-2)
+
+    /// While open, capture every panel move (the operator dragging it via
+    /// `isMovableByWindowBackground`) into `rememberedOrigin`. The programmatic
+    /// placement in `show()` runs BEFORE this is installed, so only USER drags are
+    /// remembered — and only for this app run (reset to default on boot).
+    private func installDidMoveObserver() {
+        removeDidMoveObserver()
+        didMoveObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let p = self.panel else { return }
+                self.rememberedOrigin = p.frame.origin
+            }
+        }
+    }
+
+    private func removeDidMoveObserver() {
+        if let obs = didMoveObserver {
+            NotificationCenter.default.removeObserver(obs)
+            didMoveObserver = nil
         }
     }
 
@@ -1071,64 +1143,72 @@ public struct CommandBridgeRootView: View {
 
     // MARK: Tray
 
+    /// Adaptive palette width — tracks the favorite count, centred in the
+    /// transparent envelope, clamped to [half, full] (operator round-2).
+    private var paletteWidth: CGFloat {
+        let favCount = model.slotRows.filter { $0.command != nil }.count
+        return CommandBridgeController.paletteWidth(
+            favoriteCount: favCount, full: CommandBridgeController.pillWidth)
+    }
+
     private var tray: some View {
-        HStack(spacing: 0) {
-            ForEach(Array(model.slotRows.enumerated()), id: \.element.id) { idx, row in
+        // Only REAL favorites, CENTERED (operator round-2: no empty slots, no
+        // left-anchored gaps). The fixed-pitch HStack centres inside `paletteWidth`.
+        let favorites = model.slotRows.filter { $0.command != nil }
+        return HStack(spacing: 10) {
+            ForEach(Array(favorites.enumerated()), id: \.element.id) { idx, row in
                 slotView(row, cascadeIndex: idx)
-                    .frame(maxWidth: .infinity)
             }
         }
-        .frame(width: CommandBridgeController.pillWidth)
+        .frame(width: paletteWidth)
     }
 
     @ViewBuilder
     private func slotView(_ row: CommandBridgeViewModel.SlotRow, cascadeIndex: Int) -> some View {
-        VStack(spacing: BridgeTokens.Space.s2) {
-            if let cmd = row.command {
+        // The tray now renders ONLY assigned favorites (operator round-2), so this
+        // is always a real command; `command == nil` cannot reach here.
+        if let cmd = row.command {
+            VStack(spacing: BridgeTokens.Space.s2) {
                 Button { model.onFireSlot(row.storeSlot) } label: {
                     BridgeGlassBubble(size: Self.bubbleSize) {
                         iconView(for: cmd.icon, color: cmd.color, size: 25)
                     }
                 }
                 .buttonStyle(.plain)
-                keycap(row.displayKey, empty: false)
-            } else {
-                // Position-stable EMPTY slot (per v4 design source): a faint
-                // dashed glass well so the tray's keycap row stays evenly spaced
-                // and the slot still reads as an assignable position. The keycap
-                // is dimmed (fg5) rather than hidden so the number remains legible.
-                emptyWell
-                keycap(row.displayKey, empty: true)
+                keycap(row.displayKey)
             }
+            // Bubble cascade — 10ms stagger per slot from the locked spec.
+            .opacity(model.didOpen ? 1.0 : 0.0)
+            .animation(
+                .easeOut(duration: anim.openDuration)
+                .delay(Double(cascadeIndex) * anim.bubbleCascadeStagger),
+                value: model.didOpen
+            )
         }
-        // Bubble cascade — 10ms stagger per slot from the locked spec.
-        .opacity(model.didOpen ? 1.0 : 0.0)
-        .animation(
-            .easeOut(duration: anim.openDuration)
-            .delay(Double(cascadeIndex) * anim.bubbleCascadeStagger),
-            value: model.didOpen
-        )
     }
 
     /// Tray bubble edge length — the v4 source draws 54px liquid-glass domes.
     private static let bubbleSize: CGFloat = 54
 
-    /// Mono numeric keycap shown beneath each tray bubble. fg4 for an assigned
-    /// slot, fg5 (fainter) for an unassigned one — mirrors `.cap` / `.empty .cap`.
-    private func keycap(_ n: Int, empty: Bool) -> some View {
+    /// Mono numeric keycap beneath each favorite — a dark chip with near-white ink
+    /// (operator round-2: the bare number was unreadable on light backdrops). The
+    /// chip is self-contained (dark fill + white digit) so it stays legible on ANY
+    /// backdrop — carbon or titanium, over wallpaper or white.
+    private func keycap(_ n: Int) -> some View {
         Text("\(n)")
-            .font(BridgeTokens.Typeface.micro.monospacedDigit())
-            .foregroundStyle(empty ? BridgeTokens.fg5 : BridgeTokens.fg4)
+            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .monospacedDigit()
+            .foregroundStyle(Color.white.opacity(0.96))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1.5)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.black.opacity(0.34))
+            )
     }
 
-    /// Unassigned-slot well: a dashed hairline glass recess (`--well-deep`
-    /// + dashed `--hair-strong` + inset bevel), matching `.cb-bubble.empty`.
-    private var emptyWell: some View {
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(BridgeTokens.wellFillDeep)
-            .bridgeBevel(BridgeTokens.bevelInset, radius: 18)
-            .frame(width: Self.bubbleSize, height: Self.bubbleSize)
-    }
+    // (emptyWell removed — the tray no longer renders unassigned slots; operator
+    //  round-2: show only real favorites, centered.)
 
     // MARK: Pill
     //
@@ -1186,7 +1266,7 @@ public struct CommandBridgeRootView: View {
         }
         .padding(.leading, BridgeTokens.Space.s6)
         .padding(.trailing, BridgeTokens.Space.s4)
-        .frame(width: CommandBridgeController.pillWidth, height: 70)
+        .frame(width: paletteWidth, height: 70)
         .popoverGlass(radius: 22)
     }
 
@@ -1239,7 +1319,7 @@ public struct CommandBridgeRootView: View {
             Spacer(minLength: 0)
             footHint("esc", "close")
         }
-        .frame(width: CommandBridgeController.pillWidth)
+        .frame(width: paletteWidth)
         .padding(.horizontal, BridgeTokens.Space.s2 - 2)
         .padding(.top, BridgeTokens.Space.s1 / 2)
         .accessibilityHidden(true)
@@ -1294,7 +1374,7 @@ public struct CommandBridgeRootView: View {
             }
         }
         .padding(BridgeTokens.Space.s2)
-        .frame(width: CommandBridgeController.pillWidth)
+        .frame(width: paletteWidth)
         .popoverGlass(radius: 18)
     }
 
@@ -1325,14 +1405,12 @@ public struct CommandBridgeRootView: View {
             model.onFireSlug(r.slug)
         } label: {
             HStack(spacing: BridgeTokens.Space.s4 - 2) {
-                // Icon tile (`.cb-ic`) — glass control chip with the command glyph.
-                ZStack {
-                    RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
-                        .fill(BridgeTokens.glassControl)
-                        .bridgeBevel(BridgeTokens.bevelControl, radius: BridgeTokens.Radius.control)
-                    iconView(for: r.icon, color: r.color, size: 15)
-                }
-                .frame(width: 28, height: 28)
+                // Icon (`.cb-ic`) — the bare glyph, no chip box (operator round-2:
+                // drop the per-row container). A soft drop-shadow lifts it off the
+                // frosted panel.
+                iconView(for: r.icon, color: r.color, size: 17)
+                    .frame(width: 28, height: 28)
+                    .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
 
                 highlightedName(r.name, query: highlight)
                     .font(BridgeTokens.Typeface.name)
@@ -1441,65 +1519,57 @@ public struct CommandBridgeRootView: View {
 // ============================================================
 // MARK: - 7b. Popover-glass surface (`.cb-pill` / `.cb-panel`)
 //
-//   The v4 floating-glass surface used by the pill + recents/search panel.
-//   It is the same 4-ingredient recipe as `BridgeGlassBubble` but on a
-//   rounded rect at an arbitrary corner radius (the source draws 22 for the
-//   pill, 18 for the panel — the `Elevation.popover` rung is pinned to the
-//   12pt card radius, so we consume the rung's INGREDIENTS at a custom radius):
-//     1 — `glassPopover` fill + sheen (the e3 popover material)
-//     2 — `bevelRaise` directional bevel (top rim-light + bottom occlusion)
-//     3 — `edgeRaise` hairline edge
-//     4 — `shadowE3` dual ambient+contact drop shadow
-//   …plus the `--glint` specular hotspot + the diagonal `--sheen` sweep that
-//   `materials.css .glass-popover::before/::after` paint over the fill.
+//   The pill + recents/search panel container. Operator round-2 ("I still see
+//   the container color + outlines — make it near-invisible liquid glass")
+//   reduced this from the opaque e3 popover material to FROSTED AIR:
+//     • `.ultraThinMaterial` — the most transparent system blur, the ONLY
+//       backing, so the desktop reads through as liquid glass (no tint box).
+//     • a faint centre LENS frost (thick middle → clear rim).
+//     • a faint diagonal `--sheen` lip — the only specular.
+//     • a single soft FLOAT shadow — NO directional bevel, NO edge hairline.
+//   The favorites (`BridgeGlassBubble`) stay FIRM (fill + rim); only the
+//   container goes near-invisible — the operator's firm-orbs / no-box split.
 // ============================================================
 
 private struct PopoverGlass: ViewModifier {
     let radius: CGFloat
-    private var rung: BridgeTokens.ElevationRung { BridgeTokens.Elevation.popover }
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         return content
             .background {
                 ZStack {
-                    // Ingredient 1 — e3 popover fill (base tint + 3-stop sheen).
-                    rung.fill?.paint(in: shape)
-                    // Specular hotspot (`--glint`) + diagonal sweep (`--sheen`).
-                    shape.fill(BridgeTokens.glint)
-                    shape.fill(BridgeTokens.sheen)
-                    // LENS — frost pooled at the thick CENTRE, fading to a thin edge
-                    // (the "thicker glass in the middle" gradient). Sized to the box.
+                    // FROSTED AIR (operator round-2: "I still see the container color
+                    // + outlines — make it near-invisible liquid glass"). The opaque
+                    // e3 popover FILL is gone; the most-transparent system material is
+                    // the only backing, so the desktop reads THROUGH as real liquid
+                    // glass with no container tint. (Proven primitive — BridgeUIKit
+                    // already uses .ultraThinMaterial.)
+                    shape.fill(.ultraThinMaterial)
+                    // LENS — faint frost pooled at the thick CENTRE, fading to clear
+                    // at the rim (the "thicker glass in the middle" read). No tint box.
                     GeometryReader { geo in
                         shape.fill(RadialGradient(
                             colors: [Color.white.opacity(0.10),
                                      Color.white.opacity(0.03),
                                      Color.clear],
-                            center: UnitPoint(x: 0.5, y: 0.34),
+                            center: UnitPoint(x: 0.5, y: 0.28),
                             startRadius: 0,
                             endRadius: max(geo.size.width, geo.size.height) * 0.62))
                     }
+                    // A faint diagonal sheen lip — the only specular; no glint hotspot.
+                    shape.fill(BridgeTokens.sheen).allowsHitTesting(false)
                 }
             }
-            // Ingredient 2 — directional bevel (top rim-light + bottom occlusion).
-            // The bevel + float shadow define the BORDERLESS edge — no hairline.
-            .overlay(rung.bevel.overlay(in: shape).allowsHitTesting(false))
             .clipShape(shape)
-            // Ingredient 4 — e3 dual drop shadow (the floating-glass depth).
-            .modifier(OptionalBridgeShadow(rung.shadow))
+            // Soft FLOAT shadow only — NO directional bevel, NO edge hairline. The
+            // borderless container is defined purely by the blur + this soft lift.
+            .shadow(color: .black.opacity(0.26), radius: 14, y: 8)
     }
 }
 
-/// Local twin of the (private) `OptionalShadow` in BridgeThemeV2 — applies a
-/// `BridgeShadow` only when present (the rung always carries one for e3).
-private struct OptionalBridgeShadow: ViewModifier {
-    let shadow: BridgeTokens.BridgeShadow?
-    init(_ shadow: BridgeTokens.BridgeShadow?) { self.shadow = shadow }
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if let s = shadow { content.bridgeShadow(s) } else { content }
-    }
-}
+// (OptionalBridgeShadow removed — the frosted-air PopoverGlass uses a single
+//  soft float shadow, not the e3 dual-shadow rung.)
 
 private extension View {
     /// Wrap `self` in the v4 floating popover-glass surface at `radius`.
