@@ -93,6 +93,31 @@ public enum JobsSchema {
     CREATE INDEX IF NOT EXISTS idx_executions_job_started
         ON job_executions(job_id, started_at DESC);
     """
+
+    /// PKT-381 (Scheduler Resilience): durable missed-occurrence backlog. Each
+    /// row is one scheduled occurrence that the reconciler determined was missed
+    /// (last-success → now, deduped against job_executions). The
+    /// `UNIQUE(job_id, occurrence_ts)` constraint is the load-bearing idempotency
+    /// key: an occurrence is enqueued AT MOST ONCE across the reconciler, a
+    /// relaunch, and a launchd wake-run — re-enqueue is an `INSERT OR IGNORE`
+    /// no-op. `occurrence_ts` is the ISO8601 wall-clock instant the slot was due.
+    /// Additive migration: created on open(); never alters jobs / job_executions.
+    public static let createBacklog = """
+    CREATE TABLE IF NOT EXISTS job_backlog (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        occurrence_ts TEXT NOT NULL,
+        enqueued_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        UNIQUE(job_id, occurrence_ts)
+    );
+    """
+
+    /// Drain order index: oldest-pending-first lookups hit this directly.
+    public static let createBacklogIndex = """
+    CREATE INDEX IF NOT EXISTS idx_backlog_status_occurrence
+        ON job_backlog(status, occurrence_ts ASC);
+    """
 }
 
 // MARK: - Value types
@@ -152,6 +177,47 @@ public struct ExecutionRecord: Codable, Sendable, Equatable {
     public var status: Status
     public var results: String?      // JSON string of per-step results
     public var errorMessage: String?
+
+    public init(id: Int64? = nil,
+                jobId: String,
+                startedAt: Date,
+                completedAt: Date? = nil,
+                status: Status,
+                results: String? = nil,
+                errorMessage: String? = nil) {
+        self.id = id
+        self.jobId = jobId
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+        self.status = status
+        self.results = results
+        self.errorMessage = errorMessage
+    }
+}
+
+/// PKT-381: one durable backlog entry — a single missed scheduled occurrence
+/// the reconciler decided still needs to run. `occurrenceTs` is the wall-clock
+/// instant the slot was originally due; `(jobId, occurrenceTs)` is unique, which
+/// is the idempotency key the whole resilience design hangs on.
+public struct BacklogRecord: Codable, Sendable, Equatable {
+    public enum Status: String, Codable, Sendable { case pending, running, done, skipped }
+    public var id: Int64?
+    public var jobId: String
+    public var occurrenceTs: Date
+    public var enqueuedAt: Date
+    public var status: Status
+
+    public init(id: Int64? = nil,
+                jobId: String,
+                occurrenceTs: Date,
+                enqueuedAt: Date = Date(),
+                status: Status = .pending) {
+        self.id = id
+        self.jobId = jobId
+        self.occurrenceTs = occurrenceTs
+        self.enqueuedAt = enqueuedAt
+        self.status = status
+    }
 }
 
 /// Minimal Codable JSON wrapper used for action-step arguments (MCP `Value` is
@@ -252,6 +318,11 @@ public actor JobStore {
         try exec(JobsSchema.createJobs)
         try exec(JobsSchema.createExecutions)
         try exec(JobsSchema.createExecutionIndex)
+        // PKT-381: additive durable-backlog migration. IF NOT EXISTS makes this
+        // a no-op on databases that already have the table, so it is safe to run
+        // on every open() and preserves full back-compat with pre-381 DBs.
+        try exec(JobsSchema.createBacklog)
+        try exec(JobsSchema.createBacklogIndex)
     }
 
     public func close() {
@@ -384,6 +455,148 @@ public actor JobStore {
         return rows.compactMap(Self.execFromRow)
     }
 
+    /// PKT-381: the most recent SUCCESSFUL (or partial) execution for a job, used
+    /// by the reconciler as the lower bound when enumerating missed occurrences.
+    /// `.skipped` and `.failure` rows are intentionally NOT treated as a
+    /// successful watermark — a skip (paused/battery) or failure must not advance
+    /// the catch-up cursor, otherwise a slot a failed run "consumed" would be lost.
+    /// Returns nil if the job has never run to success, in which case the caller
+    /// falls back to the job's createdAt as the enumeration floor.
+    public func lastSuccessfulExecution(jobId: String) throws -> ExecutionRecord? {
+        let sql = """
+        SELECT id,job_id,started_at,completed_at,status,results,error_message
+        FROM job_executions
+        WHERE job_id=? AND status IN ('success','partial')
+        ORDER BY started_at DESC LIMIT 1;
+        """
+        let rows = try query(sql) { stmt in
+            sqlite3_bind_text(stmt, 1, jobId, -1, SQLITE_TRANSIENT)
+        }
+        return rows.compactMap(Self.execFromRow).first
+    }
+
+    /// True iff a job_executions row already exists whose started_at falls inside
+    /// the half-open window [windowStart, windowEnd). The reconciler uses this to
+    /// dedup an enumerated occurrence against a run launchd may already have
+    /// fired (the single coalesced wake-run) before enqueuing it.
+    public func hasExecution(jobId: String, in windowStart: Date, _ windowEnd: Date) throws -> Bool {
+        let sql = """
+        SELECT 1 FROM job_executions
+        WHERE job_id=? AND started_at >= ? AND started_at < ? LIMIT 1;
+        """
+        let rows = try query(sql) { stmt in
+            sqlite3_bind_text(stmt, 1, jobId, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 2, Self.iso(windowStart), -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 3, Self.iso(windowEnd), -1, SQLITE_TRANSIENT)
+        }
+        return !rows.isEmpty
+    }
+
+    // MARK: CRUD — backlog (PKT-381)
+
+    /// Idempotent enqueue of one missed occurrence. `INSERT OR IGNORE` against the
+    /// `UNIQUE(job_id, occurrence_ts)` constraint means re-enqueuing the same
+    /// (job, occurrence) — whether from a second reconciler pass, a relaunch, or a
+    /// race with launchd — is a silent no-op. Returns true iff a NEW row was added.
+    @discardableResult
+    public func enqueueBacklog(jobId: String, occurrenceTs: Date, enqueuedAt: Date = Date()) throws -> Bool {
+        let before = sqlite3_total_changes(db)
+        let sql = "INSERT OR IGNORE INTO job_backlog(job_id,occurrence_ts,enqueued_at,status) VALUES(?,?,?,'pending');"
+        try bindAndStep(sql) { stmt in
+            sqlite3_bind_text(stmt, 1, jobId, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 2, Self.iso(occurrenceTs), -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(stmt, 3, Self.iso(enqueuedAt), -1, SQLITE_TRANSIENT)
+        }
+        return sqlite3_total_changes(db) > before
+    }
+
+    /// All pending backlog rows, oldest-occurrence first (the drain order).
+    public func pendingBacklog(limit: Int = 1000) throws -> [BacklogRecord] {
+        let sql = """
+        SELECT id,job_id,occurrence_ts,enqueued_at,status FROM job_backlog
+        WHERE status='pending' ORDER BY occurrence_ts ASC, id ASC LIMIT ?;
+        """
+        let rows = try query(sql) { stmt in
+            sqlite3_bind_int(stmt, 1, Int32(max(1, min(limit, 10000))))
+        }
+        return rows.compactMap(Self.backlogFromRow)
+    }
+
+    /// The single oldest pending backlog row, or nil if the backlog is drained.
+    /// This is the serial-drain pick: oldest occurrence wins, id breaks ties.
+    public func nextPendingBacklog() throws -> BacklogRecord? {
+        let sql = """
+        SELECT id,job_id,occurrence_ts,enqueued_at,status FROM job_backlog
+        WHERE status='pending' ORDER BY occurrence_ts ASC, id ASC LIMIT 1;
+        """
+        let rows = try query(sql) { _ in }
+        return rows.compactMap(Self.backlogFromRow).first
+    }
+
+    /// Backlog rows for a job in any status (test/inspection helper).
+    public func backlog(jobId: String) throws -> [BacklogRecord] {
+        let sql = """
+        SELECT id,job_id,occurrence_ts,enqueued_at,status FROM job_backlog
+        WHERE job_id=? ORDER BY occurrence_ts ASC, id ASC;
+        """
+        let rows = try query(sql) { stmt in
+            sqlite3_bind_text(stmt, 1, jobId, -1, SQLITE_TRANSIENT)
+        }
+        return rows.compactMap(Self.backlogFromRow)
+    }
+
+    /// Count of pending backlog rows for a job — used to bound per-job catch-up.
+    public func pendingBacklogCount(jobId: String) throws -> Int {
+        let sql = "SELECT COUNT(*) FROM job_backlog WHERE job_id=? AND status='pending';"
+        let rows = try query(sql) { stmt in
+            sqlite3_bind_text(stmt, 1, jobId, -1, SQLITE_TRANSIENT)
+        }
+        if let first = rows.first, let n = first.first as? Int64 { return Int(n) }
+        return 0
+    }
+
+    /// Total pending backlog rows across all jobs — used for the global ceiling.
+    public func pendingBacklogTotal() throws -> Int {
+        let sql = "SELECT COUNT(*) FROM job_backlog WHERE status='pending';"
+        let rows = try query(sql) { _ in }
+        if let first = rows.first, let n = first.first as? Int64 { return Int(n) }
+        return 0
+    }
+
+    /// Transition a backlog row's status. Used by the drain to move
+    /// pending → running → done/skipped. `expecting` (when supplied) makes the
+    /// update conditional on the current status, giving an atomic compare-and-set
+    /// so two drains can never both claim the same row (single-flight guard).
+    /// Returns true iff exactly one row was transitioned.
+    @discardableResult
+    public func setBacklogStatus(id: Int64, to status: BacklogRecord.Status, expecting: BacklogRecord.Status? = nil) throws -> Bool {
+        let before = sqlite3_total_changes(db)
+        if let expecting {
+            let sql = "UPDATE job_backlog SET status=? WHERE id=? AND status=?;"
+            try bindAndStep(sql) { stmt in
+                sqlite3_bind_text(stmt, 1, status.rawValue, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_int64(stmt, 2, id)
+                sqlite3_bind_text(stmt, 3, expecting.rawValue, -1, SQLITE_TRANSIENT)
+            }
+        } else {
+            let sql = "UPDATE job_backlog SET status=? WHERE id=?;"
+            try bindAndStep(sql) { stmt in
+                sqlite3_bind_text(stmt, 1, status.rawValue, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_int64(stmt, 2, id)
+            }
+        }
+        return sqlite3_total_changes(db) > before
+    }
+
+    /// Reset any rows stuck in `running` (e.g. the app was killed mid-drain)
+    /// back to `pending` so a relaunch resumes them. Returns the count reset.
+    @discardableResult
+    public func requeueStuckRunning() throws -> Int {
+        let before = sqlite3_total_changes(db)
+        try exec("UPDATE job_backlog SET status='pending' WHERE status='running';")
+        return Int(sqlite3_total_changes(db) - before)
+    }
+
     // MARK: Low-level helpers
 
     private func exec(_ sql: String) throws {
@@ -493,6 +706,18 @@ public actor JobStore {
             results: row[5] as? String,
             errorMessage: row[6] as? String
         )
+    }
+
+    private static func backlogFromRow(_ row: [Any?]) -> BacklogRecord? {
+        guard row.count == 5,
+              let jobId = row[1] as? String,
+              let occ = parseISO(row[2] as? String),
+              let enq = parseISO(row[3] as? String),
+              let statusRaw = row[4] as? String,
+              let status = BacklogRecord.Status(rawValue: statusRaw)
+        else { return nil }
+        let id = (row[0] as? Int64)
+        return BacklogRecord(id: id, jobId: jobId, occurrenceTs: occ, enqueuedAt: enq, status: status)
     }
 
     private func encodeActions(_ chain: [ActionStep]) throws -> String {
