@@ -1044,7 +1044,15 @@ set -euo pipefail
 # blank local metadata. +7 pure parse/build tests (SkillNotionMetadataSyncTests).
 # Measured integrated green = 1937 passed, 0 failed. FLOOR raised 1930 -> 1937
 # per the order-inversion rule.
-FLOOR="${BRIDGE_TEST_FLOOR:-1937}"
+# PKT-1003 / Skills Truth-Up Waves B+C+D (2026-06-16): cache truth-up (body
+# store wired to the Cache-all/Cache-now/Refresh buttons; pip + counts +
+# indicators read real SkillBodyCacheStore state), toggle truth-up (two
+# non-functional rows removed, Auto-load → "List in routing index"), and
+# detail-header up/down navigation (prev/next over the visible list). +5 pure
+# body-cache snapshot tests + +5 pure navigation tests. Measured integrated
+# green = 1947 passed, 0 failed. FLOOR raised 1937 -> 1947 per the
+# order-inversion rule.
+FLOOR="${BRIDGE_TEST_FLOOR:-1947}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

@@ -647,6 +647,8 @@ await runMCPHTTPValidationTests()
 await runDesktopOrganizationScenarioTests()
 await runSkillsModuleTests()
 await runSkillNotionMetadataSyncTests() // PKT-1003 Wave A: real-column sync read/write + gate-safe pull (no metadata blanking)
+await runSkillCacheStatusSnapshotTests() // PKT-1003 Wave B: pure body-cache snapshot (real body-store state for pip + counts + indicators)
+await runSkillListNavigationTests() // PKT-1003 Wave D: detail-header prev/next navigation math
 await runCredentialManagerTests()
 await runCredentialModuleTests()
 await runCredentialHardeningTests()   // [credentials] hardening: env-var alias normalization → canonical service:account, sentinel/placeholder detection, idempotent-read transient-drop retry policy. PURE — no Keychain / no live network.
