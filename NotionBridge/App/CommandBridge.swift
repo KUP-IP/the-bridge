@@ -76,10 +76,11 @@ public final class CommandBridgePanel: NSPanel {
         isFloatingPanel = true
         level = .floating
         hidesOnDeactivate = false
-        // (v4 round-2) Draggable — the operator can reposition the palette; the
-        // controller remembers the spot for the session and resets to the default
-        // placement on app boot (rememberedOrigin is per-launch, never persisted).
-        isMovableByWindowBackground = true
+        // (v4 round-3) Drag is handled by a SwiftUI gesture in the hosted view —
+        // isMovableByWindowBackground does NOT engage an NSHostingView (verified
+        // on-device: the bar wouldn't move). The controller's didMove observer
+        // still records the dragged origin for the session + resets on boot.
+        isMovableByWindowBackground = false
         backgroundColor = .clear
         isOpaque = false
         hasShadow = false   // shadows are baked into BridgeGlass surfaces
@@ -1079,6 +1080,10 @@ public struct CommandBridgeRootView: View {
     @ObservedObject var model: CommandBridgeViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion: Bool
     @FocusState private var queryFocused: Bool
+    // (v4 round-3) Window-drag plumbing — resolve the hosting window + track the
+    // cursor-to-origin offset so the palette can drag itself.
+    @State private var paletteWindow: NSWindow?
+    @State private var dragMouseOffset: CGSize?
 
     private var anim: CommandBridgeAnimation {
         reduceMotion ? .reduced : .locked
@@ -1120,6 +1125,11 @@ public struct CommandBridgeRootView: View {
         .frame(width: CommandBridgeController.pillWidth + 24,
                height: CommandBridgeController.panelSize.height,
                alignment: .top)
+        // (v4 round-3) Capture the hosting window + make the whole palette
+        // draggable. simultaneousGesture so taps on the orbs / menu mark still
+        // fire and the field still focuses; a >3pt drag on the glass repositions.
+        .background(WindowAccessor { paletteWindow = $0 })
+        .simultaneousGesture(windowDrag)
         .background(KeyHandler(
             onNumber: { n in model.onFireSlot(n) },
             onArrowDown: { model.moveSelection(1) },
@@ -1139,6 +1149,29 @@ public struct CommandBridgeRootView: View {
         case .recents:             return "recents"
         case .search(let q):       return "search:\(q)"
         }
+    }
+
+    /// Drag the whole palette to reposition it (operator round-3: the bar wouldn't
+    /// move). Moves the hosting window from the LIVE cursor (`NSEvent.mouseLocation`,
+    /// screen coords) so there's no feedback jitter as the window follows.
+    /// `minimumDistance` keeps taps (fire favorite / focus field) intact; a >3pt
+    /// drag anywhere on the glass repositions. Session memory + reset-on-boot live
+    /// in the controller (its didMove observer records each move).
+    private var windowDrag: some Gesture {
+        DragGesture(minimumDistance: 3)
+            .onChanged { _ in
+                guard let win = paletteWindow else { return }
+                let mouse = NSEvent.mouseLocation
+                if dragMouseOffset == nil {
+                    dragMouseOffset = CGSize(width: mouse.x - win.frame.origin.x,
+                                             height: mouse.y - win.frame.origin.y)
+                }
+                if let off = dragMouseOffset {
+                    win.setFrameOrigin(CGPoint(x: mouse.x - off.width,
+                                               y: mouse.y - off.height))
+                }
+            }
+            .onEnded { _ in dragMouseOffset = nil }
     }
 
     // MARK: Tray
@@ -1533,38 +1566,36 @@ public struct CommandBridgeRootView: View {
 
 private struct PopoverGlass: ViewModifier {
     let radius: CGFloat
+    @Environment(\.colorScheme) private var colorScheme
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        let isDark = colorScheme == .dark
+        // Operator round-3: "on a white backdrop I can still see the container."
+        // A blur material (.ultraThinMaterial) keeps a gray tint in DARK mode that
+        // reads as a filled box over white. Replace it with a WHISPER-faint adaptive
+        // frost that is invisible over white in BOTH themes (6%-white in dark,
+        // 45%-white ≈ white-on-white in light) and only a barely-there film over
+        // busy content. The favorites (BridgeGlassBubble) carry the liquid-glass
+        // signature; the container all but disappears — no fill box, no bevel, no
+        // edge hairline. The only definition is a soft, faint float halo.
+        let frost = isDark ? Color.white.opacity(0.06) : Color.white.opacity(0.45)
         return content
             .background {
                 ZStack {
-                    // FROSTED AIR (operator round-2: "I still see the container color
-                    // + outlines — make it near-invisible liquid glass"). The opaque
-                    // e3 popover FILL is gone; the most-transparent system material is
-                    // the only backing, so the desktop reads THROUGH as real liquid
-                    // glass with no container tint. (Proven primitive — BridgeUIKit
-                    // already uses .ultraThinMaterial.)
-                    shape.fill(.ultraThinMaterial)
-                    // LENS — faint frost pooled at the thick CENTRE, fading to clear
-                    // at the rim (the "thicker glass in the middle" read). No tint box.
+                    shape.fill(frost)
+                    // Faint centre lens (thick-middle read) — also invisible over white.
                     GeometryReader { geo in
                         shape.fill(RadialGradient(
-                            colors: [Color.white.opacity(0.10),
-                                     Color.white.opacity(0.03),
-                                     Color.clear],
-                            center: UnitPoint(x: 0.5, y: 0.28),
+                            colors: [Color.white.opacity(isDark ? 0.06 : 0.10), Color.clear],
+                            center: UnitPoint(x: 0.5, y: 0.26),
                             startRadius: 0,
-                            endRadius: max(geo.size.width, geo.size.height) * 0.62))
+                            endRadius: max(geo.size.width, geo.size.height) * 0.6))
                     }
-                    // A faint diagonal sheen lip — the only specular; no glint hotspot.
-                    shape.fill(BridgeTokens.sheen).allowsHitTesting(false)
                 }
             }
             .clipShape(shape)
-            // Soft FLOAT shadow only — NO directional bevel, NO edge hairline. The
-            // borderless container is defined purely by the blur + this soft lift.
-            .shadow(color: .black.opacity(0.26), radius: 14, y: 8)
+            .shadow(color: .black.opacity(isDark ? 0.20 : 0.10), radius: 11, y: 6)
     }
 }
 
@@ -1677,6 +1708,27 @@ private struct QueryField: NSViewRepresentable {
 private final class BridgeQueryTextField: NSTextField {
     var onArrowDown: (() -> Void)?
     var onEscape: (() -> Void)?
+}
+
+// ============================================================
+// MARK: - 8b. WindowAccessor — resolve the hosting NSWindow
+//
+//   The borderless non-activating panel ignores isMovableByWindowBackground when
+//   its content view is an NSHostingView, so the palette drags itself via a
+//   SwiftUI gesture (see `windowDrag`). That needs a reference to the hosting
+//   window; this representable resolves it on appear.
+// ============================================================
+
+private struct WindowAccessor: NSViewRepresentable {
+    let onResolve: (NSWindow?) -> Void
+    func makeNSView(context: Context) -> NSView {
+        let v = NSView()
+        DispatchQueue.main.async { onResolve(v.window) }
+        return v
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { onResolve(nsView.window) }
+    }
 }
 
 // ============================================================
