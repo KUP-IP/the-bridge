@@ -1364,6 +1364,7 @@ public struct CommandBridgeRootView: View {
             Text(label)
                 .font(BridgeTokens.Typeface.micro)
                 .foregroundStyle(BridgeTokens.fg5)
+                .legibilityHalo()
         }
     }
 
@@ -1416,6 +1417,7 @@ public struct CommandBridgeRootView: View {
         Text(s)
             .bridgeCap()
             .foregroundStyle(BridgeTokens.fg5)
+            .legibilityHalo()
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, BridgeTokens.Space.s3)
             .padding(.top, BridgeTokens.Space.s2)
@@ -1449,12 +1451,14 @@ public struct CommandBridgeRootView: View {
                     .font(BridgeTokens.Typeface.name)
                     .foregroundStyle(BridgeTokens.fg1)
                     .lineLimit(1)
+                    .legibilityHalo()
 
                 Spacer(minLength: BridgeTokens.Space.s1)
 
                 Text(Self.relativeHint(for: r.lastUsedAt))
                     .font(BridgeTokens.Typeface.meta)
                     .foregroundStyle(BridgeTokens.fg5)
+                    .legibilityHalo()
 
                 if let slot = r.keySlot {
                     // Slot keycap badge (`.cb-badge`) — mono, chip-filled.
@@ -1609,6 +1613,28 @@ private extension View {
     }
 }
 
+// ── Text legibility halo (v4 round-3) ──────────────────────────────────────
+//
+//   The pill/panel container is near-invisible now (operator round-3 chose
+//   "self-legible text"), so the text carries its OWN legibility — a subtle
+//   theme-aware halo lets it read on ANY backdrop (white, busy, dark): a dark
+//   halo in dark mode (white ink → reads on light backdrops), a light halo in
+//   light mode (dark ink → reads on dark backdrops). On a matching backdrop the
+//   halo is imperceptible. No container is reintroduced.
+private struct LegibilityHalo: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    func body(content: Content) -> some View {
+        let isDark = colorScheme == .dark
+        return content.shadow(
+            color: (isDark ? Color.black : Color.white).opacity(isDark ? 0.55 : 0.6),
+            radius: 2.5, x: 0, y: 0.5)
+    }
+}
+
+private extension View {
+    func legibilityHalo() -> some View { modifier(LegibilityHalo()) }
+}
+
 // ============================================================
 // MARK: - 8. QueryField — plain NSTextField bridge with key hooks
 // ============================================================
@@ -1635,14 +1661,22 @@ private struct QueryField: NSViewRepresentable {
         let monoFont = NSFont.monospacedSystemFont(ofSize: 27, weight: .regular)
         field.font = monoFont
         // Placeholder ink matches `.cb-ph` (fg-1 @ 34%) — a faint mono prompt.
+        // (v4 round-3) Self-legibility: the container is near-invisible now, so the
+        // placeholder carries its own contrast — ink raised to 42% + a soft dark
+        // shadow so "Bridge Command" reads even over a light backdrop.
+        let placeholderShadow = NSShadow()
+        placeholderShadow.shadowColor = NSColor.black.withAlphaComponent(0.55)
+        placeholderShadow.shadowBlurRadius = 3
+        placeholderShadow.shadowOffset = NSSize(width: 0, height: -1)
         field.placeholderAttributedString = NSAttributedString(
             string: placeholder,
             attributes: [
                 .font: monoFont,
                 .foregroundColor: BridgeTokens.adaptiveNSColor(
-                    dark:  { BridgeTokens.whiteAlpha(0.34) },
-                    light: { BridgeTokens.blackAlpha(0.34) }
+                    dark:  { BridgeTokens.whiteAlpha(0.42) },
+                    light: { BridgeTokens.blackAlpha(0.42) }
                 ),
+                .shadow: placeholderShadow,
             ]
         )
         // v3.7.6: adaptive ink — the query text follows the system appearance
@@ -1663,6 +1697,15 @@ private struct QueryField: NSViewRepresentable {
         field.cell?.isScrollable = true
         field.onArrowDown = { onArrowDown() }
         field.onEscape    = { onEscape() }
+        // (v4 round-3) Self-legibility for the typed text — a soft dark layer shadow
+        // halos the glyphs (the field bg is clear, so only the text casts it).
+        // Reads on white, subtle on dark; no container substrate needed.
+        field.wantsLayer = true
+        field.layer?.shadowColor = NSColor.black.cgColor
+        field.layer?.shadowOpacity = 0.45
+        field.layer?.shadowRadius = 2.5
+        field.layer?.shadowOffset = .zero
+        field.layer?.masksToBounds = false
         return field
     }
 
