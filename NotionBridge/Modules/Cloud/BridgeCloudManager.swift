@@ -107,7 +107,20 @@ public actor BridgeCloudManager: CloudProvisioning, CloudTeardown {
 
     // MARK: State
 
-    private(set) public var state: CloudConnectionState = .disabled
+    private(set) public var state: CloudConnectionState = .disabled {
+        didSet {
+            // PKT-1004 (Scheduler Resilience): on a genuine transition INTO
+            // .online from a non-online state (a reconnect after a network drop
+            // where the Mac never slept), fire the missed-occurrence reconciler.
+            // This is the "heartbeat-online" trigger that complements the
+            // NSWorkspace.didWake + launch triggers. Idempotent — the reconciler
+            // dedups against job_executions + the backlog UNIQUE key, so a noisy
+            // online⇄degraded flap can never double-fire an occurrence.
+            if state == .online, oldValue != .online {
+                Task.detached { await JobsManager.shared.onWakeOrHeartbeatOnline() }
+            }
+        }
+    }
     /// Local `jti` denylist (D-NL3.7) + consumed-token set. A capability
     /// whose `jti` is here is rejected as revoked/replayed.
     private var revokedJTIs: Set<String> = []
