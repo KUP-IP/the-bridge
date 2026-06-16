@@ -1571,44 +1571,65 @@ public struct CommandBridgeRootView: View {
 private struct PopoverGlass: ViewModifier {
     let radius: CGFloat
     @Environment(\.colorScheme) private var colorScheme
+    // SAME elevation rung as the favorite orbs (BridgeGlassBubble uses e2 RAISE):
+    // glass-raise body + bevel + rim + e2 shadow. The pill/panel read "too
+    // transparent" because they LACKED this body fill — now they share it.
+    private var rung: BridgeTokens.ElevationRung { BridgeTokens.Elevation.raise }
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         let isDark = colorScheme == .dark
-        // Operator round-3: "on a white backdrop I can still see the container."
-        // A blur material (.ultraThinMaterial) keeps a gray tint in DARK mode that
-        // reads as a filled box over white. Replace it with a WHISPER-faint adaptive
-        // frost that is invisible over white in BOTH themes (6%-white in dark,
-        // 45%-white ≈ white-on-white in light) and only a barely-there film over
-        // busy content. The favorites (BridgeGlassBubble) carry the liquid-glass
-        // signature; the container all but disappears — no fill box, no bevel, no
-        // edge hairline, no float halo. Over white the frost + lens vanish entirely.
-        let frost = isDark ? Color.white.opacity(0.06) : Color.white.opacity(0.45)
+        // SAME liquid glass as the orbs (operator: "it should look like the same
+        // liquid glass, same feel" — just a different shape). The orbs are an EVEN
+        // glass-raise body with a CENTRE-concentrated dome + refraction on top (their
+        // thickness gradient) and a bevel/rim/shadow edge. The pill mirrors that, the
+        // centre lensing shaped ELLIPTICALLY to the wide capsule.
+        let domeColors: [Color] = isDark
+            ? [Color.white.opacity(0.22), Color.white.opacity(0.06), Color.clear]
+            : [Color.white.opacity(0.42), Color.white.opacity(0.12), Color.clear]
         return content
             .background {
                 ZStack {
-                    shape.fill(frost)
-                    // Faint centre lens (thick-middle read) — also invisible over white.
-                    GeometryReader { geo in
-                        shape.fill(RadialGradient(
-                            colors: [Color.white.opacity(isDark ? 0.06 : 0.10), Color.clear],
-                            center: UnitPoint(x: 0.5, y: 0.26),
-                            startRadius: 0,
-                            endRadius: max(geo.size.width, geo.size.height) * 0.6))
-                    }
+                    // 1. BODY — the orbs' glass-raise fill (the presence that was missing).
+                    rung.fill?.paint(in: shape)
+                    // 2. THICK-CENTRE refraction — blur pooled at the centre, fading to
+                    //    clear at the rim (the gradient thickness).
+                    shape.fill(.ultraThinMaterial)
+                        .mask(shape.fill(EllipticalGradient(
+                            gradient: Gradient(stops: [
+                                .init(color: .black, location: 0.0),
+                                .init(color: .black.opacity(0.6), location: 0.55),
+                                .init(color: .clear, location: 1.0),
+                            ]),
+                            center: .center)))
+                    // 3. Lens highlight — the orbs' dome, widened to an ellipse.
+                    shape.fill(EllipticalGradient(
+                        gradient: Gradient(colors: domeColors),
+                        center: UnitPoint(x: 0.5, y: 0.34)))
+                    // 4. Specular glint — the raise-rung hotspot, same as the orbs.
+                    shape.fill(BridgeTokens.glint).allowsHitTesting(false)
                 }
             }
+            // 5+6. Same edge as the orbs: directional bevel + faint theme-aware rim.
+            .overlay(rung.bevel.overlay(in: shape).allowsHitTesting(false))
+            .overlay(shape.strokeBorder(BridgeTokens.edgeRaise, lineWidth: 1).allowsHitTesting(false))
             .clipShape(shape)
-            // No float shadow — definition-of-perfect pillar 4: "the field and
-            // recents are AIR; no halo that reads as an edge." The frost + lens are
-            // invisible over white, so without the shadow the container fully
-            // disappears. The favorites keep their own glass shadow — only the orbs
-            // read as glass; everything else floats as air with self-legible text.
+            // 7. Same depth as the orbs: the e2 dual shadow + a soft contact shadow.
+            .modifier(OptionalBridgeShadow(rung.shadow))
+            .shadow(color: .black.opacity(isDark ? 0.20 : 0.10), radius: 9, y: 4)
     }
 }
 
-// (OptionalBridgeShadow removed — the frosted-air PopoverGlass uses a single
-//  soft float shadow, not the e3 dual-shadow rung.)
+/// Applies the rung's dual (ambient + contact) `BridgeShadow` when present, so the
+/// pill/panel get the SAME e2 depth as the favorite orbs.
+private struct OptionalBridgeShadow: ViewModifier {
+    let shadow: BridgeTokens.BridgeShadow?
+    init(_ shadow: BridgeTokens.BridgeShadow?) { self.shadow = shadow }
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let s = shadow { content.bridgeShadow(s) } else { content }
+    }
+}
 
 private extension View {
     /// Wrap `self` in the v4 floating popover-glass surface at `radius`.

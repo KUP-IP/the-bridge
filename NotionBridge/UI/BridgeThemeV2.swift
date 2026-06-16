@@ -318,6 +318,19 @@ public struct BridgeGlassBubble<Content: View>: View {
         return ZStack {
             // Ingredient 1 — e2 raise surface fill (token-driven base + sheen).
             rung.fill?.paint(in: shape)
+            // THICK-CENTRE refraction (operator: gradient thickness — a glass bead is
+            // thick in the middle, thin at the rim). A real blur pooled in the centre,
+            // fading to clear at the edge via a RADIAL mask, so the orb reads as a
+            // thick refractive lens rather than an even tint; the firm rim (below)
+            // keeps the thin edge defined.
+            shape.fill(.ultraThinMaterial)
+                .mask(shape.fill(RadialGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: .black, location: 0.0),
+                        .init(color: .black.opacity(0.55), location: 0.5),
+                        .init(color: .clear, location: 0.95),
+                    ]),
+                    center: .center, startRadius: 0, endRadius: size * 0.5)))
             // Signature specular dome — centred so the lens reads thick in the middle.
             shape
                 .fill(
