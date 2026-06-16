@@ -678,6 +678,7 @@ await runBridgeAutomationModuleTests()  // FB-AUTOMATION: bridge_settings_naviga
 await runCGEventModuleTests()           // PKT-765 (v2.2 · 3.3.1)
 await runPasteboardHistoryModuleTests() // PKT-765 (v2.2 · 3.3.1)
 await runJobsModuleTests()
+await runSchedulerResilienceTests()  // PKT-381: durable backlog + reconciler + serial drain + first job
 await runGhModuleTests()
 await runGitModuleTests()
 await runWSHMenuBarTests()        // PKT-804 (v2.3): menu-bar quick-page

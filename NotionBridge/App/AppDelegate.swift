@@ -494,6 +494,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.runCredentialAutoValidateIfDue() }
+            // PKT-381 (Scheduler Resilience): on wake, reconcile + drain any
+            // scheduled occurrences that were missed while the Mac slept past a
+            // slot. launchd coalesces a sleep-spanning miss into at most one
+            // wake-run; this is the durable catch-up that also covers slots
+            // launchd dropped. Idempotent — deduped against job_executions.
+            Task.detached { await JobsManager.shared.onWakeOrHeartbeatOnline() }
         }
     }
 

@@ -1003,7 +1003,15 @@ public actor JobsManager {
     public static let ssePort: Int = 9700
 
     private var didBootstrap = false
-    private weak var router: ToolRouter?
+    /// Internal (not private) so the PKT-381 reconciler/drain extension in
+    /// JobsReconciler.swift can read the bootstrapped router.
+    weak var router: ToolRouter?
+
+    /// PKT-381: single-flight guard for the serial backlog drain. Set while a
+    /// drain is in progress so a wake/heartbeat-triggered drain cannot overlap an
+    /// in-flight launch drain. Actor isolation already serializes the bodies; this
+    /// additionally prevents a *second* drain from interleaving its picks.
+    var draining = false
 
     private init() {}
 
@@ -1011,21 +1019,48 @@ public actor JobsManager {
     /// need a ready store). Idempotent.
     public func bootstrap(router: ToolRouter? = nil) async {
         if let router { self.router = router }
-        if didBootstrap { return }
+        if didBootstrap {
+            // Already bootstrapped, but if this call is the one that finally
+            // supplied the router (the server comes up after the first
+            // bootstrap), run a reconcile+drain now so a launch that beat the
+            // server to the punch still replays missed occurrences.
+            if router != nil { await reconcileAndDrain(router: self.router) }
+            return
+        }
         do {
             try await JobStore.shared.open()
             didBootstrap = true
-            // Best-effort missed-execution scan (Wave 4 quality gate): mark any
-            // active jobs whose last execution is suspiciously stale. We log
-            // rather than replay — launchd will fire the next scheduled slot.
-            _ = try await JobStore.shared.listAll(statusFilter: .active)
             // v1.9.2: Migrate legacy curl-based plists to the signed NBJobRunner
             // helper. One-shot; re-running is a no-op because migrated plists
             // no longer reference /usr/bin/curl.
             await migrateLegacyCurlPlists()
+            // PKT-381: REAL missed-occurrence handling replaces the old dead scan
+            // (`_ = listAll(.active)` that discarded its result). Reconcile every
+            // active job's missed occurrences (last-success → now) into the
+            // durable backlog and serially drain it. Idempotent + DST-correct;
+            // the same path runs again on wake/heartbeat-online. If no router has
+            // been supplied yet (server not up), reconcile still ENQUEUES the
+            // backlog now; the drain runs once a router arrives (see the
+            // didBootstrap branch above and onWakeOrHeartbeatOnline()).
+            await reconcileMissedOccurrences()
+            if self.router != nil {
+                await drainBacklog(router: self.router)
+            }
         } catch {
             print("[JobsManager] bootstrap failed: \(error)")
         }
+    }
+
+    /// PKT-381: the wake / heartbeat-online entry point. Wired to BOTH
+    /// `NSWorkspace.didWakeNotification` and the cloud heartbeat going online so
+    /// a long-running app that slept past a slot, or reconnected after a drop,
+    /// replays the missed occurrences without a relaunch. Idempotent.
+    public func onWakeOrHeartbeatOnline() async {
+        guard didBootstrap else {
+            await bootstrap()
+            return
+        }
+        await reconcileAndDrain(router: self.router)
     }
 
     /// v1.9.2: Rewrite any LaunchAgent plists under ~/Library/LaunchAgents/

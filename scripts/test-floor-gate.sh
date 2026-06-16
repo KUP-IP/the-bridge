@@ -1052,7 +1052,32 @@ set -euo pipefail
 # body-cache snapshot tests + +5 pure navigation tests. Measured integrated
 # green = 1947 passed, 0 failed. FLOOR raised 1937 -> 1947 per the
 # order-inversion rule.
-FLOOR="${BRIDGE_TEST_FLOOR:-1947}"
+# PKT-381 / PKT-1004 (Scheduler Resilience, 2026-06-16): durable
+# missed-occurrence backlog + reconciler + serial drain. New job_backlog
+# table (UNIQUE(job_id, occurrence_ts) idempotency key) + additive migration;
+# lastSuccessfulExecution watermark + hasExecution dedup-window lookups;
+# JobOccurrenceEnumerator (DST-correct PAST-occurrence enumeration with a
+# per-job safety ceiling) + CatchUpPolicy (replayAll default / maxLookback /
+# coalesceToLatest); JobsManager.reconcileMissedOccurrences (replaces the dead
+# bootstrap() no-op scan) + serial single-flight drainBacklog (oldest-first,
+# CAS claim, requeueStuckRunning resume, skip_on_battery-aware) wired on launch
+# (ServerManager router handoff) + wake (AppDelegate NSWorkspace.didWake). The
+# new SchedulerResilienceTests suite adds 24 harness test() blocks: Wave-1
+# durability (UNIQUE dedup, oldest-first ordering, CAS single-flight claim,
+# requeueStuckRunning resume, CASCADE delete, watermark ignores failure/skipped,
+# dedup-window detection), Wave-2 enumeration (3-day gap, exclusive-lower/
+# inclusive-upper bounds, hourly gap, weekday-only, DST spring-forward 02:30
+# collapse + fall-back 01:30 ambiguity, safety-ceiling clip, applyPolicy
+# coalesce/maxLookback, reconciler missed-set + launchd-run dedup + idempotent
+# second pass + never-run createdAt floor), Wave-3 drain (serial oldest-first,
+# mid-drain-kill resume, skip_on_battery skip-record, no-double-fire re-drain).
+# The two reconciler tests that assert concrete UTC instants pin timeZone: utc
+# via the new injectable seam (production defaults to .current to match launchd's
+# local-time firing). Measured integrated green = 1972 passed, 0 failed (on the
+# America/Chicago host). FLOOR raised 1947 -> 1972 (+25) per the order-inversion
+# rule. Wave 4 (first running-report job) ships as a registered template +
+# Run-now; its Strava data path is operator-pending (REVIEW) and adds no tests.
+FLOOR="${BRIDGE_TEST_FLOOR:-1972}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

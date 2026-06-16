@@ -350,6 +350,17 @@ public actor ServerManager {
 
         // 7. SSE server was created before module registration so session diagnostics can be injected
 
+        // PKT-381 (Scheduler Resilience): hand the live router to JobsManager so
+        // its missed-occurrence reconciler can serially DRAIN the durable backlog
+        // through the same ToolRouter the SSE job-callback uses. bootstrap(router:)
+        // is idempotent — if AppDelegate already bootstrapped the store, this call
+        // just supplies the router and triggers a reconcile+drain of anything that
+        // was enqueued before the server was up. Detached so server startup is not
+        // blocked by the (potentially long) catch-up drain.
+        Task.detached { [router] in
+            await JobsManager.shared.bootstrap(router: router)
+        }
+
         return await router.allRegistrations().count
     }
 
