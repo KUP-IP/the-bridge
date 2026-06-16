@@ -76,6 +76,10 @@ public final class CommandBridgePanel: NSPanel {
         isFloatingPanel = true
         level = .floating
         hidesOnDeactivate = false
+        // (v4 round-3) Drag is handled by a SwiftUI gesture in the hosted view —
+        // isMovableByWindowBackground does NOT engage an NSHostingView (verified
+        // on-device: the bar wouldn't move). The controller's didMove observer
+        // still records the dragged origin for the session + resets on boot.
         isMovableByWindowBackground = false
         backgroundColor = .clear
         isOpaque = false
@@ -254,6 +258,13 @@ public final class CommandBridgeController: NSObject {
     /// (v3.7.6) Global mouse-down monitor installed while the palette is open.
     /// Fires on a click OUTSIDE the panel and dismisses (Spotlight behaviour).
     private var globalClickMonitor: Any?
+    /// (v4 round-2) Observes the panel moving so a drag updates `rememberedOrigin`.
+    private var didMoveObserver: Any?
+    /// (v4 round-2) Where the operator last dragged the palette THIS app run. nil
+    /// until the first drag; restored on every open within the session. It is an
+    /// instance var (not UserDefaults), so it resets to the default placement on
+    /// the next app boot — the "standard boot-up location" the operator asked for.
+    private var rememberedOrigin: CGPoint?
 
     /// (v3.7.6) The app that was frontmost the instant before we showed, so
     /// paste-into-app can re-activate it and synthesize ⌘V. Captured in
@@ -335,28 +346,73 @@ public final class CommandBridgeController: NSObject {
         return screens.first
     }
 
+    /// Adaptive palette width (operator round-2): the bar tracks the favorite
+    /// count and centres in the transparent envelope, clamped to [half, full].
+    /// ~5 favorites ≈ half width; 10 ≈ full. Pure so the clamp is unit-tested.
+    public nonisolated static func paletteWidth(favoriteCount: Int, full: CGFloat) -> CGFloat {
+        let pitch: CGFloat = 64                       // 54 bubble + 10 gap
+        let content = CGFloat(max(favoriteCount, 1)) * pitch
+        let floorW = (full / 2).rounded()             // never narrower than half
+        return min(max(content, floorW), full)
+    }
+
+    /// Clamp a remembered drag origin so a display change can't strand the panel
+    /// off-screen. Picks the screen under the panel's centre (else the first) and
+    /// keeps the frame fully inside it. Pure + nonisolated for headless tests.
+    public nonisolated static func clampOrigin(
+        _ origin: CGPoint, toScreens screens: [CGRect], panelSize: CGSize
+    ) -> CGPoint {
+        let centre = CGPoint(x: origin.x + panelSize.width / 2,
+                             y: origin.y + panelSize.height / 2)
+        guard let screen = screens.first(where: { $0.contains(centre) }) ?? screens.first
+        else { return origin }
+        let maxX = max(screen.minX, screen.maxX - panelSize.width)
+        let maxY = max(screen.minY, screen.maxY - panelSize.height)
+        return CGPoint(x: min(max(origin.x, screen.minX), maxX),
+                       y: min(max(origin.y, screen.minY), maxY))
+    }
+
     // MARK: - Hot-key registration (Carbon — no Input Monitoring)
     //
-    //   Reused verbatim in semantics from `CommandBoxController.registerHotkey`.
-    //   The Carbon callback trampolines back to `handleHotkey()` on the
-    //   main actor; the `HotkeyConfig.signature` ('NBcb') is unchanged.
+    //   v4 enterprise-grade hardening. Two changes from the prior shape that
+    //   were the surface of the persistent "⚠ Shortcut not active" defect:
+    //
+    //   1. INSTALL-ONCE event handler. The Carbon `InstallEventHandler` is
+    //      idempotent here — it runs at most ONCE for the lifetime of the
+    //      controller (tracked by `eventHandler`), decoupled from per-combo
+    //      `RegisterEventHotKey`. Before, every register()/rebind() installed a
+    //      FRESH application-level handler; a rebind (unregister→register) or a
+    //      double-start could leave multiple live handlers, each trampolining
+    //      `handleHotkey()` → the palette opened-then-immediately-closed on a
+    //      single press and read as "the shortcut doesn't work". Unregistering
+    //      now drops ONLY the hot-key (`UnregisterEventHotKey`); the single
+    //      handler persists, so re-register is a clean one-call op.
+    //
+    //   2. PRECISE collision-vs-plumbing classification. Only the real
+    //      "combo owned by another app" OSStatus (`eventHotKeyExistsErr`,
+    //      -9878) maps to `.collision`; every other non-noErr maps to
+    //      `.plumbingFailure`. A false "in use by another app" message is
+    //      thus impossible for a non-collision failure.
+    //
+    //   The Carbon callback trampolines back to `handleHotkey()` on the main
+    //   actor; the `HotkeyConfig.signature` ('NBcb') is unchanged.
 
+    /// Carbon's "this hot-key is already registered (by us or another app)"
+    /// result. Named locally so the classification doesn't depend on the
+    /// constant being importable everywhere.
+    nonisolated private static let eventHotKeyExists: Int32 = -9878  // eventHotKeyExistsErr
+
+    /// Install the application-level Carbon event handler exactly once. Returns
+    /// `noErr` when the handler is already installed (idempotent) or the install
+    /// succeeds; a non-noErr OSStatus on a genuine install failure. Decoupling
+    /// this from `RegisterEventHotKey` is the fix for the multi-handler churn
+    /// that made a single key-press toggle the palette twice.
     @discardableResult
-    public func registerHotkey() -> Bool {
-        guard hotkey.hasModifier else {
-            print("[CommandBridge] refusing modifier-less hot-key")
-            lastRegisterStatus = .plumbingFailure(osStatus: Int32(paramErr))
-            return false
-        }
-        guard !isRegistered else {
-            lastRegisterStatus = .registered
-            return true
-        }
-
+    private func installEventHandlerIfNeeded() -> OSStatus {
+        if eventHandler != nil { return noErr }   // already installed — idempotent
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
                                  eventKind: UInt32(kEventHotKeyPressed))
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
-
         let installStatus = InstallEventHandler(
             GetApplicationEventTarget(),
             { _, eventRef, userData -> OSStatus in
@@ -376,6 +432,23 @@ public final class CommandBridgeController: NSObject {
             },
             1, &spec, selfPtr, &eventHandler
         )
+        return installStatus
+    }
+
+    @discardableResult
+    public func registerHotkey() -> Bool {
+        guard hotkey.hasModifier else {
+            print("[CommandBridge] refusing modifier-less hot-key")
+            lastRegisterStatus = .plumbingFailure(osStatus: Int32(paramErr))
+            return false
+        }
+        guard !isRegistered else {
+            lastRegisterStatus = .registered
+            return true
+        }
+
+        // (1) Install-once handler — NOT re-installed on every register/rebind.
+        let installStatus = installEventHandlerIfNeeded()
         guard installStatus == noErr else {
             print("[CommandBridge] InstallEventHandler failed: \(installStatus)")
             lastRegisterStatus = .plumbingFailure(osStatus: Int32(installStatus))
@@ -388,9 +461,13 @@ public final class CommandBridgeController: NSObject {
             GetApplicationEventTarget(), 0, &hotKeyRef
         )
         guard regStatus == noErr else {
-            print("[CommandBridge] RegisterEventHotKey failed: \(regStatus) (combo likely taken)")
-            if let h = eventHandler { RemoveEventHandler(h); eventHandler = nil }
-            lastRegisterStatus = .collision(osStatus: Int32(regStatus))
+            // (2) Precise classification: ONLY the real already-registered code
+            // is a collision; anything else is a plumbing failure. The handler
+            // is install-once, so we do NOT tear it down here (a later retry /
+            // rebind reuses it).
+            lastRegisterStatus = Self.classifyRegisterFailure(regStatus)
+            print("[CommandBridge] RegisterEventHotKey failed: \(regStatus) → \(lastRegisterStatus)")
+            hotKeyRef = nil
             return false
         }
 
@@ -400,19 +477,48 @@ public final class CommandBridgeController: NSObject {
         return true
     }
 
+    /// Map a non-noErr `RegisterEventHotKey` OSStatus to the structured
+    /// outcome. Pure + nonisolated so the collision-vs-plumbing rule is
+    /// unit-tested headlessly (no Carbon call needed to assert the mapping).
+    public nonisolated static func classifyRegisterFailure(_ osStatus: OSStatus) -> HotkeyRegisterStatus {
+        osStatus == eventHotKeyExists
+            ? .collision(osStatus: Int32(osStatus))
+            : .plumbingFailure(osStatus: Int32(osStatus))
+    }
+
+    /// Drop the live hot-key registration. The install-once event handler is
+    /// intentionally RETAINED (removing + re-adding it on every disable/enable
+    /// or rebind was the source of handler churn); it is torn down only by
+    /// `teardownEventHandler()` (called on app termination). Idempotent.
     public func unregisterHotkey() {
         if let ref = hotKeyRef { UnregisterEventHotKey(ref); hotKeyRef = nil }
-        if let h = eventHandler { RemoveEventHandler(h); eventHandler = nil }
         isRegistered = false
         lastRegisterStatus = .unattempted
     }
 
+    /// Full teardown — unregister the hot-key AND remove the single Carbon
+    /// event handler. Called on app termination so no application-level
+    /// handler outlives the controller.
+    public func teardownEventHandler() {
+        unregisterHotkey()
+        if let h = eventHandler { RemoveEventHandler(h); eventHandler = nil }
+    }
+
     @discardableResult
     public func rebind(to newHotkey: HotkeyConfig) -> Bool {
+        // No-op fast path: re-binding to the SAME already-live combo is a
+        // success without churning the registration.
+        if isRegistered, newHotkey == hotkey {
+            lastRegisterStatus = .registered
+            return true
+        }
         let previous = hotkey
         unregisterHotkey()
         hotkey = newHotkey
         if registerHotkey() { return true }
+        // New combo failed — restore the prior working combo and surface the
+        // NEW combo's failure reason (so the status row names why the rebind
+        // was rejected, while the palette keeps working on the old combo).
         let failureOfNewCombo = lastRegisterStatus
         hotkey = previous
         _ = registerHotkey()
@@ -445,7 +551,14 @@ public final class CommandBridgeController: NSObject {
         // PURE, unit-tested `pickScreenFrame` / `placementOrigin`; this
         // is only the glue.
         let screenFrames = NSScreen.screens.map { $0.visibleFrame }
-        if let target = Self.pickScreenFrame(
+        if let remembered = rememberedOrigin {
+            // (v4 round-2) Session memory — reopen where the operator last dragged
+            // it, clamped so a display change can't strand it off-screen.
+            panel.setFrameOrigin(
+                Self.clampOrigin(remembered, toScreens: screenFrames,
+                                 panelSize: panel.frame.size)
+            )
+        } else if let target = Self.pickScreenFrame(
             screens: screenFrames,
             keyWindowFrame: NSApp.keyWindow?.frame,
             mouseLocation: NSEvent.mouseLocation,
@@ -472,6 +585,7 @@ public final class CommandBridgeController: NSObject {
         installFocusLossObserver()
         installBecomeKeyObserver()
         installGlobalClickMonitor()
+        installDidMoveObserver()
         // Re-assert field focus on EVERY show() — the panel is reused, so the
         // SwiftUI `.onAppear` only fires the first time. Nudging the model's
         // focus token + asking the view-model to reset to the tray makes the
@@ -498,6 +612,7 @@ public final class CommandBridgeController: NSObject {
         removeFocusLossObserver()
         removeBecomeKeyObserver()
         removeGlobalClickMonitor()
+        removeDidMoveObserver()
         model?.didOpen = false
         panel?.orderOut(nil)
         lifecycle = .closed
@@ -577,6 +692,33 @@ public final class CommandBridgeController: NSObject {
         if let m = globalClickMonitor {
             NSEvent.removeMonitor(m)
             globalClickMonitor = nil
+        }
+    }
+
+    // MARK: - Drag-to-reposition with session memory (v4 round-2)
+
+    /// While open, capture every panel move (the operator dragging it via
+    /// `isMovableByWindowBackground`) into `rememberedOrigin`. The programmatic
+    /// placement in `show()` runs BEFORE this is installed, so only USER drags are
+    /// remembered — and only for this app run (reset to default on boot).
+    private func installDidMoveObserver() {
+        removeDidMoveObserver()
+        didMoveObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let p = self.panel else { return }
+                self.rememberedOrigin = p.frame.origin
+            }
+        }
+    }
+
+    private func removeDidMoveObserver() {
+        if let obs = didMoveObserver {
+            NotificationCenter.default.removeObserver(obs)
+            didMoveObserver = nil
         }
     }
 
@@ -764,6 +906,9 @@ public final class CommandBridgeViewModel: ObservableObject {
     @Published public var slotRows: [SlotRow] = []
     @Published public var recentRows: [Row] = []
     @Published public var searchRows: [Row] = []
+    /// Keyboard-selected row in the active panel (recents/search), by slug.
+    /// ↓/↑ move it; Enter fires it. nil → no selection (closed tray).
+    @Published public var selectedSlug: String? = nil
     /// (v3.7.6) Monotonic focus token. The controller bumps this on EVERY
     /// show() (the panel is reused, so `.onAppear` only fires once); the view
     /// observes it and re-claims first responder on the query field.
@@ -828,19 +973,54 @@ public final class CommandBridgeViewModel: ObservableObject {
         if trimmed.isEmpty {
             // typing-stopped path collapses back to whichever secondary
             // panel was last open (recents stays open if it was open).
-            if case .search = panelMode { panelMode = .none }
+            if case .search = panelMode { panelMode = .none; selectedSlug = nil }
             searchRows = []
             return
         }
         let hits = (try? store.search(trimmed)) ?? []
         searchRows = hits.map(Self.row(from:))
         panelMode = .search(query: trimmed)
+        selectedSlug = searchRows.first?.slug
     }
 
-    /// ↓ → open recents (140ms slide-in handled by the view).
+    /// ↓ → open recents (140ms slide-in handled by the view), selecting the
+    /// first row so ↑/↓ can traverse and Enter fires it.
     public func openRecents() {
         if recentRows.isEmpty { return }
         panelMode = .recents
+        selectedSlug = recentRows.first?.slug
+    }
+
+    /// Rows currently shown in the secondary panel (recents or search).
+    private var activeRows: [Row] {
+        switch panelMode {
+        case .recents: return recentRows
+        case .search:  return searchRows
+        case .none:    return []
+        }
+    }
+
+    /// ↓ (+1) / ↑ (−1) move the keyboard selection within the open panel,
+    /// clamped to the ends. ↓ from the closed tray opens recents.
+    public func moveSelection(_ delta: Int) {
+        if case .none = panelMode {
+            if delta > 0 { openRecents() }
+            return
+        }
+        let rows = activeRows
+        guard !rows.isEmpty else { return }
+        let cur = selectedSlug.flatMap { s in rows.firstIndex(where: { $0.slug == s }) } ?? 0
+        let next = min(max(cur + delta, 0), rows.count - 1)
+        selectedSlug = rows[next].slug
+    }
+
+    /// Enter fires the keyboard-selected row (falling back to the first).
+    public func commitSelected() {
+        let rows = activeRows
+        guard !rows.isEmpty else { return }
+        let slug = selectedSlug.flatMap { s in rows.contains(where: { $0.slug == s }) ? s : nil }
+            ?? rows.first?.slug
+        if let slug { onFireSlug(slug) }
     }
 
     /// Esc / focus-loss / fire → reset to closed-tray state.
@@ -900,9 +1080,10 @@ public struct CommandBridgeRootView: View {
     @ObservedObject var model: CommandBridgeViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion: Bool
     @FocusState private var queryFocused: Bool
-    /// Drives the leading caret blink (`.cb-caret` / `cb-blink`). Starts true
-    /// (visible) and toggles under a repeating animation; reduce-motion pins it on.
-    @State private var caretOn: Bool = true
+    // (v4 round-3) Window-drag plumbing — resolve the hosting window + track the
+    // cursor-to-origin offset so the palette can drag itself.
+    @State private var paletteWindow: NSWindow?
+    @State private var dragMouseOffset: CGSize?
 
     private var anim: CommandBridgeAnimation {
         reduceMotion ? .reduced : .locked
@@ -944,9 +1125,15 @@ public struct CommandBridgeRootView: View {
         .frame(width: CommandBridgeController.pillWidth + 24,
                height: CommandBridgeController.panelSize.height,
                alignment: .top)
+        // (v4 round-3) Capture the hosting window + make the whole palette
+        // draggable. simultaneousGesture so taps on the orbs / menu mark still
+        // fire and the field still focuses; a >3pt drag on the glass repositions.
+        .background(WindowAccessor { paletteWindow = $0 })
+        .simultaneousGesture(windowDrag)
         .background(KeyHandler(
             onNumber: { n in model.onFireSlot(n) },
-            onArrowDown: { model.openRecents() },
+            onArrowDown: { model.moveSelection(1) },
+            onArrowUp: { model.moveSelection(-1) },
             onReturn: { commitTopSelection() },
             onEscape: { model.onEscape() }
         ))
@@ -964,73 +1151,97 @@ public struct CommandBridgeRootView: View {
         }
     }
 
+    /// Drag the whole palette to reposition it (operator round-3: the bar wouldn't
+    /// move). Moves the hosting window from the LIVE cursor (`NSEvent.mouseLocation`,
+    /// screen coords) so there's no feedback jitter as the window follows.
+    /// `minimumDistance` keeps taps (fire favorite / focus field) intact; a >3pt
+    /// drag anywhere on the glass repositions. Session memory + reset-on-boot live
+    /// in the controller (its didMove observer records each move).
+    private var windowDrag: some Gesture {
+        DragGesture(minimumDistance: 3)
+            .onChanged { _ in
+                guard let win = paletteWindow else { return }
+                let mouse = NSEvent.mouseLocation
+                if dragMouseOffset == nil {
+                    dragMouseOffset = CGSize(width: mouse.x - win.frame.origin.x,
+                                             height: mouse.y - win.frame.origin.y)
+                }
+                if let off = dragMouseOffset {
+                    win.setFrameOrigin(CGPoint(x: mouse.x - off.width,
+                                               y: mouse.y - off.height))
+                }
+            }
+            .onEnded { _ in dragMouseOffset = nil }
+    }
+
     // MARK: Tray
 
+    /// Adaptive palette width — tracks the favorite count, centred in the
+    /// transparent envelope, clamped to [half, full] (operator round-2).
+    private var paletteWidth: CGFloat {
+        let favCount = model.slotRows.filter { $0.command != nil }.count
+        return CommandBridgeController.paletteWidth(
+            favoriteCount: favCount, full: CommandBridgeController.pillWidth)
+    }
+
     private var tray: some View {
-        HStack(spacing: 0) {
-            ForEach(Array(model.slotRows.enumerated()), id: \.element.id) { idx, row in
+        // Only REAL favorites, CENTERED (operator round-2: no empty slots, no
+        // left-anchored gaps). The fixed-pitch HStack centres inside `paletteWidth`.
+        let favorites = model.slotRows.filter { $0.command != nil }
+        return HStack(spacing: 10) {
+            ForEach(Array(favorites.enumerated()), id: \.element.id) { idx, row in
                 slotView(row, cascadeIndex: idx)
-                    .frame(maxWidth: .infinity)
             }
         }
-        .frame(width: CommandBridgeController.pillWidth)
+        .frame(width: paletteWidth)
     }
 
     @ViewBuilder
     private func slotView(_ row: CommandBridgeViewModel.SlotRow, cascadeIndex: Int) -> some View {
-        VStack(spacing: BridgeTokens.Space.s2) {
-            if let cmd = row.command {
+        // The tray now renders ONLY assigned favorites (operator round-2), so this
+        // is always a real command; `command == nil` cannot reach here.
+        if let cmd = row.command {
+            VStack(spacing: BridgeTokens.Space.s2) {
                 Button { model.onFireSlot(row.storeSlot) } label: {
                     BridgeGlassBubble(size: Self.bubbleSize) {
                         iconView(for: cmd.icon, color: cmd.color, size: 25)
                     }
                 }
                 .buttonStyle(.plain)
-                keycap(row.displayKey, empty: false)
-            } else {
-                // Position-stable EMPTY slot (per v4 design source): a faint
-                // dashed glass well so the tray's keycap row stays evenly spaced
-                // and the slot still reads as an assignable position. The keycap
-                // is dimmed (fg5) rather than hidden so the number remains legible.
-                emptyWell
-                keycap(row.displayKey, empty: true)
+                keycap(row.displayKey)
             }
+            // Bubble cascade — 10ms stagger per slot from the locked spec.
+            .opacity(model.didOpen ? 1.0 : 0.0)
+            .animation(
+                .easeOut(duration: anim.openDuration)
+                .delay(Double(cascadeIndex) * anim.bubbleCascadeStagger),
+                value: model.didOpen
+            )
         }
-        // Bubble cascade — 10ms stagger per slot from the locked spec.
-        .opacity(model.didOpen ? 1.0 : 0.0)
-        .animation(
-            .easeOut(duration: anim.openDuration)
-            .delay(Double(cascadeIndex) * anim.bubbleCascadeStagger),
-            value: model.didOpen
-        )
     }
 
     /// Tray bubble edge length — the v4 source draws 54px liquid-glass domes.
     private static let bubbleSize: CGFloat = 54
 
-    /// Mono numeric keycap shown beneath each tray bubble. fg4 for an assigned
-    /// slot, fg5 (fainter) for an unassigned one — mirrors `.cap` / `.empty .cap`.
-    private func keycap(_ n: Int, empty: Bool) -> some View {
+    /// Mono numeric keycap beneath each favorite — a dark chip with near-white ink
+    /// (operator round-2: the bare number was unreadable on light backdrops). The
+    /// chip is self-contained (dark fill + white digit) so it stays legible on ANY
+    /// backdrop — carbon or titanium, over wallpaper or white.
+    private func keycap(_ n: Int) -> some View {
         Text("\(n)")
-            .font(BridgeTokens.Typeface.micro.monospacedDigit())
-            .foregroundStyle(empty ? BridgeTokens.fg5 : BridgeTokens.fg4)
+            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .monospacedDigit()
+            .foregroundStyle(Color.white.opacity(0.96))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1.5)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.black.opacity(0.34))
+            )
     }
 
-    /// Unassigned-slot well: a dashed hairline glass recess (`--well-deep`
-    /// + dashed `--hair-strong` + inset bevel), matching `.cb-bubble.empty`.
-    private var emptyWell: some View {
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(BridgeTokens.wellFillDeep)
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(
-                        BridgeTokens.hairlineStrong,
-                        style: StrokeStyle(lineWidth: 1, dash: [3, 3])
-                    )
-            )
-            .bridgeBevel(BridgeTokens.bevelInset, radius: 18)
-            .frame(width: Self.bubbleSize, height: Self.bubbleSize)
-    }
+    // (emptyWell removed — the tray no longer renders unassigned slots; operator
+    //  round-2: show only real favorites, centered.)
 
     // MARK: Pill
     //
@@ -1052,7 +1263,6 @@ public struct CommandBridgeRootView: View {
             // QueryField itself, so the caret leads the pill exactly as the source
             // shows (no glyph precedes it).
             HStack(spacing: BridgeTokens.Space.s3) {
-                caret
                 QueryField(
                     text: Binding(
                         get: { model.query },
@@ -1061,7 +1271,8 @@ public struct CommandBridgeRootView: View {
                     placeholder: "Bridge Command",
                     isFocused: $queryFocused,
                     onReturn: { commitTopSelection() },
-                    onArrowDown: { model.openRecents() },
+                    onArrowDown: { model.moveSelection(1) },
+                    onArrowUp: { model.moveSelection(-1) },
                     onEscape: { model.onEscape() }
                 )
                 .frame(maxWidth: .infinity)
@@ -1081,10 +1292,6 @@ public struct CommandBridgeRootView: View {
                         RoundedRectangle(cornerRadius: BridgeTokens.Radius.card, style: .continuous)
                             .fill(BridgeTokens.glassControl)
                             .bridgeBevel(BridgeTokens.bevelControl, radius: BridgeTokens.Radius.card)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: BridgeTokens.Radius.card, style: .continuous)
-                                    .strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5)
-                            )
                     )
             }
             .buttonStyle(.plain)
@@ -1092,27 +1299,12 @@ public struct CommandBridgeRootView: View {
         }
         .padding(.leading, BridgeTokens.Space.s6)
         .padding(.trailing, BridgeTokens.Space.s4)
-        .frame(width: CommandBridgeController.pillWidth, height: 70)
+        .frame(width: paletteWidth, height: 70)
         .popoverGlass(radius: 22)
     }
 
-    /// The leading blinking caret (`.cb-caret`): a 2pt accent-strong bar with a
-    /// soft glow, blinking ~1.15s on a forever-repeating fade. Reduce-motion holds
-    /// it steady-on (the source honours `prefers-reduced-motion`).
-    private var caret: some View {
-        RoundedRectangle(cornerRadius: 1, style: .continuous)
-            .fill(BridgeTokens.accentStrong)
-            .frame(width: 2, height: 30)
-            .shadow(color: BridgeTokens.accentStrong.opacity(0.7), radius: 4)
-            .opacity(reduceMotion ? 1 : (caretOn ? 1 : 0))
-            .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.easeInOut(duration: 0.575).repeatForever(autoreverses: true)) {
-                    caretOn = false
-                }
-            }
-            .accessibilityHidden(true)
-    }
+    // (Fake blinking caret removed — the real QueryField shows the only caret,
+    //  on focus. Operator: kill the double-cursor.)
 
     /// The trailing menu-bar mark image (`.cb-menubar img`). Loads `MenuBarIcon`
     /// — the bundled Bridge mark (`assets/bridge-mark-white.png` in the design) —
@@ -1160,7 +1352,7 @@ public struct CommandBridgeRootView: View {
             Spacer(minLength: 0)
             footHint("esc", "close")
         }
-        .frame(width: CommandBridgeController.pillWidth)
+        .frame(width: paletteWidth)
         .padding(.horizontal, BridgeTokens.Space.s2 - 2)
         .padding(.top, BridgeTokens.Space.s1 / 2)
         .accessibilityHidden(true)
@@ -1172,6 +1364,7 @@ public struct CommandBridgeRootView: View {
             Text(label)
                 .font(BridgeTokens.Typeface.micro)
                 .foregroundStyle(BridgeTokens.fg5)
+                .legibilityHalo()
         }
     }
 
@@ -1185,10 +1378,6 @@ public struct CommandBridgeRootView: View {
             .background(
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .fill(BridgeTokens.chipFill)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
-                    )
             )
     }
 
@@ -1203,7 +1392,7 @@ public struct CommandBridgeRootView: View {
             case .recents:
                 panelHeader("Recents")
                 ForEach(model.recentRows) { r in
-                    rowView(r, selected: r.id == model.recentRows.first?.id)
+                    rowView(r, selected: r.slug == model.selectedSlug)
                 }
                 if model.recentRows.isEmpty {
                     panelEmptyHint("No recents yet — fire a command to start the history.")
@@ -1211,7 +1400,7 @@ public struct CommandBridgeRootView: View {
             case .search(let q):
                 panelHeader("Matches — sorted by recency")
                 ForEach(model.searchRows) { r in
-                    rowView(r, selected: r.id == model.searchRows.first?.id, highlight: q)
+                    rowView(r, selected: r.slug == model.selectedSlug, highlight: q)
                 }
                 if model.searchRows.isEmpty {
                     panelEmptyHint("No match for \"\(q)\".")
@@ -1219,7 +1408,7 @@ public struct CommandBridgeRootView: View {
             }
         }
         .padding(BridgeTokens.Space.s2)
-        .frame(width: CommandBridgeController.pillWidth)
+        .frame(width: paletteWidth)
         .popoverGlass(radius: 18)
     }
 
@@ -1228,6 +1417,7 @@ public struct CommandBridgeRootView: View {
         Text(s)
             .bridgeCap()
             .foregroundStyle(BridgeTokens.fg5)
+            .legibilityHalo()
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, BridgeTokens.Space.s3)
             .padding(.top, BridgeTokens.Space.s2)
@@ -1250,29 +1440,25 @@ public struct CommandBridgeRootView: View {
             model.onFireSlug(r.slug)
         } label: {
             HStack(spacing: BridgeTokens.Space.s4 - 2) {
-                // Icon tile (`.cb-ic`) — glass control chip with the command glyph.
-                ZStack {
-                    RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
-                        .fill(BridgeTokens.glassControl)
-                        .bridgeBevel(BridgeTokens.bevelControl, radius: BridgeTokens.Radius.control)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
-                                .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
-                        )
-                    iconView(for: r.icon, color: r.color, size: 15)
-                }
-                .frame(width: 28, height: 28)
+                // Icon (`.cb-ic`) — the bare glyph, no chip box (operator round-2:
+                // drop the per-row container). A soft drop-shadow lifts it off the
+                // frosted panel.
+                iconView(for: r.icon, color: r.color, size: 17)
+                    .frame(width: 28, height: 28)
+                    .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
 
                 highlightedName(r.name, query: highlight)
                     .font(BridgeTokens.Typeface.name)
                     .foregroundStyle(BridgeTokens.fg1)
                     .lineLimit(1)
+                    .legibilityHalo()
 
                 Spacer(minLength: BridgeTokens.Space.s1)
 
                 Text(Self.relativeHint(for: r.lastUsedAt))
                     .font(BridgeTokens.Typeface.meta)
                     .foregroundStyle(BridgeTokens.fg5)
+                    .legibilityHalo()
 
                 if let slot = r.keySlot {
                     // Slot keycap badge (`.cb-badge`) — mono, chip-filled.
@@ -1284,10 +1470,6 @@ public struct CommandBridgeRootView: View {
                         .background(
                             RoundedRectangle(cornerRadius: 5, style: .continuous)
                                 .fill(BridgeTokens.chipFill)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                        .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5)
-                                )
                         )
                 }
             }
@@ -1366,80 +1548,90 @@ public struct CommandBridgeRootView: View {
     }
 
     private func commitTopSelection() {
-        switch model.panelMode {
-        case .search:
-            if let top = model.searchRows.first { model.onFireSlug(top.slug) }
-        case .recents:
-            if let top = model.recentRows.first { model.onFireSlug(top.slug) }
-        case .none:
-            // No selection → Enter is a no-op (matches Spotlight / cmd-sb).
-            return
-        }
+        // Fires the keyboard-selected row (↑/↓), falling back to the first.
+        model.commitSelected()
     }
 }
 
 // ============================================================
 // MARK: - 7b. Popover-glass surface (`.cb-pill` / `.cb-panel`)
 //
-//   The v4 floating-glass surface used by the pill + recents/search panel.
-//   It is the same 4-ingredient recipe as `BridgeGlassBubble` but on a
-//   rounded rect at an arbitrary corner radius (the source draws 22 for the
-//   pill, 18 for the panel — the `Elevation.popover` rung is pinned to the
-//   12pt card radius, so we consume the rung's INGREDIENTS at a custom radius):
-//     1 — `glassPopover` fill + sheen (the e3 popover material)
-//     2 — `bevelRaise` directional bevel (top rim-light + bottom occlusion)
-//     3 — `edgeRaise` hairline edge
-//     4 — `shadowE3` dual ambient+contact drop shadow
-//   …plus the `--glint` specular hotspot + the diagonal `--sheen` sweep that
-//   `materials.css .glass-popover::before/::after` paint over the fill.
+//   The pill + recents/search panel container. Operator round-2 ("I still see
+//   the container color + outlines — make it near-invisible liquid glass")
+//   reduced this from the opaque e3 popover material to FROSTED AIR:
+//     • `.ultraThinMaterial` — the most transparent system blur, the ONLY
+//       backing, so the desktop reads through as liquid glass (no tint box).
+//     • a faint centre LENS frost (thick middle → clear rim).
+//     • a faint diagonal `--sheen` lip — the only specular.
+//     • a single soft FLOAT shadow — NO directional bevel, NO edge hairline.
+//   The favorites (`BridgeGlassBubble`) stay FIRM (fill + rim); only the
+//   container goes near-invisible — the operator's firm-orbs / no-box split.
 // ============================================================
 
 private struct PopoverGlass: ViewModifier {
     let radius: CGFloat
-    private var rung: BridgeTokens.ElevationRung { BridgeTokens.Elevation.popover }
+    @Environment(\.colorScheme) private var colorScheme
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        let isDark = colorScheme == .dark
+        // SPOTLIGHT-MIMIC (operator: mimic native macOS Spotlight — the gold-standard
+        // liquid glass). Spotlight's bar is EVEN frosted glass: uniform across its
+        // width AND height (NOT a centre-pooled lens — that read unbalanced + top-
+        // heavy on a horizontal bar), an adaptive frost that lightens + blurs the
+        // backdrop, with a faint EVEN top sheen, a hairline edge, and a soft shadow.
         return content
             .background {
                 ZStack {
-                    // Ingredient 1 — e3 popover fill (base tint + 3-stop sheen).
-                    rung.fill?.paint(in: shape)
-                    // Specular hotspot (`--glint`) + diagonal sweep (`--sheen`).
-                    shape.fill(BridgeTokens.glint)
-                    shape.fill(BridgeTokens.sheen)
+                    // Even frosted blur — the Spotlight frost, uniform (no centre mask).
+                    shape.fill(.regularMaterial)
+                    // Faint EVEN top sheen — a thin glass top-light, balanced: bright
+                    // only at the very top edge, gone by ~26% (NOT a big upper dome).
+                    shape.fill(LinearGradient(
+                        gradient: Gradient(stops: [
+                            .init(color: Color.white.opacity(isDark ? 0.14 : 0.30), location: 0.0),
+                            .init(color: .clear, location: 0.26),
+                        ]),
+                        startPoint: .top, endPoint: .bottom))
                 }
             }
-            // Ingredient 2 — directional bevel.
-            .overlay(rung.bevel.overlay(in: shape).allowsHitTesting(false))
-            // Ingredient 3 — elevation edge hairline.
-            .overlay {
-                if let edge = rung.edge {
-                    shape.strokeBorder(edge, lineWidth: 0.5)
-                }
-            }
+            // Hairline edge + a soft drop shadow — Spotlight's subtle border + float.
+            .overlay(shape.strokeBorder(BridgeTokens.edgeRaise, lineWidth: 1).allowsHitTesting(false))
             .clipShape(shape)
-            // Ingredient 4 — e3 dual drop shadow.
-            .modifier(OptionalBridgeShadow(rung.shadow))
+            .shadow(color: .black.opacity(isDark ? 0.28 : 0.16), radius: 16, y: 7)
     }
 }
 
-/// Local twin of the (private) `OptionalShadow` in BridgeThemeV2 — applies a
-/// `BridgeShadow` only when present (the rung always carries one for e3).
-private struct OptionalBridgeShadow: ViewModifier {
-    let shadow: BridgeTokens.BridgeShadow?
-    init(_ shadow: BridgeTokens.BridgeShadow?) { self.shadow = shadow }
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if let s = shadow { content.bridgeShadow(s) } else { content }
-    }
-}
+// (No OptionalBridgeShadow — the Spotlight-mimic PopoverGlass uses a single soft
+//  drop shadow, not the rung's dual shadow.)
 
 private extension View {
     /// Wrap `self` in the v4 floating popover-glass surface at `radius`.
     func popoverGlass(radius: CGFloat) -> some View {
         modifier(PopoverGlass(radius: radius))
     }
+}
+
+// ── Text legibility halo (v4 round-3) ──────────────────────────────────────
+//
+//   The pill/panel container is near-invisible now (operator round-3 chose
+//   "self-legible text"), so the text carries its OWN legibility — a subtle
+//   theme-aware halo lets it read on ANY backdrop (white, busy, dark): a dark
+//   halo in dark mode (white ink → reads on light backdrops), a light halo in
+//   light mode (dark ink → reads on dark backdrops). On a matching backdrop the
+//   halo is imperceptible. No container is reintroduced.
+private struct LegibilityHalo: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    func body(content: Content) -> some View {
+        let isDark = colorScheme == .dark
+        return content.shadow(
+            color: (isDark ? Color.black : Color.white).opacity(isDark ? 0.55 : 0.6),
+            radius: 2.5, x: 0, y: 0.5)
+    }
+}
+
+private extension View {
+    func legibilityHalo() -> some View { modifier(LegibilityHalo()) }
 }
 
 // ============================================================
@@ -1452,6 +1644,7 @@ private struct QueryField: NSViewRepresentable {
     var isFocused: FocusState<Bool>.Binding
     var onReturn: () -> Void
     var onArrowDown: () -> Void
+    var onArrowUp: () -> Void
     var onEscape: () -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -1467,14 +1660,22 @@ private struct QueryField: NSViewRepresentable {
         let monoFont = NSFont.monospacedSystemFont(ofSize: 27, weight: .regular)
         field.font = monoFont
         // Placeholder ink matches `.cb-ph` (fg-1 @ 34%) — a faint mono prompt.
+        // (v4 round-3) Self-legibility: the container is near-invisible now, so the
+        // placeholder carries its own contrast — ink raised to 42% + a soft dark
+        // shadow so "Bridge Command" reads even over a light backdrop.
+        let placeholderShadow = NSShadow()
+        placeholderShadow.shadowColor = NSColor.black.withAlphaComponent(0.55)
+        placeholderShadow.shadowBlurRadius = 3
+        placeholderShadow.shadowOffset = NSSize(width: 0, height: -1)
         field.placeholderAttributedString = NSAttributedString(
             string: placeholder,
             attributes: [
                 .font: monoFont,
                 .foregroundColor: BridgeTokens.adaptiveNSColor(
-                    dark:  { BridgeTokens.whiteAlpha(0.34) },
-                    light: { BridgeTokens.blackAlpha(0.34) }
+                    dark:  { BridgeTokens.whiteAlpha(0.42) },
+                    light: { BridgeTokens.blackAlpha(0.42) }
                 ),
+                .shadow: placeholderShadow,
             ]
         )
         // v3.7.6: adaptive ink — the query text follows the system appearance
@@ -1495,6 +1696,15 @@ private struct QueryField: NSViewRepresentable {
         field.cell?.isScrollable = true
         field.onArrowDown = { onArrowDown() }
         field.onEscape    = { onEscape() }
+        // (v4 round-3) Self-legibility for the typed text — a soft dark layer shadow
+        // halos the glyphs (the field bg is clear, so only the text casts it).
+        // Reads on white, subtle on dark; no container substrate needed.
+        field.wantsLayer = true
+        field.layer?.shadowColor = NSColor.black.cgColor
+        field.layer?.shadowOpacity = 0.45
+        field.layer?.shadowRadius = 2.5
+        field.layer?.shadowOffset = .zero
+        field.layer?.masksToBounds = false
         return field
     }
 
@@ -1522,6 +1732,8 @@ private struct QueryField: NSViewRepresentable {
             switch commandSelector {
             case #selector(NSResponder.moveDown(_:)):
                 parent.onArrowDown(); return true
+            case #selector(NSResponder.moveUp(_:)):
+                parent.onArrowUp(); return true
             case #selector(NSResponder.insertNewline(_:)):
                 parent.onReturn(); return true
             case #selector(NSResponder.cancelOperation(_:)):
@@ -1541,6 +1753,27 @@ private final class BridgeQueryTextField: NSTextField {
 }
 
 // ============================================================
+// MARK: - 8b. WindowAccessor — resolve the hosting NSWindow
+//
+//   The borderless non-activating panel ignores isMovableByWindowBackground when
+//   its content view is an NSHostingView, so the palette drags itself via a
+//   SwiftUI gesture (see `windowDrag`). That needs a reference to the hosting
+//   window; this representable resolves it on appear.
+// ============================================================
+
+private struct WindowAccessor: NSViewRepresentable {
+    let onResolve: (NSWindow?) -> Void
+    func makeNSView(context: Context) -> NSView {
+        let v = NSView()
+        DispatchQueue.main.async { onResolve(v.window) }
+        return v
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { onResolve(nsView.window) }
+    }
+}
+
+// ============================================================
 // MARK: - 9. KeyHandler — captures 1–0 + ↓ + Esc at the root level
 // ============================================================
 
@@ -1552,6 +1785,7 @@ private final class BridgeQueryTextField: NSTextField {
 private struct KeyHandler: NSViewRepresentable {
     let onNumber: (Int) -> Void
     let onArrowDown: () -> Void
+    let onArrowUp: () -> Void
     let onReturn: () -> Void
     let onEscape: () -> Void
 
@@ -1559,6 +1793,7 @@ private struct KeyHandler: NSViewRepresentable {
         let v = MonitorView()
         v.onNumber = onNumber
         v.onArrowDown = onArrowDown
+        v.onArrowUp = onArrowUp
         v.onReturn = onReturn
         v.onEscape = onEscape
         return v
@@ -1569,6 +1804,7 @@ private struct KeyHandler: NSViewRepresentable {
     final class MonitorView: NSView {
         var onNumber: ((Int) -> Void)?
         var onArrowDown: (() -> Void)?
+        var onArrowUp: (() -> Void)?
         var onReturn: (() -> Void)?
         var onEscape: (() -> Void)?
         private var monitor: Any?
@@ -1640,6 +1876,8 @@ private struct KeyHandler: NSViewRepresentable {
             switch event.keyCode {
             case UInt16(kVK_DownArrow):
                 v.onArrowDown?(); return true
+            case UInt16(kVK_UpArrow):
+                v.onArrowUp?(); return true
             case UInt16(kVK_Return), UInt16(kVK_ANSI_KeypadEnter):
                 v.onReturn?(); return true
             case UInt16(kVK_Escape):

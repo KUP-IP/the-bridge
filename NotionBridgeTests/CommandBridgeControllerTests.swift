@@ -258,4 +258,47 @@ func runCommandBridgeControllerTests() async {
         }
         try expect(nowNone, "empty query must clear panelMode back to .none")
     }
+
+    // ── (I) W4 keyboard traversal — the selection model behind ↓/↑/Enter ──
+
+    await test("ViewModel.moveSelection: ↓ from the closed tray opens recents + selects first") {
+        let r = await MainActor.run { () -> (Bool, String) in
+            let vm = CommandBridgeViewModel(
+                store: CommandStore.shared, recents: CommandBridgeRecents(cap: 5))
+            let a = cmd("Alpha", slot: 1); let b = cmd("Bravo", slot: 2)
+            vm.recentRows = CommandBridgeViewModel.buildRecentRows(
+                from: [a, b], order: ["alpha", "bravo"])
+            vm.panelMode = .none
+            vm.moveSelection(1)
+            let opened: Bool = { if case .recents = vm.panelMode { return true }; return false }()
+            return (opened, vm.selectedSlug ?? "")
+        }
+        try expect(r.0, "↓ from the closed tray opens recents")
+        try expect(r.1 == "alpha", "↓ from closed selects the first recent, got \(r.1)")
+    }
+
+    await test("ViewModel.moveSelection/commitSelected: ↓/↑ traverse + clamp; Enter fires the SELECTED row") {
+        let result = await MainActor.run { () -> [String] in
+            let vm = CommandBridgeViewModel(
+                store: CommandStore.shared, recents: CommandBridgeRecents(cap: 5))
+            let a = cmd("Alpha", slot: 1); let b = cmd("Bravo", slot: 2); let c = cmd("Charlie", slot: 3)
+            vm.recentRows = CommandBridgeViewModel.buildRecentRows(
+                from: [a, b, c], order: ["alpha", "bravo", "charlie"])
+            vm.panelMode = .recents
+            vm.selectedSlug = vm.recentRows.first?.slug
+            var fired = ""
+            vm.onFireSlug = { fired = $0 }
+            vm.moveSelection(1);  let s1 = vm.selectedSlug ?? ""
+            vm.moveSelection(1);  let s2 = vm.selectedSlug ?? ""
+            vm.moveSelection(1);  let s3 = vm.selectedSlug ?? ""   // clamp at the end
+            vm.moveSelection(-1); let s4 = vm.selectedSlug ?? ""
+            vm.commitSelected()                                    // fires s4 (bravo)
+            return [s1, s2, s3, s4, fired]
+        }
+        try expect(result[0] == "bravo",   "↓ alpha→bravo, got \(result[0])")
+        try expect(result[1] == "charlie", "↓ bravo→charlie, got \(result[1])")
+        try expect(result[2] == "charlie", "↓ at end clamps at charlie, got \(result[2])")
+        try expect(result[3] == "bravo",   "↑ charlie→bravo, got \(result[3])")
+        try expect(result[4] == "bravo",   "Enter fires the SELECTED row (bravo), not the first, got \(result[4])")
+    }
 }

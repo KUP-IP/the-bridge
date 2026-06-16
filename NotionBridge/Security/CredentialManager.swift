@@ -795,19 +795,40 @@ public final class CredentialManager: Sendable {
             .replacingOccurrences(of: " ", with: "")
             .replacingOccurrences(of: "-", with: "")
 
+        // Finding 3: validate digits-only + Luhn BEFORE building the request
+        // body, matching the UI path (CredentialAddSheet.saveCard) so the MCP
+        // tool path cannot tokenize an unvalidated / non-numeric card number.
+        // CredentialCardValidation.luhn already enforces 13–19 digits and
+        // digits-only, so a value carrying form-injection characters
+        // (`&`, `=`, `[`, …) fails here and never reaches the POST body.
+        guard CredentialCardValidation.luhn(cleanNumber) else {
+            throw CredentialError.stripeTokenizationFailed(
+                "Invalid card number: must be 13–19 digits and pass the Luhn check."
+            )
+        }
+
+        // Finding 3: every interpolated value is percent-encoded with a
+        // restrictive allowed-set so it cannot break out of its `key=value`
+        // position (e.g. inject `&card[...]=` or override `type`). The bracketed
+        // keys are emitted literally (Stripe's nested form-field syntax); only
+        // VALUES are attacker-influenced, so only values are encoded.
+        func encodeValue(_ value: String) -> String {
+            let allowed = CharacterSet(charactersIn:
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+            return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
+        }
+
         var bodyParts = [
             "type=card",
-            "card[number]=\(cleanNumber)",
-            "card[exp_month]=\(expMonth)",
-            "card[exp_year]=\(expYear)"
+            "card[number]=\(encodeValue(cleanNumber))",
+            "card[exp_month]=\(encodeValue(String(expMonth)))",
+            "card[exp_year]=\(encodeValue(String(expYear)))"
         ]
         if let name = cardholderName?.trimmingCharacters(in: .whitespaces), !name.isEmpty {
-            let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
-            bodyParts.append("card[name]=\(encoded)")
+            bodyParts.append("card[name]=\(encodeValue(name))")
         }
         if let zip = zipCode?.trimmingCharacters(in: .whitespaces), !zip.isEmpty {
-            let encoded = zip.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? zip
-            bodyParts.append("card[address_zip]=\(encoded)")
+            bodyParts.append("card[address_zip]=\(encodeValue(zip))")
         }
         let body = bodyParts.joined(separator: "&")
 

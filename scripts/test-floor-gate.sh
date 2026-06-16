@@ -1009,7 +1009,35 @@ set -euo pipefail
 # (the only test edit was PKT879Dashboard popoverWidth 300→340 to track the design width).
 # Integrated green independently measured 1884 (1864 → 1884), 0 failed. Floor raised
 # 1777 → 1884 per the order-inversion rule to lock the new coverage.
-FLOOR="${BRIDGE_TEST_FLOOR:-1884}"
+# v3.8.0 security hardening (2026-06-15): +23 net-new regression tests — path-traversal
+# gate (9: ../ escapes, symlinks, component-boundary matching for ~/.ssh|~/.aws|Keychains),
+# safe-command metacharacter rejection (9: ; & | backtick $ ( ) < > { } newline +
+# -exec/-execdir/-ok), Stripe card tokenization (3: Luhn validate + percent-encode).
+# Integrated green 1884 → 1907, 0 failed. Floor raised to lock the new coverage.
+# v3.8.0 global-shortcut hardening (2026-06-15): +14 net-new tests (CommandHotkeyHardeningTests)
+# — Cocoa↔Carbon keyCode/modifier mapping round-trip, persistence load/save (incl. corrupt-bytes
+# fallback to ⌃⌘B), register-failure classification (-9878 collision vs plumbing), status-truth
+# derivation, and live-rebind no-churn. Integrated green 1907 → 1921, 0 failed. Floor raised.
+# v3.8.0 shortcut status-truth (2026-06-15): +3 net-new tests — a published .registered derives
+# .active (never the false .shortcutUnavailable warning); applyEnabledPreference(true) doesn't
+# clobber a registered status; the enable ordering settles Active with no false-warning interim.
+# (Root cause: header read a non-@Observable status box, so SwiftUI never refreshed the warning.)
+# Integrated green 1921 → 1924, 0 failed. Floor raised.
+# v3.8.0 shortcut controller-instance fix (2026-06-15): +2 tests — registering CommandsController
+# === the UI-observed instance (a published .registered reads as .active through the UI ref); +a
+# regression guard modeling the old `?? CommandsController()` phantom-instance fallback (separate
+# instance → false .shortcutUnavailable). Root cause: SettingsWindowController re-resolved the
+# controller via a fragile NSApp.delegate cast + `?? CommandsController()`, spinning up a phantom
+# instance the UI observed while registration published into the real one. Fix: inject the one
+# AppDelegate.commandsController directly. Integrated green 1924 → 1926, 0 failed. Floor raised.
+# v3.8.0 Command Bridge liquid-glass redesign (2026-06-15): +2 tests — the ⌃⌘B palette keyboard
+# selection model (CommandBridgeViewModel.moveSelection / commitSelected): ↓ opens recents + selects
+# the first row; ↓/↑ traverse + clamp; Enter fires the SELECTED row (not just the first). Locks the
+# operator's "can't arrow into recents" fix. Integrated green 1926 → 1928, 0 failed. Floor raised.
+# v4 Command Bridge round-2 (2026-06-15): +2 tests — adaptive palette width clamp (favorite count →
+# bar width, [half, full]) + remembered drag-origin clamp (keep the panel on-screen on reopen). Locks
+# the operator's "adaptive width + draggable with session memory" asks. Green 1928 → 1930, 0 failed.
+FLOOR="${BRIDGE_TEST_FLOOR:-1930}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

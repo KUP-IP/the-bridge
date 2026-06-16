@@ -252,6 +252,8 @@ public struct BridgeSegmented<Value: Hashable>: View {
                 }
                 Text(seg.label)
                     .font(BridgeTokens.Typeface.meta.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .foregroundStyle(isOn ? BridgeTokens.fg1 : BridgeTokens.fg3)
             .padding(.horizontal, 10)
@@ -448,6 +450,8 @@ public struct BridgeStatTile: View {
                 .monospacedDigit()
                 .foregroundStyle(valueColor)
             Text(label).bridgeCap().foregroundStyle(BridgeTokens.fg4)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 9)

@@ -23,7 +23,9 @@ func runWSHMenuBarTests() async {
     }
 
     await test("Display names are the snappy redesign labels (decoupled from rawValue)") {
-        try expect(SettingsSection.orders.displayName == "Orders",
+        // IA change 2026-06-12: the page is "Commands" (doctrine moved to
+        // Connection); the rawValue stays the stable legacy "Standing Orders" id.
+        try expect(SettingsSection.orders.displayName == "Commands",
                    "orders display: \(SettingsSection.orders.displayName)")
         try expect(SettingsSection.orders.rawValue == "Standing Orders",
                    "orders rawValue must stay the stable legacy id")
@@ -35,7 +37,7 @@ func runWSHMenuBarTests() async {
         // PKT-A keeps SF Symbols this pass for the surviving + merged cases.
         try expect(SettingsSection.tools.icon == "hammer", "tools icon: \(SettingsSection.tools.icon)")
         try expect(SettingsSection.connection.icon == "network", "connection icon: \(SettingsSection.connection.icon)")
-        try expect(SettingsSection.orders.icon == "scroll", "orders icon: \(SettingsSection.orders.icon)")
+        try expect(SettingsSection.orders.icon == "command", "orders icon: \(SettingsSection.orders.icon)")
         try expect(SettingsSection.skills.icon == "sparkles", "skills icon: \(SettingsSection.skills.icon)")
         try expect(SettingsSection.security.icon == "lock.shield", "security icon: \(SettingsSection.security.icon)")
         try expect(SettingsSection.jobs.icon == "clock.badge.checkmark", "jobs icon: \(SettingsSection.jobs.icon)")
@@ -66,7 +68,7 @@ func runWSHMenuBarTests() async {
                         "Security", "Connection", "Advanced"]
         try expect(order == expected, "sidebar order drifted: \(order)")
         let labels = SettingsSection.allCases.map(\.displayName)
-        let expectedLabels = ["Orders", "Skills", "Jobs", "Tools",
+        let expectedLabels = ["Commands", "Skills", "Jobs", "Tools",
                               "Security", "Connection", "Advanced"]
         try expect(labels == expectedLabels, "display-label order drifted: \(labels)")
     }

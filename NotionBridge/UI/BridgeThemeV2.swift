@@ -312,28 +312,47 @@ public struct BridgeGlassBubble<Content: View>: View {
         let domeColors: [Color] = isDark
             ? [Color.white.opacity(0.42), Color.white.opacity(0.10), Color.white.opacity(0.02)]
             : [Color.white.opacity(0.70), Color.white.opacity(0.22), Color.white.opacity(0.0)]
-        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)  // .cb-bubble squircle (command-bridge.html:28)
+        // ROUND glass orb (operator round-2: favorites read soft + square → firm +
+        // round). A circle is a squircle whose corner radius = half the edge.
+        let shape = RoundedRectangle(cornerRadius: size / 2, style: .continuous)
         return ZStack {
             // Ingredient 1 — e2 raise surface fill (token-driven base + sheen).
             rung.fill?.paint(in: shape)
-            // Signature specular dome on top of the raised glass.
+            // THICK-CENTRE refraction (operator: gradient thickness — a glass bead is
+            // thick in the middle, thin at the rim). A real blur pooled in the centre,
+            // fading to clear at the edge via a RADIAL mask, so the orb reads as a
+            // thick refractive lens rather than an even tint; the firm rim (below)
+            // keeps the thin edge defined.
+            shape.fill(.ultraThinMaterial)
+                .mask(shape.fill(RadialGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: .black, location: 0.0),
+                        .init(color: .black.opacity(0.55), location: 0.5),
+                        .init(color: .clear, location: 0.95),
+                    ]),
+                    center: .center, startRadius: 0, endRadius: size * 0.5)))
+            // Signature specular dome — centred so the lens reads thick in the middle.
             shape
                 .fill(
                     RadialGradient(
                         colors: domeColors,
-                        center: UnitPoint(x: 0.3, y: 0.18),
-                        startRadius: 0, endRadius: size * 0.9
+                        center: UnitPoint(x: 0.42, y: 0.28),
+                        startRadius: 0, endRadius: size * 0.92
                     )
                 )
             // Top-left specular glint (`--glint`) — the raise-rung highlight.
             shape.fill(BridgeTokens.glint).allowsHitTesting(false)
-            // Ingredient 3 — elevation EDGE hairline at the raise rung.
-            (rung.edge.map { shape.strokeBorder($0, lineWidth: 1) })
             content
         }
         .frame(width: size, height: size)
         // Ingredient 2 — directional bevel (top rim-light + bottom occlusion).
         .overlay(rung.bevel.overlay(in: shape).allowsHitTesting(false))
+        // FIRM defined rim (operator round-2: orbs were too soft to make out).
+        // Theme-aware `edgeRaise` (white on carbon, dark-blue on titanium) holds a
+        // crisp edge on ANY backdrop — a white-only rim vanished on white. REPLACES
+        // the prior edge-dissolve mask, which is exactly what read as "too soft".
+        .overlay(shape.strokeBorder(BridgeTokens.edgeRaise, lineWidth: 1).allowsHitTesting(false))
+        .clipShape(shape)
         // Ingredient 4 — dual ambient + contact drop shadow (e2). Keep dark's
         // prior single soft shadow feel; the dual layer reads richer on titanium.
         .modifier(OptionalShadow(rung.shadow))
@@ -652,7 +671,7 @@ public struct BridgeInput: View {
 public enum BridgeSectionIcon {
     public static func systemImage(for section: SettingsSection) -> String {
         switch section {
-        case .orders:     return "scroll"
+        case .orders:     return "command"
         case .skills:     return "sparkles"
         case .jobs:       return "clock.badge.checkmark"
         case .tools:      return "hammer"

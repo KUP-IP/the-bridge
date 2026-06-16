@@ -690,12 +690,14 @@ await runCommandPaletteTests()    // cmd-w3: palette search + gate + AppDelegate
 await runSkillVsCommandSplitTests() // cmd-ux: LOCK the skill-vs-command body/properties split
 await runCommandsControllerTests()  // cmd-ux W1/W2: CommandsController observable state machine + status/focus model
 await runCommandBridgeControllerTests()  // PKT-878 v3.6.3: SwiftUI Command Bridge popup — placement/recents/anim/builders
+await runCommandBridgeLayoutTests()      // v4 round-2: adaptive palette width clamp + remembered drag-origin clamp
 await runCommandVisibilityTests()   // cmd-ux W3: .command visibility axis — Codable, palette filter, picker write-back, empty-state
 await runFlagVisibilityMigrationTests()  // cmd-ux W4 (3.4.1): flag-based visibility SSOT — enum↔flags, decode/encode migration, RegistrySkillsCommandProvider flag filter, mutator parity
 await runW4ComponentAndStorageTests()    // cmd-ux W4 (3.4.1): kbd-chip splitter + per-path file-source flag storage + effective routing/palette resolution
 await runSkillsMCPFlagRoundTripTests()    // 3.4.2 W3 H1 fix: SkillConfig MCP reconstruction preserves combined-state flag pair
 await runHotkeyRecorderFocusTests()        // 3.4.2 W4 H5 fix: RecorderFocusModel contract locks the button-binding focus path
 await runHotkeyRebindUITests()             // v3.7.6: mount the Commands "Global shortcut" card — HotkeyConfig.from validation + persist round-trip + status-row mapping
+await runCommandHotkeyHardeningTests()     // v4: ⌃⌘B enterprise hardening — Cocoa↔Carbon map round-trip, persist relaunch survival, collision-vs-plumbing classification, status-truth invariants + live-rebind no-churn
 await runFrontmatterParserTests()   // W2 D8: SKILL.md YAML frontmatter parser
 await runSkillIconAndKindTests()    // WS-3/WS-4: Skill emoji icon (Codable + extract) + derived skillKind/sourceKind accessors
 await runSkillSourceTests()         // W2 D2: SkillSource enum + legacy notionPageId backward-compat

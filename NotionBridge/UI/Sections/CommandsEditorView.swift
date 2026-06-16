@@ -246,7 +246,6 @@ public struct CommandsEditorView: View {
             Spacer(minLength: 8)
 
             HStack(spacing: 3) {
-                headerAction("doc.on.clipboard", help: "Copy markdown to clipboard") { copyBody(c) }
                 headerAction("doc.on.doc", help: "Duplicate") { duplicate(c) }
                 headerAction("trash", help: "Delete", danger: true) { delete(c) }
             }
@@ -867,15 +866,6 @@ public struct CommandsEditorView: View {
         } catch {
             saveMessage = error.localizedDescription
         }
-    }
-
-    /// Clipboard-copy of the command's markdown body — the literal payload
-    /// the Command Bridge popup copies. Binding preserved + surfaced here.
-    private func copyBody(_ c: CommandStore.Command) {
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(c.body, forType: .string)
-        saveMessage = "Copied to clipboard"
     }
 
     private func duplicate(_ c: CommandStore.Command) {

@@ -4,6 +4,13 @@
 // All runtime version references should use AppVersion constants.
 // Info.plist CFBundleShortVersionString must be kept in sync (stamped at build time or manually).
 // Hardcoded fallback strings (e.g. ?? "1.1.0") are eliminated — use AppVersion.marketing instead.
+//
+// VERSIONING (operator rule, 2026-06-15): +1 patch per PUBLISHED INSTALL
+// (release), NOT per branch — several task branches can merge to main and ship
+// together as one install increment. Single-digit segments roll at 9 (3.8.9→
+// 3.9.0, 3.9.9→4.0.0), never double digits. THIS install is 3.8.0; next is 3.8.1 (3.7.10–3.7.12
+// were pre-rule legacy). 4.0.0 = sale-ready "V4", reached incrementally. Build
+// (CFBundleVersion) monotonic +1. See AGENTS.md "Release flow" + versioning memory.
 
 import Foundation
 
@@ -11,7 +18,7 @@ import Foundation
 public enum AppVersion {
     /// Marketing version (CFBundleShortVersionString equivalent).
     /// Format: MAJOR.MINOR.PATCH (Semantic Versioning).
-    public static let marketing = "3.7.12"
+    public static let marketing = "3.8.0"
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
@@ -57,7 +64,14 @@ public enum AppVersion {
     /// v3.7.12: 57 → 58 — v4 "Liquid Glass, evolved" UI redesign (foundation
     ///   tokens + component layer + 7 settings pages + 3 surfaces); ~95% design
     ///   compliance vs the Claude Design handoff, zero functional regression (1884/0).
-    public static let build = "58"
+    /// v3.8.0: 58 → 59 — first install under the +1-per-published-install rule;
+    ///   post-v3.7.12 refinements shipped together: Command Bridge liquid-glass
+    ///   redesign (Golden-Gate round orbs + Spotlight-mimic even-frost bar, draggable
+    ///   with session memory + keyboard traversal into recents), security hardening
+    ///   (path-traversal / metachar / Stripe tokenization), IA restructure (Commands
+    ///   its own page + Standing Orders → Connection handshake), wave page conformance,
+    ///   titanium glass-depth fix. test-floor 1884 → 1930, zero regression.
+    public static let build = "59"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }

@@ -408,6 +408,14 @@ public extension BridgeTokens {
         light: { whiteAlpha(0.70) }    // rgba(255,255,255,.70)
     )
 
+    // LIGHT/titanium note (v4 flat-render fix): the card/raise base tints are a
+    // near-white painted at .55/.62 alpha over the #ECEDEF canvas — so the card
+    // surface blends ~halfway back to the canvas and the luminance STEP that
+    // makes glass read as "lifted" is muted (flat read). The light base alphas
+    // below are raised toward opaque so the frosted-white surface sits clearly
+    // ABOVE the ground; it stays white-ish (the frosted aesthetic), just more
+    // present. Sheen stops are unchanged. Carbon is byte-for-byte unchanged.
+
     /// e1 card fill (`--glass-card`).
     static let glassCard = GlassFill(
         stops: [
@@ -416,7 +424,7 @@ public extension BridgeTokens {
         ],
         base: adaptive(
             dark:  { srgb(0.078, 0.078, 0.094, 0.30) },  // rgba(20,20,24,.30)
-            light: { srgb(0.957, 0.961, 0.969, 0.55) }   // rgba(244,245,247,.55)
+            light: { srgb(0.984, 0.988, 0.996, 0.80) }   // ~#FBFCFE near-white @ .80
         )
     )
     /// e2 raised-tile fill (`--glass-raise`).
@@ -427,7 +435,7 @@ public extension BridgeTokens {
         ],
         base: adaptive(
             dark:  { srgb(0.094, 0.098, 0.122, 0.46) },  // rgba(24,25,31,.46)
-            light: { srgb(0.973, 0.976, 0.984, 0.62) }   // rgba(248,249,251,.62)
+            light: { srgb(0.988, 0.992, 1.0, 0.86) }     // ~#FCFDFF near-white @ .86
         )
     )
     /// e3 popover fill (`--glass-popover`) — a 3-stop sheen.
@@ -489,27 +497,40 @@ public extension BridgeTokens {
         }
     }
 
+    // LIGHT/titanium note (v4 flat-render fix): the CSS `--bevel-*` values are
+    // two HARD 1px insets (top rim + bottom occlusion). The Swift `Bevel` bakes
+    // both into ONE vertical gradient stroke (top→clear@.5→bottom), so each
+    // edge is only full-strength at the extreme row and ramps to clear by the
+    // mid-line — a soft fade, not CSS's crisp 1px line. On carbon the dark base
+    // tint + hard shadows carry the depth so the dilution is invisible; on the
+    // bright titanium ground the bevel IS the primary depth cue, so the literal
+    // CSS opacities wash out to flat white. The light branches below are raised
+    // (rim-light and cool occlusion both ~2×) so the gradient-diluted edge still
+    // READS as a bright top rim + cool bottom shade. Carbon is byte-for-byte
+    // unchanged. The cool occlusion stays the same blue-gray hue (15,18,28).
     static let bevelCard = Bevel(
-        top:    adaptive(dark: { whiteAlpha(0.048) }, light: { whiteAlpha(0.34) }),
-        bottom: adaptive(dark: { blackAlpha(0.30) },  light: { srgb(0.059, 0.071, 0.110, 0.075) }) // rgba(15,18,28,.075)
+        top:    adaptive(dark: { whiteAlpha(0.048) }, light: { whiteAlpha(0.85) }),
+        bottom: adaptive(dark: { blackAlpha(0.30) },  light: { srgb(0.059, 0.071, 0.110, 0.20) }) // rgba(15,18,28,.20)
     )
     static let bevelRaise = Bevel(
-        top:    adaptive(dark: { whiteAlpha(0.056) }, light: { whiteAlpha(0.248) }),
-        bottom: adaptive(dark: { blackAlpha(0.42) },  light: { srgb(0.059, 0.071, 0.110, 0.105) }) // rgba(15,18,28,.105)
+        top:    adaptive(dark: { whiteAlpha(0.056) }, light: { whiteAlpha(0.92) }),
+        bottom: adaptive(dark: { blackAlpha(0.42) },  light: { srgb(0.059, 0.071, 0.110, 0.24) }) // rgba(15,18,28,.24)
     )
     static let bevelWindow = Bevel(
-        top:    adaptive(dark: { whiteAlpha(0.072) }, light: { whiteAlpha(0.28) }),
-        bottom: adaptive(dark: { blackAlpha(0.45) },  light: { srgb(0.059, 0.071, 0.110, 0.105) }) // rgba(15,18,28,.105)
+        top:    adaptive(dark: { whiteAlpha(0.072) }, light: { whiteAlpha(0.92) }),
+        bottom: adaptive(dark: { blackAlpha(0.45) },  light: { srgb(0.059, 0.071, 0.110, 0.24) }) // rgba(15,18,28,.24)
     )
     static let bevelControl = Bevel(
-        top:    adaptive(dark: { whiteAlpha(0.18) },  light: { whiteAlpha(0.90) }),
-        bottom: adaptive(dark: { blackAlpha(0.12) },  light: { srgb(0.059, 0.071, 0.110, 0.05) }) // rgba(15,18,28,.05)
+        top:    adaptive(dark: { whiteAlpha(0.18) },  light: { whiteAlpha(0.95) }),
+        bottom: adaptive(dark: { blackAlpha(0.12) },  light: { srgb(0.059, 0.071, 0.110, 0.12) }) // rgba(15,18,28,.12)
     )
     /// Recessed inset bevel (`--bevel-inset`): top inner SHADE (not light) +
     /// bottom inner light — the inverse of a raised bevel, for wells/inputs.
+    /// LIGHT raised (top shade .10→.22, bottom light .60→.85) so the recessed
+    /// well still reads as sunken on the bright titanium ground; carbon untouched.
     static let bevelInset = Bevel(
-        top:    adaptive(dark: { blackAlpha(0.45) },  light: { srgb(0.059, 0.071, 0.110, 0.10) }), // rgba(15,18,28,.10)
-        bottom: adaptive(dark: { whiteAlpha(0.04) },  light: { whiteAlpha(0.60) }),
+        top:    adaptive(dark: { blackAlpha(0.45) },  light: { srgb(0.059, 0.071, 0.110, 0.22) }), // rgba(15,18,28,.22)
+        bottom: adaptive(dark: { whiteAlpha(0.04) },  light: { whiteAlpha(0.85) }),
         width: 2
     )
 
@@ -517,17 +538,22 @@ public extension BridgeTokens {
     //
     // The hairline border at each elevation (`--edge-card/raise/window`).
 
+    // LIGHT/titanium note: at 0.5px over a near-white glass / light-gray canvas
+    // pairing the literal CSS .10–.13 hairline has too little luminance contrast
+    // to define the card boundary, so cards bleed into the canvas (flat read).
+    // The light branches are raised (~.16–.20) so the edge reads as a crisp
+    // boundary; the hue stays the cool blue-gray (15,18,28). Carbon unchanged.
     static let edgeCard = adaptive(
         dark:  { whiteAlpha(0.10) },
-        light: { srgb(0.059, 0.071, 0.110, 0.10) }   // rgba(15,18,28,.10)
+        light: { srgb(0.059, 0.071, 0.110, 0.16) }   // rgba(15,18,28,.16)
     )
     static let edgeRaise = adaptive(
         dark:  { whiteAlpha(0.16) },
-        light: { srgb(0.059, 0.071, 0.110, 0.13) }   // rgba(15,18,28,.13)
+        light: { srgb(0.059, 0.071, 0.110, 0.20) }   // rgba(15,18,28,.20)
     )
     static let edgeWindow = adaptive(
         dark:  { whiteAlpha(0.18) },
-        light: { srgb(0.059, 0.071, 0.110, 0.12) }   // rgba(15,18,28,.12)
+        light: { srgb(0.059, 0.071, 0.110, 0.18) }   // rgba(15,18,28,.18)
     )
 
     // ── Ingredient 4 · Dual drop shadow (ambient + contact) ─────────────────
@@ -552,25 +578,36 @@ public extension BridgeTokens {
         public init(_ a: ShadowLayer, _ b: ShadowLayer) { self.a = a; self.b = b }
     }
 
+    // LIGHT/titanium note (v4 flat-render fix): SwiftUI's `.shadow(radius:)`
+    // spreads the SAME alpha over a Gaussian (no spread, lighter falloff) and
+    // CSS blur-radius ≈ 2× SwiftUI's radius — so the literal cool CSS alphas
+    // (.075–.125 on the load-bearing card/raise rungs) cast essentially NO
+    // visible shadow on the #ECEDEF ground, a primary cause of the flat read.
+    // The light-branch alphas below are raised (the tight CONTACT layer most, so
+    // cards get a crisp lift) to register against the bright canvas; the hue
+    // stays the cool blue-gray (18,22,34). Carbon (dark) is byte-for-byte
+    // unchanged. (Could not lower radius without changing the soft ambient
+    // character, so alpha carries the legibility.)
+
     /// e1 dual shadow (`--sh-e1`).
     static let shadowE1 = BridgeShadow(
-        ShadowLayer(adaptive(dark: { blackAlpha(0.375) }, light: { srgb(0.071, 0.086, 0.133, 0.075) }), radius: 3,  y: 1.5),
-        ShadowLayer(adaptive(dark: { blackAlpha(0.275) }, light: { srgb(0.071, 0.086, 0.133, 0.075) }), radius: 9,  y: 3)
+        ShadowLayer(adaptive(dark: { blackAlpha(0.375) }, light: { srgb(0.071, 0.086, 0.133, 0.16) }), radius: 3,  y: 1.5),
+        ShadowLayer(adaptive(dark: { blackAlpha(0.275) }, light: { srgb(0.071, 0.086, 0.133, 0.20) }), radius: 9,  y: 3)
     )
     /// e2 dual shadow (`--sh-e2`).
     static let shadowE2 = BridgeShadow(
-        ShadowLayer(adaptive(dark: { blackAlpha(0.375) }, light: { srgb(0.071, 0.086, 0.133, 0.088) }), radius: 6,  y: 3),
-        ShadowLayer(adaptive(dark: { blackAlpha(0.425) }, light: { srgb(0.071, 0.086, 0.133, 0.125) }), radius: 33, y: 15)
+        ShadowLayer(adaptive(dark: { blackAlpha(0.375) }, light: { srgb(0.071, 0.086, 0.133, 0.18) }), radius: 6,  y: 3),
+        ShadowLayer(adaptive(dark: { blackAlpha(0.425) }, light: { srgb(0.071, 0.086, 0.133, 0.22) }), radius: 33, y: 15)
     )
     /// e3 dual shadow (`--sh-e3`).
     static let shadowE3 = BridgeShadow(
-        ShadowLayer(adaptive(dark: { blackAlpha(0.50) }, light: { srgb(0.071, 0.086, 0.133, 0.125) }), radius: 21, y: 9),
-        ShadowLayer(adaptive(dark: { blackAlpha(0.65) }, light: { srgb(0.071, 0.086, 0.133, 0.20) }),  radius: 90, y: 39)
+        ShadowLayer(adaptive(dark: { blackAlpha(0.50) }, light: { srgb(0.071, 0.086, 0.133, 0.20) }), radius: 21, y: 9),
+        ShadowLayer(adaptive(dark: { blackAlpha(0.65) }, light: { srgb(0.071, 0.086, 0.133, 0.30) }), radius: 90, y: 39)
     )
     /// e4 dual shadow (`--sh-e4`).
     static let shadowE4 = BridgeShadow(
-        ShadowLayer(adaptive(dark: { blackAlpha(0.575) }, light: { srgb(0.071, 0.086, 0.133, 0.15) }),  radius: 42,  y: 18),
-        ShadowLayer(adaptive(dark: { blackAlpha(0.80) },  light: { srgb(0.071, 0.086, 0.133, 0.275) }), radius: 156, y: 66)
+        ShadowLayer(adaptive(dark: { blackAlpha(0.575) }, light: { srgb(0.071, 0.086, 0.133, 0.24) }), radius: 42,  y: 18),
+        ShadowLayer(adaptive(dark: { blackAlpha(0.80) },  light: { srgb(0.071, 0.086, 0.133, 0.36) }), radius: 156, y: 66)
     )
 
     // ── Specular layer (glint · rim · sheen gradients) ──────────────────────
