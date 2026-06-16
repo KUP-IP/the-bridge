@@ -1571,65 +1571,39 @@ public struct CommandBridgeRootView: View {
 private struct PopoverGlass: ViewModifier {
     let radius: CGFloat
     @Environment(\.colorScheme) private var colorScheme
-    // SAME elevation rung as the favorite orbs (BridgeGlassBubble uses e2 RAISE):
-    // glass-raise body + bevel + rim + e2 shadow. The pill/panel read "too
-    // transparent" because they LACKED this body fill — now they share it.
-    private var rung: BridgeTokens.ElevationRung { BridgeTokens.Elevation.raise }
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         let isDark = colorScheme == .dark
-        // SAME liquid glass as the orbs (operator: "it should look like the same
-        // liquid glass, same feel" — just a different shape). The orbs are an EVEN
-        // glass-raise body with a CENTRE-concentrated dome + refraction on top (their
-        // thickness gradient) and a bevel/rim/shadow edge. The pill mirrors that, the
-        // centre lensing shaped ELLIPTICALLY to the wide capsule.
-        let domeColors: [Color] = isDark
-            ? [Color.white.opacity(0.22), Color.white.opacity(0.06), Color.clear]
-            : [Color.white.opacity(0.42), Color.white.opacity(0.12), Color.clear]
+        // SPOTLIGHT-MIMIC (operator: mimic native macOS Spotlight — the gold-standard
+        // liquid glass). Spotlight's bar is EVEN frosted glass: uniform across its
+        // width AND height (NOT a centre-pooled lens — that read unbalanced + top-
+        // heavy on a horizontal bar), an adaptive frost that lightens + blurs the
+        // backdrop, with a faint EVEN top sheen, a hairline edge, and a soft shadow.
         return content
             .background {
                 ZStack {
-                    // 1. BODY — the orbs' glass-raise fill (the presence that was missing).
-                    rung.fill?.paint(in: shape)
-                    // 2. THICK-CENTRE refraction — blur pooled at the centre, fading to
-                    //    clear at the rim (the gradient thickness).
-                    shape.fill(.ultraThinMaterial)
-                        .mask(shape.fill(EllipticalGradient(
-                            gradient: Gradient(stops: [
-                                .init(color: .black, location: 0.0),
-                                .init(color: .black.opacity(0.6), location: 0.55),
-                                .init(color: .clear, location: 1.0),
-                            ]),
-                            center: .center)))
-                    // 3. Lens highlight — the orbs' dome, widened to an ellipse.
-                    shape.fill(EllipticalGradient(
-                        gradient: Gradient(colors: domeColors),
-                        center: UnitPoint(x: 0.5, y: 0.34)))
-                    // 4. Specular glint — the raise-rung hotspot, same as the orbs.
-                    shape.fill(BridgeTokens.glint).allowsHitTesting(false)
+                    // Even frosted blur — the Spotlight frost, uniform (no centre mask).
+                    shape.fill(.regularMaterial)
+                    // Faint EVEN top sheen — a thin glass top-light, balanced: bright
+                    // only at the very top edge, gone by ~26% (NOT a big upper dome).
+                    shape.fill(LinearGradient(
+                        gradient: Gradient(stops: [
+                            .init(color: Color.white.opacity(isDark ? 0.14 : 0.30), location: 0.0),
+                            .init(color: .clear, location: 0.26),
+                        ]),
+                        startPoint: .top, endPoint: .bottom))
                 }
             }
-            // 5+6. Same edge as the orbs: directional bevel + faint theme-aware rim.
-            .overlay(rung.bevel.overlay(in: shape).allowsHitTesting(false))
+            // Hairline edge + a soft drop shadow — Spotlight's subtle border + float.
             .overlay(shape.strokeBorder(BridgeTokens.edgeRaise, lineWidth: 1).allowsHitTesting(false))
             .clipShape(shape)
-            // 7. Same depth as the orbs: the e2 dual shadow + a soft contact shadow.
-            .modifier(OptionalBridgeShadow(rung.shadow))
-            .shadow(color: .black.opacity(isDark ? 0.20 : 0.10), radius: 9, y: 4)
+            .shadow(color: .black.opacity(isDark ? 0.28 : 0.16), radius: 16, y: 7)
     }
 }
 
-/// Applies the rung's dual (ambient + contact) `BridgeShadow` when present, so the
-/// pill/panel get the SAME e2 depth as the favorite orbs.
-private struct OptionalBridgeShadow: ViewModifier {
-    let shadow: BridgeTokens.BridgeShadow?
-    init(_ shadow: BridgeTokens.BridgeShadow?) { self.shadow = shadow }
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if let s = shadow { content.bridgeShadow(s) } else { content }
-    }
-}
+// (No OptionalBridgeShadow — the Spotlight-mimic PopoverGlass uses a single soft
+//  drop shadow, not the rung's dual shadow.)
 
 private extension View {
     /// Wrap `self` in the v4 floating popover-glass surface at `radius`.
