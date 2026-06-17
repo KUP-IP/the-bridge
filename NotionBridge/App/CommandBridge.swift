@@ -1894,8 +1894,17 @@ private struct PopoverGlass: ViewModifier {
         return content
             .background {
                 ZStack {
-                    // Even frosted blur — the Spotlight frost, uniform (no centre mask).
-                    shape.fill(.regularMaterial)
+                    // (PKT-1006 R4b · operator-resolved Q2) STANDALONE liquid glass on a
+                    // fully transparent container. The shade was `.regularMaterial` — too
+                    // opaque/tinted, so the favorites row + bar read as sitting on one
+                    // shared backdrop rectangle. Move to the most transparent system
+                    // blur (`.ultraThinMaterial`, the design's frosted-air .cb-pill /
+                    // .cb-panel intent) so each element (the favorites bubbles above, the
+                    // pill, the results panel) stands alone as its OWN frosted-glass
+                    // surface over the desktop — no shared shade. The hairline edge +
+                    // even top sheen + per-element float shadow (below) keep each one
+                    // reading as a discrete raised pane (design elevation rung e3).
+                    shape.fill(.ultraThinMaterial)
                     // Faint EVEN top sheen — a thin glass top-light, balanced: bright
                     // only at the very top edge, gone by ~26% (NOT a big upper dome).
                     shape.fill(LinearGradient(
@@ -1906,7 +1915,8 @@ private struct PopoverGlass: ViewModifier {
                         startPoint: .top, endPoint: .bottom))
                 }
             }
-            // Hairline edge + a soft drop shadow — Spotlight's subtle border + float.
+            // Hairline edge + a soft PER-ELEMENT drop shadow — each glass pane floats
+            // on its own (no shared backdrop rectangle behind both).
             .overlay(shape.strokeBorder(BridgeTokens.edgeRaise, lineWidth: 1).allowsHitTesting(false))
             .clipShape(shape)
             .shadow(color: .black.opacity(isDark ? 0.28 : 0.16), radius: 16, y: 7)

@@ -309,9 +309,15 @@ public struct BridgeGlassBubble<Content: View>: View {
         // This radial specular is the bubble's signature read; it complements the
         // token `rung.fill` underneath (the e2 raise surface) rather than
         // replacing it, so the dome now sits on the shared raised-glass material.
+        // (PKT-1006 R4a · operator-resolved Q2) Firmer raised dome. The bubbles
+        // read FLAT vs the design's "PURE liquid-glass bubbles"; raise the
+        // specular hotspot + carry a touch more falloff so each favorite reads as
+        // a raised refractive dome (e2 raise rung), with the firm rim (below)
+        // holding the thin edge. Carbon ramps a brighter white hotspot; titanium
+        // keeps its softer near-white sheen so it doesn't blow out on white.
         let domeColors: [Color] = isDark
-            ? [Color.white.opacity(0.42), Color.white.opacity(0.10), Color.white.opacity(0.02)]
-            : [Color.white.opacity(0.70), Color.white.opacity(0.22), Color.white.opacity(0.0)]
+            ? [Color.white.opacity(0.52), Color.white.opacity(0.14), Color.white.opacity(0.02)]
+            : [Color.white.opacity(0.78), Color.white.opacity(0.26), Color.white.opacity(0.0)]
         // ROUND glass orb (operator round-2: favorites read soft + square → firm +
         // round). A circle is a squircle whose corner radius = half the edge.
         let shape = RoundedRectangle(cornerRadius: size / 2, style: .continuous)
@@ -326,9 +332,12 @@ public struct BridgeGlassBubble<Content: View>: View {
             shape.fill(.ultraThinMaterial)
                 .mask(shape.fill(RadialGradient(
                     gradient: Gradient(stops: [
+                        // (PKT-1006 R4a) Thicker centre, defined edge: hold full
+                        // refraction further out (0.0→0.6 solid), then fall to a
+                        // thin rim so the orb reads as a domed lens, not an even tint.
                         .init(color: .black, location: 0.0),
-                        .init(color: .black.opacity(0.55), location: 0.5),
-                        .init(color: .clear, location: 0.95),
+                        .init(color: .black.opacity(0.70), location: 0.6),
+                        .init(color: .clear, location: 0.98),
                     ]),
                     center: .center, startRadius: 0, endRadius: size * 0.5)))
             // Signature specular dome — centred so the lens reads thick in the middle.
