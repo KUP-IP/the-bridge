@@ -1274,6 +1274,7 @@ public struct CommandBridgeRootView: View {
                     ),
                     placeholder: "Bridge Command",
                     isFocused: $queryFocused,
+                    focusToken: model.focusToken,
                     onReturn: { commitTopSelection() },
                     onArrowDown: { model.moveSelection(1) },
                     onArrowUp: { model.moveSelection(-1) },
@@ -1646,6 +1647,13 @@ private struct QueryField: NSViewRepresentable {
     @Binding var text: String
     let placeholder: String
     var isFocused: FocusState<Bool>.Binding
+    /// (PKT-1006 R1) Monotonic focus token. The controller bumps it on EVERY
+    /// `show()`; this representable claims first responder whenever the value it
+    /// last applied differs from the current one. Driving focus off a token that
+    /// ALWAYS changes (rather than the `isFocused` boolean, which is already
+    /// `true` on a reused panel so its `.onChange` never re-fires) is what makes
+    /// re-open focus deterministic.
+    var focusToken: Int
     var onReturn: () -> Void
     var onArrowDown: () -> Void
     var onArrowUp: () -> Void
@@ -1714,15 +1722,48 @@ private struct QueryField: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSTextField, context: Context) {
         if nsView.stringValue != text { nsView.stringValue = text }
-        if isFocused.wrappedValue {
-            DispatchQueue.main.async {
-                nsView.window?.makeFirstResponder(nsView)
-            }
+        // (PKT-1006 R1) Re-claim first responder whenever the controller bumps
+        // the focus token. The token strictly increases on every show(), so a
+        // reused-panel re-open ALWAYS lands here (the old `isFocused` boolean
+        // was already `true`, so its `.onChange` never re-fired and the field
+        // stayed unfocused). `claimFocus` retries on the next runloop until the
+        // panel is actually the key window, fixing the async-vs-panel-key race.
+        if context.coordinator.lastAppliedFocusToken != focusToken {
+            context.coordinator.lastAppliedFocusToken = focusToken
+            claimFocus(nsView, attemptsRemaining: 12)
         }
+    }
+
+    /// Make `field` first responder once its window is key. The makeFirstResponder
+    /// from `show()` used to fire a single `DispatchQueue.main.async` that could
+    /// land BEFORE `makeKeyAndOrderFront` made the panel key — the WindowServer
+    /// then rejects the focus and the field stays dead. This retries on the main
+    /// runloop (cheap, bounded) until the window is key, then focuses exactly once.
+    private func claimFocus(_ field: NSTextField, attemptsRemaining: Int) {
+        guard let window = field.window else {
+            // Not yet in a window — try again shortly (the panel is being shown).
+            guard attemptsRemaining > 0 else { return }
+            DispatchQueue.main.async { claimFocus(field, attemptsRemaining: attemptsRemaining - 1) }
+            return
+        }
+        guard window.isKeyWindow else {
+            guard attemptsRemaining > 0 else { return }
+            DispatchQueue.main.async { claimFocus(field, attemptsRemaining: attemptsRemaining - 1) }
+            return
+        }
+        // Already first responder (the field editor descends from the field) → done.
+        if let fr = window.firstResponder as? NSView, fr === field || fr.isDescendant(of: field) {
+            return
+        }
+        window.makeFirstResponder(field)
     }
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: QueryField
+        /// (PKT-1006 R1) The focus token most recently applied, so `updateNSView`
+        /// only re-claims focus on an actual token change (not on every SwiftUI
+        /// invalidation, which would steal focus mid-typing / mid-drag).
+        var lastAppliedFocusToken: Int = 0
         init(_ parent: QueryField) { self.parent = parent }
 
         func controlTextDidChange(_ obj: Notification) {
