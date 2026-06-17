@@ -239,7 +239,9 @@ public struct AdvancedSection: View {
             BridgeButton("Check for updates", systemImage: "arrow.down.circle") {
                 (NSApp.delegate as? AppDelegate)?.checkForUpdates()
             }
+            .accessibilityIdentifier(BridgeAXID.Advanced.checkUpdates)   // PKT-1005 remainder (b)
             BridgeButton("Export diagnostics", systemImage: "square.and.arrow.up", action: onExportDiagnostics)
+                .accessibilityIdentifier(BridgeAXID.Advanced.exportDiagnostics)   // PKT-1005 remainder (b)
         }
         .padding(.horizontal, 4)
         .padding(.bottom, 2)
@@ -341,7 +343,8 @@ public struct AdvancedSection: View {
             launchToggleRow(
                 title: "Launch at login",
                 subtitle: "Registers Bridge with macOS via SMAppService. Approve in System Settings → Login Items if blocked.",
-                isOn: $launchAtLogin
+                isOn: $launchAtLogin,
+                axID: BridgeAXID.Advanced.toggleLaunchAtLogin   // PKT-1005 remainder (b)
             )
             .onChange(of: launchAtLogin) { _, enabled in
                 applyLaunchAtLoginChange(enabled: enabled)
@@ -377,7 +380,7 @@ public struct AdvancedSection: View {
             .frame(height: 0.5)
     }
 
-    private func launchToggleRow(title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
+    private func launchToggleRow(title: String, subtitle: String, isOn: Binding<Bool>, axID: String? = nil) -> some View {
         // `.avp-toggle { padding: 10px 0 }`.
         HStack(alignment: .center, spacing: 14) {
             VStack(alignment: .leading, spacing: 3) {
@@ -392,6 +395,7 @@ public struct AdvancedSection: View {
             Spacer()
             BridgeToggle(isOn: isOn)
                 .accessibilityLabel(title)
+                .accessibilityIdentifier(axID ?? "")   // PKT-1005 remainder (b): id when provided
         }
         .padding(.vertical, 10)
     }
@@ -475,6 +479,7 @@ public struct AdvancedSection: View {
                     .accessibilityLabel("Local MCP port")
 
                 BridgeButton("Save", variant: .primary, isEnabled: portSaveEnabled, action: onSaveSSEPort)
+                    .accessibilityIdentifier(BridgeAXID.Advanced.savePort)   // PKT-1005 remainder (b)
 
                 BridgeButton("Restore default", variant: .link) {
                     ssePortInput = String(BridgeConstants.defaultSSEPort)
@@ -739,6 +744,7 @@ public struct AdvancedSection: View {
                 BridgeButton("Restart Bridge", systemImage: "power") {
                     NSApp.restartBridge()
                 }
+                .accessibilityIdentifier(BridgeAXID.Advanced.restart)   // PKT-1005 remainder (b)
                 if let routineFlash {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 13))
@@ -786,6 +792,7 @@ public struct AdvancedSection: View {
                 BridgeButton("Factory reset\u{2026}", systemImage: "power", variant: .danger) {
                     showFactoryResetConfirmation = true
                 }
+                .accessibilityIdentifier(BridgeAXID.Advanced.factoryReset)   // PKT-1005 remainder (b)
             }
         }
     }

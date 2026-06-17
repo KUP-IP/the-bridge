@@ -67,6 +67,99 @@ public enum BridgeAXID {
         /// The metadata grid container (3 cells post-PKT-1005 finding 1).
         public static let metadataGrid   = id("metadata.grid")
     }
+
+    // ── Commands section control slugs (enum case `.orders`) ─────────────
+    // Displays "Commands"; the id segment stays the stable `orders` case name.
+    public enum Commands {
+        private static func id(_ slug: String) -> String { BridgeAXID.control(.orders, slug) }
+        /// The consolidated header container.
+        public static let header        = id("header")
+        /// The Command Bridge master switch (global hot-key on/off).
+        public static let toggleEnabled = id("toggle.enabled")
+        /// The recordable global-shortcut editor field.
+        public static let shortcutEditor = id("shortcut.editor")
+        /// The command master–detail list.
+        public static let list          = id("list")
+    }
+
+    // ── Jobs section control slugs (enum case `.jobs`) ───────────────────
+    public enum Jobs {
+        private static func id(_ slug: String) -> String { BridgeAXID.control(.jobs, slug) }
+        /// Primary "New job" button.
+        public static let newJob        = id("new")
+        /// "Pause all" button.
+        public static let pauseAll      = id("pause.all")
+        /// The job-search field.
+        public static let search        = id("search")
+        /// The scrollable jobs list.
+        public static let list          = id("list")
+        /// A single job list row (shared id; one per row).
+        public static let row           = id("row")
+    }
+
+    // ── Tools section control slugs (enum case `.tools`) ─────────────────
+    public enum Tools {
+        private static func id(_ slug: String) -> String { BridgeAXID.control(.tools, slug) }
+        /// The module-group browser container (the whole tools list).
+        public static let list          = id("list")
+        /// A single module-group card row (shared id; one per group).
+        public static let groupRow       = id("group.row")
+        /// A dependency-link "Fix" button.
+        public static let depFix         = id("dep.fix")
+    }
+
+    // ── Security section control slugs (enum case `.security`) ───────────
+    // The merged Vault (credentials) + Gates (permissions) page.
+    public enum Security {
+        private static func id(_ slug: String) -> String { BridgeAXID.control(.security, slug) }
+        /// "Re-check all" permission button.
+        public static let recheckAll    = id("recheck.all")
+        /// The permission-grants grid container.
+        public static let grantsList    = id("grants.list")
+        /// A single permission grant tile (shared id; one per grant).
+        public static let grantRow       = id("grant.row")
+        /// Primary "Add credential" button.
+        public static let addCredential  = id("credential.add")
+        /// "Validate all" credentials button.
+        public static let validateAll    = id("credential.validate.all")
+        /// The stored-credentials list container.
+        public static let credentialsList = id("credentials.list")
+        /// A single stored-credential row (shared id; one per credential).
+        public static let credentialRow  = id("credential.row")
+        /// The credential auto-validate policy toggle.
+        public static let togglePolicy   = id("toggle.policy")
+    }
+
+    // ── Connection section control slugs (enum case `.connection`) ───────
+    // The merged Local (connections) + Remote (cloud access) page.
+    public enum Connection {
+        private static func id(_ slug: String) -> String { BridgeAXID.control(.connection, slug) }
+        /// The connected-clients list container.
+        public static let clientsList   = id("clients.list")
+        /// A single connected-client row (shared id; one per client).
+        public static let clientRow      = id("client.row")
+        /// The "Enable remote access" master toggle.
+        public static let toggleRemote   = id("toggle.remote")
+        /// The "Add to Claude" primary button.
+        public static let addToClaude    = id("claude.add")
+    }
+
+    // ── Advanced section control slugs (enum case `.advanced`) ───────────
+    public enum Advanced {
+        private static func id(_ slug: String) -> String { BridgeAXID.control(.advanced, slug) }
+        /// "Check for updates" button.
+        public static let checkUpdates  = id("updates.check")
+        /// "Export diagnostics" button.
+        public static let exportDiagnostics = id("diagnostics.export")
+        /// The launch-at-login toggle.
+        public static let toggleLaunchAtLogin = id("toggle.launchAtLogin")
+        /// The SSE-port "Save" primary button.
+        public static let savePort      = id("port.save")
+        /// "Restart Notion Bridge" button.
+        public static let restart       = id("restart")
+        /// "Factory Reset" destructive button.
+        public static let factoryReset  = id("factory.reset")
+    }
 }
 
 // MARK: - The stage (the window surface: solid canvas + carbon-fibre weave)

@@ -270,6 +270,7 @@ public struct ModuleGroupList: View {
                 .padding(.vertical, BridgeTokens.Space.paneV)
                 .padding(.horizontal, BridgeTokens.Space.paneH)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier(BridgeAXID.Tools.list)   // PKT-1005 remainder (b)
             }
             // Deep-link: expand + scroll the chip's target family into view. Fires
             // on first appear (chip tapped from another page) and on every later
@@ -383,6 +384,7 @@ public struct ModuleGroupList: View {
                         // Scroll/expand anchor — the resolved group id, so the
                         // deep-link can jump straight to the family.
                         .id(group.id)
+                        .accessibilityIdentifier(BridgeAXID.Tools.groupRow)   // PKT-1005 remainder (b)
                 }
             }
         }
@@ -427,6 +429,7 @@ public struct ModuleGroupList: View {
                         .buttonStyle(.plain)
                         .font(BridgeTokens.Typeface.meta.weight(.semibold))
                         .foregroundStyle(BridgeTokens.warnText)
+                        .accessibilityIdentifier(BridgeAXID.Tools.depFix)   // PKT-1005 remainder (b)
                 }
                 .padding(.horizontal, BridgeToolTableMetrics.hPad)
                 .padding(.top, BridgeTokens.Space.s3)

@@ -186,9 +186,11 @@ public struct JobsSection: View {
                 Task { await pauseAll() }
             }
             .help("Pause every active job")
+            .accessibilityIdentifier(BridgeAXID.Jobs.pauseAll)   // PKT-1005 remainder (b)
             BridgeButton("New job", systemImage: "plus", variant: .primary) {
                 showNewJobSheet = true
             }
+            .accessibilityIdentifier(BridgeAXID.Jobs.newJob)   // PKT-1005 remainder (b)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
@@ -332,6 +334,7 @@ public struct JobsSection: View {
                 .foregroundStyle(BridgeTokens.fg1)
                 .tint(BridgeTokens.accentStrong)
                 .accessibilityLabel("Filter jobs")
+                .accessibilityIdentifier(BridgeAXID.Jobs.search)   // PKT-1005 remainder (b)
         }
         .frame(width: 160, height: 30)
         .padding(.horizontal, 10)
@@ -353,7 +356,7 @@ public struct JobsSection: View {
         } else if filteredJobs.isEmpty {
             emptyState
         } else {
-            VStack(spacing: 3) {
+            VStack(spacing: 3) {   // PKT-1005 remainder (b): list container id applied below
                 ForEach(Array(filteredJobs.enumerated()), id: \.element.id) { _, job in
                     JobGlassRow(
                         job: job,
@@ -379,8 +382,10 @@ public struct JobsSection: View {
                                           ? BridgeTokens.accent.opacity(0.4) : Color.clear,
                                           lineWidth: 1)
                     )
+                    .accessibilityIdentifier(BridgeAXID.Jobs.row)   // PKT-1005 remainder (b)
                 }
             }
+            .accessibilityIdentifier(BridgeAXID.Jobs.list)   // PKT-1005 remainder (b)
         }
     }
 

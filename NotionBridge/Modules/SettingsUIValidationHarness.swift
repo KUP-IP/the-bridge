@@ -51,9 +51,15 @@ public enum SettingsUIValidationHarness {
                 BridgeAXID.titleBar,
                 BridgeAXID.control(section, "root"),
             ]
-            if section == .skills {
+            // Per-section inner-control ids. Skills was the Pillar-C priority
+            // surface (PKT-1005 wave plan); the other six sections' key controls
+            // were instrumented in PKT-1005 remainder (b) under the SAME
+            // BridgeAXID convention, so the harness can assert them by id too.
+            switch section {
+            case .skills:
+                // NB: `BridgeAXID.Skills.root` == `BridgeAXID.control(.skills, "root")`,
+                // already added by the shared-chrome loop above — not repeated here.
                 ids.append(contentsOf: [
-                    BridgeAXID.Skills.root,
                     BridgeAXID.Skills.list,
                     BridgeAXID.Skills.toggleRouting,
                     BridgeAXID.Skills.toggleEnabled,
@@ -61,6 +67,45 @@ public enum SettingsUIValidationHarness {
                     BridgeAXID.Skills.statusIndicator,
                     BridgeAXID.Skills.trash,
                     BridgeAXID.Skills.metadataGrid,
+                ])
+            case .orders:   // displays "Commands"
+                ids.append(contentsOf: [
+                    BridgeAXID.Commands.header,
+                    BridgeAXID.Commands.toggleEnabled,
+                    BridgeAXID.Commands.shortcutEditor,
+                    BridgeAXID.Commands.list,
+                ])
+            case .jobs:
+                ids.append(contentsOf: [
+                    BridgeAXID.Jobs.newJob,
+                    BridgeAXID.Jobs.pauseAll,
+                    BridgeAXID.Jobs.search,
+                    BridgeAXID.Jobs.list,
+                ])
+            case .tools:
+                ids.append(contentsOf: [
+                    BridgeAXID.Tools.list,
+                ])
+            case .security:
+                ids.append(contentsOf: [
+                    BridgeAXID.Security.recheckAll,
+                    BridgeAXID.Security.grantsList,
+                    BridgeAXID.Security.addCredential,
+                    BridgeAXID.Security.credentialsList,
+                    BridgeAXID.Security.togglePolicy,
+                ])
+            case .connection:
+                ids.append(contentsOf: [
+                    BridgeAXID.Connection.clientsList,
+                    BridgeAXID.Connection.toggleRemote,
+                ])
+            case .advanced:
+                ids.append(contentsOf: [
+                    BridgeAXID.Advanced.checkUpdates,
+                    BridgeAXID.Advanced.exportDiagnostics,
+                    BridgeAXID.Advanced.toggleLaunchAtLogin,
+                    BridgeAXID.Advanced.savePort,
+                    BridgeAXID.Advanced.factoryReset,
                 ])
             }
             map[section] = ids

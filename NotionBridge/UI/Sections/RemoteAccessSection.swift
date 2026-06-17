@@ -371,6 +371,7 @@ public struct RemoteAccessSection: View {
                 .onChange(of: cloudAccessEnabled) { _, on in
                     handleToggle(on)
                 }
+                .accessibilityIdentifier(BridgeAXID.Connection.toggleRemote)   // PKT-1005 remainder (b)
         }
     }
 
@@ -503,6 +504,7 @@ public struct RemoteAccessSection: View {
                 ) {
                     addToClaude()
                 }
+                .accessibilityIdentifier(BridgeAXID.Connection.addToClaude)   // PKT-1005 remainder (b)
                 if didCopyMCPURL {
                     Text(ClaudeAIIntegration.pasteHint)
                         .font(BridgeTokens.Typeface.micro)

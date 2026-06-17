@@ -1140,7 +1140,24 @@ set -euo pipefail
 # empty-query guard, kind-namespaced result ids + destination carry-through, and
 # skillDestination routing (file/notion/gdocs/manual). Measured integrated green
 # = 2023 passed, 0 failed. FLOOR raised 2004 -> 2023 (+19) per the order-inversion rule.
-FLOOR="${BRIDGE_TEST_FLOOR:-2023}"
+# PKT-1005 remainders (a)+(b) (On-device UI testability, 2026-06-17): closed the
+# two open DoD items. (a) ax_tree / ax_inspect(find_element) now emit each
+# element's stable AX `identifier` (kAXIdentifierAttribute) — previously only
+# detailedInfo/element_info did, so a live read could resolve elements only by
+# volatile role/title/label, never by a BridgeAXID. The two serializers were
+# unified through a pure `serializedElementAttributes(...)` builder so the
+# identifier-emission contract is unit-testable without a live AX tree / TCC.
+# +3 AccessibilityModuleTests (identifier emitted-when-present, omitted-when-
+# absent, additive-alongside-the-full-attribute-set). (b) Extended the BridgeAXID
+# convention to the inner key controls of the other six settings sections
+# (Commands/Jobs/Tools/Security/Connection/Advanced — primary buttons, toggles,
+# list rows, section roots), reusing the existing helper; the harness manifest
+# now carries those ids and a dedup removed the pre-existing Skills.root double-
+# count. +3 SettingsAXIdentifierTests (6-section id-convention lock, every-
+# section-has-inner-control-ids, manifest well-formed+unique-per-section).
+# Measured integrated green = 2029 passed, 0 failed. FLOOR raised 2023 -> 2029
+# (+6) per the order-inversion rule.
+FLOOR="${BRIDGE_TEST_FLOOR:-2029}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

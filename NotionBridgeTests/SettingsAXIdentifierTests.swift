@@ -137,6 +137,62 @@ func runSettingsAXIdentifierTests() async {
         try expect(ids.contains(grid), "Skills manifest must expose the metadata-grid id")
     }
 
+    // MARK: - PKT-1005 remainder (b): inner-control coverage for the other 6 sections
+
+    await test("PKT-1005(b): the 6 non-Skills sections' control ids follow the convention") {
+        // Each id must be `bridge.settings.<caseName>.<slug>` — keyed off the
+        // stable SettingsSection case name (note .orders displays "Commands").
+        let checks: [(String, String)] = await MainActor.run {
+            [
+                (BridgeAXID.Commands.toggleEnabled,         "bridge.settings.orders.toggle.enabled"),
+                (BridgeAXID.Commands.shortcutEditor,        "bridge.settings.orders.shortcut.editor"),
+                (BridgeAXID.Commands.header,                "bridge.settings.orders.header"),
+                (BridgeAXID.Commands.list,                  "bridge.settings.orders.list"),
+                (BridgeAXID.Jobs.newJob,                    "bridge.settings.jobs.new"),
+                (BridgeAXID.Jobs.pauseAll,                  "bridge.settings.jobs.pause.all"),
+                (BridgeAXID.Jobs.search,                    "bridge.settings.jobs.search"),
+                (BridgeAXID.Jobs.row,                       "bridge.settings.jobs.row"),
+                (BridgeAXID.Tools.list,                     "bridge.settings.tools.list"),
+                (BridgeAXID.Tools.groupRow,                 "bridge.settings.tools.group.row"),
+                (BridgeAXID.Security.recheckAll,            "bridge.settings.security.recheck.all"),
+                (BridgeAXID.Security.addCredential,         "bridge.settings.security.credential.add"),
+                (BridgeAXID.Security.togglePolicy,          "bridge.settings.security.toggle.policy"),
+                (BridgeAXID.Connection.toggleRemote,        "bridge.settings.connection.toggle.remote"),
+                (BridgeAXID.Connection.clientRow,           "bridge.settings.connection.client.row"),
+                (BridgeAXID.Advanced.toggleLaunchAtLogin,   "bridge.settings.advanced.toggle.launchAtLogin"),
+                (BridgeAXID.Advanced.savePort,              "bridge.settings.advanced.port.save"),
+                (BridgeAXID.Advanced.factoryReset,          "bridge.settings.advanced.factory.reset"),
+            ]
+        }
+        for (got, want) in checks {
+            try expect(got == want, "AX-id drift: got \(got), want \(want)")
+        }
+    }
+
+    await test("PKT-1005(b): every section's manifest carries at least one inner-control id") {
+        // Shared chrome (nav + title + root) = 3 ids; remainder (b) means every
+        // section now also exposes section-specific controls (> 3 manifest ids).
+        let manifest = SettingsUIValidationHarness.expectedIdentifiers
+        for section in SettingsSection.allCases {
+            let ids = manifest[section] ?? []
+            try expect(ids.count > 3,
+                       "section \(section) must expose inner-control ids beyond the 3 shared-chrome ids, has \(ids.count)")
+            // No id may be empty (an unprovided axID passes "" — must never reach the manifest).
+            try expect(!ids.contains(""), "section \(section) manifest must not carry an empty id")
+        }
+    }
+
+    await test("PKT-1005(b): all manifest ids across all sections are well-formed + unique-per-section") {
+        let manifest = SettingsUIValidationHarness.expectedIdentifiers
+        for section in SettingsSection.allCases {
+            let ids = manifest[section] ?? []
+            for id in ids {
+                try expect(id.hasPrefix("bridge.settings."), "malformed id in \(section): \(id)")
+            }
+            try expect(Set(ids).count == ids.count, "duplicate id within \(section) manifest: \(ids)")
+        }
+    }
+
     await test("PKT-1005: harness validateAll aggregates per-section reports") {
         // Feed the union of every section's expected ids → all sections pass.
         var union = Set<String>()
