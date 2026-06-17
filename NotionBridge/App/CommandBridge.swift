@@ -1327,6 +1327,14 @@ public struct CommandBridgeRootView: View {
     // cursor-to-origin offset so the palette can drag itself.
     @State private var paletteWindow: NSWindow?
     @State private var dragMouseOffset: CGSize?
+    // (PKT-1006 R4c · operator-resolved Q3) True while the window is being
+    // dragged. The self-legibility text shadows (placeholder NSShadow + field
+    // layer.shadow + the SwiftUI .legibilityHalo()) re-render every
+    // windowDrag.onChanged (setFrameOrigin from the live mouse) — that re-render
+    // is the "Bridge Command" shimmer. We KEEP the shadows but FREEZE them while
+    // dragging by rasterizing the haloed text into a stable layer (no per-frame
+    // shadow recompute), then release it on drag end.
+    @State private var isDraggingWindow = false
 
     private var anim: CommandBridgeAnimation {
         reduceMotion ? .reduced : .locked
@@ -1368,6 +1376,9 @@ public struct CommandBridgeRootView: View {
         .frame(width: CommandBridgeController.pillWidth + 24,
                height: CommandBridgeController.panelSize.height,
                alignment: .top)
+        // (PKT-1006 R4c) Publish the drag state so the legibility halos freeze
+        // (rasterize) while the window moves instead of shimmering.
+        .environment(\.cbIsDragging, isDraggingWindow)
         // (v4 round-3) Capture the hosting window + make the whole palette
         // draggable. simultaneousGesture so taps on the orbs / menu mark still
         // fire and the field still focuses; a >3pt drag on the glass repositions.
@@ -1408,13 +1419,20 @@ public struct CommandBridgeRootView: View {
                 if dragMouseOffset == nil {
                     dragMouseOffset = CGSize(width: mouse.x - win.frame.origin.x,
                                              height: mouse.y - win.frame.origin.y)
+                    // (R4c) Enter drag-stabilized mode on the first move — freeze
+                    // the legibility halos so they don't shimmer as the window moves.
+                    if !isDraggingWindow { isDraggingWindow = true }
                 }
                 if let off = dragMouseOffset {
                     win.setFrameOrigin(CGPoint(x: mouse.x - off.width,
                                                y: mouse.y - off.height))
                 }
             }
-            .onEnded { _ in dragMouseOffset = nil }
+            .onEnded { _ in
+                dragMouseOffset = nil
+                // (R4c) Release the frozen halos — back to live self-legible text.
+                isDraggingWindow = false
+            }
     }
 
     // MARK: Tray
@@ -1941,13 +1959,39 @@ private extension View {
 //   halo in dark mode (white ink → reads on light backdrops), a light halo in
 //   light mode (dark ink → reads on dark backdrops). On a matching backdrop the
 //   halo is imperceptible. No container is reintroduced.
+/// (PKT-1006 R4c) Environment flag — true while the palette window is being
+/// dragged. The legibility halos read it and FREEZE (rasterize) so they don't
+/// shimmer/re-render as the window moves (operator-resolved Q3: keep the
+/// shadows, stabilize during drag).
+private struct CBIsDraggingKey: EnvironmentKey {
+    static let defaultValue = false
+}
+private extension EnvironmentValues {
+    var cbIsDragging: Bool {
+        get { self[CBIsDraggingKey.self] }
+        set { self[CBIsDraggingKey.self] = newValue }
+    }
+}
+
 private struct LegibilityHalo: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.cbIsDragging) private var isDragging
     func body(content: Content) -> some View {
         let isDark = colorScheme == .dark
-        return content.shadow(
+        let haloed = content.shadow(
             color: (isDark ? Color.black : Color.white).opacity(isDark ? 0.55 : 0.6),
             radius: 2.5, x: 0, y: 0.5)
+        // (R4c) While dragging, flatten the haloed text into a single GPU layer
+        // (`.drawingGroup()`) so the window move translates a STABLE bitmap
+        // rather than re-compositing the text shadow every frame — the shadow is
+        // intact, just frozen, so the shimmer stops. Released (live) when idle.
+        return Group {
+            if isDragging {
+                haloed.drawingGroup()
+            } else {
+                haloed
+            }
+        }
     }
 }
 
@@ -2038,6 +2082,17 @@ private struct QueryField: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSTextField, context: Context) {
         if nsView.stringValue != text { nsView.stringValue = text }
+        // (PKT-1006 R4c) Freeze the field's self-legibility layer shadow while the
+        // window is dragging — rasterize the layer so its shadow is cached and
+        // translates as a stable bitmap rather than re-rendering every frame (the
+        // shimmer). The shadow stays intact; it's just frozen. Released when idle.
+        if let layer = nsView.layer {
+            let dragging = context.environment.cbIsDragging
+            if layer.shouldRasterize != dragging {
+                layer.rasterizationScale = nsView.window?.backingScaleFactor ?? 2.0
+                layer.shouldRasterize = dragging
+            }
+        }
         // (PKT-1006 R1) Re-claim first responder whenever the controller bumps
         // the focus token. The token strictly increases on every show(), so a
         // reused-panel re-open ALWAYS lands here (the old `isFocused` boolean
