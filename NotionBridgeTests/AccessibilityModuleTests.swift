@@ -218,4 +218,57 @@ func runAccessibilityModuleTests() async {
             try expect(b.truncation == nil, "no limit hit must leave truncation == nil")
         }
     }
+
+    // --- PKT-1005 remainder (a): identifier is queryable in serialized output ---
+    //
+    // ax_tree (elementDict) and ax_inspect mode=find_element (findElementPayload)
+    // both route through serializedElementAttributes. Before PKT-1005 those two
+    // serializers emitted role/title/description/geometry but NOT the AX
+    // identifier (kAXIdentifierAttribute) — so a live ax_tree / ax_inspect read
+    // could only match on volatile labels, never on a stable BridgeAXID. These
+    // tests pin that the shared serializer now ALWAYS emits `identifier` when
+    // present and OMITS it when absent, without needing a live AX tree / TCC.
+
+    await test("PKT-1005(a): serialized element emits identifier when present") {
+        let d = AccessibilityModule.serializedElementAttributes(
+            role: "AXButton", path: "/AXApplication:The Bridge/AXButton:Skills",
+            title: "Skills", description: nil,
+            identifier: "bridge.settings.nav.skills",
+            position: nil, size: nil)
+        guard case .string(let id)? = d["identifier"] else {
+            throw TestError.assertion("serialized element must carry an 'identifier' key")
+        }
+        try expect(id == "bridge.settings.nav.skills",
+                   "identifier must round-trip the BridgeAXID, got \(id)")
+    }
+
+    await test("PKT-1005(a): serialized element OMITS identifier when absent") {
+        let d = AccessibilityModule.serializedElementAttributes(
+            role: "AXGroup", path: "/AXApplication:The Bridge/AXGroup",
+            title: nil, description: nil, identifier: nil,
+            position: nil, size: nil)
+        try expect(d["identifier"] == nil,
+                   "an element with no AX identifier must not emit an 'identifier' key")
+        // Sanity: role is still always present.
+        guard case .string(let r)? = d["role"] else {
+            throw TestError.assertion("role must always be present")
+        }
+        try expect(r == "AXGroup", "role must round-trip, got \(r)")
+    }
+
+    await test("PKT-1005(a): identifier survives alongside the full attribute set") {
+        // Mirrors a real instrumented control: role + title + geometry + id.
+        let d = AccessibilityModule.serializedElementAttributes(
+            role: "AXCheckBox", path: "/AXApplication:The Bridge/AXCheckBox:Enabled",
+            title: "Enabled", description: "toggle",
+            identifier: "bridge.settings.skills.toggle.enabled",
+            position: (x: 12, y: 34), size: (w: 56, h: 20))
+        guard case .string(let id)? = d["identifier"] else {
+            throw TestError.assertion("identifier must coexist with the rest of the attributes")
+        }
+        try expect(id == "bridge.settings.skills.toggle.enabled", "got \(id)")
+        // The id must not clobber the other serialized fields.
+        try expect(d["title"] != nil && d["width"] != nil && d["path"] != nil,
+                   "identifier emission must be additive, not destructive")
+    }
 }

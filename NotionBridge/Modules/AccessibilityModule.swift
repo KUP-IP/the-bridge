@@ -283,9 +283,45 @@ public enum AccessibilityModule {
         title(el) ?? desc(el) ?? strAttr(el, kAXValueAttribute as String)
     }
 
+    /// The element's stable AX identifier (kAXIdentifierAttribute) — the
+    /// macOS AX surface of SwiftUI's `.accessibilityIdentifier` / AppKit's
+    /// `setAccessibilityIdentifier`. PKT-1005 (remainder a): `detailedInfo`
+    /// already surfaced this, but the high-traffic `ax_tree` / `find_element`
+    /// serializers did NOT, so a live read could not resolve an element by id
+    /// — only by volatile role/title/label. Emitting it here makes the
+    /// BridgeAXID identifiers (e.g. `bridge.settings.nav.skills`) resolvable
+    /// from an `ax_tree` / `ax_inspect mode=find_element` read.
+    @MainActor
+    private static func identifier(_ el: AXUIElement) -> String? {
+        strAttr(el, kAXIdentifierAttribute as String)
+    }
+
     @MainActor
     private static func children(_ el: AXUIElement) -> [AXUIElement] {
         (attr(el, kAXChildrenAttribute as String) as? [AXUIElement]) ?? []
+    }
+
+    /// Assemble the base serialized-attribute map shared by the `ax_tree`
+    /// (`elementDict`) and `ax_inspect mode=find_element` (`findElementPayload`)
+    /// element shapes from already-read primitive values. Pulled out as a pure,
+    /// non-AX function so the serialization contract — crucially that a present
+    /// `identifier` (kAXIdentifierAttribute) is ALWAYS emitted and an absent one
+    /// is OMITTED — is unit-testable without a live AX tree / TCC grant.
+    /// PKT-1005 remainder (a): the `identifier` key is the on-device proof that
+    /// a BridgeAXID can be resolved by id rather than by volatile label.
+    public static func serializedElementAttributes(
+        role: String, path: String?,
+        title: String?, description: String?, identifier: String?,
+        position: (x: Double, y: Double)?, size: (w: Double, h: Double)?
+    ) -> [String: Value] {
+        var d: [String: Value] = ["role": .string(role)]
+        if let path = path        { d["path"] = .string(path) }
+        if let t = title          { d["title"] = .string(t) }
+        if let ds = description   { d["description"] = .string(ds) }
+        if let id = identifier    { d["identifier"] = .string(id) }   // PKT-1005 remainder (a)
+        if let p = position       { d["x"] = .double(p.x); d["y"] = .double(p.y) }
+        if let s = size           { d["width"] = .double(s.w); d["height"] = .double(s.h) }
+        return d
     }
 
     @MainActor
@@ -321,11 +357,12 @@ public enum AccessibilityModule {
         let t = title(el)
         let curPath = path.isEmpty ? "/\(r):\(t ?? "")" : "\(path)/\(r):\(t ?? "")"
 
-        var d: [String: Value] = ["role": .string(r), "path": .string(curPath)]
-        if let t = t          { d["title"] = .string(t) }
-        if let ds = desc(el)  { d["description"] = .string(ds) }
-        if let p = position(el) { d["x"] = .double(p.x); d["y"] = .double(p.y) }
-        if let s = size(el)     { d["width"] = .double(s.w); d["height"] = .double(s.h) }
+        // Shared serializer (PKT-1005 remainder a): one code path emits the
+        // identifier for both ax_tree and find_element so the two can't drift.
+        var d = serializedElementAttributes(
+            role: r, path: curPath,
+            title: t, description: desc(el), identifier: identifier(el),
+            position: position(el), size: size(el))
 
         if flat {
             results.append(.object(d))
@@ -487,11 +524,14 @@ public enum AccessibilityModule {
                 "pid":      .int(Int(app.processIdentifier))
             ]
             if let fe = attr(appEl, kAXFocusedUIElementAttribute as String) as! AXUIElement? { // Safe: CF bridging
-                result["focusedElement"] = .object([
+                var feDict: [String: Value] = [
                     "role":  .string(role(fe)),
                     "title": .string(title(fe) ?? ""),
                     "description": .string(desc(fe) ?? "")
-                ])
+                ]
+                // PKT-1005 remainder (a): surface the stable AX identifier here too.
+                if let id = identifier(fe) { feDict["identifier"] = .string(id) }
+                result["focusedElement"] = .object(feDict)
             }
             return .object(result)
         } catch let e as AXModuleError { return e.toResponse() } catch { return .object(["error": .string("Unexpected: \(error)")]) }
@@ -517,11 +557,12 @@ public enum AccessibilityModule {
             let matches = findElements(in: appEl, role: r, title: t, label: l,
                                         depth: 0, budget: budget)
             let elements: [Value] = matches.map { (el, path) in
-                var d: [String: Value] = ["role": .string(role(el)), "path": .string(path)]
-                if let t = title(el)    { d["title"] = .string(t) }
-                if let ds = desc(el)    { d["description"] = .string(ds) }
-                if let p = position(el) { d["x"] = .double(p.x); d["y"] = .double(p.y) }
-                if let s = size(el)     { d["width"] = .double(s.w); d["height"] = .double(s.h) }
+                // Shared serializer (PKT-1005 remainder a): identical shape +
+                // identifier emission to ax_tree's elementDict.
+                let d = serializedElementAttributes(
+                    role: role(el), path: path,
+                    title: title(el), description: desc(el), identifier: identifier(el),
+                    position: position(el), size: size(el))
                 return .object(d)
             }
             var out: [String: Value] = ["matches": .array(elements), "count": .int(elements.count)]
@@ -714,7 +755,7 @@ public enum AccessibilityModule {
             name: "ax_tree",
             module: moduleName,
             tier: .open,
-            description: "Dump the full AX element tree for one app. Expensive — cap with maxDepth. Use ax_inspect (mode='find_element') for targeted lookups.",
+            description: "Dump the full AX element tree for one app. Each element carries its stable AX `identifier` (the SwiftUI `.accessibilityIdentifier`) when set, so elements can be resolved by id rather than by volatile label. Expensive — cap with maxDepth. Use ax_inspect (mode='find_element') for targeted lookups.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
