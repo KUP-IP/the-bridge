@@ -863,14 +863,18 @@ public final class CommandBridgeController: NSObject {
 
     // MARK: - Settings deep-link
 
-    /// Menu-bar ⌘ chip → SettingsNavigation to Orders/Commands. Public so the
-    /// SwiftUI button can invoke without touching the AppDelegate.
-    /// PKT-A: Commands folded into Orders → open Orders on the `commands` tab.
+    /// Trailing bridge-mark → bring the Bridge app to the FOREGROUND.
+    /// PKT-1006 R3 (operator-resolved Q1): the icon brings the app to the
+    /// front only — NOT Dashboard, NOT Settings. The prior implementation
+    /// deep-linked to Orders/Commands settings via the fragile
+    /// `NSApp.delegate as? AppDelegate` cast (which silently no-ops under
+    /// `@NSApplicationDelegateAdaptor`, so the icon read as dead). We now route
+    /// through the identity-correct `AppDelegate.shared` handle — the proven
+    /// PKT-1005 pattern from `BridgeAutomationModule.liveAppDelegate()` — and
+    /// call the dedicated `bringToFront()` foreground primitive.
     public func openCommandsSettings() {
-        SettingsNavigation.shared.go(.orders, anchor: "commands")
-        if let app = NSApp.delegate as? AppDelegate {
-            app.openSettings(section: .orders)
-        }
+        let app = AppDelegate.shared ?? (NSApp.delegate as? AppDelegate)
+        app?.bringToFront()
         hide()
     }
 
@@ -1295,7 +1299,7 @@ public struct CommandBridgeRootView: View {
                     )
             }
             .buttonStyle(.plain)
-            .help("Open Commands settings")
+            .help("Bring The Bridge to the front")
         }
         .padding(.leading, BridgeTokens.Space.s6)
         .padding(.trailing, BridgeTokens.Space.s4)

@@ -640,6 +640,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsController.show(section: section)
     }
 
+    /// PKT-1006 R3: bring the Bridge app to the FOREGROUND without opening any
+    /// specific window (operator-resolved Q1 — not Dashboard, not Settings).
+    /// As an `LSUIElement` (menu-bar) app we are normally `.accessory`, so we
+    /// flip to `.regular` and activate — the same foreground primitive
+    /// `checkForUpdates()` uses. The trailing bridge-mark in the Command Bridge
+    /// routes here via the identity-correct `AppDelegate.shared` handle (the
+    /// PKT-1005 pattern), replacing the fragile `NSApp.delegate as? AppDelegate`
+    /// cast that silently missed under `@NSApplicationDelegateAdaptor`.
+    public func bringToFront() {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     /// PKT-430 / PKT-932: Trigger a manual Sparkle update check.
     /// As an `LSUIElement` app we may not be frontmost when the check returns,
     /// so activate first to ensure Sparkle's update window/alert surfaces; and
