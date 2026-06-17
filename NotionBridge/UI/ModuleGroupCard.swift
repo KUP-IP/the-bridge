@@ -56,6 +56,9 @@ public struct ModuleGroupList: View {
     /// v4 family-category filter ("All" + the design's super-sections). Pure
     /// view-side; derived category labels, never persisted.
     @State private var categoryFilter: String = ToolFamilyCategory.allLabel
+    /// (PKT-1006 R2) The tool to flash when arrived-at via a Command Bridge
+    /// deep-link ("group:tool" anchor). Cleared after a beat.
+    @State private var deepLinkedTool: String?
 
     public init(tools: [ToolInfo], nav: SettingsNavigation = .shared) {
         self.tools = tools
@@ -440,6 +443,19 @@ public struct ModuleGroupList: View {
                     ),
                     onTierTap: { cycleTier(name) }
                 )
+                // (PKT-1006 R2) Per-tool scroll anchor + arrival highlight, so a
+                // Command Bridge Tool result can deep-link to the exact tool row
+                // (not just its family) — ready to toggle / set its gate.
+                .id(Self.toolAnchorID(name))
+                .background(
+                    RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
+                        .fill(deepLinkedTool == name ? BridgeTokens.accent.opacity(0.14) : Color.clear)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
+                        .strokeBorder(deepLinkedTool == name ? BridgeTokens.accent.opacity(0.4) : Color.clear,
+                                      lineWidth: 1)
+                )
             }
         }
     }
@@ -453,10 +469,52 @@ public struct ModuleGroupList: View {
         )
     }
 
-    /// Expand + scroll the anchored family to the top, then clear the consumed
-    /// anchor so the same chip can re-trigger later. No-op when the anchor maps
-    /// to no on-screen family (e.g. an orphaned-credential chip).
+    /// Stable per-tool scroll id for a Command Bridge Tool deep-link.
+    private static func toolAnchorID(_ name: String) -> String { "tool.\(name)" }
+
+    /// Parse a Command Bridge Tool anchor of the form "group:tool" → the tool
+    /// name (if it resolves to a live registered tool). Returns nil for the
+    /// legacy chip anchors (a bare module/group id), which are handled by
+    /// `anchoredGroupID`.
+    private var anchoredToolName: String? {
+        guard let raw = nav.anchor?.trimmingCharacters(in: .whitespacesAndNewlines),
+              raw.contains(":") else { return nil }
+        let toolPart = String(raw.split(separator: ":", maxSplits: 1).last ?? "")
+        guard !toolPart.isEmpty,
+              tools.contains(where: { $0.name == toolPart }) else { return nil }
+        return toolPart
+    }
+
+    /// Expand + scroll the anchored target into view, then clear the consumed
+    /// anchor so the same chip can re-trigger later. Handles BOTH the Command
+    /// Bridge "group:tool" deep-link (R2 — expand the family + scroll to the
+    /// exact tool row + flash it) AND the legacy family-only chip anchors. No-op
+    /// when the anchor maps to nothing on-screen.
     private func scrollToAnchorIfNeeded(_ proxy: ScrollViewProxy) {
+        // 1) Command Bridge tool deep-link ("group:tool") — land on the exact tool.
+        if let toolName = anchoredToolName {
+            let groupID = ModuleGroupDerivation.resolve(toolName: toolName)
+            // Clear any view-side filter that would hide the tool's family/row.
+            if categoryFilter != ToolFamilyCategory.allLabel {
+                categoryFilter = ToolFamilyCategory.allLabel
+            }
+            if !searchText.isEmpty { searchText = "" }
+            expandedGroups.insert(groupID)
+            deepLinkedTool = toolName
+            DispatchQueue.main.async {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    proxy.scrollTo(Self.toolAnchorID(toolName), anchor: .center)
+                }
+                nav.anchor = nil
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                if deepLinkedTool == toolName {
+                    withAnimation(.easeOut(duration: 0.4)) { deepLinkedTool = nil }
+                }
+            }
+            return
+        }
+        // 2) Legacy family-only chip anchor — expand + scroll the family.
         guard let target = anchoredGroupID else { return }
         // Land the operator on an OPEN family (matches the pre-v4 forceExpanded).
         expandedGroups.insert(target)

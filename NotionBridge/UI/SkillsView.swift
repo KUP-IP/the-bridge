@@ -78,6 +78,12 @@ struct SkillsView: View {
         case file(String) // path.path
     }
     @State private var selection: Selection?
+    /// (PKT-1006 R2) Deep-link nav — the Command Bridge routes a Skill result
+    /// whose source can't be opened directly (manual / no URL) to Settings →
+    /// Skills with the skill name as the anchor; we observe it to SELECT that
+    /// skill in the master list (which drives the detail pane). The common skill
+    /// case opens the source URL/file directly and never reaches this section.
+    @ObservedObject private var nav = SettingsNavigation.shared
     @State private var searchText: String = ""
     @State private var showAddForm: Bool = false
 
@@ -169,7 +175,9 @@ struct SkillsView: View {
             skillsManager.reloadFromUserDefaults()
             loadFileSourceSkills()
             restoreSelectionIfNeeded()
+            selectSkillFromAnchor()
         }
+        .onChange(of: nav.anchor) { _, _ in selectSkillFromAnchor() }
         .onChange(of: selection) { _, _ in
             // A new selection collapses any open body float + resets the tab.
             expandedBody = false
@@ -1707,6 +1715,32 @@ struct SkillsView: View {
         case .none:
             break
         }
+    }
+
+    /// (PKT-1006 R2) Consume a deep-link anchor: SELECT the named skill in the
+    /// master list so its detail pane opens. Notion-source skills select by
+    /// name; file-source skills select by absolute path (the anchor falls back
+    /// to the skill name, so match on name first, then on a path tail). Clears
+    /// any active search filter so the selected skill is visible, then consumes
+    /// the anchor so re-selecting the same result re-triggers.
+    private func selectSkillFromAnchor() {
+        guard let anchor = nav.anchor?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !anchor.isEmpty else { return }
+        // Notion-source skill matched by name.
+        if skillsManager.skill(named: anchor) != nil {
+            if !searchText.isEmpty { searchText = "" }
+            selection = .skill(anchor)
+            nav.anchor = nil
+            return
+        }
+        // File-source skill matched by name (its parsed display name).
+        if let file = fileSourceSkills.first(where: { $0.name == anchor }) {
+            if !searchText.isEmpty { searchText = "" }
+            selection = .file(file.path.path)
+            nav.anchor = nil
+            return
+        }
+        // Anchor isn't a skill (the channel is shared across sections) → leave it.
     }
 
     // MARK: - File-source load (unchanged)
