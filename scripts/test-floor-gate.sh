@@ -1130,7 +1130,17 @@ set -euo pipefail
 # SettingsAXIdentifierTests (id convention locks, harness pass/fail/aggregate,
 # finding 1+2 locks). Measured integrated green = 2004 passed, 0 failed. FLOOR raised
 # 1993 -> 2004 (+11) per the order-inversion rule.
-FLOOR="${BRIDGE_TEST_FLOOR:-2004}"
+# PKT-1006 R2 (Command Bridge v4 · multi-entity search, 2026-06-17): the bar
+# used to search ONLY CommandStore commands; W2 added a from-scratch typed
+# multi-entity search MODEL (BridgeSearch.swift) over Commands+Skills+Jobs+Tools
+# with fuzzy matching, score/recency ranking, group ordering, and per-group caps,
+# plus a typed per-kind destination model + the skill-source resolver. +19
+# BridgeSearchTests: fuzzy scoring shape (exact>prefix>substring>subsequence>nil,
+# boundary/position/gap), rankedResults grouping+ordering+recency-tiebreak+cap+
+# empty-query guard, kind-namespaced result ids + destination carry-through, and
+# skillDestination routing (file/notion/gdocs/manual). Measured integrated green
+# = 2023 passed, 0 failed. FLOOR raised 2004 -> 2023 (+19) per the order-inversion rule.
+FLOOR="${BRIDGE_TEST_FLOOR:-2023}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

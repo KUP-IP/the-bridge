@@ -696,6 +696,7 @@ await runCommandPaletteTests()    // cmd-w3: palette search + gate + AppDelegate
 await runSkillVsCommandSplitTests() // cmd-ux: LOCK the skill-vs-command body/properties split
 await runCommandsControllerTests()  // cmd-ux W1/W2: CommandsController observable state machine + status/focus model
 await runCommandBridgeControllerTests()  // PKT-878 v3.6.3: SwiftUI Command Bridge popup — placement/recents/anim/builders
+await runBridgeSearchTests()             // PKT-1006 R2: multi-entity search — fuzzy/ranking/grouping + skill-source destination routing
 await runCommandBridgeLayoutTests()      // v4 round-2: adaptive palette width clamp + remembered drag-origin clamp
 await runCommandVisibilityTests()   // cmd-ux W3: .command visibility axis — Codable, palette filter, picker write-back, empty-state
 await runFlagVisibilityMigrationTests()  // cmd-ux W4 (3.4.1): flag-based visibility SSOT — enum↔flags, decode/encode migration, RegistrySkillsCommandProvider flag filter, mutator parity
