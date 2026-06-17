@@ -32,6 +32,18 @@ func runBridgeAutomationModuleTests() async {
         try expect(tools.contains { $0.name == "bridge_settings_navigate" }, "missing bridge_settings_navigate")
     }
 
+    // PKT-1005 (Pillar A): the cold-open tool must be registered.
+    await test("PKT-1005: BridgeAutomationModule registers bridge_open_settings") {
+        let tools = await router.registrations(forModule: "automation")
+        try expect(tools.contains { $0.name == "bridge_open_settings" }, "missing bridge_open_settings")
+    }
+
+    await test("PKT-1005: bridge_open_settings is .open tier") {
+        let tools = await router.registrations(forModule: "automation")
+        let t = tools.first { $0.name == "bridge_open_settings" }!
+        try expect(t.tier == .open, "expected .open, got \(t.tier.rawValue)")
+    }
+
     await test("BridgeAutomationModule.moduleName is 'automation'") {
         try expect(BridgeAutomationModule.moduleName == "automation",
                    "expected 'automation', got '\(BridgeAutomationModule.moduleName)'")
@@ -158,6 +170,86 @@ func runBridgeAutomationModuleTests() async {
         let nav = await MainActor.run { (SettingsNavigation.shared.section, SettingsNavigation.shared.anchor) }
         try expect(nav.0 == .tools, "selection model section not updated: \(nav.0)")
         try expect(nav.1 == "screen", "selection model anchor not updated: \(String(describing: nav.1))")
+    }
+
+    // PKT-1005 (Pillar A): bridge_open_settings accepts an OPTIONAL section
+    // (cold open at last-selected) and updates the selection model when one is
+    // given. In the headless test process there is no AppDelegate-owned window
+    // host, so `opened` is false and a `note` is surfaced — but the selection
+    // model still moves, proving the deep-link wiring is correct.
+    await test("PKT-1005: bridge_open_settings deep-links the selection model (headless: opened=false + note)") {
+        await MainActor.run { SettingsNavigation.shared.go(.advanced) }
+        let result = try await router.dispatch(
+            toolName: "bridge_open_settings",
+            arguments: .object(["section": .string("Skills")])
+        )
+        guard case .object(let dict) = result else {
+            throw TestError.assertion("expected object response")
+        }
+        if case .string(let sec) = dict["section"] {
+            try expect(sec == "Skills", "expected section 'Skills', got \(sec)")
+        } else {
+            throw TestError.assertion("response missing section")
+        }
+        // Headless: no window host → opened=false with an explanatory note.
+        if case .bool(let opened) = dict["opened"] {
+            try expect(opened == false, "headless test should report opened=false")
+        } else {
+            throw TestError.assertion("response missing opened bool")
+        }
+        try expect(dict["note"] != nil, "headless open should surface a note")
+        let nav = await MainActor.run { SettingsNavigation.shared.section }
+        try expect(nav == .skills, "selection model not deep-linked: \(nav)")
+    }
+
+    await test("PKT-1005: bridge_open_settings allows omitted section (open at last-selected)") {
+        let result = try await router.dispatch(
+            toolName: "bridge_open_settings",
+            arguments: .object([:])
+        )
+        guard case .object(let dict) = result else {
+            throw TestError.assertion("expected object response")
+        }
+        // No section arg is valid (not invalid_input) — success key present.
+        try expect(dict["success"] != nil, "omitted section should be accepted")
+        try expect(dict["code"] == nil, "omitted section must NOT be an invalid_input error")
+    }
+
+    await test("PKT-1005: bridge_open_settings rejects an unknown section") {
+        let result = try await router.dispatch(
+            toolName: "bridge_open_settings",
+            arguments: .object(["section": .string("does-not-exist")])
+        )
+        guard case .object(let dict) = result, case .string(let code) = dict["code"] else {
+            throw TestError.assertion("expected invalid_input code for unknown section")
+        }
+        try expect(code == "invalid_input", "expected invalid_input, got \(code)")
+    }
+
+    // PKT-1005 (Pillar B): the host-detection fix. In the headless test process
+    // no Settings NSWindow exists, so navigate() must report windowOpened=false
+    // based on the ACTUAL absence of a Settings window — NOT crash, and NOT
+    // claim a host when there is none. (On-device, with a window open, the same
+    // codepath reports true; that arm is exercised in the on-device receipt.)
+    await test("PKT-1005: navigate() host-detection is window-presence based (headless → false)") {
+        let opened = await MainActor.run {
+            BridgeSettingsAutomation.navigate(to: .security, anchor: nil)
+        }
+        try expect(opened == false, "headless: no Settings NSWindow → host-present must be false")
+        // Selection model still updated regardless of host presence.
+        let nav = await MainActor.run { SettingsNavigation.shared.section }
+        try expect(nav == .security, "navigate() must update the selection model even with no host")
+    }
+
+    await test("PKT-1005: openSettings(section:) core returns opened=false headless but moves selection") {
+        let outcome = await MainActor.run {
+            BridgeSettingsAutomation.openSettings(section: .tools, anchor: "screen")
+        }
+        try expect(outcome.opened == false, "headless: no window host → opened=false")
+        try expect(outcome.section == .tools, "outcome should echo the requested section")
+        let nav = await MainActor.run { (SettingsNavigation.shared.section, SettingsNavigation.shared.anchor) }
+        try expect(nav.0 == .tools, "selection section not set: \(nav.0)")
+        try expect(nav.1 == "screen", "selection anchor not set: \(String(describing: nav.1))")
     }
 
     // MARK: - mouse_click axPath additions (coordinate-space fix)

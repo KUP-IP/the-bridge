@@ -162,7 +162,10 @@ public enum BridgeConstants {
     ///   notion_connections_list, bridge_focus_settings = 12). 211 − 50 = 161.
     ///   The Stripe family was removed entirely but was already excluded from this
     ///   static count (it registered via the network-gated `includeStripe` path).
-    public static let staticFeatureModuleToolCount = 161
+    /// PKT-1005 (Pillar A, 2026-06-17): + 1 (bridge_open_settings — deterministic
+    ///   cold-open of the Settings window, joins the existing `automation` family).
+    ///   161 + 1 = 162.
+    public static let staticFeatureModuleToolCount = 162
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

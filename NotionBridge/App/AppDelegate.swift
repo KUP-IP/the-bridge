@@ -577,10 +577,37 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// (`/auth/exchange`), which holds the WorkOS secret; the Mac only relays
     /// its one-time code (WS-F remediation 2026-06-10).
     public func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls where url.scheme?.lowercased() == "bridge-auth" {
-            NSLog("[WS-F] bridge-auth callback received: host=\(url.host ?? "nil")")
-            cloudAuthCallbackHandler.handle(url)
+        for url in urls {
+            switch url.scheme?.lowercased() {
+            case "bridge-auth":
+                NSLog("[WS-F] bridge-auth callback received: host=\(url.host ?? "nil")")
+                cloudAuthCallbackHandler.handle(url)
+            case "bridge":
+                // PKT-1005 (Pillar A): bridge://settings/<section> deep-link.
+                // Coexists with the bridge-auth OAuth callback above — routed
+                // strictly by scheme so the cloud-auth path is untouched.
+                handleBridgeDeepLink(url)
+            default:
+                break
+            }
         }
+    }
+
+    /// PKT-1005: handle a `bridge://settings/<section>` deep-link. The host
+    /// names the surface ("settings") and the first path component names the
+    /// section ("skills", "security", …, resolved via the same back-compat
+    /// aliases bridge_settings_navigate accepts). Opens the Settings window
+    /// from cold and deep-links to the section; an unknown/empty section just
+    /// opens Settings at the last-selected section.
+    private func handleBridgeDeepLink(_ url: URL) {
+        guard url.host?.lowercased() == "settings" else {
+            NSLog("[PKT-1005] bridge:// deep-link with unknown host=\(url.host ?? "nil") — ignored")
+            return
+        }
+        let rawSection = url.pathComponents.first(where: { $0 != "/" && !$0.isEmpty })
+        let section = rawSection.flatMap { BridgeSettingsAutomation.resolveSection($0) }
+        NSLog("[PKT-1005] bridge://settings deep-link → section=\(section.map { $0.rawValue } ?? "nil")")
+        openSettings(section: section)
     }
 
     /// The WS-F callback handler, assembled over the production seams

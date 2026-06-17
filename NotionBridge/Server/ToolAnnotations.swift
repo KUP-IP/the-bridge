@@ -104,6 +104,11 @@ public enum ToolAnnotationCatalog {
         // user data and is fully idempotent (re-selecting a section is a no-op).
         // Touches only this app's own UI — not an open world.
         "bridge_settings_navigate": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
+        // PKT-1005 (Pillar A): cold-opens the in-app Settings window + deep-links
+        // a section. Same posture as bridge_settings_navigate — opens this app's
+        // own UI, mutates no user data, idempotent (re-opening an open window is
+        // a no-op re-point), not an open world.
+        "bridge_open_settings": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
         // WS-D (PKT-921): cloud-gated health probe. Reads the local
         // BridgeCloudManager state machine; touches nothing — pure read.
         "bridge_status": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),

@@ -1107,7 +1107,16 @@ set -euo pipefail
 # banner/footer/add-enable/cache truth and Google Docs source-filter separation.
 # Measured integrated green = 1986 passed, 0 failed. FLOOR raised 1984 -> 1986
 # (+2) per the order-inversion rule.
-FLOOR="${BRIDGE_TEST_FLOOR:-1986}"
+# PKT-1005 Wave 1 (on-device UI reachability core, 2026-06-17): added
+# bridge_open_settings MCP tool (deterministic cold-open of the Settings window)
+# + fixed the bridge_settings_navigate host-detection bug (window-presence based,
+# not AppDelegate-cast based) + a bridge://settings/<section> URL handler.
+# +6 BridgeAutomationModuleTests (open-tool registration/tier, cold-open deep-link
+# + omitted/unknown section handling, navigate() host-detection, openSettings core)
+# and the static feature-tool count bumped 161 -> 162 (the +1 tool). Measured
+# integrated green = 1993 passed, 0 failed. FLOOR raised 1986 -> 1993 (+7) per the
+# order-inversion rule (6 new automation tests + the count-pin guard re-greening).
+FLOOR="${BRIDGE_TEST_FLOOR:-1993}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

@@ -144,23 +144,65 @@ public enum BridgeSettingsAutomation {
     }
 
     /// Drive the in-app navigation to `section`, opening the Settings window if
-    /// needed. Returns the resolved section's raw value on success.
+    /// needed. Returns `true` when a real Settings NSWindow host is present (or
+    /// was just opened) — i.e. the navigation actually targets a live window.
     ///
-    /// Uses `AppDelegate.openSettings(section:)` when an AppDelegate is present
-    /// (production); falls back to mutating the shared selection model directly
-    /// (the model is what the view binds to) so the call is still meaningful in
-    /// a headless / test context where no AppDelegate is installed.
+    /// PKT-1005 (Pillar B) host-detection fix: the previous implementation
+    /// returned `false` SOLELY because `NSApp.delegate as? AppDelegate` failed
+    /// to cast — it never checked whether a Settings window actually existed.
+    /// Under the `@NSApplicationDelegateAdaptor` identity quirk that cast can
+    /// miss even in a fully-live app with an open Settings window, so
+    /// `bridge_settings_navigate` emitted the false "no app window host present"
+    /// note while the window was sitting right there. We now determine
+    /// host-presence from the ACTUAL `NSApp.windows` (the same `isSettingsWindow`
+    /// enumeration the sibling `focusSettings()` already uses), opening the host
+    /// via the AppDelegate when one is reachable and none is open yet.
     public static func navigate(to section: SettingsSection, anchor: String?) -> Bool {
         // Always update the shared selection model — this is the source of
         // truth the SettingsView binds to, and what makes navigation work even
         // when the window is already open.
         SettingsNavigation.shared.go(section, anchor: anchor)
 
-        if let delegate = NSApp.delegate as? AppDelegate {
+        // Open the host when none is up yet and an AppDelegate is reachable.
+        // (A successful cast is sufficient-but-not-necessary for host presence;
+        // see the window check below for the authoritative signal.)
+        let alreadyOpen = NSApp.windows.contains { isSettingsWindow($0) }
+        if !alreadyOpen, let delegate = NSApp.delegate as? AppDelegate {
             delegate.openSettings(section: section)
-            return true
         }
-        return false
+
+        // Authoritative host-presence: does a real Settings NSWindow now exist?
+        // This — not the delegate cast — is what determines success, so a deep
+        // link to an open window no longer reports a false "no host" note.
+        return NSApp.windows.contains { isSettingsWindow($0) }
+    }
+
+    /// Open the Settings window from a COLD / closed state and deep-link it to
+    /// `section` (PKT-1005 Pillar A). Unlike `navigate(to:)` this does not
+    /// depend on the Dashboard popover ever having been shown — it reaches the
+    /// AppDelegate's owned `SettingsWindowController` (via `openSettings`) which
+    /// instantiates the hand-rolled NSWindow host on demand. Returns
+    /// `(opened, section)` where `opened` reflects whether a real Settings
+    /// NSWindow is present after the call.
+    ///
+    /// The shared selection model is set first so the freshly-hosted view binds
+    /// to the requested section on its very first render (no post-open nav hop).
+    @discardableResult
+    public static func openSettings(section: SettingsSection?, anchor: String?) -> (opened: Bool, section: SettingsSection?) {
+        if let section {
+            SettingsNavigation.shared.go(section, anchor: anchor)
+        }
+
+        let alreadyOpen = NSApp.windows.contains { isSettingsWindow($0) }
+        if !alreadyOpen, let delegate = NSApp.delegate as? AppDelegate {
+            delegate.openSettings(section: section)
+        } else if alreadyOpen, let section {
+            // Already hosted — just (re)point it and bring it forward.
+            SettingsNavigation.shared.go(section, anchor: anchor)
+        }
+
+        let opened = NSApp.windows.contains { isSettingsWindow($0) }
+        return (opened: opened, section: section)
     }
 
     /// Bring the Settings window frontmost and raise it. Flips the activation
@@ -278,8 +320,66 @@ public enum BridgeAutomationModule {
                 ]
                 if let anchor { result["anchor"] = .string(anchor) }
                 if !windowDriven {
-                    // No AppDelegate (headless/test) — selection model still set.
+                    // No Settings NSWindow host present (headless/test) — the
+                    // selection model is still updated, but nothing to show.
                     result["note"] = .string("Selection model updated; no app window host present to open.")
+                }
+                return .object(result)
+            }
+        ))
+
+        // ── bridge_open_settings (cold open) ─────────────────────────────
+        // PKT-1005 (Pillar A): the must-have deterministic open affordance.
+        // Instantiates the Settings window host from a COLD state (no window
+        // open, no Dashboard popover needed) and deep-links to a section, so an
+        // executor can reliably surface + AX-read Settings unattended.
+        await router.register(ToolRegistration(
+            name: "bridge_open_settings",
+            module: moduleName,
+            tier: .open,
+            description: "Open The Bridge's Settings window from a COLD/closed state (does NOT require the Dashboard popover) and deep-link to a named section. Use this to deterministically surface Settings for an AX read or screen_capture when no Settings window is open. Pass no section to open at the last-selected section. Pair with bridge_focus_settings to raise it frontmost.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "section": .object([
+                        "type": .string("string"),
+                        "description": .string("Optional Settings section to deep-link to on open. One of: \(BridgeSettingsAutomation.sectionDisplayNames.joined(separator: ", ")). Case-insensitive; the enum case name and the five retired legacy names are also accepted. Omit to open at the last-selected section."),
+                        "enum": .array(BridgeSettingsAutomation.sectionDisplayNames.map { .string($0) })
+                    ]),
+                    "anchor": .object([
+                        "type": .string("string"),
+                        "description": .string("Optional sub-section anchor passed through to the section.")
+                    ])
+                ])
+            ]),
+            handler: { arguments in
+                let params = unwrap(arguments)
+                let explicitAnchor = stringParam(params, "anchor")
+
+                // Section is OPTIONAL for a cold open (open at last-selected).
+                var section: SettingsSection? = nil
+                var anchor: String? = explicitAnchor
+                if let rawSection = stringParam(params, "section"), !rawSection.isEmpty {
+                    guard let resolved = await BridgeSettingsAutomation.resolveSectionWithAnchor(rawSection) else {
+                        return .object([
+                            "error": .string("Unknown section '\(rawSection)'."),
+                            "code":  .string("invalid_input"),
+                            "validSections": .array(await BridgeSettingsAutomation.sectionRawValues.map { .string($0) })
+                        ])
+                    }
+                    section = resolved.section
+                    anchor = explicitAnchor ?? resolved.anchor
+                }
+
+                let outcome = await BridgeSettingsAutomation.openSettings(section: section, anchor: anchor)
+                var result: [String: Value] = [
+                    "success": .bool(outcome.opened),
+                    "opened": .bool(outcome.opened)
+                ]
+                if let s = outcome.section { result["section"] = .string(s.rawValue) }
+                if let anchor { result["anchor"] = .string(anchor) }
+                if !outcome.opened {
+                    result["note"] = .string("No app window host present to open (headless/test context).")
                 }
                 return .object(result)
             }
