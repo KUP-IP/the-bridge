@@ -132,6 +132,17 @@ private final class UpdaterLogger: NSObject, SPUUpdaterDelegate {
 /// for connections, tool calls, Notion token status, and uptime.
 @MainActor
 public final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// PKT-1005 (Pillar A/B): a stable, identity-correct handle to the LIVE
+    /// AppDelegate. The app is wired via `@NSApplicationDelegateAdaptor`, under
+    /// which `NSApp.delegate as? AppDelegate` can FAIL to cast — `NSApp.delegate`
+    /// may hand back a SwiftUI wrapper, not this instance. That fragile cast is
+    /// exactly why `bridge_settings_navigate` historically reported a false
+    /// "no app window host present" and never opened the window. We assign this
+    /// weak self-reference in `applicationDidFinishLaunching` so the automation
+    /// surface (BridgeSettingsAutomation) can reach the real `settingsController`
+    /// host WITHOUT the cast. `weak` so it never keeps a torn-down delegate alive.
+    @MainActor public private(set) static weak var shared: AppDelegate?
+
     private var serverTask: Task<Void, Never>?
     private var serverManager: ServerManager?
 
@@ -246,6 +257,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        // PKT-1005: publish the identity-correct self-reference for the
+        // automation surface (see `AppDelegate.shared`). Set first so any early
+        // MCP-driven open/navigate reaches the real host, not a failed cast.
+        Self.shared = self
+
         // PKT-487 → PKT-1 v3.5: Dock label uses the new display name
         // (executable bundle name is still "NotionBridge" — that's the
         // SPM target identifier baked into the binary).

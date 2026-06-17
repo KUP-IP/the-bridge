@@ -163,11 +163,13 @@ public enum BridgeSettingsAutomation {
         // when the window is already open.
         SettingsNavigation.shared.go(section, anchor: anchor)
 
-        // Open the host when none is up yet and an AppDelegate is reachable.
-        // (A successful cast is sufficient-but-not-necessary for host presence;
-        // see the window check below for the authoritative signal.)
+        // Open the host when none is up yet. Reach the AppDelegate via the
+        // identity-correct `AppDelegate.shared` FIRST (the @NSApplicationDelegate-
+        // Adaptor-safe path), falling back to the historic cast only if shared
+        // isn't published yet. This is what actually opens the window under the
+        // adaptor — the bare cast could miss and leave it closed.
         let alreadyOpen = NSApp.windows.contains { isSettingsWindow($0) }
-        if !alreadyOpen, let delegate = NSApp.delegate as? AppDelegate {
+        if !alreadyOpen, let delegate = liveAppDelegate() {
             delegate.openSettings(section: section)
         }
 
@@ -175,6 +177,15 @@ public enum BridgeSettingsAutomation {
         // This — not the delegate cast — is what determines success, so a deep
         // link to an open window no longer reports a false "no host" note.
         return NSApp.windows.contains { isSettingsWindow($0) }
+    }
+
+    /// Identity-correct handle to the live AppDelegate. Prefers the
+    /// `@NSApplicationDelegateAdaptor`-safe `AppDelegate.shared`; falls back to
+    /// the `NSApp.delegate` cast for any host that set the delegate the classic
+    /// way. PKT-1005: the bare cast alone is the bug — it can miss under the
+    /// adaptor and strand the open path.
+    static func liveAppDelegate() -> AppDelegate? {
+        AppDelegate.shared ?? (NSApp.delegate as? AppDelegate)
     }
 
     /// Open the Settings window from a COLD / closed state and deep-link it to
@@ -194,7 +205,7 @@ public enum BridgeSettingsAutomation {
         }
 
         let alreadyOpen = NSApp.windows.contains { isSettingsWindow($0) }
-        if !alreadyOpen, let delegate = NSApp.delegate as? AppDelegate {
+        if !alreadyOpen, let delegate = liveAppDelegate() {
             delegate.openSettings(section: section)
         } else if alreadyOpen, let section {
             // Already hosted — just (re)point it and bring it forward.
