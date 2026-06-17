@@ -159,6 +159,10 @@ struct SkillsView: View {
             .frame(maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // PKT-1005 (Pillar C): the Skills section's inner content container.
+        // (The section-level root id `bridge.settings.skills.root` is applied by
+        // SettingsView.detailContent; this is the master–detail content beneath.)
+        .accessibilityIdentifier(BridgeAXID.control(.skills, "content"))
         // v4: the expand-on-click body float, scoped over the whole page.
         .overlay { bodyFloatOverlay }
         .onAppear {
@@ -348,6 +352,7 @@ struct SkillsView: View {
                 }
                 .padding(.horizontal, 8).padding(.vertical, 6)
             }
+            .accessibilityIdentifier(BridgeAXID.Skills.list)   // PKT-1005 Pillar C
 
             Divider().overlay(BridgeTokens.hairline)
 
@@ -832,15 +837,8 @@ struct SkillsView: View {
                     isOn: Binding(
                         get: { skill.routingDiscoverable },
                         set: { _ = skillsManager.setRoutingDiscoverable(named: skill.name, to: $0) }
-                    ))
-                tokenDivider
-                permissionToggleRow(
-                    title: "Show in Commands palette",
-                    sub: "List this skill in the global Commands palette hot-key popover.",
-                    isOn: Binding(
-                        get: { skill.inCommandPalette },
-                        set: { _ = skillsManager.setInCommandPalette(named: skill.name, to: $0) }
-                    ))
+                    ),
+                    axID: BridgeAXID.Skills.toggleRouting)
                 tokenDivider
                 permissionToggleRow(
                     title: "Enabled",
@@ -848,7 +846,8 @@ struct SkillsView: View {
                     isOn: Binding(
                         get: { skill.enabled },
                         set: { _ in skillsManager.toggleSkill(named: skill.name) }
-                    ))
+                    ),
+                    axID: BridgeAXID.Skills.toggleEnabled)
             }
         }
     }
@@ -956,6 +955,7 @@ struct SkillsView: View {
             return .info
         }()
         return BridgeBadge(SkillManagementUIContract.visibilityBadgeLabel(for: skill), tone: tone, showsDot: true)
+            .accessibilityIdentifier(BridgeAXID.Skills.statusIndicator)   // PKT-1005 Pillar C
     }
 
     @ViewBuilder
@@ -1016,16 +1016,20 @@ struct SkillsView: View {
             iconButton("arrow.up.right.square", help: "Open in browser") {
                 openSkillURL(skill.url ?? skill.notionPageId)
             }
-            iconButton("chevron.up", help: "Previous skill", disabled: !hasPrev) {
+            iconButton("chevron.up", help: "Previous skill", disabled: !hasPrev,
+                       axID: BridgeAXID.Skills.navChevron + ".prev") {
                 navigateSkill(from: skill.name, delta: -1)
             }
-            iconButton("chevron.down", help: "Next skill", disabled: !hasNext) {
+            iconButton("chevron.down", help: "Next skill", disabled: !hasNext,
+                       axID: BridgeAXID.Skills.navChevron + ".next") {
                 navigateSkill(from: skill.name, delta: +1)
             }
-            iconButton("trash", help: "Delete skill", danger: true) {
+            iconButton("trash", help: "Delete skill", danger: true,
+                       axID: BridgeAXID.Skills.trash) {
                 skillPendingDeletion = skill.name
             }
         }
+        .accessibilityIdentifier(BridgeAXID.control(.skills, "detail.actions"))
     }
 
     /// The visible skills' names in the exact on-screen order (the grouped,
@@ -1045,23 +1049,25 @@ struct SkillsView: View {
         selection = .skill(target)
     }
 
-    /// PKT-skills: 4 non-redundant cells; the synthesized Visibility value is
-    /// elevated (`.sk-meta.key`).
+    /// PKT-1005 (finding 1): the redundant "Page" cell is removed — the subtle
+    /// header page-id control already surfaces the Notion page id, so the grid
+    /// dropped a duplicate. Now 3 non-redundant cells (Kind · Visibility ·
+    /// Source); the synthesized Visibility value is elevated (`.sk-meta.key`).
     private func metadataGrid(_ skill: SkillsManager.Skill) -> some View {
         let cells: [(String, String, Bool)] = [
             ("Kind", SkillManagementUIContract.kindLabel(for: skill), false),
             ("Visibility", SkillManagementUIContract.visibilityMetadataLabel(for: skill), true),
             ("Source", skill.platform.displayName, false),
-            ("Page", skill.notionPageId.isEmpty ? "—" : "…\(String(skill.notionPageId.suffix(6)))", false),
         ]
         return LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4),
+            columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
             spacing: 8
         ) {
             ForEach(cells, id: \.0) { cap, val, key in
                 metaCell(cap: cap, val: val, key: key)
             }
         }
+        .accessibilityIdentifier(BridgeAXID.Skills.metadataGrid)   // PKT-1005 Pillar C
     }
 
     /// `.sk-meta` inset cell; `key` elevates it with an accent tint (Visibility).
@@ -1162,8 +1168,12 @@ struct SkillsView: View {
                             // real body store.
                             onRefreshBody(skill.notionPageId)
                         }
+                        .accessibilityIdentifier(BridgeAXID.Skills.cacheRefresh)   // PKT-1005 Pillar C
                     }
                 }
+                // PKT-1005 (Pillar C): the cache-state bar is the cache indicator.
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(BridgeAXID.Skills.cacheIndicator)
 
                 if cached {
                     // peek → float
@@ -1204,6 +1214,7 @@ struct SkillsView: View {
                     // PKT-1003 Wave B: warm all skill bodies via the real body store.
                     onCacheAllBodies()
                 }
+                .accessibilityIdentifier(BridgeAXID.Skills.cacheRefresh)   // PKT-1005 Pillar C
             }
         }
         .frame(maxWidth: .infinity)
@@ -1366,18 +1377,8 @@ struct SkillsView: View {
                             fileSkillRoutingMap[fs.path.path] = v
                             SkillsModule.setFileSkillRoutingDiscoverable(path: fs.path, value: v)
                         }
-                    ))
-                tokenDivider
-                permissionToggleRow(
-                    title: "Show in Commands palette",
-                    sub: "List this file-source skill in the global Commands palette hot-key popover.",
-                    isOn: Binding(
-                        get: { fileSkillPaletteMap[fs.path.path] ?? false },
-                        set: { v in
-                            fileSkillPaletteMap[fs.path.path] = v
-                            SkillsModule.setFileSkillInCommandPalette(path: fs.path, value: v)
-                        }
-                    ))
+                    ),
+                    axID: BridgeAXID.Skills.toggleRouting)
                 tokenDivider
                 permissionToggleRow(
                     title: "Enabled",
@@ -1388,7 +1389,8 @@ struct SkillsView: View {
                             fileSkillEnabledMap[fs.path.path] = v
                             SkillsModule.setFileSkillEnabled(path: fs.path, enabled: v)
                         }
-                    ))
+                    ),
+                    axID: BridgeAXID.Skills.toggleEnabled)
             }
         }
     }
@@ -1590,7 +1592,10 @@ struct SkillsView: View {
     /// `.sk-perm` — a permission row: title + sub on the left, the W2
     /// `BridgeToggle` on the right. `isEnabled: false` renders a non-interactive
     /// row (e.g. a bundled file body that is always cached and not evictable).
-    private func permissionToggleRow(title: String, sub: String, isOn: Binding<Bool>, isEnabled: Bool = true) -> some View {
+    // PKT-1005 (Pillar C): optional `axID` attaches a stable, label-independent
+    // accessibilityIdentifier so the headless harness can target the toggle by
+    // id (e.g. bridge.settings.skills.toggle.enabled) rather than its label.
+    private func permissionToggleRow(title: String, sub: String, isOn: Binding<Bool>, isEnabled: Bool = true, axID: String? = nil) -> some View {
         HStack(alignment: .center, spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -1607,12 +1612,14 @@ struct SkillsView: View {
                 .opacity(isEnabled ? 1 : 0.5)
                 .accessibilityLabel(title)
                 .accessibilityHint(sub)
+                .accessibilityIdentifier(axID ?? "")
         }
         .padding(.vertical, 10)
     }
 
     /// Small neutral-glass icon button (`.sk-iconbtn` / `.sk-rename` / actions).
-    private func iconButton(_ systemImage: String, help: String, disabled: Bool = false, danger: Bool = false, action: @escaping () -> Void) -> some View {
+    /// PKT-1005 (Pillar C): optional `axID` for stable harness targeting.
+    private func iconButton(_ systemImage: String, help: String, disabled: Bool = false, danger: Bool = false, axID: String? = nil, action: @escaping () -> Void) -> some View {
         let shape = RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
         return Button(action: action) {
             Image(systemName: systemImage)
@@ -1629,6 +1636,7 @@ struct SkillsView: View {
         .disabled(disabled)
         .opacity(disabled ? 0.4 : 1)
         .help(help)
+        .accessibilityIdentifier(axID ?? "")
     }
 
     // MARK: - Counts (real visibility taxonomy)

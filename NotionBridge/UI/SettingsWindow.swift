@@ -275,15 +275,23 @@ public struct SettingsView: View {
 
     @ViewBuilder
     private var detailContent: some View {
-        switch nav.section {
-        case .orders: commandsSection
-        case .skills: SkillsSection()
-        case .jobs: jobsSection
-        case .tools: toolsSection
-        case .security: securitySection
-        case .connection: connectionSection
-        case .advanced: advancedSection
+        // PKT-1005 (Pillar C): every section's detail content carries a stable
+        // root container id — `bridge.settings.<section>.root` — so the headless
+        // harness can assert it landed on the right section after a deep-link,
+        // independent of any display label. Skills additionally instruments its
+        // inner controls (toggles, cache, chevrons, Trash, metadata grid).
+        Group {
+            switch nav.section {
+            case .orders: commandsSection
+            case .skills: SkillsSection()
+            case .jobs: jobsSection
+            case .tools: toolsSection
+            case .security: securitySection
+            case .connection: connectionSection
+            case .advanced: advancedSection
+            }
         }
+        .accessibilityIdentifier(BridgeAXID.control(nav.section, "root"))
     }
 
     // MARK: - Shared Properties

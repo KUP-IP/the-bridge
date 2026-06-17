@@ -11,6 +11,64 @@
 
 import SwiftUI
 
+// MARK: - PKT-1005 (Pillar C): stable AX-identifier convention
+
+/// Central namespace for the Settings UI's accessibility identifiers
+/// (PKT-1005). Before this packet there were ZERO `accessibilityIdentifier`
+/// usages anywhere in `NotionBridge/UI`, so on-device AX reads had to match on
+/// volatile display labels. These ids are LABEL-INDEPENDENT and STABLE —
+/// keyed off the `SettingsSection` case name and a fixed control slug — so the
+/// headless UI-validation harness can target controls deterministically.
+///
+/// Convention: `bridge.settings.<section>.<control>` for per-section controls;
+/// `bridge.settings.<chrome>` for shared chrome (nav row, title bar). The
+/// `<section>` segment is the enum CASE NAME (e.g. `skills`, `orders`), never
+/// the display label, so the id never churns when the chrome label changes.
+public enum BridgeAXID {
+    /// Root prefix for every Settings AX id.
+    public static let root = "bridge.settings"
+
+    /// Sidebar nav row for a section — `bridge.settings.nav.<caseName>`.
+    public static func navRow(_ section: SettingsSection) -> String {
+        "\(root).nav.\(String(describing: section))"
+    }
+
+    /// The section H1 title in the titlebar — `bridge.settings.title`.
+    public static let titleBar = "\(root).title"
+
+    /// A per-section control id — `bridge.settings.<caseName>.<control>`.
+    public static func control(_ section: SettingsSection, _ control: String) -> String {
+        "\(root).\(String(describing: section)).\(control)"
+    }
+
+    // ── Skills section control slugs (Pillar C priority surface) ─────────
+    public enum Skills {
+        private static func id(_ slug: String) -> String {
+            BridgeAXID.control(.skills, slug)
+        }
+        /// Whole Skills section root container.
+        public static let root          = id("root")
+        /// The skills list / sidebar within the Skills detail.
+        public static let list          = id("list")
+        /// "List in routing index" toggle.
+        public static let toggleRouting  = id("toggle.routing")
+        /// "Enabled" toggle.
+        public static let toggleEnabled  = id("toggle.enabled")
+        /// The body-cache card refresh / cache control.
+        public static let cacheRefresh   = id("cache.refresh")
+        /// The body-cache status indicator.
+        public static let cacheIndicator = id("cache.indicator")
+        /// Visibility status indicator badge in the detail header.
+        public static let statusIndicator = id("status.indicator")
+        /// A skill row's disclosure / nav chevron.
+        public static let navChevron     = id("nav.chevron")
+        /// The delete / Trash control.
+        public static let trash          = id("trash")
+        /// The metadata grid container (3 cells post-PKT-1005 finding 1).
+        public static let metadataGrid   = id("metadata.grid")
+    }
+}
+
 // MARK: - The stage (the window surface: solid canvas + carbon-fibre weave)
 
 /// The Settings-window surface, full-bleed behind every glass card. This is the
@@ -250,6 +308,11 @@ struct BridgeSectionNavItem: View {
         .animation(.easeInOut(duration: 0.15), value: hovering)
         .accessibilityLabel(section.displayName)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        // PKT-1005 (Pillar C): stable, label-independent AX id for each sidebar
+        // nav row — `bridge.settings.nav.<sectionCaseName>` (e.g. `…nav.skills`).
+        // The convention keys off the SettingsSection CASE NAME, not the
+        // display label, so the id is stable even if the chrome label churns.
+        .accessibilityIdentifier(BridgeAXID.navRow(section))
     }
 
     @ViewBuilder private var icon: some View {
@@ -309,6 +372,11 @@ public struct BridgeTitleBar: View {
                 .tracking(-0.1)
                 .foregroundStyle(BridgeTokens.fg2)
                 .allowsHitTesting(false)   // keep the titlebar draggable
+                // PKT-1005 (Pillar C): the section H1 is the per-section title
+                // anchor — `bridge.settings.title` (its STRING VALUE is the
+                // displayName, which the harness reads to confirm the active
+                // section after a deep-link).
+                .accessibilityIdentifier(BridgeAXID.titleBar)
             Spacer(minLength: 0)
         }
         // Leading inset clears the native traffic-light cluster (`--traffic-gutter`

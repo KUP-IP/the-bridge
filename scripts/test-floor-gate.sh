@@ -1116,7 +1116,21 @@ set -euo pipefail
 # and the static feature-tool count bumped 161 -> 162 (the +1 tool). Measured
 # integrated green = 1993 passed, 0 failed. FLOOR raised 1986 -> 1993 (+7) per the
 # order-inversion rule (6 new automation tests + the count-pin guard re-greening).
-FLOOR="${BRIDGE_TEST_FLOOR:-1993}"
+# PKT-1005 Waves 2+3 (AX instrumentation + harness + ratified findings, 2026-06-17):
+# added the BridgeAXID convention (bridge.settings.<section>.<control>) — the
+# Settings UI's FIRST accessibilityIdentifiers — across the sidebar nav rows + the
+# section H1 (all 7 sections) + the Skills controls (toggles, cache, indicators,
+# nav chevrons, Trash, metadata grid) + a per-section root container. Added the
+# headless UI-validation harness (SettingsUIValidationHarness: per-section expected-id
+# manifest + validate/validateAll) and its on-device driver scripts/pkt1005-ui-validate.sh.
+# Applied operator-ratified finding 1 (Skills "Page" metadata cell removed → 3-cell
+# grid) + finding 2 (the "Show in Commands palette" detail toggle removed from BOTH
+# the Notion- and file-source panes; the inCommandPalette backend flag/setter retained,
+# so the existing SkillsMCPFlagRoundTrip tests stay valid unchanged). +11
+# SettingsAXIdentifierTests (id convention locks, harness pass/fail/aggregate,
+# finding 1+2 locks). Measured integrated green = 2004 passed, 0 failed. FLOOR raised
+# 1993 -> 2004 (+11) per the order-inversion rule.
+FLOOR="${BRIDGE_TEST_FLOOR:-2004}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
