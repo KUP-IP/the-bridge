@@ -2,12 +2,7 @@
 // NotionBridge · Modules
 //
 // SSOT = Notion. The live SKILLS data source exposes these `rich_text` columns:
-//   • "Description"        — the single agent-facing field (preferred).
-//   • "Summary"            — LEGACY agent-facing field; kept only as a read
-//                            fallback while the Notion Phase-0 unification (which
-//                            rewrites Description on every row and deletes Summary)
-//                            is still pending. Code must be gate-safe: prefer
-//                            Description, fall back to Summary, never blank either.
+//   • "Description"        — the single agent-facing field.
 //   • "Activation Examples" — trigger phrases (one per line).
 //   • "Anti-Triggers"       — anti-trigger phrases (one per line).
 //
@@ -22,18 +17,15 @@
 import Foundation
 
 /// Real Notion column names on each skill page in the live SKILLS data source.
-/// `description` is the preferred agent-facing field; `summaryLegacy` is read as
-/// a fallback only (it is being retired by the Notion Phase-0 unification).
+/// `description` is the single agent-facing field.
 public enum SkillNotionColumns: Sendable {
     public static let description = "Description"
-    public static let summaryLegacy = "Summary"
     public static let activationExamples = "Activation Examples"
     public static let antiTriggers = "Anti-Triggers"
 
-    /// Ordered read fallback for the single agent-facing field: prefer the
-    /// canonical "Description", fall back to the legacy "Summary" while it still
-    /// exists in Notion (Phase-0 gate). First non-empty wins.
-    public static let agentFacingReadKeys: [String] = [description, summaryLegacy]
+    /// Ordered for API symmetry with the old fallback helper; only the canonical
+    /// Description field is read from Notion.
+    public static let agentFacingReadKeys: [String] = [description]
 }
 
 /// DEPRECATED — retained for source compatibility. Previously held the phantom
@@ -75,9 +67,7 @@ public enum SkillNotionMetadata: Sendable {
         return NotionJSON.extractPlainText(from: rt)
     }
 
-    /// First non-empty `rich_text` plain text among `keys`, in order. Used for
-    /// the agent-facing field's Description→Summary fallback so the read works
-    /// whether or not the legacy "Summary" column still exists.
+    /// First non-empty `rich_text` plain text among `keys`, in order.
     public static func firstRichTextPlain(keys: [String], properties: [String: Any]) -> String {
         for key in keys {
             let text = richTextPlain(propertyName: key, properties: properties)
@@ -94,8 +84,8 @@ public enum SkillNotionMetadata: Sendable {
     }
 
     /// Parse a fetched Notion page's `properties` into the agent-facing metadata
-    /// fields, reading the REAL columns (Description→Summary fallback,
-    /// Activation Examples, Anti-Triggers). Pure; never throws. Empty fields are
+    /// fields, reading the REAL columns (Description, Activation Examples,
+    /// Anti-Triggers). Pure; never throws. Empty fields are
     /// surfaced as empty — the pull caller treats those as no-ops (gate-safe).
     public static func parsePulledMetadata(properties: [String: Any]) -> SkillNotionPulledMetadata {
         let summary = firstRichTextPlain(keys: SkillNotionColumns.agentFacingReadKeys, properties: properties)
@@ -110,8 +100,7 @@ public enum SkillNotionMetadata: Sendable {
 
     /// JSON body for `PATCH /v1/pages/{id}` — `{ "properties": { ... } }`.
     /// Writes the single agent-facing field to "Description" (SSOT field) plus
-    /// the trigger/anti-trigger columns. Does NOT write the legacy "Summary"
-    /// column (it is being retired); the Notion Phase-0 unification owns that.
+    /// the trigger/anti-trigger columns.
     public static func buildPagePropertiesPatchData(
         summary: String,
         triggerPhrases: [String],

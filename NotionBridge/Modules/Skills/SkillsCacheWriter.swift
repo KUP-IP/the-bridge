@@ -176,8 +176,8 @@ extension SkillsCacheWriter.ParentSource {
 extension SkillsCacheWriter.ChildEnumerator {
     /// Production enumerator backed by a live `NotionClient`. Surfaces each
     /// curated specialist's `id`, `title`, and a one-line `summary` (the
-    /// related page's `Summary`/`Description` rich_text when present, else
-    /// empty). Failures degrade to "no children" — the cache will surface
+    /// related page's `Description` rich_text when present, else empty).
+    /// Failures degrade to "no children" — the cache will surface
     /// zero specialists for that parent and the routing index renders
     /// without the section.
     public static func live(client: NotionClient) -> SkillsCacheWriter.ChildEnumerator {
@@ -238,10 +238,9 @@ extension SkillsCacheWriter.ChildEnumerator {
                 let t = NotionJSON.extractTitle(from: props)
                 if !t.isEmpty && t != "Untitled" { title = t }
                 // Best-effort one-line summary: SSOT = Notion "Description"
-                // (the single agent-facing field). Fall back to the legacy
-                // "Summary" column while it still exists (Phase-0 gate), then
-                // any lowercase `description` key.
-                summary = firstRichText(props, keys: ["Description", "Summary", "description"])
+                // (the single agent-facing field), with lowercase `description`
+                // tolerated for file/test fixtures.
+                summary = firstRichText(props, keys: ["Description", "description"])
                 isActive = SpecialistFilter.isActiveSpecialist(properties: props)
             }
             // Two hydration-time guards (belt + suspenders): drop doc-pages by

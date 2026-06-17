@@ -1039,7 +1039,7 @@ set -euo pipefail
 # the operator's "adaptive width + draggable with session memory" asks. Green 1928 → 1930, 0 failed.
 # PKT-1003 / Skills Truth-Up Wave A (2026-06-16): metadata-sync remediation —
 # read+write repointed off the phantom "Bridge *" columns onto the real live
-# SKILLS columns (Description → Summary fallback, Activation Examples,
+# SKILLS columns (Description, Activation Examples,
 # Anti-Triggers); pull made gate-safe so an empty Notion value can no longer
 # blank local metadata. +7 pure parse/build tests (SkillNotionMetadataSyncTests).
 # Measured integrated green = 1937 passed, 0 failed. FLOOR raised 1930 -> 1937
@@ -1094,7 +1094,20 @@ set -euo pipefail
 # the order-inversion rule. On-device verification (sleep/wake + force-quit
 # across a slot) and the Strava-source + self-handle wiring remain operator
 # REVIEW items.
-FLOOR="${BRIDGE_TEST_FLOOR:-1978}"
+# PKT-1003 follow-through (Skills settings user scenarios, 2026-06-16):
+# added SkillManagementUIContract as the pure Settings -> Skills alignment seam
+# and +6 SkillManagementUIScenarioTests covering add, rename/page edit, MCP
+# metadata reload, delete, file-source toggles, and filtered chevron navigation
+# against the real SkillsManager/UserDefaults + SkillsModule per-path storage.
+# Measured integrated green = 1984 passed, 0 failed. FLOOR raised 1978 -> 1984
+# (+6) per the order-inversion rule.
+# PKT-1003 follow-through (Skills settings full-coverage closure, 2026-06-16):
+# restored an honest existing-skill "Show in Commands palette" toggle for both
+# Notion/GDocs and file-source detail panes, then added +2 scenario tests for
+# banner/footer/add-enable/cache truth and Google Docs source-filter separation.
+# Measured integrated green = 1986 passed, 0 failed. FLOOR raised 1984 -> 1986
+# (+2) per the order-inversion rule.
+FLOOR="${BRIDGE_TEST_FLOOR:-1986}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

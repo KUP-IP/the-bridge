@@ -925,8 +925,8 @@ public enum SkillsModule {
                             return .object(["success": .bool(false), "action": .string(actionLabel), "message": .string("Failed to parse Notion page.")])
                         }
                         // SSOT = Notion. Read the REAL columns
-                        // (Description → Summary fallback, Activation Examples,
-                        // Anti-Triggers). GATE-SAFE: an empty Notion value never
+                        // (Description, Activation Examples, Anti-Triggers).
+                        // GATE-SAFE: an empty Notion value never
                         // overwrites a non-empty local value, so a pull can no
                         // longer blank metadata (the historical phantom-column
                         // bug). See SkillNotionMetadata.parsePulledMetadata.

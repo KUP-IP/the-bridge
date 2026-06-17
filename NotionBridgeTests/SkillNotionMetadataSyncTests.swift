@@ -2,11 +2,10 @@
 // NotionBridge · Tests
 //
 // Locks the metadata-sync remediation: read + write now target the REAL live
-// SKILLS columns (Description → Summary fallback, Activation Examples,
+// SKILLS columns (Description, Activation Examples,
 // Anti-Triggers) instead of the phantom "Bridge *" columns that never existed.
 // Critically, asserts the historical pull-blanks-metadata bug is gone:
-//   • the agent-facing field reads "Description", falling back to legacy
-//     "Summary" only when Description is empty (Phase-0 gate-safe);
+//   • the agent-facing field reads "Description";
 //   • parsing a page that has NONE of the real columns yields empty fields
 //     (which the SkillsModule pull branch treats as a no-op — proven here by
 //     SkillNotionPulledMetadata equality);
@@ -54,12 +53,11 @@ func runSkillNotionMetadataSyncTests() async {
     print("\n\u{1F517} PKT-1003 SkillNotionMetadata sync (real columns · gate-safe pull)")
 
     // -----------------------------------------------------------------
-    // 1. Pull prefers the canonical "Description" over legacy "Summary".
+    // 1. Pull reads the canonical "Description" field.
     // -----------------------------------------------------------------
-    await test("pull: Description is the agent-facing field, preferred over Summary") {
+    await test("pull: Description is the agent-facing field") {
         let props: [String: Any] = [
             "Description": richTextProp("canonical agent-facing description"),
-            "Summary": richTextProp("legacy summary should be ignored"),
             "Activation Examples": richTextProp("do the thing\nstart the flow"),
             "Anti-Triggers": richTextProp("never this\nnor that")
         ]
@@ -70,16 +68,15 @@ func runSkillNotionMetadataSyncTests() async {
     }
 
     // -----------------------------------------------------------------
-    // 2. Phase-0 gate: when Description is empty/absent, fall back to the
-    //    legacy "Summary" column so the read works pre-unification.
+    // 2. Retired Summary: when Description is absent, Summary is ignored.
     // -----------------------------------------------------------------
-    await test("pull: falls back to legacy Summary when Description is absent (Phase-0 gate)") {
+    await test("pull: ignores legacy Summary when Description is absent") {
         let props: [String: Any] = [
             "Summary": richTextProp("legacy still present"),
             "Activation Examples": richTextProp("trigger one")
         ]
         let pulled = SkillNotionMetadata.parsePulledMetadata(properties: props)
-        try expect(pulled.summary == "legacy still present", "expected Summary fallback, got: \(pulled.summary)")
+        try expect(pulled.summary == "", "legacy Summary should be ignored, got: \(pulled.summary)")
         try expect(pulled.triggerPhrases == ["trigger one"], "triggers: \(pulled.triggerPhrases)")
     }
 
@@ -102,7 +99,7 @@ func runSkillNotionMetadataSyncTests() async {
     }
 
     // -----------------------------------------------------------------
-    // 4. firstRichTextPlain honours key order (Description wins; else Summary).
+    // 4. firstRichTextPlain honours key order.
     // -----------------------------------------------------------------
     await test("firstRichTextPlain: ordered fallback, first non-empty wins") {
         let bothEmpty: [String: Any] = [
@@ -111,7 +108,7 @@ func runSkillNotionMetadataSyncTests() async {
         ]
         let got = SkillNotionMetadata.firstRichTextPlain(
             keys: SkillNotionColumns.agentFacingReadKeys, properties: bothEmpty)
-        try expect(got == "summary value", "empty Description should fall through to Summary, got: \(got)")
+        try expect(got == "", "Summary is no longer in the read key list, got: \(got)")
 
         let noneMatch = SkillNotionMetadata.firstRichTextPlain(
             keys: SkillNotionColumns.agentFacingReadKeys, properties: [:])
