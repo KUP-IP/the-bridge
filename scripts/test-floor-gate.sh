@@ -1353,7 +1353,12 @@ set -euo pipefail
 # injected-key decode, mint/verify round-trip, wrong-key forgery reject,
 # entitled via computeStatus, expired→licenseExpired). Measured integrated
 # green 2175 → 2181; floor raised per the order-inversion rule.
-FLOOR="${BRIDGE_TEST_FLOOR:-2181}"
+# Payment P1 (PRJCT-2754 · Wave 1, 2026-06-18): StripeClient.createCheckoutSession
+# (hosted Checkout) + BridgeCheckout brand config + LicenseCard "Get a license"
+# entry. +4 StripeClientTests (request shape mode/price/urls/brand-metadata/
+# client_reference_id + parse; empty-priceID fail-fast no-network; Stripe error
+# response; brand metadata + priceID provider). 2181 → 2185.
+FLOOR="${BRIDGE_TEST_FLOOR:-2185}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

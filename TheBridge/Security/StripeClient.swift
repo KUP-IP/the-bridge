@@ -16,6 +16,18 @@ public struct PaymentIntentResult: Sendable, Equatable {
     }
 }
 
+public struct CheckoutSession: Sendable, Equatable {
+    /// Stripe Checkout Session id (`cs_…`). Correlates to the buyer's payment.
+    public let id: String
+    /// Hosted Checkout URL the buyer opens to pay.
+    public let url: String
+
+    public init(id: String, url: String) {
+        self.id = id
+        self.url = url
+    }
+}
+
 public struct StripeAccountInfo: Sendable, Equatable {
     public let id: String
     public let email: String?
@@ -120,6 +132,60 @@ public final class StripeClient: @unchecked Sendable {
             country: json["country"] as? String,
             chargesEnabled: json["charges_enabled"] as? Bool ?? false
         )
+    }
+
+    /// Create a hosted Stripe Checkout Session (Payment P1). Returns the
+    /// session id + the hosted `url` the buyer opens to pay. Brand-scoped
+    /// `metadata` + `clientReferenceID` ride on the session so the (external)
+    /// fulfillment worker can mint + email the license after `checkout.session
+    /// .completed`. `priceID` is the operator-configured live Stripe Price;
+    /// Stripe live product/price config + the fulfillment worker are
+    /// operator/external (out of P1 scope).
+    public func createCheckoutSession(
+        priceID: String,
+        successURL: String,
+        cancelURL: String,
+        metadata: [String: String] = [:],
+        clientReferenceID: String? = nil,
+        idempotencyKey: String? = nil
+    ) async throws -> CheckoutSession {
+        guard !priceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw StripeError.missingPriceID
+        }
+        var fields: [String: String] = [
+            "mode": "payment",
+            "line_items[0][price]": priceID,
+            "line_items[0][quantity]": "1",
+            "success_url": successURL,
+            "cancel_url": cancelURL
+        ]
+        if let clientReferenceID, !clientReferenceID.isEmpty {
+            fields["client_reference_id"] = clientReferenceID
+        }
+        for (key, value) in metadata {
+            fields["metadata[\(key)]"] = value
+        }
+
+        var request = try authorizedRequest(
+            method: "POST",
+            endpoint: "checkout/sessions",
+            idempotencyKey: idempotencyKey
+        )
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Self.formURLEncoded(fields).data(using: .utf8)
+        let data = try await performRequest(request)
+        return try Self.parseCheckoutSession(data: data)
+    }
+
+    static func parseCheckoutSession(data: Data) throws -> CheckoutSession {
+        guard
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let id = json["id"] as? String,
+            let url = json["url"] as? String
+        else {
+            throw StripeError.invalidResponse
+        }
+        return CheckoutSession(id: id, url: url)
     }
 
     private func executePaymentIntentRequest(_ request: URLRequest) async throws -> PaymentIntentResult {

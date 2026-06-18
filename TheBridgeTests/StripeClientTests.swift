@@ -201,12 +201,111 @@ func runStripeClientTests() async {
             }
         }
     }
+
+    // ── Payment P1: hosted Stripe Checkout Session ───────────────────────
+    await test("createCheckoutSession posts mode/price/urls + brand metadata + client_reference_id") {
+        StripeMockURLProtocol.reset()
+        StripeMockURLProtocol.requestHandler = { request in
+            try expect(request.url?.absoluteString == "https://api.stripe.com/v1/checkout/sessions",
+                       "expected checkout/sessions endpoint, got \(request.url?.absoluteString ?? "nil")")
+            try expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer sk_test_co",
+                       "expected bearer auth")
+            let body = stripeRequestBody(request)
+            try expect(body.contains("mode=payment"), "missing mode=payment in \(body)")
+            try expect(body.contains("line_items%5B0%5D%5Bprice%5D=price_live_123"), "missing price line item in \(body)")
+            try expect(body.contains("line_items%5B0%5D%5Bquantity%5D=1"), "missing quantity in \(body)")
+            try expect(body.contains("success_url=https%3A%2F%2Fok"), "missing success_url in \(body)")
+            try expect(body.contains("cancel_url=https%3A%2F%2Fno"), "missing cancel_url in \(body)")
+            try expect(body.contains("metadata%5Bproduct%5D=the-bridge"), "missing brand metadata in \(body)")
+            try expect(body.contains("client_reference_id=ord_42"), "missing client_reference_id in \(body)")
+            let json = #"{"id":"cs_test_123","url":"https://checkout.stripe.com/c/pay/cs_test_123"}"#
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, Data(json.utf8))
+        }
+        let client = StripeClient(session: makeStripeMockSession(), apiKeyProvider: { "sk_test_co" })
+        let session = try await client.createCheckoutSession(
+            priceID: "price_live_123",
+            successURL: "https://ok",
+            cancelURL: "https://no",
+            metadata: BridgeCheckout.brandMetadata(appVersion: "9.9.9"),
+            clientReferenceID: "ord_42",
+            idempotencyKey: "idem-co"
+        )
+        try expect(session.id == "cs_test_123", "expected cs_test_123, got \(session.id)")
+        try expect(session.url == "https://checkout.stripe.com/c/pay/cs_test_123")
+    }
+
+    await test("createCheckoutSession with empty priceID throws missingPriceID (no network)") {
+        StripeMockURLProtocol.reset()
+        StripeMockURLProtocol.requestHandler = { _ in
+            throw TestError.assertion("network must NOT be called when priceID is empty")
+        }
+        let client = StripeClient(session: makeStripeMockSession(), apiKeyProvider: { "sk_test_co" })
+        do {
+            _ = try await client.createCheckoutSession(priceID: "  ", successURL: "https://ok", cancelURL: "https://no")
+            throw TestError.assertion("expected missingPriceID")
+        } catch let error as StripeError {
+            if case .missingPriceID = error { } else {
+                throw TestError.assertion("expected missingPriceID, got \(error)")
+            }
+        }
+    }
+
+    await test("createCheckoutSession surfaces a Stripe error response") {
+        StripeMockURLProtocol.reset()
+        StripeMockURLProtocol.requestHandler = { request in
+            let json = #"{"error":{"type":"invalid_request_error","message":"No such price"}}"#
+            let response = HTTPURLResponse(url: request.url!, statusCode: 400, httpVersion: nil, headerFields: nil)!
+            return (response, Data(json.utf8))
+        }
+        let client = StripeClient(session: makeStripeMockSession(), apiKeyProvider: { "sk_test_co" })
+        do {
+            _ = try await client.createCheckoutSession(priceID: "price_bad", successURL: "https://ok", cancelURL: "https://no")
+            throw TestError.assertion("expected a StripeError")
+        } catch let error as StripeError {
+            if case .processingError = error { } else {
+                throw TestError.assertion("expected processingError, got \(error)")
+            }
+        }
+    }
+
+    await test("BridgeCheckout brand metadata + priceID provider") {
+        let md = BridgeCheckout.brandMetadata(appVersion: "4.0.0")
+        try expect(md["product"] == "the-bridge")
+        try expect(md["app_version"] == "4.0.0")
+        try expect(md["channel"] == "in-app")
+        try expect(BridgeCheckout.priceID({ nil }) == nil, "nil provider → nil")
+        try expect(BridgeCheckout.priceID({ "   " }) == nil, "whitespace → nil")
+        try expect(BridgeCheckout.priceID({ " price_x " }) == "price_x", "trimmed value")
+        try expect(BridgeCheckout.paymentLinkURL({ nil }) == nil, "nil link → nil")
+        try expect(BridgeCheckout.paymentLinkURL({ " https://buy.stripe.com/x " }) == "https://buy.stripe.com/x",
+                   "trimmed payment link")
+    }
 }
 
 private func makeStripeMockSession() -> URLSession {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [StripeMockURLProtocol.self]
     return URLSession(configuration: config)
+}
+
+/// Read a URLRequest body whether URLSession left it as httpBody or moved it
+/// to httpBodyStream (it does the latter for bodies handed to a URLProtocol).
+private func stripeRequestBody(_ request: URLRequest) -> String {
+    if let data = request.httpBody { return String(decoding: data, as: UTF8.self) }
+    guard let stream = request.httpBodyStream else { return "" }
+    stream.open()
+    defer { stream.close() }
+    var data = Data()
+    let bufSize = 4096
+    let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufSize)
+    defer { buffer.deallocate() }
+    while stream.hasBytesAvailable {
+        let read = stream.read(buffer, maxLength: bufSize)
+        if read <= 0 { break }
+        data.append(buffer, count: read)
+    }
+    return String(decoding: data, as: UTF8.self)
 }
 
 private final class StripeMockURLProtocol: URLProtocol {

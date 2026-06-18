@@ -11,6 +11,7 @@ public enum StripeError: Error, LocalizedError {
     case amountExceedsCeiling(amount: Int, ceiling: Int)
     case missingIdempotencyKey
     case invalidAmount
+    case missingPriceID
 
     public var errorDescription: String? {
         switch self {
@@ -34,6 +35,8 @@ public enum StripeError: Error, LocalizedError {
             return "Missing required idempotency key."
         case .invalidAmount:
             return "Amount must be greater than zero."
+        case .missingPriceID:
+            return "No Stripe Price is configured for checkout. Set the live Price id (operator)."
         }
     }
 }

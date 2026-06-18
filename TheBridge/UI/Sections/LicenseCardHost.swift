@@ -85,9 +85,15 @@ public final class LicenseCardHost: ObservableObject {
     /// Open the store page in the user's default browser. The host
     /// supplies the URL so a future redirect can land without an app
     /// update.
+    /// Open the purchase flow. P1: prefer the operator-configured Stripe Payment
+    /// Link (it carries the price + success/cancel + metadata, so the app never
+    /// holds a Stripe secret key); fall back to the store page when no link is
+    /// configured. Server-side session creation with brand-scoped metadata for
+    /// the fulfillment worker lives in `StripeClient.createCheckoutSession`.
     public func openBuyPage() {
-        let url = URL(string: "https://kup.solutions/notion-bridge")!
-        NSWorkspace.shared.open(url)
+        let target = BridgeCheckout.paymentLinkURL().flatMap(URL.init(string:))
+            ?? URL(string: "https://kup.solutions/the-bridge")!
+        NSWorkspace.shared.open(target)
     }
 }
 
