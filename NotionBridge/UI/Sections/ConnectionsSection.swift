@@ -351,8 +351,10 @@ public struct ConnectionsSection: View {
                     VStack(spacing: 6) {
                         ForEach(Array(statusBar.connectedClients.enumerated()), id: \.element.name) { _, client in
                             clientRow(client)
+                                .accessibilityIdentifier(BridgeAXID.Connection.clientRow)   // PKT-1005 remainder (b)
                         }
                     }
+                    .accessibilityIdentifier(BridgeAXID.Connection.clientsList)   // PKT-1005 remainder (b)
                 }
             }
         }

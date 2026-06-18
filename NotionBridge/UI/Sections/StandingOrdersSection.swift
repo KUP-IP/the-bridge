@@ -70,6 +70,7 @@ public struct OrdersSection: View {
                 selectedSlug: $selectedSlug
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .accessibilityIdentifier(BridgeAXID.Commands.list)   // PKT-1005 remainder (b)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.clear)
@@ -129,6 +130,7 @@ public struct OrdersSection: View {
             }
         }
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(BridgeAXID.Commands.header)   // PKT-1005 remainder (b)
     }
 
     // MARK: Live status-indicator subtitle (replaces the description)
@@ -170,6 +172,7 @@ public struct OrdersSection: View {
             .help("The system-wide chord that opens the Command Bridge. Click to record a new one.")
             .accessibilityLabel("Command Bridge global shortcut")
             .accessibilityValue(settingsStatus.message)
+            .accessibilityIdentifier(BridgeAXID.Commands.shortcutEditor)   // PKT-1005 remainder (b)
             if isCollision {
                 Button("Retry") {
                     _ = (NSApp.delegate as? AppDelegate)?.retryHotkeyRegistration()
@@ -220,6 +223,7 @@ public struct OrdersSection: View {
         .help("Enable the global Command Bridge popup hot-key.")
         .accessibilityLabel("Command Bridge global hot-key")
         .accessibilityValue(paletteEnabled ? "on" : "off")
+        .accessibilityIdentifier(BridgeAXID.Commands.toggleEnabled)   // PKT-1005 remainder (b)
     }
 
     // MARK: - Observed hot-key state (mirrors the controller-or-fallback ladder)

@@ -271,6 +271,13 @@ public final class CommandBridgeController: NSObject {
     /// `show()` BEFORE `orderFrontRegardless()`.
     private var priorApp: NSRunningApplication?
 
+    /// (PKT-1006 R2) Cached Jobs snapshot for multi-entity search. `JobStore`
+    /// is an `actor` (async reads), but `buildSearchEntities()` runs
+    /// synchronously inside `queryDidChange`. We refresh this snapshot
+    /// asynchronously on each `show()` and read it synchronously while typing —
+    /// jobs change rarely, so a one-open-stale snapshot is acceptable.
+    private var cachedJobs: [JobRecord] = []
+
     /// (v3.7.6) Presents the standalone Dashboard popover anchored off the
     /// bar's leading bridge-mark. Injected by the App layer (it owns the
     /// `StatusBarController` / `PermissionManager` the dashboard needs); `nil`
@@ -575,6 +582,13 @@ public final class CommandBridgeController: NSObject {
         // command shows immediately. Failures fall back to empty.
         model?.reload()
         model?.queryDidChange("")
+        // (PKT-1006 R2) Refresh the Jobs snapshot for multi-entity search.
+        // JobStore is an actor (async); we snapshot it here so the synchronous
+        // search path can read jobs while typing without an await.
+        Task { [weak self] in
+            let jobs = (try? await JobStore.shared.listAll()) ?? []
+            await MainActor.run { self?.cachedJobs = jobs }
+        }
 
         // (v3.7.6) Make the panel KEY (not just ordered front) so the hosted
         // query field can take first responder and the user types immediately.
@@ -836,9 +850,18 @@ public final class CommandBridgeController: NSObject {
     private func makePanel() -> CommandBridgePanel {
         let panel = CommandBridgePanel(size: Self.panelSize)
 
-        let model = CommandBridgeViewModel(store: store, recents: recents)
+        let model = CommandBridgeViewModel(
+            store: store,
+            recents: recents,
+            // (PKT-1006 R2) Live multi-entity provider. The view-model owns no
+            // store coupling — the controller supplies the searchable entities
+            // (Commands + Skills + Jobs + Tools) at query time.
+            entityProvider: { [weak self] in self?.buildSearchEntities() ?? [] }
+        )
         model.onFireSlot = { [weak self] slot in self?.fireSlot(slot) }
         model.onFireSlug = { [weak self] slug in self?.fireSlug(slug) }
+        // (PKT-1006 R2) Route a typed result's destination to its open action.
+        model.onFireDestination = { [weak self] dest in self?.fireDestination(dest) }
         model.onEscape   = { [weak self] in self?.hide() }
         model.onSettings = { [weak self] in self?.openCommandsSettings() }
         // (v3.7.6) Dashboard popover presenter. The pill no longer carries a
@@ -863,14 +886,18 @@ public final class CommandBridgeController: NSObject {
 
     // MARK: - Settings deep-link
 
-    /// Menu-bar ⌘ chip → SettingsNavigation to Orders/Commands. Public so the
-    /// SwiftUI button can invoke without touching the AppDelegate.
-    /// PKT-A: Commands folded into Orders → open Orders on the `commands` tab.
+    /// Trailing bridge-mark → bring the Bridge app to the FOREGROUND.
+    /// PKT-1006 R3 (operator-resolved Q1): the icon brings the app to the
+    /// front only — NOT Dashboard, NOT Settings. The prior implementation
+    /// deep-linked to Orders/Commands settings via the fragile
+    /// `NSApp.delegate as? AppDelegate` cast (which silently no-ops under
+    /// `@NSApplicationDelegateAdaptor`, so the icon read as dead). We now route
+    /// through the identity-correct `AppDelegate.shared` handle — the proven
+    /// PKT-1005 pattern from `BridgeAutomationModule.liveAppDelegate()` — and
+    /// call the dedicated `bringToFront()` foreground primitive.
     public func openCommandsSettings() {
-        SettingsNavigation.shared.go(.orders, anchor: "commands")
-        if let app = NSApp.delegate as? AppDelegate {
-            app.openSettings(section: .orders)
-        }
+        let app = AppDelegate.shared ?? (NSApp.delegate as? AppDelegate)
+        app?.bringToFront()
         hide()
     }
 
@@ -885,6 +912,153 @@ public final class CommandBridgeController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.001) {
             present()
         }
+    }
+
+    // ============================================================
+    // MARK: - Multi-entity search (PKT-1006 R2)
+    // ============================================================
+
+    /// Build the live searchable entities the view-model ranks: Commands +
+    /// Skills + Jobs + Tools. Pure-adapter — it reads the live stores and maps
+    /// each into a `BridgeSearchEntity` carrying a typed destination. All the
+    /// ranking/fuzzy/grouping lives in the pure `BridgeSearch` (unit-tested);
+    /// this is only the store-read seam, so a store failure degrades to fewer
+    /// entities rather than crashing the bar.
+    public func buildSearchEntities() -> [BridgeSearchEntity] {
+        var entities: [BridgeSearchEntity] = []
+
+        // ── Commands (the historical bar contents) ──────────────────────
+        let commands = (try? store.list()) ?? []
+        for c in commands {
+            entities.append(BridgeSearchEntity(
+                kind: .command,
+                id: c.slug,
+                title: c.name,
+                subtitle: c.keySlot.map { "slot \($0)" },
+                destination: .command(slug: c.slug),
+                recency: c.lastUsedAt
+            ))
+        }
+
+        // ── Skills (open their SOURCE: notion / gdocs / file) ────────────
+        let skills = SkillsManager().listSkills()
+        for s in skills {
+            entities.append(BridgeSearchEntity(
+                kind: .skill,
+                id: s.name,
+                title: s.name,
+                subtitle: s.platform.displayName,
+                destination: Self.skillDestination(for: s)
+            ))
+        }
+
+        // ── Jobs (deep-link into Settings → Jobs) ────────────────────────
+        // Read the snapshot refreshed asynchronously on show() (JobStore is an
+        // actor — see `cachedJobs`).
+        let jobs = cachedJobs
+        for j in jobs {
+            entities.append(BridgeSearchEntity(
+                kind: .job,
+                id: j.id,
+                title: j.name,
+                subtitle: j.schedule,
+                destination: .job(id: j.id)
+            ))
+        }
+
+        // ── Tools (deep-link into Settings → Tools, open the grouping) ───
+        let tools = AppDelegate.shared?.statusBar.toolInfoList ?? []
+        for t in tools {
+            let group = ModuleGroupDerivation.resolve(toolName: t.name).rawValue
+            entities.append(BridgeSearchEntity(
+                kind: .tool,
+                id: t.name,
+                title: t.name,
+                subtitle: t.module,
+                destination: .tool(group: group, tool: t.name)
+            ))
+        }
+
+        return entities
+    }
+
+    /// Resolve a Skill into its typed source destination. The Skill model
+    /// carries `source` (.notion(pageId) / .file(path)) + `platform`
+    /// (.notion / .googleDocs / .manual) + an optional original `url`:
+    ///   • .file source        → open the file
+    ///   • .notion + a Google-Docs platform/URL → open the Google Doc
+    ///   • .notion source       → open the Notion page
+    ///   • otherwise (manual / no resolvable target) → Settings → Skills row
+    public static func skillDestination(for skill: SkillsManager.Skill) -> BridgeSearchDestination {
+        switch skill.source {
+        case .file(let path):
+            return .skillFile(path: path.path)
+        case .notion(let pageId):
+            if skill.platform == .googleDocs, let url = skill.url, !url.isEmpty {
+                return .skillGoogleDoc(url: url)
+            }
+            if !pageId.isEmpty {
+                return .skillNotion(pageId: pageId, url: skill.url)
+            }
+            if let url = skill.url, !url.isEmpty {
+                // No page id but a URL we can open (e.g. a non-canonical link).
+                return .skillGoogleDoc(url: url)
+            }
+            return .skillSettings(anchor: skill.name)
+        }
+    }
+
+    /// Fire a typed search result's destination (R2). The single routing seam
+    /// (one switch, not 4 ad-hoc branches). Commands paste-and-close exactly as
+    /// before; skills open their source; jobs/tools deep-link into Settings via
+    /// the identity-correct `AppDelegate.shared` + SettingsNavigation (PKT-1005
+    /// plumbing). The bar is hidden after navigating so the destination has focus.
+    public func fireDestination(_ destination: BridgeSearchDestination) {
+        switch destination {
+        case .command(let slug):
+            fireSlug(slug)                 // paste body + close (existing path)
+
+        case .skillNotion(let pageId, let url):
+            openURLString(url ?? SkillPlatform.notion.canonicalURL(uuid: pageId)
+                          ?? "https://www.notion.so/\(pageId.replacingOccurrences(of: "-", with: ""))")
+            hide()
+
+        case .skillGoogleDoc(let url):
+            openURLString(url)
+            hide()
+
+        case .skillFile(let path):
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+            hide()
+
+        case .skillSettings(let anchor):
+            navigateSettings(.skills, anchor: anchor)
+
+        case .job(let id):
+            navigateSettings(.jobs, anchor: id)
+
+        case .tool(let group, let tool):
+            // Open the tool's GROUPING and scroll to the tool so it can be
+            // toggled / permission-gated. The Tools section consumes the
+            // "group:tool" anchor (opens the group, then scrolls to the row).
+            navigateSettings(.tools, anchor: "\(group):\(tool)")
+        }
+    }
+
+    /// Foreground the app + deep-link Settings to `section`/`anchor` via the
+    /// identity-correct `AppDelegate.shared` (PKT-1005). Hides the bar after.
+    private func navigateSettings(_ section: SettingsSection, anchor: String?) {
+        SettingsNavigation.shared.go(section, anchor: anchor)
+        let app = AppDelegate.shared ?? (NSApp.delegate as? AppDelegate)
+        app?.openSettings(section: section)
+        app?.bringToFront()
+        hide()
+    }
+
+    /// Open a URL string in the default handler (browser / Notion app).
+    private func openURLString(_ string: String) {
+        guard let url = URL(string: string) else { return }
+        NSWorkspace.shared.open(url)
     }
 }
 
@@ -906,9 +1080,18 @@ public final class CommandBridgeViewModel: ObservableObject {
     @Published public var slotRows: [SlotRow] = []
     @Published public var recentRows: [Row] = []
     @Published public var searchRows: [Row] = []
+    /// (PKT-1006 R2) Multi-entity, typed, ranked search results — Commands +
+    /// Skills + Jobs + Tools. Replaces the command-only `searchRows` as the
+    /// search-mode model; `searchRows` stays only for back-compat with the
+    /// recency builder + existing tests. Each result carries its kind (type tag
+    /// + color), title/subtitle, and typed destination action.
+    @Published public var searchResults: [BridgeSearchResult] = []
     /// Keyboard-selected row in the active panel (recents/search), by slug.
     /// ↓/↑ move it; Enter fires it. nil → no selection (closed tray).
     @Published public var selectedSlug: String? = nil
+    /// (PKT-1006 R2) Keyboard-selected typed search result id ("<kind>:<id>").
+    /// ↑/↓ move it across groups; Enter fires its destination. nil → none.
+    @Published public var selectedResultID: String? = nil
     /// (v3.7.6) Monotonic focus token. The controller bumps this on EVERY
     /// show() (the panel is reused, so `.onAppear` only fires once); the view
     /// observes it and re-claims first responder on the query field.
@@ -935,6 +1118,10 @@ public final class CommandBridgeViewModel: ObservableObject {
 
     public var onFireSlot: (Int) -> Void = { _ in }
     public var onFireSlug: (String) -> Void = { _ in }
+    /// (PKT-1006 R2) Fire a typed search result's destination (skill source /
+    /// jobs deep-link / tools deep-link / command body). The controller wires
+    /// the live router; default is a no-op for tests/shells.
+    public var onFireDestination: (BridgeSearchDestination) -> Void = { _ in }
     public var onEscape: () -> Void = {}
     public var onSettings: () -> Void = {}
     /// (v3.7.6) Open the Dashboard popover. No longer fired from a pill glyph
@@ -944,10 +1131,20 @@ public final class CommandBridgeViewModel: ObservableObject {
 
     private let store: CommandStore
     private let recents: CommandBridgeRecents
+    /// (PKT-1006 R2) Supplies the live searchable entities (Skills + Jobs +
+    /// Tools, plus Commands) at query time. Injected by the controller, which
+    /// owns the store coupling; defaults to an empty provider so the view-model
+    /// stays pure + headlessly testable (no store I/O in this layer).
+    private let entityProvider: () -> [BridgeSearchEntity]
 
-    public init(store: CommandStore, recents: CommandBridgeRecents) {
+    public init(
+        store: CommandStore,
+        recents: CommandBridgeRecents,
+        entityProvider: @escaping () -> [BridgeSearchEntity] = { [] }
+    ) {
         self.store = store
         self.recents = recents
+        self.entityProvider = entityProvider
         reload()
     }
 
@@ -965,22 +1162,38 @@ public final class CommandBridgeViewModel: ObservableObject {
         self.recentRows = Self.buildRecentRows(from: all, order: recents.ordered)
     }
 
-    /// Search-as-you-type. Empty query → panelMode = .none and rows
-    /// hidden. Non-empty → substring match on name, ranked by recency.
+    /// Search-as-you-type. Empty query → panelMode = .none and rows hidden.
+    /// Non-empty → (PKT-1006 R2) multi-entity ranked search across Commands +
+    /// Skills + Jobs + Tools via `BridgeSearch.rankedResults` over the live
+    /// entities supplied by `entityProvider`. The selection moves to the first
+    /// result so ↑/↓/Enter work across groups with no mouse.
     public func queryDidChange(_ q: String) {
         self.query = q
         let trimmed = q.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             // typing-stopped path collapses back to whichever secondary
             // panel was last open (recents stays open if it was open).
-            if case .search = panelMode { panelMode = .none; selectedSlug = nil }
+            if case .search = panelMode {
+                panelMode = .none
+                selectedSlug = nil
+                selectedResultID = nil
+            }
             searchRows = []
+            searchResults = []
             return
         }
-        let hits = (try? store.search(trimmed)) ?? []
-        searchRows = hits.map(Self.row(from:))
+        let entities = entityProvider()
+        let results = BridgeSearch.rankedResults(query: trimmed, entities: entities)
+        searchResults = results
+        // Keep `searchRows` populated from the command hits only, for the
+        // back-compat recency path + the existing command-only tests.
+        searchRows = results
+            .filter { $0.kind == .command }
+            .map { Row(slug: $0.entityId, name: $0.title, icon: .symbol("command"),
+                       color: nil, lastUsedAt: nil, keySlot: nil) }
         panelMode = .search(query: trimmed)
-        selectedSlug = searchRows.first?.slug
+        selectedResultID = results.first?.id
+        selectedSlug = results.first(where: { $0.kind == .command })?.entityId
     }
 
     /// ↓ → open recents (140ms slide-in handled by the view), selecting the
@@ -991,7 +1204,8 @@ public final class CommandBridgeViewModel: ObservableObject {
         selectedSlug = recentRows.first?.slug
     }
 
-    /// Rows currently shown in the secondary panel (recents or search).
+    /// Rows currently shown in the RECENTS panel (search mode uses the typed
+    /// `searchResults` instead — see `moveSelection`/`commitSelected`).
     private var activeRows: [Row] {
         switch panelMode {
         case .recents: return recentRows
@@ -1001,32 +1215,61 @@ public final class CommandBridgeViewModel: ObservableObject {
     }
 
     /// ↓ (+1) / ↑ (−1) move the keyboard selection within the open panel,
-    /// clamped to the ends. ↓ from the closed tray opens recents.
+    /// clamped to the ends. ↓ from the closed tray opens recents. In search
+    /// mode the selection traverses the typed `searchResults` ACROSS GROUPS
+    /// (R2: commands → skills → jobs → tools as one flat keyboard list).
     public func moveSelection(_ delta: Int) {
-        if case .none = panelMode {
+        switch panelMode {
+        case .none:
             if delta > 0 { openRecents() }
-            return
+        case .search:
+            guard !searchResults.isEmpty else { return }
+            let cur = selectedResultID
+                .flatMap { id in searchResults.firstIndex(where: { $0.id == id }) } ?? 0
+            let next = min(max(cur + delta, 0), searchResults.count - 1)
+            selectedResultID = searchResults[next].id
+            // Mirror the command slug for the back-compat path when a command
+            // row is selected (nil otherwise — non-command rows have no slug).
+            let sel = searchResults[next]
+            selectedSlug = sel.kind == .command ? sel.entityId : nil
+        case .recents:
+            let rows = recentRows
+            guard !rows.isEmpty else { return }
+            let cur = selectedSlug.flatMap { s in rows.firstIndex(where: { $0.slug == s }) } ?? 0
+            let next = min(max(cur + delta, 0), rows.count - 1)
+            selectedSlug = rows[next].slug
         }
-        let rows = activeRows
-        guard !rows.isEmpty else { return }
-        let cur = selectedSlug.flatMap { s in rows.firstIndex(where: { $0.slug == s }) } ?? 0
-        let next = min(max(cur + delta, 0), rows.count - 1)
-        selectedSlug = rows[next].slug
     }
 
-    /// Enter fires the keyboard-selected row (falling back to the first).
+    /// Enter fires the keyboard-selected row. In SEARCH mode it fires the
+    /// selected typed result's DESTINATION (skill source / job / tool / command),
+    /// falling back to the first result. In RECENTS mode it fires the selected
+    /// command by slug (unchanged).
     public func commitSelected() {
-        let rows = activeRows
-        guard !rows.isEmpty else { return }
-        let slug = selectedSlug.flatMap { s in rows.contains(where: { $0.slug == s }) ? s : nil }
-            ?? rows.first?.slug
-        if let slug { onFireSlug(slug) }
+        switch panelMode {
+        case .search:
+            guard !searchResults.isEmpty else { return }
+            let result = selectedResultID
+                .flatMap { id in searchResults.first(where: { $0.id == id }) }
+                ?? searchResults.first
+            if let result { onFireDestination(result.destination) }
+        case .recents:
+            let rows = recentRows
+            guard !rows.isEmpty else { return }
+            let slug = selectedSlug.flatMap { s in rows.contains(where: { $0.slug == s }) ? s : nil }
+                ?? rows.first?.slug
+            if let slug { onFireSlug(slug) }
+        case .none:
+            break
+        }
     }
 
     /// Esc / focus-loss / fire → reset to closed-tray state.
     public func resetToTray() {
         query = ""
         searchRows = []
+        searchResults = []
+        selectedResultID = nil
         panelMode = .none
     }
 
@@ -1084,6 +1327,14 @@ public struct CommandBridgeRootView: View {
     // cursor-to-origin offset so the palette can drag itself.
     @State private var paletteWindow: NSWindow?
     @State private var dragMouseOffset: CGSize?
+    // (PKT-1006 R4c · operator-resolved Q3) True while the window is being
+    // dragged. The self-legibility text shadows (placeholder NSShadow + field
+    // layer.shadow + the SwiftUI .legibilityHalo()) re-render every
+    // windowDrag.onChanged (setFrameOrigin from the live mouse) — that re-render
+    // is the "Bridge Command" shimmer. We KEEP the shadows but FREEZE them while
+    // dragging by rasterizing the haloed text into a stable layer (no per-frame
+    // shadow recompute), then release it on drag end.
+    @State private var isDraggingWindow = false
 
     private var anim: CommandBridgeAnimation {
         reduceMotion ? .reduced : .locked
@@ -1125,6 +1376,9 @@ public struct CommandBridgeRootView: View {
         .frame(width: CommandBridgeController.pillWidth + 24,
                height: CommandBridgeController.panelSize.height,
                alignment: .top)
+        // (PKT-1006 R4c) Publish the drag state so the legibility halos freeze
+        // (rasterize) while the window moves instead of shimmering.
+        .environment(\.cbIsDragging, isDraggingWindow)
         // (v4 round-3) Capture the hosting window + make the whole palette
         // draggable. simultaneousGesture so taps on the orbs / menu mark still
         // fire and the field still focuses; a >3pt drag on the glass repositions.
@@ -1165,13 +1419,20 @@ public struct CommandBridgeRootView: View {
                 if dragMouseOffset == nil {
                     dragMouseOffset = CGSize(width: mouse.x - win.frame.origin.x,
                                              height: mouse.y - win.frame.origin.y)
+                    // (R4c) Enter drag-stabilized mode on the first move — freeze
+                    // the legibility halos so they don't shimmer as the window moves.
+                    if !isDraggingWindow { isDraggingWindow = true }
                 }
                 if let off = dragMouseOffset {
                     win.setFrameOrigin(CGPoint(x: mouse.x - off.width,
                                                y: mouse.y - off.height))
                 }
             }
-            .onEnded { _ in dragMouseOffset = nil }
+            .onEnded { _ in
+                dragMouseOffset = nil
+                // (R4c) Release the frozen halos — back to live self-legible text.
+                isDraggingWindow = false
+            }
     }
 
     // MARK: Tray
@@ -1270,6 +1531,7 @@ public struct CommandBridgeRootView: View {
                     ),
                     placeholder: "Bridge Command",
                     isFocused: $queryFocused,
+                    focusToken: model.focusToken,
                     onReturn: { commitTopSelection() },
                     onArrowDown: { model.moveSelection(1) },
                     onArrowUp: { model.moveSelection(-1) },
@@ -1295,7 +1557,7 @@ public struct CommandBridgeRootView: View {
                     )
             }
             .buttonStyle(.plain)
-            .help("Open Commands settings")
+            .help("Bring The Bridge to the front")
         }
         .padding(.leading, BridgeTokens.Space.s6)
         .padding(.trailing, BridgeTokens.Space.s4)
@@ -1398,11 +1660,19 @@ public struct CommandBridgeRootView: View {
                     panelEmptyHint("No recents yet — fire a command to start the history.")
                 }
             case .search(let q):
-                panelHeader("Matches — sorted by recency")
-                ForEach(model.searchRows) { r in
-                    rowView(r, selected: r.slug == model.selectedSlug, highlight: q)
+                // (PKT-1006 R2) Typed, grouped, multi-entity results. Each kind
+                // gets its own section header; rows carry a type tag + color.
+                let grouped = Dictionary(grouping: model.searchResults, by: { $0.kind })
+                let kinds = grouped.keys.sorted { $0.groupOrder < $1.groupOrder }
+                ForEach(kinds, id: \.self) { kind in
+                    panelHeader(kind.groupHeader)
+                    ForEach(grouped[kind] ?? []) { result in
+                        resultRow(result,
+                                  selected: result.id == model.selectedResultID,
+                                  highlight: q)
+                    }
                 }
-                if model.searchRows.isEmpty {
+                if model.searchResults.isEmpty {
                     panelEmptyHint("No match for \"\(q)\".")
                 }
             }
@@ -1476,6 +1746,65 @@ public struct CommandBridgeRootView: View {
             .padding(.horizontal, BridgeTokens.Space.s3)
             .frame(height: 46)
             .background(rowBackground(selected: selected))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// (PKT-1006 R2) A typed multi-entity result row — a COLOR indicator dot +
+    /// the title (match-highlighted) + an optional dim subtitle + a TYPE TAG
+    /// chip (CMD/SKILL/JOB/TOOL) tinted to the kind's color. Selecting it fires
+    /// the typed destination (skill source / jobs deep-link / tools deep-link /
+    /// command body) with zero mouse.
+    @ViewBuilder
+    private func resultRow(_ result: BridgeSearchResult,
+                           selected: Bool,
+                           highlight: String) -> some View {
+        let kindColor = NotionPalette.color(named: result.kind.colorTag) ?? BridgeTokens.fg2
+        Button {
+            model.onFireDestination(result.destination)
+        } label: {
+            HStack(spacing: BridgeTokens.Space.s4 - 2) {
+                // Color indicator dot — the kind's hue.
+                Circle()
+                    .fill(kindColor)
+                    .frame(width: 9, height: 9)
+                    .shadow(color: kindColor.opacity(0.6), radius: 2.5)
+                    .frame(width: 28, height: 28)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    highlightedName(result.title, query: highlight)
+                        .font(BridgeTokens.Typeface.name)
+                        .foregroundStyle(BridgeTokens.fg1)
+                        .lineLimit(1)
+                        .legibilityHalo()
+                    if let subtitle = result.subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(BridgeTokens.Typeface.meta)
+                            .foregroundStyle(BridgeTokens.fg5)
+                            .lineLimit(1)
+                            .legibilityHalo()
+                    }
+                }
+
+                Spacer(minLength: BridgeTokens.Space.s1)
+
+                // Type tag chip — kind label, kind-tinted fill + ink.
+                Text(result.kind.tag)
+                    .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(kindColor)
+                    .padding(.horizontal, BridgeTokens.Space.s2)
+                    .frame(minHeight: 18)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(kindColor.opacity(0.16))
+                            .overlay(Capsule(style: .continuous)
+                                .strokeBorder(kindColor.opacity(0.34), lineWidth: 0.5))
+                    )
+            }
+            .padding(.horizontal, BridgeTokens.Space.s3)
+            .frame(height: 46)
+            .background(rowBackground(selected: selected))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -1583,8 +1912,17 @@ private struct PopoverGlass: ViewModifier {
         return content
             .background {
                 ZStack {
-                    // Even frosted blur — the Spotlight frost, uniform (no centre mask).
-                    shape.fill(.regularMaterial)
+                    // (PKT-1006 R4b · operator-resolved Q2) STANDALONE liquid glass on a
+                    // fully transparent container. The shade was `.regularMaterial` — too
+                    // opaque/tinted, so the favorites row + bar read as sitting on one
+                    // shared backdrop rectangle. Move to the most transparent system
+                    // blur (`.ultraThinMaterial`, the design's frosted-air .cb-pill /
+                    // .cb-panel intent) so each element (the favorites bubbles above, the
+                    // pill, the results panel) stands alone as its OWN frosted-glass
+                    // surface over the desktop — no shared shade. The hairline edge +
+                    // even top sheen + per-element float shadow (below) keep each one
+                    // reading as a discrete raised pane (design elevation rung e3).
+                    shape.fill(.ultraThinMaterial)
                     // Faint EVEN top sheen — a thin glass top-light, balanced: bright
                     // only at the very top edge, gone by ~26% (NOT a big upper dome).
                     shape.fill(LinearGradient(
@@ -1595,7 +1933,8 @@ private struct PopoverGlass: ViewModifier {
                         startPoint: .top, endPoint: .bottom))
                 }
             }
-            // Hairline edge + a soft drop shadow — Spotlight's subtle border + float.
+            // Hairline edge + a soft PER-ELEMENT drop shadow — each glass pane floats
+            // on its own (no shared backdrop rectangle behind both).
             .overlay(shape.strokeBorder(BridgeTokens.edgeRaise, lineWidth: 1).allowsHitTesting(false))
             .clipShape(shape)
             .shadow(color: .black.opacity(isDark ? 0.28 : 0.16), radius: 16, y: 7)
@@ -1620,13 +1959,39 @@ private extension View {
 //   halo in dark mode (white ink → reads on light backdrops), a light halo in
 //   light mode (dark ink → reads on dark backdrops). On a matching backdrop the
 //   halo is imperceptible. No container is reintroduced.
+/// (PKT-1006 R4c) Environment flag — true while the palette window is being
+/// dragged. The legibility halos read it and FREEZE (rasterize) so they don't
+/// shimmer/re-render as the window moves (operator-resolved Q3: keep the
+/// shadows, stabilize during drag).
+private struct CBIsDraggingKey: EnvironmentKey {
+    static let defaultValue = false
+}
+private extension EnvironmentValues {
+    var cbIsDragging: Bool {
+        get { self[CBIsDraggingKey.self] }
+        set { self[CBIsDraggingKey.self] = newValue }
+    }
+}
+
 private struct LegibilityHalo: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.cbIsDragging) private var isDragging
     func body(content: Content) -> some View {
         let isDark = colorScheme == .dark
-        return content.shadow(
+        let haloed = content.shadow(
             color: (isDark ? Color.black : Color.white).opacity(isDark ? 0.55 : 0.6),
             radius: 2.5, x: 0, y: 0.5)
+        // (R4c) While dragging, flatten the haloed text into a single GPU layer
+        // (`.drawingGroup()`) so the window move translates a STABLE bitmap
+        // rather than re-compositing the text shadow every frame — the shadow is
+        // intact, just frozen, so the shimmer stops. Released (live) when idle.
+        return Group {
+            if isDragging {
+                haloed.drawingGroup()
+            } else {
+                haloed
+            }
+        }
     }
 }
 
@@ -1642,6 +2007,13 @@ private struct QueryField: NSViewRepresentable {
     @Binding var text: String
     let placeholder: String
     var isFocused: FocusState<Bool>.Binding
+    /// (PKT-1006 R1) Monotonic focus token. The controller bumps it on EVERY
+    /// `show()`; this representable claims first responder whenever the value it
+    /// last applied differs from the current one. Driving focus off a token that
+    /// ALWAYS changes (rather than the `isFocused` boolean, which is already
+    /// `true` on a reused panel so its `.onChange` never re-fires) is what makes
+    /// re-open focus deterministic.
+    var focusToken: Int
     var onReturn: () -> Void
     var onArrowDown: () -> Void
     var onArrowUp: () -> Void
@@ -1710,15 +2082,59 @@ private struct QueryField: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSTextField, context: Context) {
         if nsView.stringValue != text { nsView.stringValue = text }
-        if isFocused.wrappedValue {
-            DispatchQueue.main.async {
-                nsView.window?.makeFirstResponder(nsView)
+        // (PKT-1006 R4c) Freeze the field's self-legibility layer shadow while the
+        // window is dragging — rasterize the layer so its shadow is cached and
+        // translates as a stable bitmap rather than re-rendering every frame (the
+        // shimmer). The shadow stays intact; it's just frozen. Released when idle.
+        if let layer = nsView.layer {
+            let dragging = context.environment.cbIsDragging
+            if layer.shouldRasterize != dragging {
+                layer.rasterizationScale = nsView.window?.backingScaleFactor ?? 2.0
+                layer.shouldRasterize = dragging
             }
         }
+        // (PKT-1006 R1) Re-claim first responder whenever the controller bumps
+        // the focus token. The token strictly increases on every show(), so a
+        // reused-panel re-open ALWAYS lands here (the old `isFocused` boolean
+        // was already `true`, so its `.onChange` never re-fired and the field
+        // stayed unfocused). `claimFocus` retries on the next runloop until the
+        // panel is actually the key window, fixing the async-vs-panel-key race.
+        if context.coordinator.lastAppliedFocusToken != focusToken {
+            context.coordinator.lastAppliedFocusToken = focusToken
+            claimFocus(nsView, attemptsRemaining: 12)
+        }
+    }
+
+    /// Make `field` first responder once its window is key. The makeFirstResponder
+    /// from `show()` used to fire a single `DispatchQueue.main.async` that could
+    /// land BEFORE `makeKeyAndOrderFront` made the panel key — the WindowServer
+    /// then rejects the focus and the field stays dead. This retries on the main
+    /// runloop (cheap, bounded) until the window is key, then focuses exactly once.
+    private func claimFocus(_ field: NSTextField, attemptsRemaining: Int) {
+        guard let window = field.window else {
+            // Not yet in a window — try again shortly (the panel is being shown).
+            guard attemptsRemaining > 0 else { return }
+            DispatchQueue.main.async { claimFocus(field, attemptsRemaining: attemptsRemaining - 1) }
+            return
+        }
+        guard window.isKeyWindow else {
+            guard attemptsRemaining > 0 else { return }
+            DispatchQueue.main.async { claimFocus(field, attemptsRemaining: attemptsRemaining - 1) }
+            return
+        }
+        // Already first responder (the field editor descends from the field) → done.
+        if let fr = window.firstResponder as? NSView, fr === field || fr.isDescendant(of: field) {
+            return
+        }
+        window.makeFirstResponder(field)
     }
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: QueryField
+        /// (PKT-1006 R1) The focus token most recently applied, so `updateNSView`
+        /// only re-claims focus on an actual token change (not on every SwiftUI
+        /// invalidation, which would steal focus mid-typing / mid-drag).
+        var lastAppliedFocusToken: Int = 0
         init(_ parent: QueryField) { self.parent = parent }
 
         func controlTextDidChange(_ obj: Notification) {

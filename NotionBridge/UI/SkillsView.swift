@@ -41,7 +41,32 @@ struct SkillsView: View {
     var cacheBusy: Bool = false
     var cacheMessage: String? = nil
     var cacheIsError: Bool = false
-    var onRefreshCache: () -> Void = {}
+    // PKT-1003 Wave B — two honest cache layers, separately wired.
+    /// Real body-store state (SkillBodyCacheStore.state), keyed by page id.
+    /// Drives the row pip, the `N cached` count, and the "Body cached" badge.
+    var bodyCacheSnapshot = SkillBodyCacheSnapshot()
+    /// Real routing/parent-cache state — drives the "Routing synced" badge.
+    var routingSynced: Bool = false
+    /// Refresh the routing/parent cache (feeds the routing index).
+    var onRefreshRoutingCache: () -> Void = {}
+    /// Fetch + store EVERY Notion-source skill body via the real body store.
+    var onCacheAllBodies: () -> Void = {}
+    /// Re-pull + rewrite ONE skill body via the real body store.
+    var onRefreshBody: (_ pageId: String) -> Void = { _ in }
+
+    /// Is this skill's body stored? Reads the real body store snapshot.
+    private func isBodyCached(_ skill: SkillsManager.Skill) -> Bool {
+        bodyCacheSnapshot.isCached(skill.notionPageId)
+    }
+
+    /// At least one Notion-source skill body is stored (drives the "Body
+    /// cached" indicator). Reads the real body store snapshot.
+    private var anyBodyCached: Bool {
+        SkillManagementUIContract.anyBodyCached(
+            skills: skillsManager.skills,
+            bodyCacheSnapshot: bodyCacheSnapshot
+        )
+    }
 
     // MARK: - Selection (master → detail)
 
@@ -53,23 +78,18 @@ struct SkillsView: View {
         case file(String) // path.path
     }
     @State private var selection: Selection?
+    /// (PKT-1006 R2) Deep-link nav — the Command Bridge routes a Skill result
+    /// whose source can't be opened directly (manual / no URL) to Settings →
+    /// Skills with the skill name as the anchor; we observe it to SELECT that
+    /// skill in the master list (which drives the detail pane). The common skill
+    /// case opens the source URL/file directly and never reaches this section.
+    @ObservedObject private var nav = SettingsNavigation.shared
     @State private var searchText: String = ""
     @State private var showAddForm: Bool = false
 
     /// v4 source filter (mirrors `.sk-filter` — All · File · Notion · Google
     /// Docs). Drives both the list grouping and the counts banner.
-    private enum SourceFilter: String, CaseIterable, Hashable {
-        case all, file, notion, gdocs
-        var label: String {
-            switch self {
-            case .all:    return "All"
-            case .file:   return "File"
-            case .notion: return "Notion"
-            case .gdocs:  return "Docs"
-            }
-        }
-    }
-    @State private var sourceFilter: SourceFilter = .all
+    @State private var sourceFilter: SkillManagementSourceFilter = .all
 
     /// v4 body-cache preview tab + expand-on-click float (the `.sk-peek` →
     /// `.sk-float` pattern). The body shown is the skill's MCP summary (the only
@@ -104,6 +124,18 @@ struct SkillsView: View {
     /// skills exist yet either, so the list would otherwise read as empty).
     @State private var filesLoaded: Bool = false
 
+    private var fileSkillStates: [SkillManagementFileSkillState] {
+        fileSourceSkills.map { fs in
+            SkillManagementFileSkillState(
+                name: fs.name,
+                path: fs.path.path,
+                enabled: fileSkillEnabledMap[fs.path.path] ?? true,
+                routingDiscoverable: fileSkillRoutingMap[fs.path.path] ?? false,
+                inCommandPalette: fileSkillPaletteMap[fs.path.path] ?? false
+            )
+        }
+    }
+
     // W4 (3.4.1): independent routing / palette toggles on the add form.
     @State private var newSkillRoutingDiscoverable: Bool = false
     @State private var newSkillInCommandPalette: Bool = false
@@ -133,13 +165,19 @@ struct SkillsView: View {
             .frame(maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // PKT-1005 (Pillar C): the Skills section's inner content container.
+        // (The section-level root id `bridge.settings.skills.root` is applied by
+        // SettingsView.detailContent; this is the master–detail content beneath.)
+        .accessibilityIdentifier(BridgeAXID.control(.skills, "content"))
         // v4: the expand-on-click body float, scoped over the whole page.
         .overlay { bodyFloatOverlay }
         .onAppear {
             skillsManager.reloadFromUserDefaults()
             loadFileSourceSkills()
             restoreSelectionIfNeeded()
+            selectSkillFromAnchor()
         }
+        .onChange(of: nav.anchor) { _, _ in selectSkillFromAnchor() }
         .onChange(of: selection) { _, _ in
             // A new selection collapses any open body float + resets the tab.
             expandedBody = false
@@ -174,36 +212,37 @@ struct SkillsView: View {
 
     @ViewBuilder
     private var banners: some View {
-        let invalidPageSkills = skillsManager.skills.filter { !NotionPageRef.isValidStoredPageId($0.notionPageId) }
-        let palettePopulation = skillsManager.skills.filter { $0.enabled && $0.inCommandPalette }.count
-            + fileSourceSkills.filter { (fileSkillEnabledMap[$0.path.path] ?? true) && (fileSkillPaletteMap[$0.path.path] ?? false) }.count
-        let showInvalid = !invalidPageSkills.isEmpty
-        let showFetchOff = fetchSkillDisabled && !skillsManager.skills.isEmpty
-        let showPaletteEmpty = !skillsManager.skills.isEmpty && palettePopulation == 0
-        let cacheFailed = cacheIsError && (cacheMessage != nil) && !cacheBusy
+        let state = SkillManagementUIContract.bannerState(
+            skills: skillsManager.skills,
+            fileSkills: fileSkillStates,
+            fetchSkillDisabled: fetchSkillDisabled,
+            cacheBusy: cacheBusy,
+            cacheMessage: cacheMessage,
+            cacheIsError: cacheIsError
+        )
 
-        if showInvalid || showFetchOff || showPaletteEmpty || cacheFailed {
+        if state.showsInvalidPageIDs || state.showsFetchSkillDisabled || state.showsPaletteEmpty || state.showsCacheFailure {
             VStack(spacing: 8) {
-                if cacheFailed {
+                if state.showsCacheFailure {
                     // v4: the Notion-fetch-failed guard reads as the error edge
                     // state — a .bad banner with a Retry that re-runs the real
                     // workspace cache refresh.
                     BridgeErrorView(
                         message: cacheMessage ?? "Notion fetch failed — showing cached skills. Check the credential.",
                         retryTitle: "Retry",
-                        onRetry: onRefreshCache)
+                        onRetry: onRefreshRoutingCache)
                 }
-                if showInvalid {
+                if state.showsInvalidPageIDs {
                     BridgeBanner(
                         signal: .warn,
                         message: "Some skills have an invalid Notion page ID (not 32 hex digits). Fix the URL or ID — these skills won\u{2019}t be retrievable by agents until corrected.")
                 }
-                if showFetchOff {
+                if state.showsFetchSkillDisabled {
                     BridgeBanner(
                         signal: .warn,
                         message: "Skill retrieval is disabled in Tools. Skills won\u{2019}t be available to AI clients until you re-enable it.")
                 }
-                if showPaletteEmpty {
+                if state.showsPaletteEmpty {
                     BridgeBanner(
                         signal: .info,
                         message: "No skills in the Commands palette yet. Flip a skill\u{2019}s Palette toggle to make it appear in the global hot-key popover. Routing is independent.")
@@ -232,7 +271,18 @@ struct SkillsView: View {
                     .font(BridgeTokens.Typeface.base.weight(.medium))
                     .foregroundStyle(BridgeTokens.fg1)
                     .lineLimit(1)
-                BridgeBadge("Synced", tone: .ok, showsDot: true)
+                // PKT-1003 Wave B — TWO honest indicators, each reading its
+                // real store state (decision #3).
+                BridgeBadge(routingSynced ? "Routing synced" : "Routing not synced",
+                            tone: routingSynced ? .ok : .neutral, showsDot: true)
+                    .help(routingSynced
+                          ? "The routing/parent cache has a fresh entry (feeds the routing index)."
+                          : "No fresh routing cache — run Refresh routing cache.")
+                BridgeBadge(anyBodyCached ? "Body cached" : "No bodies cached",
+                            tone: anyBodyCached ? .ok : .neutral, showsDot: true)
+                    .help(anyBodyCached
+                          ? "At least one skill body is stored offline (the body store)."
+                          : "No skill bodies stored — run Cache all.")
             }
             .fixedSize()
 
@@ -242,7 +292,7 @@ struct SkillsView: View {
 
             BridgeButton("Cache all", systemImage: "externaldrive.badge.timemachine",
                          variant: .default, isEnabled: !cacheBusy) {
-                onRefreshCache()
+                onCacheAllBodies()
             }
         }
         .padding(.horizontal, 20)
@@ -310,6 +360,7 @@ struct SkillsView: View {
                 }
                 .padding(.horizontal, 8).padding(.vertical, 6)
             }
+            .accessibilityIdentifier(BridgeAXID.Skills.list)   // PKT-1005 Pillar C
 
             Divider().overlay(BridgeTokens.hairline)
 
@@ -388,16 +439,16 @@ struct SkillsView: View {
             Divider()
 
             Button {
-                onRefreshCache()
+                onCacheAllBodies()
             } label: {
                 Label("Cache all bodies", systemImage: "externaldrive.badge.timemachine")
             }
             .disabled(cacheBusy)
 
             Button {
-                onRefreshCache()
+                onRefreshRoutingCache()
             } label: {
-                Label("Refresh skill cache", systemImage: "arrow.triangle.2.circlepath")
+                Label("Refresh routing cache", systemImage: "arrow.triangle.2.circlepath")
             }
             .disabled(cacheBusy)
         } label: {
@@ -432,7 +483,7 @@ struct SkillsView: View {
     private var sourceFilterControl: some View {
         BridgeSegmented(
             selection: $sourceFilter,
-            options: SourceFilter.allCases.map { ($0, $0.label) })
+            options: SkillManagementSourceFilter.allCases.map { ($0, $0.label) })
     }
 
     @ViewBuilder
@@ -523,11 +574,10 @@ struct SkillsView: View {
     }
 
     private var listFooterText: String {
-        let total = skillsManager.skills.count
-        let enabled = skillsManager.enabledSkills.count
-        let cached = skillsManager.skills.filter { !$0.summary.isEmpty }.count
-        if total == 0 { return "No skills" }
-        return "\(enabled)/\(total) enabled · \(cached) cached"
+        SkillManagementUIContract.listFooterText(
+            skills: skillsManager.skills,
+            bodyCacheSnapshot: bodyCacheSnapshot
+        )
     }
 
     // MARK: - List rows
@@ -537,7 +587,8 @@ struct SkillsView: View {
     /// status description. (`.sk-row`)
     private func skillListRow(_ skill: SkillsManager.Skill) -> some View {
         let isSel = selection == .skill(skill.name)
-        let cached = !skill.summary.isEmpty
+        // PKT-1003 Wave B: pip reads the real body store, not `!summary.isEmpty`.
+        let cached = isBodyCached(skill)
         return Button {
             commitPendingEdit()
             showAddForm = false
@@ -564,7 +615,7 @@ struct SkillsView: View {
         .buttonStyle(.plain)
         .opacity(skill.enabled ? 1 : 0.5)
         .accessibilityLabel(skill.name)
-        .accessibilityValue(statusDescription(for: skill) + (cached ? ", cached" : ", not cached"))
+        .accessibilityValue(SkillManagementUIContract.rowStatusDescription(for: skill) + (cached ? ", cached" : ", not cached"))
         .accessibilityAddTraits(isSel ? [.isButton, .isSelected] : .isButton)
     }
 
@@ -633,13 +684,6 @@ struct SkillsView: View {
     }
 
     /// VoiceOver-readable summary of the 4-state status dot.
-    private func statusDescription(for skill: SkillsManager.Skill) -> String {
-        if !skill.enabled { return "Disabled" }
-        if skill.routingDiscoverable { return "Enabled, routing-discoverable" }
-        if skill.inCommandPalette { return "Enabled, palette only" }
-        return "Enabled"
-    }
-
     /// Status dot via the W2 atom: emerald when routing-discoverable, amber when
     /// palette-only, accent when enabled-but-neither, neutral when disabled.
     private func statusDot(for skill: SkillsManager.Skill) -> some View {
@@ -787,40 +831,22 @@ struct SkillsView: View {
         // cache + content (peek → expand-on-click)
         bodyCacheCard(skill)
 
-        // permissions & behavior — the design's three `.sk-perm` rows
-        // (Auto-load · Cache body · Fetch on activation), each wired to a real
-        // binding, plus the retained Enabled master switch (the only writer of
-        // `enabled`; the design keeps a disabled state but folds the toggle).
+        // permissions & behavior — PKT-1003 Wave C toggle truth-up: each row's
+        // label matches the backend flag it writes. "List in routing index"
+        // writes routingDiscoverable; "Show in Commands palette" writes
+        // inCommandPalette; "Enabled" writes enabled.
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 0) {
                 BridgeCardLabel("Permissions & behavior")
                     .padding(.bottom, 10)
                 permissionToggleRow(
-                    title: "Auto-load into routing context",
+                    title: "List in routing index",
                     sub: "List this skill when an MCP client enumerates routing skills.",
                     isOn: Binding(
                         get: { skill.routingDiscoverable },
                         set: { _ = skillsManager.setRoutingDiscoverable(named: skill.name, to: $0) }
-                    ))
-                tokenDivider
-                permissionToggleRow(
-                    title: "Cache body for offline use",
-                    sub: "Keep the full body on disk for instant, offline preview \u{0026} fetch.",
-                    isOn: Binding(
-                        get: { !skill.summary.isEmpty },
-                        // Enabling fetches + stores the body (the workspace cache
-                        // refresh — this install's per-skill cache analog). The
-                        // store is the SSOT, so toggling off is a no-op here.
-                        set: { newValue in if newValue && skill.summary.isEmpty { onRefreshCache() } }
-                    ))
-                tokenDivider
-                permissionToggleRow(
-                    title: "Fetch on activation",
-                    sub: "Pull the latest body from the source on every invoke, via the Commands palette.",
-                    isOn: Binding(
-                        get: { skill.inCommandPalette },
-                        set: { _ = skillsManager.setInCommandPalette(named: skill.name, to: $0) }
-                    ))
+                    ),
+                    axID: BridgeAXID.Skills.toggleRouting)
                 tokenDivider
                 permissionToggleRow(
                     title: "Enabled",
@@ -828,7 +854,8 @@ struct SkillsView: View {
                     isOn: Binding(
                         get: { skill.enabled },
                         set: { _ in skillsManager.toggleSkill(named: skill.name) }
-                    ))
+                    ),
+                    axID: BridgeAXID.Skills.toggleEnabled)
             }
         }
     }
@@ -929,13 +956,14 @@ struct SkillsView: View {
     /// design's `SK_DOT`: routing=ok "Routing-discoverable", palette=warn
     /// "Palette-only", enabled=info "Enabled", disabled=neutral).
     private func visibilityBadge(_ skill: SkillsManager.Skill) -> some View {
-        let (label, tone): (String, BridgeBadge.Tone) = {
-            if !skill.enabled { return ("Disabled", .neutral) }
-            if skill.routingDiscoverable { return ("Routing-discoverable", .ok) }
-            if skill.inCommandPalette { return ("Palette-only", .warn) }
-            return ("Enabled", .info)
+        let tone: BridgeBadge.Tone = {
+            if !skill.enabled { return .neutral }
+            if skill.routingDiscoverable { return .ok }
+            if skill.inCommandPalette { return .warn }
+            return .info
         }()
-        return BridgeBadge(label, tone: tone, showsDot: true)
+        return BridgeBadge(SkillManagementUIContract.visibilityBadgeLabel(for: skill), tone: tone, showsDot: true)
+            .accessibilityIdentifier(BridgeAXID.Skills.statusIndicator)   // PKT-1005 Pillar C
     }
 
     @ViewBuilder
@@ -984,43 +1012,70 @@ struct SkillsView: View {
     }
 
     private func detailActions(_ skill: SkillsManager.Skill) -> some View {
-        let index = skillsManager.skills.firstIndex(where: { $0.id == skill.id }) ?? 0
+        // PKT-1003 Wave D: the chevrons NAVIGATE the visible (filtered, grouped)
+        // skill list — select the previous/next skill the user actually sees —
+        // instead of reordering the underlying store. `moveSkill` stays in the
+        // model for drag-reorder. Navigation order = the on-screen group order.
+        let order = visibleSkillNamesInDisplayOrder
+        let pos = order.firstIndex(of: skill.name)
+        let hasPrev = (pos ?? 0) > 0
+        let hasNext = pos != nil && pos! < order.count - 1
         return HStack(spacing: 4) {
             iconButton("arrow.up.right.square", help: "Open in browser") {
                 openSkillURL(skill.url ?? skill.notionPageId)
             }
-            iconButton("chevron.up", help: "Move up", disabled: index == 0) {
-                commitPendingEdit()
-                _ = skillsManager.moveSkill(from: index, to: index - 1)
+            iconButton("chevron.up", help: "Previous skill", disabled: !hasPrev,
+                       axID: BridgeAXID.Skills.navChevron + ".prev") {
+                navigateSkill(from: skill.name, delta: -1)
             }
-            iconButton("chevron.down", help: "Move down",
-                       disabled: index == skillsManager.skills.count - 1) {
-                commitPendingEdit()
-                _ = skillsManager.moveSkill(from: index, to: index + 1)
+            iconButton("chevron.down", help: "Next skill", disabled: !hasNext,
+                       axID: BridgeAXID.Skills.navChevron + ".next") {
+                navigateSkill(from: skill.name, delta: +1)
             }
-            iconButton("trash", help: "Delete skill", danger: true) {
+            iconButton("trash", help: "Delete skill", danger: true,
+                       axID: BridgeAXID.Skills.trash) {
                 skillPendingDeletion = skill.name
             }
         }
+        .accessibilityIdentifier(BridgeAXID.control(.skills, "detail.actions"))
     }
 
-    /// PKT-skills: 4 non-redundant cells; the synthesized Visibility value is
-    /// elevated (`.sk-meta.key`).
+    /// The visible skills' names in the exact on-screen order (the grouped,
+    /// filtered list). Drives detail-header up/down navigation.
+    private var visibleSkillNamesInDisplayOrder: [String] {
+        visibleGroups.flatMap { $0.skills.map(\.name) }
+    }
+
+    /// Select the skill `delta` steps from `name` in the visible display order.
+    /// No-op at the ends or when `name` isn't visible. Commits any pending edit
+    /// first so navigation doesn't drop an in-flight rename/URL edit.
+    private func navigateSkill(from name: String, delta: Int) {
+        let order = visibleSkillNamesInDisplayOrder
+        guard let target = SkillListNavigation.target(from: name, delta: delta, in: order) else { return }
+        commitPendingEdit()
+        showAddForm = false
+        selection = .skill(target)
+    }
+
+    /// PKT-1005 (finding 1): the redundant "Page" cell is removed — the subtle
+    /// header page-id control already surfaces the Notion page id, so the grid
+    /// dropped a duplicate. Now 3 non-redundant cells (Kind · Visibility ·
+    /// Source); the synthesized Visibility value is elevated (`.sk-meta.key`).
     private func metadataGrid(_ skill: SkillsManager.Skill) -> some View {
         let cells: [(String, String, Bool)] = [
-            ("Kind", kindLabel(skill), false),
-            ("Visibility", visibilityLabel(skill), true),
+            ("Kind", SkillManagementUIContract.kindLabel(for: skill), false),
+            ("Visibility", SkillManagementUIContract.visibilityMetadataLabel(for: skill), true),
             ("Source", skill.platform.displayName, false),
-            ("Page", skill.notionPageId.isEmpty ? "—" : "…\(String(skill.notionPageId.suffix(6)))", false),
         ]
         return LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4),
+            columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
             spacing: 8
         ) {
             ForEach(cells, id: \.0) { cap, val, key in
                 metaCell(cap: cap, val: val, key: key)
             }
         }
+        .accessibilityIdentifier(BridgeAXID.Skills.metadataGrid)   // PKT-1005 Pillar C
     }
 
     /// `.sk-meta` inset cell; `key` elevates it with an accent tint (Visibility).
@@ -1046,26 +1101,6 @@ struct SkillsView: View {
                 .overlay(shape.strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
                 .bridgeBevel(BridgeTokens.bevelInset, radius: 9))
         )
-    }
-
-    private func visibilityLabel(_ skill: SkillsManager.Skill) -> String {
-        switch (skill.routingDiscoverable, skill.inCommandPalette) {
-        case (true, true):   return "Both"
-        case (true, false):  return "Routing"
-        case (false, true):  return "Palette"
-        case (false, false): return "Fetch-only"
-        }
-    }
-
-    /// The design's `Kind` meta value, from the model's derived `skillKind`
-    /// (Routing / Specialist / Plain) — consistent with the list grouping + the
-    /// Specialist count tile.
-    private func kindLabel(_ skill: SkillsManager.Skill) -> String {
-        switch skill.skillKind {
-        case .routing:    return "Routing"
-        case .specialist: return "Specialist"
-        case .plain:      return "Plain"
-        }
     }
 
     /// `.sk-deps` — a "Depends on" row of deep-link chips (Notion credential +
@@ -1098,7 +1133,10 @@ struct SkillsView: View {
     /// cache refresh). The transient `cacheBusy` flag drives the caching look.
     @ViewBuilder
     private func bodyCacheCard(_ skill: SkillsManager.Skill) -> some View {
-        let cached = !skill.summary.isEmpty
+        // PKT-1003 Wave B: cache STATE reads the real body store. Preview
+        // content stays summary-sourced (the local agent-facing field, always
+        // available offline); the stored raw body powers the routing/fetch path.
+        let cached = isBodyCached(skill)
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 11) {
                 // cache bar: state on the left, tabs + refresh on the right
@@ -1134,10 +1172,16 @@ struct SkillsView: View {
                         bodyTabSegmented
                         BridgeButton("Refresh", systemImage: "arrow.triangle.2.circlepath",
                                      variant: .default, isEnabled: !cacheBusy) {
-                            onRefreshCache()
+                            // PKT-1003 Wave B: re-pull THIS skill's body via the
+                            // real body store.
+                            onRefreshBody(skill.notionPageId)
                         }
+                        .accessibilityIdentifier(BridgeAXID.Skills.cacheRefresh)   // PKT-1005 Pillar C
                     }
                 }
+                // PKT-1005 (Pillar C): the cache-state bar is the cache indicator.
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(BridgeAXID.Skills.cacheIndicator)
 
                 if cached {
                     // peek → float
@@ -1175,8 +1219,10 @@ struct SkillsView: View {
                     .frame(maxWidth: 320)
                 BridgeButton("Cache now", systemImage: "arrow.triangle.2.circlepath",
                              variant: .primary, isEnabled: !cacheBusy) {
-                    onRefreshCache()
+                    // PKT-1003 Wave B: warm all skill bodies via the real body store.
+                    onCacheAllBodies()
                 }
+                .accessibilityIdentifier(BridgeAXID.Skills.cacheRefresh)   // PKT-1005 Pillar C
             }
         }
         .frame(maxWidth: .infinity)
@@ -1324,15 +1370,14 @@ struct SkillsView: View {
         // body preview (the on-disk body is always available — peek → float)
         bodyCacheCardForFile(fs, summary: summary)
 
-        // permission toggles (file-source — persist per path). The design's
-        // three `.sk-perm` rows (Auto-load · Cache body · Fetch on activation),
-        // plus the retained Enabled per-path flag (wiring preserved).
+        // permission toggles (file-source — persist per path). Each row writes a
+        // real per-path flag; SKILL.md stays read-only.
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 0) {
                 BridgeCardLabel("Permissions & behavior")
                     .padding(.bottom, 10)
                 permissionToggleRow(
-                    title: "Auto-load into routing context",
+                    title: "List in routing index",
                     sub: "List this skill when an MCP client enumerates routing skills.",
                     isOn: Binding(
                         get: { fileSkillRoutingMap[fs.path.path] ?? false },
@@ -1340,26 +1385,8 @@ struct SkillsView: View {
                             fileSkillRoutingMap[fs.path.path] = v
                             SkillsModule.setFileSkillRoutingDiscoverable(path: fs.path, value: v)
                         }
-                    ))
-                tokenDivider
-                permissionToggleRow(
-                    title: "Cache body for offline use",
-                    sub: "Keep the full body on disk for instant, offline preview \u{0026} fetch.",
-                    // File-source bodies always ship on disk — the body is
-                    // bundled, so this reads on and is not user-evictable.
-                    isOn: .constant(true),
-                    isEnabled: false)
-                tokenDivider
-                permissionToggleRow(
-                    title: "Fetch on activation",
-                    sub: "Pull the latest body from the source on every invoke, via the Commands palette.",
-                    isOn: Binding(
-                        get: { fileSkillPaletteMap[fs.path.path] ?? false },
-                        set: { v in
-                            fileSkillPaletteMap[fs.path.path] = v
-                            SkillsModule.setFileSkillInCommandPalette(path: fs.path, value: v)
-                        }
-                    ))
+                    ),
+                    axID: BridgeAXID.Skills.toggleRouting)
                 tokenDivider
                 permissionToggleRow(
                     title: "Enabled",
@@ -1370,7 +1397,8 @@ struct SkillsView: View {
                             fileSkillEnabledMap[fs.path.path] = v
                             SkillsModule.setFileSkillEnabled(path: fs.path, enabled: v)
                         }
-                    ))
+                    ),
+                    axID: BridgeAXID.Skills.toggleEnabled)
             }
         }
     }
@@ -1468,8 +1496,10 @@ struct SkillsView: View {
                     HStack {
                         Spacer()
                         BridgeButton("Add skill", variant: .primary,
-                                     isEnabled: !(newSkillName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                                  || newSkillPageId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)) {
+                                     isEnabled: SkillManagementUIContract.isAddSkillEnabled(
+                                        name: newSkillName,
+                                        pageId: newSkillPageId
+                                     )) {
                             addSkill()
                         }
                     }
@@ -1570,7 +1600,10 @@ struct SkillsView: View {
     /// `.sk-perm` — a permission row: title + sub on the left, the W2
     /// `BridgeToggle` on the right. `isEnabled: false` renders a non-interactive
     /// row (e.g. a bundled file body that is always cached and not evictable).
-    private func permissionToggleRow(title: String, sub: String, isOn: Binding<Bool>, isEnabled: Bool = true) -> some View {
+    // PKT-1005 (Pillar C): optional `axID` attaches a stable, label-independent
+    // accessibilityIdentifier so the headless harness can target the toggle by
+    // id (e.g. bridge.settings.skills.toggle.enabled) rather than its label.
+    private func permissionToggleRow(title: String, sub: String, isOn: Binding<Bool>, isEnabled: Bool = true, axID: String? = nil) -> some View {
         HStack(alignment: .center, spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -1587,12 +1620,14 @@ struct SkillsView: View {
                 .opacity(isEnabled ? 1 : 0.5)
                 .accessibilityLabel(title)
                 .accessibilityHint(sub)
+                .accessibilityIdentifier(axID ?? "")
         }
         .padding(.vertical, 10)
     }
 
     /// Small neutral-glass icon button (`.sk-iconbtn` / `.sk-rename` / actions).
-    private func iconButton(_ systemImage: String, help: String, disabled: Bool = false, danger: Bool = false, action: @escaping () -> Void) -> some View {
+    /// PKT-1005 (Pillar C): optional `axID` for stable harness targeting.
+    private func iconButton(_ systemImage: String, help: String, disabled: Bool = false, danger: Bool = false, axID: String? = nil, action: @escaping () -> Void) -> some View {
         let shape = RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
         return Button(action: action) {
             Image(systemName: systemImage)
@@ -1609,87 +1644,65 @@ struct SkillsView: View {
         .disabled(disabled)
         .opacity(disabled ? 0.4 : 1)
         .help(help)
+        .accessibilityIdentifier(axID ?? "")
     }
 
     // MARK: - Counts (real visibility taxonomy)
 
-    /// Counts honor the active source filter so the banner reflects what's shown.
-    private var countableSkills: [SkillsManager.Skill] {
-        switch sourceFilter {
-        case .all:    return skillsManager.skills
-        case .notion: return skillsManager.skills.filter { $0.platform == .notion }
-        case .gdocs:  return skillsManager.skills.filter { $0.platform == .googleDocs }
-        case .file:   return []   // file-source skills are not SkillsManager.Skill
-        }
+    private var skillManagementCounts: SkillManagementCounts {
+        SkillManagementUIContract.counts(
+            skills: skillsManager.skills,
+            fileSkills: fileSkillStates,
+            sourceFilter: sourceFilter,
+            bodyCacheSnapshot: bodyCacheSnapshot
+        )
     }
+
     private var countsTotal: Int {
-        countableSkills.count + (sourceFilter == .all || sourceFilter == .file ? fileSourceSkills.count : 0)
+        skillManagementCounts.total
     }
+
     private var countsRouting: Int {
-        countableSkills.filter { $0.enabled && $0.routingDiscoverable }.count
-            + ((sourceFilter == .all || sourceFilter == .file)
-               ? fileSourceSkills.filter { (fileSkillEnabledMap[$0.path.path] ?? true) && (fileSkillRoutingMap[$0.path.path] ?? false) }.count
-               : 0)
+        skillManagementCounts.routing
     }
+
     /// `.sk-count.spec` — specialists per the model's derived `skillKind`
     /// (`.specialist` = curated/palette-pinned but NOT routing-discoverable).
     /// File-source skills are `plain` by the design taxonomy, so they do not
     /// add to the specialist count.
     private var countsSpecialist: Int {
-        countableSkills.filter { $0.enabled && $0.skillKind == .specialist }.count
+        skillManagementCounts.specialist
     }
+
     /// Bodies stored for offline use — Notion/GDocs skills with a non-empty
     /// summary, plus file-source skills (their bodies always ship on disk).
     /// Honors the active source filter, like the other counts.
     private var countsCached: Int {
-        countableSkills.filter { !$0.summary.isEmpty }.count
-            + ((sourceFilter == .all || sourceFilter == .file) ? fileSourceSkills.count : 0)
+        skillManagementCounts.cached
     }
 
     // MARK: - Filtering + grouping
 
-    /// Notion / GDocs skills after the search query + source filter.
-    private var filteredSkills: [SkillsManager.Skill] {
-        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return skillsManager.skills.filter { skill in
-            let matchesQuery = q.isEmpty
-                || skill.name.lowercased().contains(q)
-                || skill.summary.lowercased().contains(q)
-            let matchesSource: Bool = {
-                switch sourceFilter {
-                case .all:    return true
-                case .notion: return skill.platform == .notion
-                case .gdocs:  return skill.platform == .googleDocs
-                case .file:   return false
-                }
-            }()
-            return matchesQuery && matchesSource
-        }
-    }
-
     /// File-source skills after the search query + source filter.
     private var visibleFileSkills: [ParsedSkill] {
-        guard sourceFilter == .all || sourceFilter == .file else { return [] }
-        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return fileSourceSkills }
-        return fileSourceSkills.filter { $0.name.lowercased().contains(q) }
+        let visiblePaths = Set(SkillManagementUIContract.visibleFileSkills(
+            fileSkillStates,
+            searchText: searchText,
+            sourceFilter: sourceFilter
+        ).map(\.path))
+        return fileSourceSkills.filter { visiblePaths.contains($0.path.path) }
     }
 
     /// Kind grouping — the design's `SK_KINDS` taxonomy (Routing & orchestrators
     /// · Specialists · Plain skills), driven by the model's derived `skillKind`
     /// (`.routing` = routing-discoverable · `.specialist` = palette-pinned but
     /// not routing · `.plain` = neither). (`.sk-group-cap`)
-    private struct SkillGroup { let id: String; let label: String; let skills: [SkillsManager.Skill] }
-    private var visibleGroups: [SkillGroup] {
-        let all = filteredSkills
-        let routing    = all.filter { $0.skillKind == .routing }
-        let specialist = all.filter { $0.skillKind == .specialist }
-        let plain      = all.filter { $0.skillKind == .plain }
-        return [
-            SkillGroup(id: "routing",    label: "Routing & orchestrators", skills: routing),
-            SkillGroup(id: "specialist", label: "Specialists",             skills: specialist),
-            SkillGroup(id: "plain",      label: "Plain skills",            skills: plain),
-        ].filter { !$0.skills.isEmpty }
+    private var visibleGroups: [SkillManagementSkillGroup] {
+        SkillManagementUIContract.visibleGroups(
+            skills: skillsManager.skills,
+            searchText: searchText,
+            sourceFilter: sourceFilter
+        )
     }
 
     private func restoreSelectionIfNeeded() {
@@ -1702,6 +1715,32 @@ struct SkillsView: View {
         case .none:
             break
         }
+    }
+
+    /// (PKT-1006 R2) Consume a deep-link anchor: SELECT the named skill in the
+    /// master list so its detail pane opens. Notion-source skills select by
+    /// name; file-source skills select by absolute path (the anchor falls back
+    /// to the skill name, so match on name first, then on a path tail). Clears
+    /// any active search filter so the selected skill is visible, then consumes
+    /// the anchor so re-selecting the same result re-triggers.
+    private func selectSkillFromAnchor() {
+        guard let anchor = nav.anchor?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !anchor.isEmpty else { return }
+        // Notion-source skill matched by name.
+        if skillsManager.skill(named: anchor) != nil {
+            if !searchText.isEmpty { searchText = "" }
+            selection = .skill(anchor)
+            nav.anchor = nil
+            return
+        }
+        // File-source skill matched by name (its parsed display name).
+        if let file = fileSourceSkills.first(where: { $0.name == anchor }) {
+            if !searchText.isEmpty { searchText = "" }
+            selection = .file(file.path.path)
+            nav.anchor = nil
+            return
+        }
+        // Anchor isn't a skill (the channel is shared across sections) → leave it.
     }
 
     // MARK: - File-source load (unchanged)

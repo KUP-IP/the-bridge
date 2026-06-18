@@ -27,6 +27,13 @@ import AppKit
 import MCP
 
 public struct JobsSection: View {
+    /// (PKT-1006 R2) Deep-link nav — the Command Bridge routes a Job result to
+    /// Settings → Jobs with the job id as the anchor; we observe it to scroll
+    /// to + briefly highlight that row. Previously JobsSection consumed NO
+    /// anchor (no ScrollViewReader / .id / onChange).
+    @ObservedObject private var nav = SettingsNavigation.shared
+    /// The job row to flash when arrived-at via a deep-link (cleared after).
+    @State private var deepLinkedJobId: String?
     @State private var jobs: [JobRecord] = []
     @State private var lastExecByJob: [String: ExecutionRecord] = [:]
     @State private var recentRuns: [RunLine] = []
@@ -85,20 +92,29 @@ public struct JobsSection: View {
             Rectangle().fill(BridgeTokens.hairlineFaint).frame(height: 0.5)
 
             // Body (`.jbp-body`) — scrolls; page banner + cards.
-            ScrollView {
-                VStack(spacing: cardGap) {
-                    if let job = firstFailingJob {
-                        pageFailingBanner(for: job)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: cardGap) {
+                        if let job = firstFailingJob {
+                            pageFailingBanner(for: job)
+                        }
+                        scheduledCard
+                        recentRunsCard
                     }
-                    scheduledCard
-                    recentRunsCard
+                    .padding(paneInset)
                 }
-                .padding(paneInset)
+                .onChange(of: nav.anchor) { _, _ in scrollToAnchoredJob(proxy) }
+                .onChange(of: isLoading) { _, loading in
+                    // Re-attempt once the list has loaded (the anchor may arrive
+                    // before the rows exist).
+                    if !loading { scrollToAnchoredJob(proxy) }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
         .task { await reload() }
+        .onAppear { /* anchor handled after reload via isLoading onChange */ }
         .onReceive(NotificationCenter.default.publisher(for: .jobsDidChange)) { _ in
             Task { await reload() }
         }
@@ -170,9 +186,11 @@ public struct JobsSection: View {
                 Task { await pauseAll() }
             }
             .help("Pause every active job")
+            .accessibilityIdentifier(BridgeAXID.Jobs.pauseAll)   // PKT-1005 remainder (b)
             BridgeButton("New job", systemImage: "plus", variant: .primary) {
                 showNewJobSheet = true
             }
+            .accessibilityIdentifier(BridgeAXID.Jobs.newJob)   // PKT-1005 remainder (b)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
@@ -316,6 +334,7 @@ public struct JobsSection: View {
                 .foregroundStyle(BridgeTokens.fg1)
                 .tint(BridgeTokens.accentStrong)
                 .accessibilityLabel("Filter jobs")
+                .accessibilityIdentifier(BridgeAXID.Jobs.search)   // PKT-1005 remainder (b)
         }
         .frame(width: 160, height: 30)
         .padding(.horizontal, 10)
@@ -337,7 +356,7 @@ public struct JobsSection: View {
         } else if filteredJobs.isEmpty {
             emptyState
         } else {
-            VStack(spacing: 3) {
+            VStack(spacing: 3) {   // PKT-1005 remainder (b): list container id applied below
                 ForEach(Array(filteredJobs.enumerated()), id: \.element.id) { _, job in
                     JobGlassRow(
                         job: job,
@@ -350,8 +369,23 @@ public struct JobsSection: View {
                         },
                         onChanged: { Task { await reload() } }
                     )
+                    // (PKT-1006 R2) Deep-link target id + a brief arrival highlight.
+                    .id(Self.jobAnchorID(job.id))
+                    .background(
+                        RoundedRectangle(cornerRadius: BridgeTokens.Radius.card, style: .continuous)
+                            .fill(deepLinkedJobId == job.id
+                                  ? BridgeTokens.accent.opacity(0.14) : Color.clear)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: BridgeTokens.Radius.card, style: .continuous)
+                            .strokeBorder(deepLinkedJobId == job.id
+                                          ? BridgeTokens.accent.opacity(0.4) : Color.clear,
+                                          lineWidth: 1)
+                    )
+                    .accessibilityIdentifier(BridgeAXID.Jobs.row)   // PKT-1005 remainder (b)
                 }
             }
+            .accessibilityIdentifier(BridgeAXID.Jobs.list)   // PKT-1005 remainder (b)
         }
     }
 
@@ -463,6 +497,38 @@ public struct JobsSection: View {
         case .statusActive: return base.sorted {
             ($0.status == .active ? 0 : 1, $0.name) < ($1.status == .active ? 0 : 1, $1.name)
         }
+        }
+    }
+
+    // MARK: - Deep-link anchor consumption (PKT-1006 R2)
+
+    /// Stable per-row scroll id for the deep-link target.
+    private static func jobAnchorID(_ id: String) -> String { "job.\(id)" }
+
+    /// Scroll to + briefly highlight the job named by `nav.anchor` (the job id
+    /// the Command Bridge passed). Clears any filter that would hide it so the
+    /// deep-linked row is always reachable, then fades the highlight after a beat.
+    private func scrollToAnchoredJob(_ proxy: ScrollViewProxy) {
+        guard let anchor = nav.anchor?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !anchor.isEmpty else { return }
+        // Only act if the anchor matches a real loaded job (the anchor channel
+        // is shared across sections; ignore anchors that aren't ours).
+        guard jobs.contains(where: { $0.id == anchor }) else { return }
+        // Make sure no active filter hides the target row.
+        if statusFilter != .all { statusFilter = .all }
+        if !searchText.isEmpty { searchText = "" }
+        deepLinkedJobId = anchor
+        // Defer one runloop so the (possibly un-filtered) row exists before we scroll.
+        DispatchQueue.main.async {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                proxy.scrollTo(Self.jobAnchorID(anchor), anchor: .center)
+            }
+        }
+        // Fade the arrival highlight after ~2s.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            if deepLinkedJobId == anchor {
+                withAnimation(.easeOut(duration: 0.4)) { deepLinkedJobId = nil }
+            }
         }
     }
 

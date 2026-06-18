@@ -513,31 +513,23 @@ public actor SSEServer {
 
     /// PKT-810: a request is "remote" iff Cloudflare stamped a tunnel header on
     /// it. cloudflared adds `Cf-Connecting-Ip` / `Cf-Ray` to every proxied
-    /// request reaching the origin; a direct-loopback request (local desktop
-    /// stdio-proxy, or any process on 127.0.0.1) carries neither. `header(_:)`
-    /// is case-insensitive (MCP SDK), so wire-case variance is a non-issue.
+    /// request reaching the origin AND overwrites any client-supplied copy, so a
+    /// remote caller can neither suppress nor spoof "looks local." A direct-
+    /// loopback request (local desktop stdio-proxy, or any process on 127.0.0.1)
+    /// carries neither. `header(_:)` is case-insensitive (MCP SDK), so wire-case
+    /// variance is a non-issue.
+    ///
+    /// SECURITY — trust boundary: the loopback token-exemption rests ENTIRELY on
+    /// this origin signal, which is sound ONLY because (a) the listener binds
+    /// 127.0.0.1 (off-box clients can't reach it directly) and (b) cloudflared
+    /// is the ONLY fronting proxy and always stamps Cf-*. If `:9700` is ever
+    /// fronted by a different proxy (nginx/Caddy/Tailscale Funnel) that does NOT
+    /// inject a Cf-* header, every remote request would read as local and become
+    /// token-free. Any such proxy MUST inject `Cf-Ray` (or the loopback exemption
+    /// must be revisited). A peer-address check does NOT help here: cloudflared
+    /// runs on-box, so tunneled traffic also has a loopback peer address.
     public static func isRemoteTunnelRequest(_ request: HTTPRequest) -> Bool {
         request.header("Cf-Connecting-Ip") != nil || request.header("Cf-Ray") != nil
-    }
-
-    /// PKT-810 coexistence: the loopback (local desktop) static-bearer fallback.
-    /// Returns a served response ONLY when the request is direct-loopback (no
-    /// Cloudflare tunnel header), a local bearer is configured, and the
-    /// presented bearer matches it. Returns `nil` otherwise so the caller falls
-    /// back to the OAuth rejection. A remote (tunnel) request never matches —
-    /// the static bearer can never be a cloud OAuth bypass.
-    private func loopbackStaticBearerFallback(
-        _ request: HTTPRequest, authHeader: String?, auth: ConnectorAuthContext
-    ) async -> HTTPResponse? {
-        guard !Self.isRemoteTunnelRequest(request),
-              let expected = auth.localBearer, !expected.isEmpty,
-              let presented = authHeader.map({
-                  $0.lowercased().hasPrefix("bearer ") ? String($0.dropFirst(7)) : $0
-              }),
-              presented == expected
-        else { return nil }
-        await auth.diagnostics.record(outcome: "local.accepted", detail: "loopback")
-        return await processStreamableHTTP(request)
     }
 
     public func handleHTTPRequest(_ request: HTTPRequest) async -> HTTPResponse {
@@ -548,14 +540,38 @@ public actor SSEServer {
         // routes `/health`, `/sse`, `/messages`, the job callback, and the PRM
         // doc *before* `handleHTTPRequest`), so no other transport hits it.
         //
-        // PKT-810 coexistence — OAuth-first, loopback-static-bearer fallback:
-        // a valid AuthKit JWT is ALWAYS OAuth-validated (cloud + any origin).
-        // If the bearer is NOT a valid JWT, a direct-loopback request may fall
-        // back to the local static bearer (so the local desktop path keeps
-        // working when cloud OAuth is on). The static bearer is loopback-scoped
-        // — a tunnel request never reaches the fallback, so it can never bypass
-        // OAuth. `localBearer == nil` ⇒ fallback inert (pure prior behavior).
+        // PKT-810 R5 — origin split: a DIRECT-LOOPBACK request (no Cloudflare
+        // tunnel header) is local and token-exempt by contract; only a REMOTE
+        // (tunnel) request is OAuth-gated. The prior PKT-810 "loopback static
+        // bearer" fallback is removed — it gated loopback behind a bearer the
+        // OAuth desktop client never sends, contradicting the documented
+        // token-free-loopback contract and dead-ending local clients in a cloud
+        // OAuth discovery.
         if let auth = connectorAuth {
+            // PKT-810 R5 — restore the documented loopback contract. The UI
+            // (ConnectionsSection) promises: "Local clients on this Mac connect
+            // with no token — the bearer applies only off-loopback." Cloud OAuth
+            // exists ONLY for REMOTE (Cloudflare-tunnel) callers; a request with
+            // no tunnel header is a local process on 127.0.0.1 and must NEVER be
+            // OAuth-gated. Gating it could only dead-end a local client in an
+            // OAuth discovery it should never have been sent to (the WorkOS
+            // Dynamic-Client-Registration failure this fixes — the WWW-Authenticate
+            // points a loopback client at a cloud sign-in service). Serve the
+            // loopback request as a LOCAL session (`connectorAuthed: false`) so it
+            // keeps the full local tool surface; `createSession` additionally
+            // skips the legacy static-bearer / remote-tunnel-missing phase for a
+            // loopback request, so loopback is token-free end-to-end — exactly as
+            // documented and as the stdio-only build behaves. Tunnel requests
+            // (Cf header present) fall through to the full OAuth gate below:
+            // remote enforcement is entirely unchanged, and no bearer over the
+            // tunnel can ever be bypassed.
+            if !Self.isRemoteTunnelRequest(request) {
+                await auth.diagnostics.record(
+                    outcome: "local.exempt",
+                    detail: "loopback"
+                )
+                return await processStreamableHTTP(request)
+            }
             let authHeader = request.header(HTTPHeaderName.authorization)
             do {
                 let token = try await auth.validator.validate(authorizationHeader: authHeader)
@@ -565,18 +581,12 @@ public actor SSEServer {
                 )
                 return await dispatchAuthorizedConnectorRequest(request, token: token, auth: auth)
             } catch let err as BearerValidationError {
-                if let local = await loopbackStaticBearerFallback(request, authHeader: authHeader, auth: auth) {
-                    return local
-                }
                 await auth.diagnostics.record(
                     outcome: "bearer.rejected",
                     detail: "reason=\(err.wwwAuthenticateError)"
                 )
                 return Self.unauthorizedResponse(for: err, auth: auth)
             } catch {
-                if let local = await loopbackStaticBearerFallback(request, authHeader: authHeader, auth: auth) {
-                    return local
-                }
                 await auth.diagnostics.record(
                     outcome: "bearer.rejected",
                     detail: "reason=opaque"
@@ -915,7 +925,19 @@ public actor SSEServer {
         await pruneDuplicateClientSessions(clientName: clientName, clientVersion: clientVersion)
         await evictSessionsIfNeeded(reservingSlots: 1)
 
-        let validationPipeline = MCPHTTPValidation.streamableHTTPPipeline(ssePort: port, connectorAuthed: connectorAuthed)
+        // PKT-810 R5 — origin split for the LEGACY bearer phase too. A direct-
+        // loopback request (no Cloudflare tunnel header) is token-free by the
+        // documented contract, so the legacy static-bearer / remote-tunnel-missing
+        // validators must NOT apply to it — only to REMOTE (tunnel) requests.
+        // This holds whether or not the connector OAuth path is enabled: with
+        // `tunnelURL` + a static `mcpBearerToken` configured (the cloud-connector
+        // operator install), a local client on 127.0.0.1 would otherwise 401 with
+        // "missing Bearer token for MCP HTTP" — the same loopback dead-end the
+        // origin split removes. Remote requests keep the full legacy gate, so the
+        // tunnel still requires its bearer. (`connectorAuthed` already implies a
+        // verified caller, so it is exempt regardless.)
+        let bearerExempt = connectorAuthed || !Self.isRemoteTunnelRequest(request)
+        let validationPipeline = MCPHTTPValidation.streamableHTTPPipeline(ssePort: port, connectorAuthed: bearerExempt)
 
         let transport = StatefulHTTPServerTransport(
             sessionIDGenerator: FixedIDGenerator(id: sessionID),

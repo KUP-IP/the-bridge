@@ -924,17 +924,27 @@ public enum SkillsModule {
                               let properties = pageJSON["properties"] as? [String: Any] else {
                             return .object(["success": .bool(false), "action": .string(actionLabel), "message": .string("Failed to parse Notion page.")])
                         }
-                        let sum = SkillNotionMetadata.richTextPlain(propertyName: SkillBridgeNotionPropertyNames.summary, properties: properties)
-                        let trigText = SkillNotionMetadata.richTextPlain(propertyName: SkillBridgeNotionPropertyNames.triggers, properties: properties)
-                        let antiText = SkillNotionMetadata.richTextPlain(propertyName: SkillBridgeNotionPropertyNames.antiTriggers, properties: properties)
-                        let trig = SkillMetadataLimits.clampedPhraseList(SkillNotionMetadata.phrasesFromStoredText(trigText))
-                        let anti = SkillMetadataLimits.clampedPhraseList(SkillNotionMetadata.phrasesFromStoredText(antiText))
-                        let newSummary = SkillMetadataLimits.clampedSummary(sum)
+                        // SSOT = Notion. Read the REAL columns
+                        // (Description, Activation Examples, Anti-Triggers).
+                        // GATE-SAFE: an empty Notion value never
+                        // overwrites a non-empty local value, so a pull can no
+                        // longer blank metadata (the historical phantom-column
+                        // bug). See SkillNotionMetadata.parsePulledMetadata.
+                        let pulled = SkillNotionMetadata.parsePulledMetadata(properties: properties)
                         var skills = readAllSkills()
                         guard let idx = skills.firstIndex(where: { $0.name.lowercased() == name.lowercased() }) else {
                             return .object(["success": .bool(false), "action": .string(actionLabel), "message": .string("Skill not found.")])
                         }
                         let cur = skills[idx]
+                        let newSummary = pulled.summary.isEmpty
+                            ? cur.summary
+                            : SkillMetadataLimits.clampedSummary(pulled.summary)
+                        let trig = pulled.triggerPhrases.isEmpty
+                            ? cur.triggerPhrases
+                            : SkillMetadataLimits.clampedPhraseList(pulled.triggerPhrases)
+                        let anti = pulled.antiTriggerPhrases.isEmpty
+                            ? cur.antiTriggerPhrases
+                            : SkillMetadataLimits.clampedPhraseList(pulled.antiTriggerPhrases)
                         skills[idx] = SkillConfig(
                             name: cur.name, source: cur.source, enabled: cur.enabled,
                             routingDiscoverable: cur.routingDiscoverable, inCommandPalette: cur.inCommandPalette,
@@ -942,7 +952,7 @@ public enum SkillsModule {
                             url: cur.url, platform: cur.platform
                         )
                         writeSkills(skills)
-                        return .object(["success": .bool(true), "action": .string(actionLabel), "name": .string(name), "message": .string("MCP metadata updated from Notion.")])
+                        return .object(["success": .bool(true), "action": .string(actionLabel), "name": .string(name), "message": .string("MCP metadata updated from Notion (Description-sourced; empty fields preserved).")])
                     }
                 } catch let error as NotionClientError {
                     return .object(["success": .bool(false), "action": .string(actionLabel), "error": .string(error.localizedDescription)])

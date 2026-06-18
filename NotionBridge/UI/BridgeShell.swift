@@ -11,6 +11,157 @@
 
 import SwiftUI
 
+// MARK: - PKT-1005 (Pillar C): stable AX-identifier convention
+
+/// Central namespace for the Settings UI's accessibility identifiers
+/// (PKT-1005). Before this packet there were ZERO `accessibilityIdentifier`
+/// usages anywhere in `NotionBridge/UI`, so on-device AX reads had to match on
+/// volatile display labels. These ids are LABEL-INDEPENDENT and STABLE —
+/// keyed off the `SettingsSection` case name and a fixed control slug — so the
+/// headless UI-validation harness can target controls deterministically.
+///
+/// Convention: `bridge.settings.<section>.<control>` for per-section controls;
+/// `bridge.settings.<chrome>` for shared chrome (nav row, title bar). The
+/// `<section>` segment is the enum CASE NAME (e.g. `skills`, `orders`), never
+/// the display label, so the id never churns when the chrome label changes.
+public enum BridgeAXID {
+    /// Root prefix for every Settings AX id.
+    public static let root = "bridge.settings"
+
+    /// Sidebar nav row for a section — `bridge.settings.nav.<caseName>`.
+    public static func navRow(_ section: SettingsSection) -> String {
+        "\(root).nav.\(String(describing: section))"
+    }
+
+    /// The section H1 title in the titlebar — `bridge.settings.title`.
+    public static let titleBar = "\(root).title"
+
+    /// A per-section control id — `bridge.settings.<caseName>.<control>`.
+    public static func control(_ section: SettingsSection, _ control: String) -> String {
+        "\(root).\(String(describing: section)).\(control)"
+    }
+
+    // ── Skills section control slugs (Pillar C priority surface) ─────────
+    public enum Skills {
+        private static func id(_ slug: String) -> String {
+            BridgeAXID.control(.skills, slug)
+        }
+        /// Whole Skills section root container.
+        public static let root          = id("root")
+        /// The skills list / sidebar within the Skills detail.
+        public static let list          = id("list")
+        /// "List in routing index" toggle.
+        public static let toggleRouting  = id("toggle.routing")
+        /// "Enabled" toggle.
+        public static let toggleEnabled  = id("toggle.enabled")
+        /// The body-cache card refresh / cache control.
+        public static let cacheRefresh   = id("cache.refresh")
+        /// The body-cache status indicator.
+        public static let cacheIndicator = id("cache.indicator")
+        /// Visibility status indicator badge in the detail header.
+        public static let statusIndicator = id("status.indicator")
+        /// A skill row's disclosure / nav chevron.
+        public static let navChevron     = id("nav.chevron")
+        /// The delete / Trash control.
+        public static let trash          = id("trash")
+        /// The metadata grid container (3 cells post-PKT-1005 finding 1).
+        public static let metadataGrid   = id("metadata.grid")
+    }
+
+    // ── Commands section control slugs (enum case `.orders`) ─────────────
+    // Displays "Commands"; the id segment stays the stable `orders` case name.
+    public enum Commands {
+        private static func id(_ slug: String) -> String { BridgeAXID.control(.orders, slug) }
+        /// The consolidated header container.
+        public static let header        = id("header")
+        /// The Command Bridge master switch (global hot-key on/off).
+        public static let toggleEnabled = id("toggle.enabled")
+        /// The recordable global-shortcut editor field.
+        public static let shortcutEditor = id("shortcut.editor")
+        /// The command master–detail list.
+        public static let list          = id("list")
+    }
+
+    // ── Jobs section control slugs (enum case `.jobs`) ───────────────────
+    public enum Jobs {
+        private static func id(_ slug: String) -> String { BridgeAXID.control(.jobs, slug) }
+        /// Primary "New job" button.
+        public static let newJob        = id("new")
+        /// "Pause all" button.
+        public static let pauseAll      = id("pause.all")
+        /// The job-search field.
+        public static let search        = id("search")
+        /// The scrollable jobs list.
+        public static let list          = id("list")
+        /// A single job list row (shared id; one per row).
+        public static let row           = id("row")
+    }
+
+    // ── Tools section control slugs (enum case `.tools`) ─────────────────
+    public enum Tools {
+        private static func id(_ slug: String) -> String { BridgeAXID.control(.tools, slug) }
+        /// The module-group browser container (the whole tools list).
+        public static let list          = id("list")
+        /// A single module-group card row (shared id; one per group).
+        public static let groupRow       = id("group.row")
+        /// A dependency-link "Fix" button.
+        public static let depFix         = id("dep.fix")
+    }
+
+    // ── Security section control slugs (enum case `.security`) ───────────
+    // The merged Vault (credentials) + Gates (permissions) page.
+    public enum Security {
+        private static func id(_ slug: String) -> String { BridgeAXID.control(.security, slug) }
+        /// "Re-check all" permission button.
+        public static let recheckAll    = id("recheck.all")
+        /// The permission-grants grid container.
+        public static let grantsList    = id("grants.list")
+        /// A single permission grant tile (shared id; one per grant).
+        public static let grantRow       = id("grant.row")
+        /// Primary "Add credential" button.
+        public static let addCredential  = id("credential.add")
+        /// "Validate all" credentials button.
+        public static let validateAll    = id("credential.validate.all")
+        /// The stored-credentials list container.
+        public static let credentialsList = id("credentials.list")
+        /// A single stored-credential row (shared id; one per credential).
+        public static let credentialRow  = id("credential.row")
+        /// The credential auto-validate policy toggle.
+        public static let togglePolicy   = id("toggle.policy")
+    }
+
+    // ── Connection section control slugs (enum case `.connection`) ───────
+    // The merged Local (connections) + Remote (cloud access) page.
+    public enum Connection {
+        private static func id(_ slug: String) -> String { BridgeAXID.control(.connection, slug) }
+        /// The connected-clients list container.
+        public static let clientsList   = id("clients.list")
+        /// A single connected-client row (shared id; one per client).
+        public static let clientRow      = id("client.row")
+        /// The "Enable remote access" master toggle.
+        public static let toggleRemote   = id("toggle.remote")
+        /// The "Add to Claude" primary button.
+        public static let addToClaude    = id("claude.add")
+    }
+
+    // ── Advanced section control slugs (enum case `.advanced`) ───────────
+    public enum Advanced {
+        private static func id(_ slug: String) -> String { BridgeAXID.control(.advanced, slug) }
+        /// "Check for updates" button.
+        public static let checkUpdates  = id("updates.check")
+        /// "Export diagnostics" button.
+        public static let exportDiagnostics = id("diagnostics.export")
+        /// The launch-at-login toggle.
+        public static let toggleLaunchAtLogin = id("toggle.launchAtLogin")
+        /// The SSE-port "Save" primary button.
+        public static let savePort      = id("port.save")
+        /// "Restart Notion Bridge" button.
+        public static let restart       = id("restart")
+        /// "Factory Reset" destructive button.
+        public static let factoryReset  = id("factory.reset")
+    }
+}
+
 // MARK: - The stage (the window surface: solid canvas + carbon-fibre weave)
 
 /// The Settings-window surface, full-bleed behind every glass card. This is the
@@ -250,6 +401,11 @@ struct BridgeSectionNavItem: View {
         .animation(.easeInOut(duration: 0.15), value: hovering)
         .accessibilityLabel(section.displayName)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        // PKT-1005 (Pillar C): stable, label-independent AX id for each sidebar
+        // nav row — `bridge.settings.nav.<sectionCaseName>` (e.g. `…nav.skills`).
+        // The convention keys off the SettingsSection CASE NAME, not the
+        // display label, so the id is stable even if the chrome label churns.
+        .accessibilityIdentifier(BridgeAXID.navRow(section))
     }
 
     @ViewBuilder private var icon: some View {
@@ -309,6 +465,11 @@ public struct BridgeTitleBar: View {
                 .tracking(-0.1)
                 .foregroundStyle(BridgeTokens.fg2)
                 .allowsHitTesting(false)   // keep the titlebar draggable
+                // PKT-1005 (Pillar C): the section H1 is the per-section title
+                // anchor — `bridge.settings.title` (its STRING VALUE is the
+                // displayName, which the harness reads to confirm the active
+                // section after a deep-link).
+                .accessibilityIdentifier(BridgeAXID.titleBar)
             Spacer(minLength: 0)
         }
         // Leading inset clears the native traffic-light cluster (`--traffic-gutter`

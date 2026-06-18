@@ -543,7 +543,7 @@ func runRemoteOAuthBearerTests() async {
         let tok = try await keys.sign(iss: kIssuer, aud: kResource, scope: "snippets.read")
         let req = HTTPRequest(
             method: "POST",
-            headers: ["Authorization": "Bearer \(tok)"],
+            headers: ["Cf-Connecting-Ip": "203.0.113.7", "Authorization": "Bearer \(tok)"],
             body: nil
         )
         let resp = await server.handleHTTPRequest(req)
@@ -553,7 +553,9 @@ func runRemoteOAuthBearerTests() async {
     await test("Connector-gated server: missing bearer on /mcp → 401 + WWW-Authenticate") {
         let r = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
         let server = SSEServer(router: r, onToolCall: {}, connectorAuth: authCtx)
-        let req = HTTPRequest(method: "POST", headers: [:], body: nil)
+        // PKT-810 R5: the OAuth bearer gate applies to REMOTE (tunnel) requests
+        // only — mark this a tunnel request so the missing-bearer challenge fires.
+        let req = HTTPRequest(method: "POST", headers: ["Cf-Connecting-Ip": "203.0.113.7"], body: nil)
         let resp = await server.handleHTTPRequest(req)
         try expect(resp.statusCode == 401, "missing bearer on gated /mcp must be 401, got \(resp.statusCode)")
         let wa = resp.headers.first { $0.key.lowercased() == "www-authenticate" }?.value
@@ -569,7 +571,7 @@ func runRemoteOAuthBearerTests() async {
         let body = Data(#"{"method":"tools/call","params":{"name":"snippets_delete","arguments":{}}}"#.utf8)
         let req = HTTPRequest(
             method: "POST",
-            headers: ["Authorization": "Bearer \(tok)", "Mcp-Session-Id": "nope"],
+            headers: ["Cf-Connecting-Ip": "203.0.113.7", "Authorization": "Bearer \(tok)", "Mcp-Session-Id": "nope"],
             body: body
         )
         let resp = await server.handleHTTPRequest(req)

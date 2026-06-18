@@ -1,5 +1,6 @@
 // MCPHTTPValidationTests.swift — tunnel Origin/Host allowlist parsing
 import Foundation
+import MCP
 import NotionBridgeLib
 
 private let tunnelURLKey = "tunnelURL"
@@ -164,5 +165,52 @@ func runMCPHTTPValidationTests() async {
 
     await test("constant-time comparison: different lengths") {
         try expect(MCPHTTPValidation.constantTimeEqual("short", "longer-string") == false)
+    }
+
+    // PKT-810 R5 — legacy bearer phase is origin-split too: with `tunnelURL` + a
+    // static bearer configured (the cloud-connector operator install) and NO
+    // connector OAuth path (connectorAuth == nil), a DIRECT-LOOPBACK /mcp request
+    // is served token-free, while a REMOTE (Cloudflare-tunnel) request still 401s
+    // for the missing bearer. This is the second gate behind the local Claude
+    // Desktop dead-end (the first being the connector OAuth gate).
+    await test("StreamableHTTP: loopback exempt from legacy static bearer; tunnel still 401") {
+        let ud = UserDefaults.standard
+        let prevTunnel = ud.string(forKey: tunnelURLKey)
+        let prevBearer = ud.string(forKey: MCPHTTPValidation.mcpBearerTokenUserDefaultsKey)
+        ud.set("https://mcp.example.com/mcp", forKey: tunnelURLKey)
+        ud.set("legacy-static-secret", forKey: MCPHTTPValidation.mcpBearerTokenUserDefaultsKey)
+        defer {
+            if let prevTunnel { ud.set(prevTunnel, forKey: tunnelURLKey) }
+            else { ud.removeObject(forKey: tunnelURLKey) }
+            if let prevBearer { ud.set(prevBearer, forKey: MCPHTTPValidation.mcpBearerTokenUserDefaultsKey) }
+            else { ud.removeObject(forKey: MCPHTTPValidation.mcpBearerTokenUserDefaultsKey) }
+        }
+        // No connectorAuth (BRIDGE_ENABLE_HTTP unset) — only the legacy gate is live.
+        let server = SSEServer(
+            router: ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog()),
+            onToolCall: {}
+        )
+        let initBody = Data("""
+        {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"\(BridgeConstants.mcpProtocolVersion)","capabilities":{},"clientInfo":{"name":"legacy-loopback","version":"t"}}}
+        """.utf8)
+        let localHeaders = [
+            "Host": "127.0.0.1:\(BridgeConstants.defaultSSEPort)",
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+        ]
+        // LOOPBACK (no Cf header) + NO bearer ⇒ served token-free (not 401).
+        let localResp = await server.handleHTTPRequest(
+            HTTPRequest(method: "POST", headers: localHeaders, body: initBody))
+        try expect(localResp.statusCode != 401,
+                   "loopback must be exempt from the legacy static bearer, got \(localResp.statusCode)")
+        try expect(localResp.headers[HTTPHeaderName.sessionID] != nil,
+                   "loopback initialize must mint a session id token-free")
+        // TUNNEL (Cf header) + NO bearer ⇒ 401 (legacy gate still applies off-loopback).
+        var tunnelHeaders = localHeaders
+        tunnelHeaders["Cf-Connecting-Ip"] = "203.0.113.7"
+        let tunnelResp = await server.handleHTTPRequest(
+            HTTPRequest(method: "POST", headers: tunnelHeaders, body: initBody))
+        try expect(tunnelResp.statusCode == 401,
+                   "tunnel must still require the legacy bearer, got \(tunnelResp.statusCode)")
     }
 }

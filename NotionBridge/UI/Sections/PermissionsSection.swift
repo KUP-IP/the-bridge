@@ -256,6 +256,7 @@ public struct PermissionsSection: View {
             }
             .help("Re-check all macOS system-access grants")
             .accessibilityLabel("Re-check all system permissions")
+            .accessibilityIdentifier(BridgeAXID.Security.recheckAll)   // PKT-1005 remainder (b)
         }
     }
 
@@ -300,8 +301,10 @@ public struct PermissionsSection: View {
                 LazyVGrid(columns: grantColumns, alignment: .leading, spacing: BridgeTokens.Space.s1 + 3) {
                     ForEach(PermissionManager.Grant.v1Cases, id: \.id) { grant in
                         grantTile(grant: grant)
+                            .accessibilityIdentifier(BridgeAXID.Security.grantRow)   // PKT-1005 remainder (b)
                     }
                 }
+                .accessibilityIdentifier(BridgeAXID.Security.grantsList)   // PKT-1005 remainder (b)
 
                 Text("Granted in System Settings \u{2192} Privacy & Security. Some changes need a relaunch to register.")
                     .font(BridgeTokens.Typeface.micro)

@@ -229,7 +229,7 @@ func runRemoteOAuthHardeningS4Tests() async {
         let body = Data(#"{"method":"tools/call","params":{"name":"contacts_get","arguments":{"id":"x"}}}"#.utf8)
         let resp = await server.handleHTTPRequest(HTTPRequest(
             method: "POST",
-            headers: ["Authorization": "Bearer \(tok)", "Mcp-Session-Id": "A1-s1"],
+            headers: ["Cf-Connecting-Ip": "203.0.113.7", "Authorization": "Bearer \(tok)", "Mcp-Session-Id": "A1-s1"],
             body: body))
         try expect(resp.statusCode == 403,
                    "voice.resolve→contacts_get must be 403, got \(resp.statusCode)")
@@ -250,7 +250,7 @@ func runRemoteOAuthHardeningS4Tests() async {
         let body = Data(#"{"method":"tools/call","params":{"name":"contacts_get","arguments":{"id":"x"}}}"#.utf8)
         let resp = await server.handleHTTPRequest(HTTPRequest(
             method: "POST",
-            headers: ["Authorization": "Bearer \(tok)", "Mcp-Session-Id": "A1-s2"],
+            headers: ["Cf-Connecting-Ip": "203.0.113.7", "Authorization": "Bearer \(tok)", "Mcp-Session-Id": "A1-s2"],
             body: body))
         // Scope satisfied (contacts_get is not destructive ⇒ no step-up) ⇒ the
         // request is authorized. v3.7.10: connector tools/call is served by
@@ -351,7 +351,7 @@ func runRemoteOAuthHardeningS4Tests() async {
         let body = Data(#"{"method":"tools/call","params":{"name":"snippets_delete","arguments":{"id":"s1"}}}"#.utf8)
         let resp = await server.handleHTTPRequest(HTTPRequest(
             method: "POST",
-            headers: ["Authorization": "Bearer \(tok)", "Mcp-Session-Id": "A3-noscope"],
+            headers: ["Cf-Connecting-Ip": "203.0.113.7", "Authorization": "Bearer \(tok)", "Mcp-Session-Id": "A3-noscope"],
             body: body))
         try expect(resp.statusCode == 403,
                    "destructive w/o connector.step_up must be 403, got \(resp.statusCode)")
@@ -374,7 +374,7 @@ func runRemoteOAuthHardeningS4Tests() async {
         let body = Data(#"{"method":"tools/call","params":{"name":"snippets_delete","arguments":{"id":"s1"}}}"#.utf8)
         let resp = await server.handleHTTPRequest(HTTPRequest(
             method: "POST",
-            headers: ["Authorization": "Bearer \(tok)", "Mcp-Session-Id": "A3-scoped"],
+            headers: ["Cf-Connecting-Ip": "203.0.113.7", "Authorization": "Bearer \(tok)", "Mcp-Session-Id": "A3-scoped"],
             body: body))
         // Scope + step-up satisfied ⇒ authorized. v3.7.10: connector tools/call
         // is dispatched by processConnectorJSONRPC → 200, NOT a 401/403 refusal.
@@ -394,7 +394,7 @@ func runRemoteOAuthHardeningS4Tests() async {
         let body = Data(#"{"method":"tools/call","params":{"name":"snippets_delete","arguments":{"id":"s1","_stepUp":"i-promise-i-confirmed"}}}"#.utf8)
         let resp = await server.handleHTTPRequest(HTTPRequest(
             method: "POST",
-            headers: ["Authorization": "Bearer \(tok)", "Mcp-Session-Id": "A3-tokenonly"],
+            headers: ["Cf-Connecting-Ip": "203.0.113.7", "Authorization": "Bearer \(tok)", "Mcp-Session-Id": "A3-tokenonly"],
             body: body))
         try expect(resp.statusCode == 403,
                    "per-call token alone must NOT authorize a destructive call, got \(resp.statusCode)")

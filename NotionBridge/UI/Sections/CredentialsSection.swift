@@ -140,8 +140,10 @@ public struct CredentialsSection: View {
                     VStack(spacing: 6) {
                         ForEach(stored, id: \.rowID) { entry in
                             credentialRow(entry)
+                                .accessibilityIdentifier(BridgeAXID.Security.credentialRow)   // PKT-1005 remainder (b)
                         }
                     }
+                    .accessibilityIdentifier(BridgeAXID.Security.credentialsList)   // PKT-1005 remainder (b)
                 }
             }
         }
@@ -171,6 +173,7 @@ public struct CredentialsSection: View {
                 Task { await validateAll() }
             }
             .help("Re-validate every stored credential against its service")
+            .accessibilityIdentifier(BridgeAXID.Security.validateAll)   // PKT-1005 remainder (b)
         }
     }
 
@@ -182,6 +185,7 @@ public struct CredentialsSection: View {
             sheetMode = .add
         }
         .help("Add a new credential")
+        .accessibilityIdentifier(BridgeAXID.Security.addCredential)   // PKT-1005 remainder (b)
     }
 
     private var emptyState: some View {
@@ -444,14 +448,15 @@ public struct CredentialsSection: View {
                                 Task { await validateAll() }
                             }
                         }
-                    )
+                    ),
+                    axID: BridgeAXID.Security.togglePolicy   // PKT-1005 remainder (b)
                 )
             }
         }
     }
 
     @ViewBuilder
-    private func policyRow(title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
+    private func policyRow(title: String, subtitle: String, isOn: Binding<Bool>, axID: String? = nil) -> some View {
         HStack(alignment: .center, spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -464,6 +469,7 @@ public struct CredentialsSection: View {
             }
             Spacer()
             Toggle("", isOn: isOn).labelsHidden().toggleStyle(.switch)
+                .accessibilityIdentifier(axID ?? "")   // PKT-1005 remainder (b): id when provided
         }
     }
 

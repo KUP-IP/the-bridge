@@ -143,6 +143,12 @@ public actor ServerManager {
                 expectedIssuer: issuer,
                 expectedAudience: resource
             )
+            // PKT-810 R5: whether the cloud OAuth tenant is ACTUALLY provisioned
+            // (`WorkOSConfig.isConfigured` — a real, non-placeholder client id).
+            // The PUBLIC resource_metadata pointer is conditioned on this: a
+            // non-live tenant must never be advertised to a client as a real
+            // sign-in service.
+            let cloudOAuthLive = WorkOSConfig.resolved().isConfigured
             // PKT-810: the RFC 9728 resource_metadata pointer in the
             // WWW-Authenticate challenge MUST be reachable by the REMOTE
             // client — derive it from the (possibly public) resolved
@@ -150,23 +156,26 @@ public actor ServerManager {
             // BRIDGE_PUBLIC_RESOURCE set this becomes
             // https://mcp.kup.solutions/.well-known/oauth-protected-resource;
             // unset, it falls back to the local origin (dev/stdio default).
+            //
+            // PKT-810 R5: BUT only advertise the PUBLIC cloud PRM when WorkOS is
+            // actually live. With no provisioned tenant, pointing any client at
+            // https://mcp.kup.solutions/.well-known/… would send it into a
+            // WorkOS DCR that can only fail (placeholder client id) — so a stray
+            // 401 must point at the LOCAL origin instead, never a non-existent
+            // sign-in service. Loopback is never gated at all (SSETransport
+            // origin split); this guards the off-loopback (tunnel) challenge.
             let prmURL: String = {
-                if let c = URLComponents(string: resource),
+                if cloudOAuthLive,
+                   let c = URLComponents(string: resource),
                    let scheme = c.scheme, let host = c.host {
                     let portPart = c.port.map { ":\($0)" } ?? ""
                     return "\(scheme)://\(host)\(portPart)/.well-known/oauth-protected-resource"
                 }
                 return "http://127.0.0.1:\(ssePort)/.well-known/oauth-protected-resource"
             }()
-            // PKT-810 coexistence: the loopback (local desktop) static bearer —
-            // the same Keychain secret existing local clients already send. nil
-            // when unset (prior local-trust). Remote requests are OAuth-gated
-            // above; this only governs direct-loopback requests.
-            let local = MCPHTTPValidation.resolveMCPBearerToken()
             return ConnectorAuthContext(
                 validator: validator,
-                resourceMetadataURL: prmURL,
-                localBearer: local.isEmpty ? nil : local
+                resourceMetadataURL: prmURL
             )
         }()
 
@@ -349,6 +358,17 @@ public actor ServerManager {
         await server.withMethodHandler(ResourceUnsubscribe.self) { _ in Empty() }
 
         // 7. SSE server was created before module registration so session diagnostics can be injected
+
+        // PKT-381 (Scheduler Resilience): hand the live router to JobsManager so
+        // its missed-occurrence reconciler can serially DRAIN the durable backlog
+        // through the same ToolRouter the SSE job-callback uses. bootstrap(router:)
+        // is idempotent — if AppDelegate already bootstrapped the store, this call
+        // just supplies the router and triggers a reconcile+drain of anything that
+        // was enqueued before the server was up. Detached so server startup is not
+        // blocked by the (potentially long) catch-up drain.
+        Task.detached { [router] in
+            await JobsManager.shared.bootstrap(router: router)
+        }
 
         return await router.allRegistrations().count
     }

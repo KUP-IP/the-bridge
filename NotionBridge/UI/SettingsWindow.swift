@@ -156,6 +156,7 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
     case tools      = "Tools"
     case security   = "Security"          // Credentials + Permissions merged
     case connection = "Connection"        // Connections + Remote Access merged
+    case datasources = "Data Sources"     // Data-Source Registry: entity → Notion data source + property map
     case advanced   = "Advanced"
 
     public var id: String { rawValue }
@@ -171,6 +172,7 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
         case .tools:      return "Tools"
         case .security:   return "Security"
         case .connection: return "Connection"
+        case .datasources: return "Data Sources"
         case .advanced:   return "Advanced"
         }
     }
@@ -183,6 +185,7 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
         case .tools:      return "hammer"
         case .security:   return "lock.shield"
         case .connection: return "network"
+        case .datasources: return "tablecells"
         case .advanced:   return "wrench.and.screwdriver"
         }
     }
@@ -275,15 +278,24 @@ public struct SettingsView: View {
 
     @ViewBuilder
     private var detailContent: some View {
-        switch nav.section {
-        case .orders: commandsSection
-        case .skills: SkillsSection()
-        case .jobs: jobsSection
-        case .tools: toolsSection
-        case .security: securitySection
-        case .connection: connectionSection
-        case .advanced: advancedSection
+        // PKT-1005 (Pillar C): every section's detail content carries a stable
+        // root container id — `bridge.settings.<section>.root` — so the headless
+        // harness can assert it landed on the right section after a deep-link,
+        // independent of any display label. Skills additionally instruments its
+        // inner controls (toggles, cache, chevrons, Trash, metadata grid).
+        Group {
+            switch nav.section {
+            case .orders: commandsSection
+            case .skills: SkillsSection()
+            case .jobs: jobsSection
+            case .tools: toolsSection
+            case .security: securitySection
+            case .connection: connectionSection
+            case .datasources: DataSourcesSection()
+            case .advanced: advancedSection
+            }
         }
+        .accessibilityIdentifier(BridgeAXID.control(nav.section, "root"))
     }
 
     // MARK: - Shared Properties

@@ -623,6 +623,13 @@ await runShellModuleTests()
 await runFileModuleTests()
 await runSessionModuleTests()
 await runSessionPersistenceTests()   // ITEM [session]: MCP session durability across restart/install (persist + clean-shutdown marker + resumable reconnect)
+await runRegistryConfigTests()       // Data-Source Registry W1: config model + store (Skills = entity #1, bind-by-property-id)
+await runRegistryRowCacheTests()     // Data-Source Registry W1: generalized per-entity read-through row cache (stale-while-revalidate + offline)
+await runRegistryPropertyCodecTests() // Data-Source Registry W2: Notion property codec (typed Value ↔ Notion JSON, decode/encode/isWritable)
+await runRegistryDataPathTests()     // Data-Source Registry W2: live data path (schema binder · read-through reader · writer create-then-update · rate limiter)
+await runRegistryModuleTests()       // Data-Source Registry W3: MCP tool surface (8 generic CRUD + introspect + possess tools, registration + handler behavior)
+await runDataSourcesViewModelTests() // Data-Source Registry W4: Settings pane scenarios (propose→confirm, TTL, drift, errors) + BE↔FE alignment
+await runRegistryEdgeCaseTests()     // Data-Source Registry: adversarial edge cases (codec chunking, pagination, cache concurrency, config race, writer)
 await runMessagesModuleTests()
 await runMessagesSuiteAuditTests()   // Messages-suite every-angle-of-attack audit
 await runMailModuleTests()           // PKT-961 (v3.7·H): mail_* Apple Mail module (mock seam; send-guard)
@@ -646,6 +653,10 @@ await runConfigManagerTests()
 await runMCPHTTPValidationTests()
 await runDesktopOrganizationScenarioTests()
 await runSkillsModuleTests()
+await runSkillNotionMetadataSyncTests() // PKT-1003 Wave A: real-column sync read/write + gate-safe pull (no metadata blanking)
+await runSkillCacheStatusSnapshotTests() // PKT-1003 Wave B: pure body-cache snapshot (real body-store state for pip + counts + indicators)
+await runSkillListNavigationTests() // PKT-1003 Wave D: detail-header prev/next navigation math
+await runSkillManagementUIScenarioTests() // PKT-1003 follow-through: Settings->Skills user scenarios aligned to UI contract + storage/edit paths
 await runCredentialManagerTests()
 await runCredentialModuleTests()
 await runCredentialHardeningTests()   // [credentials] hardening: env-var alias normalization → canonical service:account, sentinel/placeholder detection, idempotent-read transient-drop retry policy. PURE — no Keychain / no live network.
@@ -672,9 +683,11 @@ await runSpotlightModuleTests()        // PKT-747 (v2.2 · 3.3)
 await runSyntheticInputModuleTests()   // PKT-747 (v2.2 · 3.3)
 await runMouseClickModuleTests()        // PKT-765 (v2.2 · 3.3.1)
 await runBridgeAutomationModuleTests()  // FB-AUTOMATION: bridge_settings_navigate + bridge_focus_settings + axPath/frontmost-guard
+await runSettingsAXIdentifierTests()    // PKT-1005: BridgeAXID convention + SettingsUIValidationHarness (Pillar C/D)
 await runCGEventModuleTests()           // PKT-765 (v2.2 · 3.3.1)
 await runPasteboardHistoryModuleTests() // PKT-765 (v2.2 · 3.3.1)
 await runJobsModuleTests()
+await runSchedulerResilienceTests()  // PKT-381: durable backlog + reconciler + serial drain + first job
 await runGhModuleTests()
 await runGitModuleTests()
 await runWSHMenuBarTests()        // PKT-804 (v2.3): menu-bar quick-page
@@ -690,6 +703,7 @@ await runCommandPaletteTests()    // cmd-w3: palette search + gate + AppDelegate
 await runSkillVsCommandSplitTests() // cmd-ux: LOCK the skill-vs-command body/properties split
 await runCommandsControllerTests()  // cmd-ux W1/W2: CommandsController observable state machine + status/focus model
 await runCommandBridgeControllerTests()  // PKT-878 v3.6.3: SwiftUI Command Bridge popup — placement/recents/anim/builders
+await runBridgeSearchTests()             // PKT-1006 R2: multi-entity search — fuzzy/ranking/grouping + skill-source destination routing
 await runCommandBridgeLayoutTests()      // v4 round-2: adaptive palette width clamp + remembered drag-origin clamp
 await runCommandVisibilityTests()   // cmd-ux W3: .command visibility axis — Codable, palette filter, picker write-back, empty-state
 await runFlagVisibilityMigrationTests()  // cmd-ux W4 (3.4.1): flag-based visibility SSOT — enum↔flags, decode/encode migration, RegistrySkillsCommandProvider flag filter, mutator parity
@@ -712,7 +726,7 @@ await runRemoteOAuthHTTPTests()     // PKT-800 (S1): RFC 9728 PRM + transport ga
 await runRemoteOAuthBearerTests()   // PKT-800 (S2): JWTKit bearer + ScopeGate + 401/WWW-Auth
 await runRemoteOAuthHardeningTests() // PKT-800 (S3): step-up + confused-deputy + leak-sweep + gating
 await runRemoteOAuthHardeningS4Tests() // PKT-800 (S4): contacts.read split + TransportRouter seam + step-up scope-only
-await runRemoteOAuthOriginGatingTests() // PKT-810: local↔cloud coexistence (loopback static-bearer fallback, tunnel OAuth)
+await runRemoteOAuthOriginGatingTests() // PKT-810 R5: origin split — loopback token-free, tunnel OAuth-gated
 await runBridgeFeatureFlagsTests()  // PKT-798 (v2.3 · WS-C): fail-closed capability gates
 await runBridgeModuleRegistryTests() // PKT v3.0·0.4: single-source module registrar
 await runMCPToolFactoryTests()       // PKT v3.0·0.5: metadata contract + unified Tool factory

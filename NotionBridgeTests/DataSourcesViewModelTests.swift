@@ -1,0 +1,221 @@
+// DataSourcesViewModelTests.swift — Data-Source Registry (Wave 4)
+// NotionBridge · Tests
+//
+// The Settings → "Data Sources" pane USER SCENARIOS, exercised through the
+// view-model contract (the codebase tests UI at the view-model layer — cf.
+// SkillManagementUIScenarioTests). Covers the Decision-5 onboarding flow
+// (load → propose → review drift → confirm), per-entity TTL, cache clear, and
+// error handling — PLUS back-end↔front-end ALIGNMENT: the pane's view-model and
+// the registry_* MCP tools read/write the SAME config + gateway, so a binding
+// made in the UI is the binding the tools see (and vice-versa).
+//
+// Hermetic: temp home + injected fake gateway; @MainActor view-model accessed
+// via MainActor.run hops.
+
+import Foundation
+import MCP
+import NotionBridgeLib
+
+private actor VMFakeGateway: RegistryNotionGateway {
+    var schemaToReturn: DataSourceSchema
+    var offline = false
+    init(schema: DataSourceSchema) { self.schemaToReturn = schema }
+    func setOffline(_ v: Bool) { offline = v }
+    func schema(dataSourceId: String, workspace: String?) async throws -> DataSourceSchema {
+        if offline { throw NSError(domain: "vmfake", code: 1, userInfo: [NSLocalizedDescriptionKey: "offline"]) }
+        return schemaToReturn
+    }
+    func query(dataSourceId: String, workspace: String?, pageSize: Int, startCursor: String?) async throws -> (rows: [NotionRow], nextCursor: String?) { ([], nil) }
+    func page(pageId: String, workspace: String?) async throws -> NotionRow { throw NSError(domain: "vmfake", code: 404) }
+    func create(dataSourceId: String, workspace: String?, fields: [BoundField]) async throws -> NotionRow { throw NSError(domain: "vmfake", code: 405) }
+    func update(pageId: String, workspace: String?, fields: [BoundField]) async throws -> NotionRow { throw NSError(domain: "vmfake", code: 405) }
+    func archive(pageId: String, workspace: String?) async throws {}
+    func markdown(pageId: String, workspace: String?) async throws -> String { "" }
+}
+
+private func fullSkillsSchema() -> DataSourceSchema {
+    DataSourceSchema(columnsByName: [
+        "Skill Name": .init(id: "id_title", type: "title"),
+        "Slug": .init(id: "id_slug", type: "rich_text"),
+        "Description": .init(id: "id_desc", type: "rich_text"),
+        "Activation Examples": .init(id: "id_act", type: "rich_text"),
+        "Anti-Triggers": .init(id: "id_anti", type: "rich_text"),
+        "Status": .init(id: "id_status", type: "status"),
+        "Domain": .init(id: "id_domain", type: "select"),
+        "Specialist": .init(id: "id_spec", type: "relation"),
+    ])
+}
+
+private func withVMEnv(_ fake: VMFakeGateway, _ body: (DataSourcesViewModel) async throws -> Void) async throws {
+    let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("bridge-dsvm-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+    BridgePaths.overrideHomeForTesting(tmp)
+    let prior = RegistryModule.gatewayProvider
+    RegistryModule.gatewayProvider = { fake }
+    defer {
+        RegistryModule.gatewayProvider = prior
+        BridgePaths.overrideHomeForTesting(nil)
+        try? FileManager.default.removeItem(at: tmp)
+    }
+    let vm = await MainActor.run { DataSourcesViewModel() }
+    try await body(vm)
+}
+
+func runDataSourcesViewModelTests() async {
+    print("\n\u{1F5A5}\u{FE0F} Data-Source Registry — Settings pane scenarios (view-model + BE↔FE alignment)")
+
+    // MARK: - Load
+
+    await test("Scenario: initial load shows Skills as entity #1 (unbound)") {
+        try await withVMEnv(VMFakeGateway(schema: fullSkillsSchema())) { vm in
+            await vm.load()
+            let (count, key, bound) = await MainActor.run {
+                (vm.entities.count, vm.entities.first?.key, vm.entities.first?.isFullyBound)
+            }
+            try expect(count == 1, "one seeded entity")
+            try expect(key == "skill", "skill entity #1")
+            try expect(bound == false, "unbound until introspect")
+        }
+    }
+
+    // MARK: - Propose → review → confirm (Decision 5)
+
+    await test("Scenario: propose binding sets a CLEAN proposal but does NOT persist") {
+        try await withVMEnv(VMFakeGateway(schema: fullSkillsSchema())) { vm in
+            await vm.load()
+            await vm.proposeIntrospection("skill")
+            let (hasProposal, fully, clean, entityStillUnbound) = await MainActor.run {
+                (vm.proposal != nil, vm.proposal?.fullyBound, vm.proposal?.clean, vm.entities.first?.isFullyBound)
+            }
+            try expect(hasProposal, "proposal present")
+            try expect(fully == true, "proposal fully bound")
+            try expect(clean == true, "proposal clean (no missing columns)")
+            try expect(entityStillUnbound == false, "entity NOT persisted yet (still unbound)")
+        }
+    }
+
+    await test("Scenario: confirm persists the proposal; entity becomes fully bound") {
+        try await withVMEnv(VMFakeGateway(schema: fullSkillsSchema())) { vm in
+            await vm.load()
+            await vm.proposeIntrospection("skill")
+            let ok = await vm.confirmProposal()
+            try expect(ok, "confirm succeeded")
+            let (proposalCleared, bound) = await MainActor.run {
+                (vm.proposal == nil, vm.entities.first?.isFullyBound)
+            }
+            try expect(proposalCleared, "proposal cleared after confirm")
+            try expect(bound == true, "entity now fully bound + persisted")
+            // Persisted across a fresh view-model.
+            try await withFreshVM { vm2 in
+                await vm2.load()
+                let bound2 = await MainActor.run { vm2.entities.first?.isFullyBound }
+                try expect(bound2 == true, "binding survived to a fresh view-model (on disk)")
+            }
+        }
+    }
+
+    await test("Scenario: a missing column surfaces drift; proposal is not clean") {
+        var cols = fullSkillsSchema().columnsByName
+        cols["Specialist"] = nil   // drop a column → unmatched
+        try await withVMEnv(VMFakeGateway(schema: DataSourceSchema(columnsByName: cols))) { vm in
+            await vm.load()
+            await vm.proposeIntrospection("skill")
+            let (clean, fully, drift) = await MainActor.run {
+                (vm.proposal?.clean, vm.proposal?.fullyBound, vm.proposal?.drift ?? [])
+            }
+            try expect(clean == false, "missing column → not clean")
+            try expect(fully == false, "not fully bound")
+            try expect(drift.contains { $0.contains("no column named") }, "drift names the missing column: \(drift)")
+        }
+    }
+
+    await test("Scenario: type drift is reported but the proposal stays clean (id resolves)") {
+        var cols = fullSkillsSchema().columnsByName
+        cols["Status"] = .init(id: "id_status", type: "select")  // declared status, live select
+        try await withVMEnv(VMFakeGateway(schema: DataSourceSchema(columnsByName: cols))) { vm in
+            await vm.load()
+            await vm.proposeIntrospection("skill")
+            let (clean, fully, drift) = await MainActor.run {
+                (vm.proposal?.clean, vm.proposal?.fullyBound, vm.proposal?.drift ?? [])
+            }
+            try expect(clean == true, "all names matched → clean")
+            try expect(fully == true, "fully bound")
+            try expect(drift.contains { $0.contains("type drift") }, "type drift surfaced: \(drift)")
+        }
+    }
+
+    await test("Scenario: cancel discards the proposal, entity unchanged") {
+        try await withVMEnv(VMFakeGateway(schema: fullSkillsSchema())) { vm in
+            await vm.load()
+            await vm.proposeIntrospection("skill")
+            await MainActor.run { vm.cancelProposal() }
+            let (cleared, bound, status) = await MainActor.run {
+                (vm.proposal == nil, vm.entities.first?.isFullyBound, vm.status)
+            }
+            try expect(cleared, "proposal cleared")
+            try expect(bound == false, "entity still unbound")
+            try expect(status == "Cancelled", "status reflects cancel")
+        }
+    }
+
+    await test("Scenario: setTTL updates + persists the entity TTL") {
+        try await withVMEnv(VMFakeGateway(schema: fullSkillsSchema())) { vm in
+            await vm.load()
+            await vm.setTTL("skill", seconds: 99)
+            let ttl = await MainActor.run { vm.entities.first?.cacheTTLSeconds }
+            try expect(ttl == 99, "TTL updated to 99")
+            try await withFreshVM { vm2 in
+                await vm2.load()
+                let ttl2 = await MainActor.run { vm2.entities.first?.cacheTTLSeconds }
+                try expect(ttl2 == 99, "TTL persisted to disk")
+            }
+        }
+    }
+
+    await test("Scenario: introspection failure (offline) clears proposal + sets error status") {
+        let fake = VMFakeGateway(schema: fullSkillsSchema())
+        try await withVMEnv(fake) { vm in
+            await vm.load()
+            await fake.setOffline(true)
+            await vm.proposeIntrospection("skill")
+            let (proposal, status) = await MainActor.run { (vm.proposal, vm.status) }
+            try expect(proposal == nil, "no proposal on failure")
+            try expect(status.lowercased().contains("failed") || status.lowercased().contains("offline"),
+                       "error surfaced in status: \(status)")
+        }
+    }
+
+    // MARK: - BE↔FE alignment
+
+    await test("Alignment: a binding confirmed in the UI is seen by the registry_entities TOOL") {
+        try await withVMEnv(VMFakeGateway(schema: fullSkillsSchema())) { vm in
+            await vm.load()
+            await vm.proposeIntrospection("skill")
+            _ = await vm.confirmProposal()
+            // Same config + gateway seam → the MCP tool reflects the UI's write.
+            let out = try await RegistryModule.makeEntities().handler(.object([:]))
+            guard case .object(let o) = out, case .array(let arr)? = o["entities"], let first = arr.first,
+                  case .object(let e) = first else { throw TestError.assertion("tool returned no entities") }
+            try expect(e["fullyBound"] == .bool(true), "tool sees the UI-confirmed binding")
+        }
+    }
+
+    await test("Alignment: a binding made by the registry_introspect TOOL is seen by the pane") {
+        try await withVMEnv(VMFakeGateway(schema: fullSkillsSchema())) { vm in
+            // Tool binds first…
+            _ = try await RegistryModule.makeIntrospect().handler(.object(["entity": .string("skill")]))
+            // …then the pane loads and reflects it.
+            await vm.load()
+            let bound = await MainActor.run { vm.entities.first?.isFullyBound }
+            try expect(bound == true, "pane sees the tool-made binding (shared config)")
+        }
+    }
+}
+
+// Re-enter the CURRENT env (temp home + gateway already set) with a brand-new
+// view-model to prove on-disk persistence.
+private func withFreshVM(_ body: (DataSourcesViewModel) async throws -> Void) async throws {
+    let vm = await MainActor.run { DataSourcesViewModel() }
+    try await body(vm)
+}

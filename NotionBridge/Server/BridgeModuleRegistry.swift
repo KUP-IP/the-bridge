@@ -68,6 +68,7 @@ public enum BridgeModuleRegistry {
         await StandingOrdersModule.register(on: router)
         await ShortcutsModule.register(on: router)
         await MemoryModule.register(on: router)
+        await RegistryModule.register(on: router)          // Data-Source Registry: generic CRUD + add_entity + introspect + possess (9 tools)
         await BridgeAutomationModule.register(on: router) // FB-AUTOMATION: bridge_settings_navigate
         await PermissionsModule.register(on: router)       // fb-permissions: permissions_status
     }

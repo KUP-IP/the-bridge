@@ -104,6 +104,11 @@ public enum ToolAnnotationCatalog {
         // user data and is fully idempotent (re-selecting a section is a no-op).
         // Touches only this app's own UI — not an open world.
         "bridge_settings_navigate": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
+        // PKT-1005 (Pillar A): cold-opens the in-app Settings window + deep-links
+        // a section. Same posture as bridge_settings_navigate — opens this app's
+        // own UI, mutates no user data, idempotent (re-opening an open window is
+        // a no-op re-point), not an open world.
+        "bridge_open_settings": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
         // WS-D (PKT-921): cloud-gated health probe. Reads the local
         // BridgeCloudManager state machine; touches nothing — pure read.
         "bridge_status": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
@@ -231,6 +236,20 @@ public enum ToolAnnotationCatalog {
         "notes_update": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         "notes_delete": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: true, openWorld: true),
         "notify": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
+        // Data-Source Registry (generic CRUD + introspect + possess). CRUD
+        // annotations are deterministic: reads are read-only+idempotent; create
+        // is a non-idempotent write; update is an idempotent (set-to-X) write;
+        // delete is a destructive, confirmation-gated archive; introspect writes
+        // config (idempotent). `registry_entities` reads LOCAL config (closed).
+        "registry_entities": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
+        "registry_add_entity": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
+        "registry_introspect": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
+        "registry_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
+        "registry_get": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
+        "registry_create": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "registry_update": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
+        "registry_delete": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: true, openWorld: true),
+        "registry_possess": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         "notion_block_delete": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         // Sprint A · mcp-builder #1: notion_block_read removed
         // (PKT-738 v2.2 deprecation cycle complete).

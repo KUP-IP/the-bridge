@@ -219,7 +219,7 @@ func runRemoteOAuthHardeningTests() async {
         let body = Data(#"{"method":"tools/call","params":{"name":"snippets_delete","arguments":{"id":"s1"}}}"#.utf8)
         let req = HTTPRequest(
             method: "POST",
-            headers: ["Authorization": "Bearer \(tok)", "Mcp-Session-Id": "sess-A"],
+            headers: ["Cf-Connecting-Ip": "203.0.113.7", "Authorization": "Bearer \(tok)", "Mcp-Session-Id": "sess-A"],
             body: body
         )
         let resp = await server.handleHTTPRequest(req)
@@ -243,7 +243,7 @@ func runRemoteOAuthHardeningTests() async {
         let body = Data(#"{"method":"tools/call","params":{"name":"snippets_delete","arguments":{"id":"s1"}}}"#.utf8)
         let req = HTTPRequest(
             method: "POST",
-            headers: ["Authorization": "Bearer \(tok)", "Mcp-Session-Id": "sess-OK"],
+            headers: ["Cf-Connecting-Ip": "203.0.113.7", "Authorization": "Bearer \(tok)", "Mcp-Session-Id": "sess-OK"],
             body: body
         )
         let resp = await server.handleHTTPRequest(req)
@@ -265,7 +265,7 @@ func runRemoteOAuthHardeningTests() async {
         let body = Data(#"{"method":"tools/call","params":{"name":"snippets_list","arguments":{}}}"#.utf8)
         let req = HTTPRequest(
             method: "POST",
-            headers: ["Authorization": "Bearer \(tok)", "Mcp-Session-Id": "sess-ND"],
+            headers: ["Cf-Connecting-Ip": "203.0.113.7", "Authorization": "Bearer \(tok)", "Mcp-Session-Id": "sess-ND"],
             body: body
         )
         let resp = await server.handleHTTPRequest(req)
@@ -334,7 +334,7 @@ func runRemoteOAuthHardeningTests() async {
         let tokA = try await keys.sign(iss: hIssuer, aud: hResource, sub: "client-A", scope: "snippets.read")
         let reqA = HTTPRequest(
             method: "POST",
-            headers: ["Authorization": "Bearer \(tokA)", "Mcp-Session-Id": "shared"],
+            headers: ["Cf-Connecting-Ip": "203.0.113.7", "Authorization": "Bearer \(tokA)", "Mcp-Session-Id": "shared"],
             body: Data(#"{"method":"ping"}"#.utf8)
         )
         _ = await server.handleHTTPRequest(reqA)
@@ -344,7 +344,7 @@ func runRemoteOAuthHardeningTests() async {
         let tokB = try await keys.sign(iss: hIssuer, aud: hResource, sub: "client-B", scope: "snippets.read")
         let reqB = HTTPRequest(
             method: "POST",
-            headers: ["Authorization": "Bearer \(tokB)", "Mcp-Session-Id": "shared"],
+            headers: ["Cf-Connecting-Ip": "203.0.113.7", "Authorization": "Bearer \(tokB)", "Mcp-Session-Id": "shared"],
             body: Data(#"{"method":"tools/call","params":{"name":"snippets_list","arguments":{}}}"#.utf8)
         )
         let resp = await server.handleHTTPRequest(reqB)
@@ -388,24 +388,24 @@ func runRemoteOAuthHardeningTests() async {
         // 1. valid bearer (non-tools/call → bearer accepted path)
         _ = await server.handleHTTPRequest(HTTPRequest(
             method: "POST",
-            headers: ["Authorization": "Bearer \(validTok)", "Mcp-Session-Id": "L1"],
+            headers: ["Cf-Connecting-Ip": "203.0.113.7", "Authorization": "Bearer \(validTok)", "Mcp-Session-Id": "L1"],
             body: Data(#"{"method":"ping"}"#.utf8)))
         // 2. invalid bearer (garbage)
         _ = await server.handleHTTPRequest(HTTPRequest(
-            method: "POST", headers: ["Authorization": "Bearer not-a-jwt-garbage"], body: nil))
+            method: "POST", headers: ["Cf-Connecting-Ip": "203.0.113.7", "Authorization": "Bearer not-a-jwt-garbage"], body: nil))
         // 3. expired bearer
         _ = await server.handleHTTPRequest(HTTPRequest(
-            method: "POST", headers: ["Authorization": "Bearer \(expiredTok)"], body: nil))
+            method: "POST", headers: ["Cf-Connecting-Ip": "203.0.113.7", "Authorization": "Bearer \(expiredTok)"], body: nil))
         // 4. scope-deny (read scope → write tool)
         _ = await server.handleHTTPRequest(HTTPRequest(
             method: "POST",
-            headers: ["Authorization": "Bearer \(validTok)", "Mcp-Session-Id": "L1"],
+            headers: ["Cf-Connecting-Ip": "203.0.113.7", "Authorization": "Bearer \(validTok)", "Mcp-Session-Id": "L1"],
             body: Data(#"{"method":"tools/call","params":{"name":"snippets_update","arguments":{}}}"#.utf8)))
         // 5. step-up required (write scope → destructive tool, no step-up)
         let wtok = try await keys.sign(iss: hIssuer, aud: hResource, scope: "snippets.write")
         _ = await server.handleHTTPRequest(HTTPRequest(
             method: "POST",
-            headers: ["Authorization": "Bearer \(wtok)", "Mcp-Session-Id": "L2"],
+            headers: ["Cf-Connecting-Ip": "203.0.113.7", "Authorization": "Bearer \(wtok)", "Mcp-Session-Id": "L2"],
             body: Data(#"{"method":"tools/call","params":{"name":"snippets_delete","arguments":{}}}"#.utf8)))
 
         let transcript = await diag.capturedText()

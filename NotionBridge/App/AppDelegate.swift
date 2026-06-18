@@ -132,6 +132,17 @@ private final class UpdaterLogger: NSObject, SPUUpdaterDelegate {
 /// for connections, tool calls, Notion token status, and uptime.
 @MainActor
 public final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// PKT-1005 (Pillar A/B): a stable, identity-correct handle to the LIVE
+    /// AppDelegate. The app is wired via `@NSApplicationDelegateAdaptor`, under
+    /// which `NSApp.delegate as? AppDelegate` can FAIL to cast — `NSApp.delegate`
+    /// may hand back a SwiftUI wrapper, not this instance. That fragile cast is
+    /// exactly why `bridge_settings_navigate` historically reported a false
+    /// "no app window host present" and never opened the window. We assign this
+    /// weak self-reference in `applicationDidFinishLaunching` so the automation
+    /// surface (BridgeSettingsAutomation) can reach the real `settingsController`
+    /// host WITHOUT the cast. `weak` so it never keeps a torn-down delegate alive.
+    @MainActor public private(set) static weak var shared: AppDelegate?
+
     private var serverTask: Task<Void, Never>?
     private var serverManager: ServerManager?
 
@@ -246,6 +257,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        // PKT-1005: publish the identity-correct self-reference for the
+        // automation surface (see `AppDelegate.shared`). Set first so any early
+        // MCP-driven open/navigate reaches the real host, not a failed cast.
+        Self.shared = self
+
         // PKT-487 → PKT-1 v3.5: Dock label uses the new display name
         // (executable bundle name is still "NotionBridge" — that's the
         // SPM target identifier baked into the binary).
@@ -494,6 +510,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.runCredentialAutoValidateIfDue() }
+            // PKT-381 (Scheduler Resilience): on wake, reconcile + drain any
+            // scheduled occurrences that were missed while the Mac slept past a
+            // slot. launchd coalesces a sleep-spanning miss into at most one
+            // wake-run; this is the durable catch-up that also covers slots
+            // launchd dropped. Idempotent — deduped against job_executions.
+            Task.detached { await JobsManager.shared.onWakeOrHeartbeatOnline() }
         }
     }
 
@@ -571,10 +593,37 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// (`/auth/exchange`), which holds the WorkOS secret; the Mac only relays
     /// its one-time code (WS-F remediation 2026-06-10).
     public func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls where url.scheme?.lowercased() == "bridge-auth" {
-            NSLog("[WS-F] bridge-auth callback received: host=\(url.host ?? "nil")")
-            cloudAuthCallbackHandler.handle(url)
+        for url in urls {
+            switch url.scheme?.lowercased() {
+            case "bridge-auth":
+                NSLog("[WS-F] bridge-auth callback received: host=\(url.host ?? "nil")")
+                cloudAuthCallbackHandler.handle(url)
+            case "bridge":
+                // PKT-1005 (Pillar A): bridge://settings/<section> deep-link.
+                // Coexists with the bridge-auth OAuth callback above — routed
+                // strictly by scheme so the cloud-auth path is untouched.
+                handleBridgeDeepLink(url)
+            default:
+                break
+            }
         }
+    }
+
+    /// PKT-1005: handle a `bridge://settings/<section>` deep-link. The host
+    /// names the surface ("settings") and the first path component names the
+    /// section ("skills", "security", …, resolved via the same back-compat
+    /// aliases bridge_settings_navigate accepts). Opens the Settings window
+    /// from cold and deep-links to the section; an unknown/empty section just
+    /// opens Settings at the last-selected section.
+    private func handleBridgeDeepLink(_ url: URL) {
+        guard url.host?.lowercased() == "settings" else {
+            NSLog("[PKT-1005] bridge:// deep-link with unknown host=\(url.host ?? "nil") — ignored")
+            return
+        }
+        let rawSection = url.pathComponents.first(where: { $0 != "/" && !$0.isEmpty })
+        let section = rawSection.flatMap { BridgeSettingsAutomation.resolveSection($0) }
+        NSLog("[PKT-1005] bridge://settings deep-link → section=\(section.map { $0.rawValue } ?? "nil")")
+        openSettings(section: section)
     }
 
     /// The WS-F callback handler, assembled over the production seams
@@ -589,6 +638,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the menu-bar quick-page straight to a Settings section.
     public func openSettings(section: SettingsSection? = nil) {
         settingsController.show(section: section)
+    }
+
+    /// PKT-1006 R3: bring the Bridge app to the FOREGROUND without opening any
+    /// specific window (operator-resolved Q1 — not Dashboard, not Settings).
+    /// As an `LSUIElement` (menu-bar) app we are normally `.accessory`, so we
+    /// flip to `.regular` and activate — the same foreground primitive
+    /// `checkForUpdates()` uses. The trailing bridge-mark in the Command Bridge
+    /// routes here via the identity-correct `AppDelegate.shared` handle (the
+    /// PKT-1005 pattern), replacing the fragile `NSApp.delegate as? AppDelegate`
+    /// cast that silently missed under `@NSApplicationDelegateAdaptor`.
+    public func bringToFront() {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     /// PKT-430 / PKT-932: Trigger a manual Sparkle update check.
