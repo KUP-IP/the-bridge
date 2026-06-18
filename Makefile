@@ -49,6 +49,14 @@ GENERATE_APPCAST ?= 1
 #   .build/artifacts/sparkle/Sparkle/bin/generate_keys -x key.txt
 SPARKLE_ED_KEY_FILE ?=
 
+# Packet B (PRJCT-2754): Ed25519 license PUBLIC key injected into the build.
+# Empty (local default) → fail-closed (no bundled key; trial-only gate).
+# release.yml sets it from the LICENSE_PUBLIC_KEY_BASE64URL repo secret (the
+# production key). Local dev demo:
+#   make build LICENSE_PUBLIC_KEY_BASE64URL=<dev-public-key-base64url>
+LICENSE_PUBLIC_KEY_BASE64URL ?=
+LICENSE_KEY_INJECT_FILE = TheBridge/Core/Licensing/LicensePublicKeyInjected.swift
+
 INFO_PLIST      = Info.plist
 RESOURCES_DIR   = TheBridge/App/Resources
 DMG_ICON        = $(RESOURCES_DIR)/Assets.xcassets/AppIcon.appiconset/icon_512x512.png
@@ -56,7 +64,7 @@ SPARKLE_ARTIFACT_DIR = $(BUILD_DIR)/artifacts/sparkle/Sparkle
 SPARKLE_FRAMEWORK = $(SPARKLE_ARTIFACT_DIR)/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework
 SPARKLE_TOOLS_DIR = $(SPARKLE_ARTIFACT_DIR)/bin
 
-.PHONY: debug build test app extension jobrunner appcast dmg dmg-background sign notarize verify verify-sparkle-feed check-update-flow check-appcast release clean install install-copy install-agent-safe clean-tcc patch-deps check-stale-build
+.PHONY: debug build test app extension jobrunner appcast dmg dmg-background sign notarize verify verify-sparkle-feed check-update-flow check-appcast release clean install install-copy install-agent-safe clean-tcc patch-deps check-stale-build inject-license-key
 
 # ── Debug Build ────────────────────────────────────────────────
 debug:
@@ -65,7 +73,20 @@ debug:
 	@echo "✅ Debug build: $(DEBUG_DIR)/$(BINARY_NAME)"
 
 # ── Release Build ──────────────────────────────────────────────
-build:
+# ── License public-key injection (Packet B) ───────────────────
+# Rewrites the single injected constant from LICENSE_PUBLIC_KEY_BASE64URL.
+# Idempotent: with the var EMPTY it rewrites the fail-closed default
+# (byte-identical to the committed file → no git churn). base64url has no
+# sed-special chars, so the '|'-delimited substitution is safe.
+inject-license-key:
+	@sed -i '' -E 's|^.*// INJECT:LICENSE_PUBLIC_KEY.*$$|    static let injectedBase64URL = "$(LICENSE_PUBLIC_KEY_BASE64URL)"   // INJECT:LICENSE_PUBLIC_KEY — do not hand-edit|' $(LICENSE_KEY_INJECT_FILE)
+	@if [ -n "$(LICENSE_PUBLIC_KEY_BASE64URL)" ]; then \
+		echo "🔑 Injected license public key into $(LICENSE_KEY_INJECT_FILE)"; \
+	else \
+		echo "🔑 License public key empty → fail-closed build (trial-only)"; \
+	fi
+
+build: inject-license-key
 	@echo "🔨 Building release binary with strict concurrency..."
 	swift build -c release \
 		-Xswiftc -strict-concurrency=complete

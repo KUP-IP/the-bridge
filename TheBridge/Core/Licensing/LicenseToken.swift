@@ -202,12 +202,15 @@ public enum LicensePublicKey {
 
     /// Bundled key, base64url-encoded raw 32-byte Ed25519 public key.
     ///
-    /// Until the production key is wired (release engineering task in
-    /// PKT-909 close-out), this string is empty so `bundled()` returns
-    /// nil. A nil bundled key + a non-grandfather user means "no paste-
-    /// key path works yet" — the trial timer is the only gate. Once
-    /// wired the string is non-empty and paste-key activation works.
-    public static let bundledBase64URL: String = ""
+    /// SOURCE (Packet B): the build-time-injected `injectedBase64URL`
+    /// constant in LicensePublicKeyInjected.swift, which
+    /// `make inject-license-key` (local dev key) and release.yml (the
+    /// production key from the LICENSE_PUBLIC_KEY_BASE64URL CI secret)
+    /// rewrite before the build. The committed default is empty, so an
+    /// unconfigured build returns nil here and FAILS CLOSED (no token
+    /// verifies; the trial timer is the only gate). When a key is injected
+    /// at build time, `bundled()` is non-nil and paste-key activation works.
+    public static var bundledBase64URL: String { injectedBase64URL }
 
     /// Returns the bundled public key, or nil if no key has been
     /// compiled in. Callers should treat nil as "paste-key activation

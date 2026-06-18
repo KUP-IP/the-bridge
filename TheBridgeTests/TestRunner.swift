@@ -790,6 +790,8 @@ await runLicenseToolErrorTests()
 await runLicenseUITests()
 await runLicenseRevocationTests()
 await runLicenseDispatchGateTests()
+// Packet B (PRJCT-2754 · Ship The Bridge v4): pubkey injection + mint→verify→entitled.
+await runLicenseCLITests()
 
 // v3.7·A: SkillsCacheReader/Writer pipeline — Notion-source eager
 // enumeration carve-out closure (PKT-907) + StandingOrders cached

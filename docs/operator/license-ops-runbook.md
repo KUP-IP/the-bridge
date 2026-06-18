@@ -43,21 +43,38 @@ not accepted as "partial."
 
 ## 1. Minting a new license
 
-> The mint CLI is an **operator-private tool** that will live under `scripts/`
-> (e.g. `scripts/mint-license.*`). It is **not committed with the signing key** —
-> the Ed25519 **private key is custody-controlled by the operator** and never
-> ships in the app or the repo (the app is verify-only; see
-> `LicenseToken.encode(payload:signedBy:)` for the signing shape the CLI mirrors).
-> The matching **public** half is what gets compiled into the build via the
-> `LICENSE_PUBLIC_KEY_BASE64URL` CI secret — see `DELIVERY-GAPS.md`.
+> The mint CLI is **`scripts/license-cli`** (Packet B) — a SwiftPM executable that
+> depends on `TheBridgeLib`, so it signs with the SAME `LicenseToken.encode` the
+> app verifies with (they can never drift). It is **not committed with the signing
+> key** — the Ed25519 **private key is custody-controlled by the operator** and
+> never ships in the app or the repo (the app is verify-only). The matching
+> **public** half is compiled into the build via the `LICENSE_PUBLIC_KEY_BASE64URL`
+> CI secret (`make inject-license-key`) — see `DELIVERY-GAPS.md`.
+>
+> **One-time setup — generate the production keypair (operator machine):**
+> ```
+> swift run license-cli keygen
+> #  → prints `private <b64url>` and `public <b64url>`.
+> #  • Store the PRIVATE key in operator custody (password manager / secure note).
+> #    NEVER commit it — it is the only thing that can mint valid licenses.
+> #  • Put the PUBLIC key in the LICENSE_PUBLIC_KEY_BASE64URL GitHub repo secret;
+> #    release.yml injects it at build time so shipped builds verify your tokens.
+> ```
 
 To mint:
 
 1. Gather the fields: `id` = the Stripe checkout/order id, `sub` = buyer email,
    `kind` = `"paid"`, `iat` = now (unix seconds), `exp` = `null` (perpetual) unless
    you're issuing a time-boxed promo.
-2. Run the mint CLI with the operator private key. It emits the dot-separated
-   wire token (`<base64url(payload)>.<base64url(signature)>`).
+2. Run the mint CLI with the operator private key:
+   ```
+   swift run license-cli mint --private <PRIVATE_b64url> \
+       --id <stripe_order_id> --sub buyer@example.com --kind paid
+   #  add --days N for a time-boxed promo; omit for a perpetual one-time purchase.
+   ```
+   It prints the dot-separated wire token
+   (`<base64url(payload)>.<base64url(signature)>`). Sanity-check any token with
+   `swift run license-cli verify --token <token> --public <PUBLIC_b64url>`.
 3. Deliver the token to the customer via the welcome email
    (`docs/operator/license-issuance-email.md`, `{{license_key}}`).
 4. Customer pastes it into **Settings → License → Activate**.

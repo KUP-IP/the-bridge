@@ -1345,7 +1345,15 @@ set -euo pipefail
 # installs affected (seedIfMissing never overwrites an existing registry.json). +6
 # tests (seed-unbound, setDataSource raw-id/URL/garbage, parseDataSourceId unit,
 # registry_entities-unbound). Measured = 2175. FLOOR 2169 -> 2175.
-FLOOR="${BRIDGE_TEST_FLOOR:-2175}"
+# Packet B (PRJCT-2754 · Ship The Bridge v4, Wave 1, 2026-06-18): license
+# public-key build injection (LicensePublicKeyInjected.swift + make
+# inject-license-key + release.yml secret) + scripts/license-cli
+# (keygen/mint/verify, reusing LicenseToken.encode) + a dev-keypair
+# mint→verify→entitled round-trip. +6 LicenseCLITests (fail-closed seam,
+# injected-key decode, mint/verify round-trip, wrong-key forgery reject,
+# entitled via computeStatus, expired→licenseExpired). Measured integrated
+# green 2175 → 2181; floor raised per the order-inversion rule.
+FLOOR="${BRIDGE_TEST_FLOOR:-2181}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

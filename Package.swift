@@ -21,6 +21,7 @@ let package = Package(
         .executable(name: "TheBridgeTests", targets: ["TheBridgeTests"]),
         .executable(name: "NotificationContentExtension", targets: ["NotificationContentExtension"]),
         .executable(name: "NBJobRunner", targets: ["NBJobRunner"]),
+        .executable(name: "license-cli", targets: ["license-cli"]),
     ],
     dependencies: [
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0"),
@@ -90,6 +91,16 @@ let package = Package(
         .executableTarget(
             name: "NBJobRunner",
             path: "NBJobRunner",
+            sources: ["main.swift"]
+        ),
+        // Packet B (PRJCT-2754): operator CLI for the Ed25519 license-token
+        // system. Depends on TheBridgeLib so `mint` reuses the SAME
+        // LicenseToken.encode the shipped app verifies with — the CLI and the
+        // in-app verifier can never drift.
+        .executableTarget(
+            name: "license-cli",
+            dependencies: ["TheBridgeLib"],
+            path: "scripts/license-cli",
             sources: ["main.swift"]
         ),
     ]
