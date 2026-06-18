@@ -6,7 +6,7 @@ the tool exists, but the agent reaches for `shell_exec` (or guesses a `/Users/..
 path) instead. This page exists so you reach for the right tool on the first try.
 
 **Accuracy rule for this doc:** every tool listed below was confirmed to be registered
-in the Swift source (grep `name: "<tool>"` under `NotionBridge/Modules/`). Tools that do
+in the Swift source (grep `name: "<tool>"` under `TheBridge/Modules/`). Tools that do
 **not** exist yet are called out explicitly in the [Not yet available](#not-yet-available)
 section — do not assume them.
 
@@ -43,7 +43,7 @@ use the background-process module:
 - **`bg_process_start`** (`.request`) — spawns the command as a detached child in its
   own POSIX process group; returns a job `id` immediately. Optional `workingDir`,
   `env`, `label`. Stdout/stderr stream to
-  `~/Library/Application Support/NotionBridge/jobs/<id>/`.
+  `~/Library/Application Support/TheBridge/jobs/<id>/`.
 - **`bg_process_status`** (`.request`) — `status`, `pid`, `pgid`, `exitCode`,
   `killSignal`, timestamps for one job `id`.
 - **`bg_process_logs`** (`.request`) — paginated stdout/stderr chunk. Pass `cursor:0`
@@ -55,7 +55,7 @@ use the background-process module:
 Typical loop: `bg_process_start` the build → poll `bg_process_status` until terminal →
 `bg_process_logs` to read the tail on failure.
 
-Source: `NotionBridge/Modules/BgProcessModule.swift`.
+Source: `TheBridge/Modules/BgProcessModule.swift`.
 
 ## Surgical file edits → `file_edit`
 
@@ -71,7 +71,7 @@ Do not shell out to `sed`/`python3` for in-place edits. Use the first-class edit
 `file_str_replace` and `file_apply_patch` still exist but are **deprecated 1-cycle
 aliases** of `file_edit` — prefer `file_edit`.
 
-Source: `NotionBridge/Modules/CodeEditModule.swift`.
+Source: `TheBridge/Modules/CodeEditModule.swift`.
 
 ## Code search → `code_search`
 
@@ -81,7 +81,7 @@ Source: `NotionBridge/Modules/CodeEditModule.swift`.
   programmatically. Returns `capability_missing` if ripgrep is not installed
   (`brew install ripgrep`).
 
-Source: `NotionBridge/Modules/CodeEditModule.swift`.
+Source: `TheBridge/Modules/CodeEditModule.swift`.
 
 ## Filesystem grounding → `system_info`
 
@@ -96,7 +96,7 @@ machine is `/Users/keepup`, not `/Users/isaiah` (this exact mistake cost round-t
 File tools also expand a leading `~` (VERIFIED-FIXED 2026-05-30), so `~/Developer/...`
 resolves correctly.
 
-Source: `NotionBridge/Modules/SystemModule.swift`.
+Source: `TheBridge/Modules/SystemModule.swift`.
 
 ## Long Notion reads → `notion_query` projection + `notion_page_markdown_read`
 
@@ -113,7 +113,7 @@ Large Notion results spill to disk and force `jq`/slice workarounds. Keep reads 
 - **`notion_page_markdown_read`** — full prose for one page without paginating raw blocks
   yourself. Prefer this over `notion_page_read` when block structure is not needed.
 
-Source: `NotionBridge/Modules/NotionModule.swift`.
+Source: `TheBridge/Modules/NotionModule.swift`.
 
 ## Git diffs over a range → `git_diff`
 
@@ -121,7 +121,7 @@ Source: `NotionBridge/Modules/NotionModule.swift`.
   worktree-vs-index) and a `cwd`. The earlier `A...B`-range failure is VERIFIED-FIXED
   (2026-05-30): use the `range:` + `cwd:` arguments rather than shelling out.
 
-Source: `NotionBridge/Modules/GitModule.swift`.
+Source: `TheBridge/Modules/GitModule.swift`.
 
 ---
 

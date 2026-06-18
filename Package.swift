@@ -1,6 +1,6 @@
 // swift-tools-version: 6.2
 // PKT-318: Added swift-nio for SSE transport on :9700
-// NOTE: Tests use a custom executable harness (not XCTest). Run via: swift run NotionBridgeTests
+// NOTE: Tests use a custom executable harness (not XCTest). Run via: swift run TheBridgeTests
 // PKT-353: Platform bumped to macOS 26 (Tahoe) for Liquid Glass adoption.
 //   swift-tools-version bumped 6.0 → 6.2 (required for .macOS(.v26)).
 // PKT-430: Added Sparkle for auto-update framework
@@ -14,11 +14,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "NotionBridge",
+    name: "TheBridge",
     platforms: [.macOS(.v26)],
     products: [
-        .executable(name: "NotionBridge", targets: ["NotionBridge"]),
-        .executable(name: "NotionBridgeTests", targets: ["NotionBridgeTests"]),
+        .executable(name: "TheBridge", targets: ["TheBridge"]),
+        .executable(name: "TheBridgeTests", targets: ["TheBridgeTests"]),
         .executable(name: "NotificationContentExtension", targets: ["NotificationContentExtension"]),
         .executable(name: "NBJobRunner", targets: ["NBJobRunner"]),
     ],
@@ -30,7 +30,7 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "NotionBridgeLib",
+            name: "TheBridgeLib",
             dependencies: [
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "NIOCore", package: "swift-nio"),
@@ -39,8 +39,8 @@ let package = Package(
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "JWTKit", package: "jwt-kit"),
             ],
-            path: "NotionBridge",
-            exclude: ["App/NotionBridgeApp.swift", "App/Resources"],
+            path: "TheBridge",
+            exclude: ["App/TheBridgeApp.swift", "App/Resources"],
             // W3: bundled default SKILL.md files (Apache-2.0 skills from
             // anthropics/skills + STUB.md stubs for source-available
             // skills we cannot redistribute). `.copy` preserves directory
@@ -50,18 +50,18 @@ let package = Package(
             resources: [.copy("Resources/skills")]
         ),
         .executableTarget(
-            name: "NotionBridge",
-            dependencies: ["NotionBridgeLib"],
-            path: "NotionBridge/App",
+            name: "TheBridge",
+            dependencies: ["TheBridgeLib"],
+            path: "TheBridge/App",
             exclude: ["AppDelegate.swift", "StatusBarController.swift", "WindowTracker.swift"],
-            sources: ["NotionBridgeApp.swift"],
+            sources: ["TheBridgeApp.swift"],
             resources: [.process("Resources")]
         ),
         // Standalone test executable (not .testTarget) — uses custom test harness
-        // in main.swift instead of XCTest. Run via: swift run NotionBridgeTests
+        // in main.swift instead of XCTest. Run via: swift run TheBridgeTests
         .executableTarget(
-            name: "NotionBridgeTests",
-            dependencies: ["NotionBridgeLib",
+            name: "TheBridgeTests",
+            dependencies: ["TheBridgeLib",
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "NIOEmbedded", package: "swift-nio"),
                 // PKT-800 S2 (fix #4b): NIOHTTP1 + NIOCore are used directly
@@ -71,12 +71,12 @@ let package = Package(
                 .product(name: "NIOHTTP1", package: "swift-nio"),
                 .product(name: "NIOCore", package: "swift-nio")
             ],
-            path: "NotionBridgeTests"
+            path: "TheBridgeTests"
         ),
         // PKT-551: Notification Content Extension — built as a standalone
         // executable, then repackaged by the Makefile into
         // NotificationContentExtension.appex and embedded into
-        // Notion Bridge.app/Contents/PlugIns/.
+        // The Bridge.app/Contents/PlugIns/.
         // Info.plist for the .appex lives at NotificationContentExtension/Info.plist
         // and is copied by `make extension`, not built by SPM.
         .executableTarget(
@@ -86,7 +86,7 @@ let package = Package(
             sources: ["NotificationViewController.swift"]
         ),
         // v1.9.2: Signed launchd callback helper. Replaces /usr/bin/curl in
-        // job plists so BTM groups background items under Notion Bridge.
+        // job plists so BTM groups background items under The Bridge.
         .executableTarget(
             name: "NBJobRunner",
             path: "NBJobRunner",

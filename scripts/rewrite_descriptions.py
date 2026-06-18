@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Rewrite all 66 NotionBridge MCP tool descriptions in Swift source files."""
+"""Rewrite all 66 The Bridge MCP tool descriptions in Swift source files."""
 import os
 
-BASE = "os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'NotionBridge')"
+BASE = "os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'TheBridge')"
 
 # (relative_path, old_desc_substring, new_full_description_value)
 # We match on unique substrings to avoid escaping issues
@@ -106,7 +106,7 @@ R.append(("Modules/SkillsModule.swift",
     "Fetch a named skill (Notion page) by name. Returns the page title, properties, and block content as text. Skills are configured in Settings",
     "Fetch a named skill by name (case-insensitive). Returns {title, properties, blocks} from the linked Notion page. Results cached 10 minutes. Configure skills in Settings"))
 R.append(("Modules/SkillsModule.swift",
-    "Manage NotionBridge skills configuration. Actions: list, add, delete, toggle, rename, update_url, bulk_add. Skills are persisted in Settings",
+    "Manage The Bridge skills configuration. Actions: list, add, delete, toggle, rename, update_url, bulk_add. Skills are persisted in Settings",
     "Manage the skills registry. Supported actions: list, add, delete, toggle, rename, update_url, bulk_add. Returns the updated skills list. Skills persist in Settings"))
 
 # === ChromeModule.swift (5) ===
@@ -203,8 +203,8 @@ R.append(("Modules/ShellModule.swift",
 
 # === AppleScriptModule.swift (1) ===
 R.append(("Modules/AppleScriptModule.swift",
-    "Execute AppleScript code in-process via NSAppleScript. Avoids TCC re-prompting by running as NotionBridge.app (not /usr/bin/osascript). Use for controlling apps (Chrome, Finder, System Events, etc.). Returns the result string or error info.",
-    "Execute AppleScript in-process via NSAppleScript. Runs as NotionBridge.app to avoid TCC re-prompting (unlike /usr/bin/osascript). Returns the result string or error info. Use for controlling apps like Chrome, Finder, System Events."))
+    "Execute AppleScript code in-process via NSAppleScript. Avoids TCC re-prompting by running as TheBridge.app (not /usr/bin/osascript). Use for controlling apps (Chrome, Finder, System Events, etc.). Returns the result string or error info.",
+    "Execute AppleScript in-process via NSAppleScript. Runs as TheBridge.app to avoid TCC re-prompting (unlike /usr/bin/osascript). Returns the result string or error info. Use for controlling apps like Chrome, Finder, System Events."))
 
 # === ScreenModule.swift (2) ===
 R.append(("Modules/ScreenModule.swift",

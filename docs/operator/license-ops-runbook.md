@@ -1,7 +1,7 @@
 # License Operations Runbook
 
 Operator runbook for the license lifecycle: mint, re-issue, revoke. Grounded
-against `NotionBridge/Core/Licensing/` as of v3.8.2.
+against `TheBridge/Core/Licensing/` as of v3.8.2.
 
 ## Mental model (read this first)
 
@@ -133,11 +133,11 @@ it. To resolve a customer you need the **Stripe / fulfillment record**:
 
 ## Key references
 
-- `NotionBridge/Core/Licensing/LicenseToken.swift` — payload schema, verify
+- `TheBridge/Core/Licensing/LicenseToken.swift` — payload schema, verify
   contract, base64url, `encode(payload:signedBy:)` (the signing shape the mint CLI
   mirrors).
-- `NotionBridge/Core/Licensing/LicenseManager.swift` — activate / deactivate /
+- `TheBridge/Core/Licensing/LicenseManager.swift` — activate / deactivate /
   trial gate / grandfather safety contract.
-- `NotionBridge/Core/Licensing/LicenseRevocationClient.swift` — verify endpoint,
+- `TheBridge/Core/Licensing/LicenseRevocationClient.swift` — verify endpoint,
   request/response shape, fail-open contract.
 - `docs/operator/license-issuance-email.md` — welcome email + fulfillment notes.

@@ -1,7 +1,7 @@
 # keepr-bridge — Code Review, Pruning & Test Hardening Sprint
 ## Post-v1.8.0 Quality Sprint
 
-**Prerequisite:** `docs/sprint-v1.8.0.md` sprint complete. All 17 items shipped. `swift run NotionBridgeTests` green on `main` at v1.8.0.
+**Prerequisite:** `docs/sprint-v1.8.0.md` sprint complete. All 17 items shipped. `swift run TheBridgeTests` green on `main` at v1.8.0.
 **Branch:** `chore/code-review-v1.8`
 **Contract:** `sk mac-dev v3.0.1` — Workflows B (BUILD), C (GIT), E (TEST), CODE
 **Maturity target:** Production-grade. Every line earns its place. Every tool is validated. Every failure mode is tested.
@@ -17,17 +17,17 @@ You are taking **ownership** of this codebase. That means:
 - When a test fails, you diagnose the root cause and fix it. You do not disable the test or work around it.
 - When you find something wrong that is not on the list, you fix it or log it — you do not ignore it.
 - You hold the standard: **would a senior Swift engineer with security expertise be impressed by this code?** If the answer is no, it is not done.
-- You run `swift run NotionBridgeTests` after every substantive change. A green test suite is not the end state — it is the minimum bar.
+- You run `swift run TheBridgeTests` after every substantive change. A green test suite is not the end state — it is the minimum bar.
 - You commit in logical, atomic units with clear conventional commit messages. You do not batch unrelated changes into a single commit.
-- You operate within `sk mac-dev v3.0.1` boundaries: code and tests are yours; NotionBridge lifecycle (restart, reload) hands off to `sk mac ops`.
+- You operate within `sk mac-dev v3.0.1` boundaries: code and tests are yours; TheBridge lifecycle (restart, reload) hands off to `sk mac ops`.
 
 ---
 
 ## Codebase Map
 
 ```
-NotionBridge/
-├── App/            AppDelegate, NotionBridgeApp, StatusBarController, WindowTracker
+TheBridge/
+├── App/            AppDelegate, TheBridgeApp, StatusBarController, WindowTracker
 ├── Config/         ConfigManager, Version, ConnectionRegistry, ConnectionHealthChecker, BridgeConnectionModels
 ├── Modules/        ~20 feature modules (Notion, File, Shell, Screen, Messages, Skills, Stripe, ...)
 ├── Notion/         NotionClient, NotionClientRegistry, NotionModels
@@ -35,13 +35,13 @@ NotionBridge/
 ├── Server/         ServerManager, SSETransport, ToolRouter, MCPHTTPValidation
 └── UI/             DashboardView, SettingsWindow, ConnectionsManagementView, PermissionView, ...
 
-NotionBridgeTests/
-├── main.swift                          Custom test harness (swift run NotionBridgeTests)
+TheBridgeTests/
+├── main.swift                          Custom test harness (swift run TheBridgeTests)
 ├── *ModuleTests.swift                  Per-module unit tests (22 files)
 └── IntegrationTests/EndToEndTests.swift
 ```
 
-Test runner: `swift run NotionBridgeTests` (custom harness — NOT `swift test`).
+Test runner: `swift run TheBridgeTests` (custom harness — NOT `swift test`).
 Build: `swift build -c release` or `make app`.
 
 ---
@@ -159,7 +159,7 @@ Every tool handler receives `arguments` from an external MCP client. Treat all i
 - `AuditLog` — verify it logs the operation and actor, never the credential value
 
 ### 4.4 Entitlement Hygiene
-Review `NotionBridge.entitlements`:
+Review `TheBridge.entitlements`:
 - Each entitlement must correspond to an active feature. Document the mapping.
 - Any entitlement not currently exercised by live code is a security surface that should be removed.
 
@@ -173,7 +173,7 @@ Review `NotionBridge.entitlements`:
 
 ## Phase 5 — Test Coverage Expansion
 
-The test suite uses a custom harness (`swift run NotionBridgeTests`). Tests live in `NotionBridgeTests/` as `swift run` executable targets, not XCTest.
+The test suite uses a custom harness (`swift run TheBridgeTests`). Tests live in `TheBridgeTests/` as `swift run` executable targets, not XCTest.
 
 ### 5.1 Coverage Audit
 For each module, map existing tests against the tool's handler logic:
@@ -234,7 +234,7 @@ This is the core execution loop. Run it until all tests pass with zero failures.
 
 ```
 LOOP:
-  1. swift run NotionBridgeTests
+  1. swift run TheBridgeTests
   2. If all pass → proceed to Phase 7
   3. If failures:
      a. Read the full failure output
@@ -254,7 +254,7 @@ LOOP:
 
 ## Phase 7 — Full Tool Validation
 
-After the test suite is green, perform a live end-to-end validation of every registered MCP tool. This is not covered by unit tests alone — it exercises the full NotionBridge SSE transport, SecurityGate, and tool dispatch stack.
+After the test suite is green, perform a live end-to-end validation of every registered MCP tool. This is not covered by unit tests alone — it exercises the full TheBridge SSE transport, SecurityGate, and tool dispatch stack.
 
 ### 7.1 Validation Method
 Use `mcp__notion-bridge__*` tool calls directly through the MCP session. For each tool:
@@ -423,7 +423,7 @@ This sprint is complete when **all** of the following are true:
 - [ ] No credential value appears in any log entry, error message, or tool response
 
 ### Tests
-- [ ] `swift run NotionBridgeTests` passes with zero failures
+- [ ] `swift run TheBridgeTests` passes with zero failures
 - [ ] `swift build -c release` passes with zero warnings
 - [ ] Every tool handler has at least one test for the missing-parameter failure path
 - [ ] HTML entity round-trip test passes for `file_write`

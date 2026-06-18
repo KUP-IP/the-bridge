@@ -1,10 +1,10 @@
 # Bundled Skills — Attribution + License Matrix
 
-Notion Bridge ships a curated set of default SKILL.md files alongside the
+The Bridge ships a curated set of default SKILL.md files alongside the
 app. They are loaded at runtime by `FilesystemSkillIndex` from
 `Bundle.module/skills/<name>/SKILL.md`. Operators can override or add
 their own skills by placing a `SKILL.md` under
-`~/Library/Application Support/Notion Bridge/skills/<name>/SKILL.md` —
+`~/Library/Application Support/The Bridge/skills/<name>/SKILL.md` —
 the user dir wins on a name collision.
 
 Skills marked **Apache-2.0** are redistributed in their entirety. Skills
@@ -51,7 +51,7 @@ The default-bundle model is **additive, not authoritative**. Operators
 can:
 
   * **Override a bundled skill** — drop a SKILL.md with the same `name`
-    into `~/Library/Application Support/Notion Bridge/skills/<name>/`.
+    into `~/Library/Application Support/The Bridge/skills/<name>/`.
     The user-dir version wins on collision (`FilesystemSkillIndex` D4).
   * **Add a new skill** — same path, any name. The file watcher picks
     up new entries within the cache TTL (60s) or immediately on file-

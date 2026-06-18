@@ -4,7 +4,7 @@
 
 **Effective date:** _(to be set on publish)_
 **Licensor:** KUP Solutions (Isaiah Peters), Texas, USA — `isaiah@kup.solutions`
-**Product:** The Bridge (Swift target `NotionBridge`, bundle ID `kup.solutions.notion-bridge`)
+**Product:** The Bridge (Swift target `The Bridge`, bundle ID `kup.solutions.notion-bridge`)
 
 This Commercial Use License (the "**CUL**") governs Your commercial use of **The Bridge** ("**Software**") when You have purchased a license through KUP Solutions. The CUL is layered **on top of** the [KUP Solutions Source-Available License](./LICENSE) (the "**Source-Available License**"): the Source-Available License continues to govern Your access to the source code, and this CUL grants the additional rights needed to run the Software in a commercial capacity on a single machine.
 

@@ -1,7 +1,7 @@
 # Security tiers and Always-Allow scope
 
 The Bridge gates every tool call through `SecurityGate` using a three-tier model
-(`SecurityTier` in `NotionBridge/Security/SecurityGate.swift`):
+(`SecurityTier` in `TheBridge/Security/SecurityGate.swift`):
 
 | Tier       | Behavior                                                              |
 |------------|----------------------------------------------------------------------|
@@ -14,7 +14,7 @@ The Bridge gates every tool call through `SecurityGate` using a three-tier model
 Tools that strictly read state — those whose names end in `_list`, `_get`,
 `_read`, or `_search` — are registered at tier `.open` so they run without a
 confirmation prompt. This is enforced by `ReadOnlyTierAuditTests`
-(`NotionBridgeTests/ReadOnlyTierAuditTests.swift`), which fails the build if any
+(`TheBridgeTests/ReadOnlyTierAuditTests.swift`), which fails the build if any
 read-only-named tool is registered above `.open` without an explicit, justified
 allowlist entry.
 

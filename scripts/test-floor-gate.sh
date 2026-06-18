@@ -2,7 +2,7 @@
 # test-floor-gate.sh — WS-C (v2.3, PKT-798)
 #
 # Locks the green test baseline as a CI gate. The custom harness
-# (.build/debug/NotionBridgeTests) already exits non-zero on any failing
+# (.build/debug/TheBridgeTests) already exits non-zero on any failing
 # test, but that does NOT catch tests being silently deleted or disabled —
 # a suite that shrinks from 710 → 600 with 0 failures would otherwise pass
 # CI unnoticed. This gate fails the build if the passing count drops below
@@ -80,7 +80,7 @@
 # 9728 §5.1); scope-insufficient tools/call → 403 with NO dispatch. Also
 # fixed the S1 finding: ProtectedResourceMetadataProvider.resource now
 # derives from the resolved SSE port (config.json → NOTION_BRIDGE_PORT →
-# 9700) instead of a hardcoded 9700, and the NotionBridgeTests target now
+# 9700) instead of a hardcoded 9700, and the TheBridgeTests target now
 # declares explicit NIOHTTP1 + NIOCore products. Added RemoteOAuthBearerTests
 # (47 harness `test()` blocks): header extraction, accept/expired/nbf/
 # wrong-iss/wrong-aud/bad-sig/malformed/missing/fail-closed validation,
@@ -216,7 +216,7 @@
 # expected; lowering it requires a conscious decision recorded alongside
 # the change.
 # cmd-w2 (Commands data layer, 2026-05-18): additive-isolated new files
-# only — NotionBridge/Modules/Commands/MentionResolver.swift +
+# only — TheBridge/Modules/Commands/MentionResolver.swift +
 # CommandsManager.swift (a Snippet-shaped `Command` model, an in-memory
 # TTL `CommandCache` cloned from SkillsModule.SkillCache + offline-
 # fallback semantics, and a `CommandsManager` actor that fetches a
@@ -420,7 +420,7 @@
 # SkillSource discriminated enum (Codable + legacy notionPageId
 # backward-compat decode + synthesized-mirror encode → stable round-trip
 # fixed point); FilesystemSkillIndex actor (Bundle.module bundled scan
-# + ~/Library/Application Support/Notion Bridge/skills user dir +
+# + ~/Library/Application Support/The Bridge/skills user dir +
 # DispatchSource FS watcher + 60s TTL); fetch_skill file-source path
 # (content = MentionResolver-rendered body, properties = YAML
 # frontmatter map; envelope-key parity); list_routing_skills merged
@@ -428,7 +428,7 @@
 # Notion/File source badge + Reveal-in-Finder + per-path enable toggle
 # (BridgeDefaults.fileSkillEnabled); pure FrontmatterParser
 # (never-throws, defensive over BOM/malformed/unclosed-quote/embedded
-# ---). (W3) 13 Apache-2.0 skills bundled at NotionBridge/Resources/
+# ---). (W3) 13 Apache-2.0 skills bundled at TheBridge/Resources/
 # skills/ via Package.swift .copy('Resources/skills') + LICENSE-APACHE-
 # 2.0.txt + NOTICE; 4 source-available stubs (docx/pdf/pptx/xlsx)
 # linked-not-redistributed; docs/operator/skills-attributions.md
@@ -946,7 +946,7 @@ set -euo pipefail
 # silently dropped.
 # fix(sparkle) (2026-06-05): staged-update crash-loop guard. The 2026-06-05
 # incident was a raced Sparkle staged-update swap that left the SPM resource
-# bundle `NotionBridge_NotionBridge.bundle` an empty husk → SwiftPM's generated
+# bundle `TheBridge_TheBridge.bundle` an empty husk → SwiftPM's generated
 # `Bundle.module` accessor TRAPPED (`Swift.fatalError`) at the menu-bar-icon load
 # site → EXC_BREAKPOINT/SIGTRAP crash-loop on every launch. Fix: (1) graceful
 # degradation — MenuBarIconResolver resolves the icon via non-trapping
@@ -1446,7 +1446,7 @@ FLOOR="${BRIDGE_TEST_FLOOR:-2175}"
 # Recommended badge invariant, IconPickerCatalog emoji + SF Symbol
 # curation + de-duped + NSImage resolvable, CommandStore icon round-trip.
 # Baseline 1275 at HEAD 4554d32 + 14 + 25 + 19 + 27 = 1360.
-BIN=".build/debug/NotionBridgeTests"
+BIN=".build/debug/TheBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."
 swift build -c debug

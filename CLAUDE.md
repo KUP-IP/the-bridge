@@ -1,4 +1,4 @@
-# Project: The Bridge (NotionBridge)
+# Project: The Bridge (TheBridge)
 
 ## Overview
 A macOS menu-bar app that exposes the Mac + a Notion workspace to AI agents over MCP
@@ -6,8 +6,8 @@ A macOS menu-bar app that exposes the Mac + a Notion workspace to AI agents over
 (bundle id `kup.solutions.notion-bridge`), updated via Sparkle. SwiftPM, no Xcode project.
 
 ## Architecture
-- **Library target `NotionBridgeLib`** holds everything testable; thin `NotionBridge`
-  executable wraps it. Tests are a custom harness (`NotionBridgeTests`), NOT XCTest.
+- **Library target `TheBridgeLib`** holds everything testable; thin `TheBridge`
+  executable wraps it. Tests are a custom harness (`TheBridgeTests`), NOT XCTest.
 - **MCP server:** `Server/SSEServer` (`SSETransport.swift`) serves `/mcp`, `/sse`,
   `/health`, job callbacks. Tools register via `Server/BridgeModuleRegistry.swift`
   (single source of truth, ~172 tools / 27 families) → `ToolRouter` → `MCPToolFactory`.
@@ -27,7 +27,7 @@ A macOS menu-bar app that exposes the Mac + a Notion workspace to AI agents over
 
 ## Dev Commands
 - Build (release, strict concurrency): `make build`
-- Test: `make test` (debug build + run harness) — or `.build/debug/NotionBridgeTests`
+- Test: `make test` (debug build + run harness) — or `.build/debug/TheBridgeTests`
 - Test floor gate: `make test-floor` (`scripts/test-floor-gate.sh`) — green-count must be ≥ FLOOR
 - Install signed (keeps TCC identity, does NOT relaunch): `make install-copy` then
   `open -a "The Bridge"`. NOTE: the GUI app gets env (`BRIDGE_ENABLE_HTTP`, WorkOS, …)

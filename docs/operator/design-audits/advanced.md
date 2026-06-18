@@ -1,6 +1,6 @@
 # Design Audit — Advanced page
 
-> Source: `NotionBridge/UI/Sections/AdvancedSection.swift` (548 lines, READ-ONLY)
+> Source: `TheBridge/UI/Sections/AdvancedSection.swift` (548 lines, READ-ONLY)
 > Method: `design:design-critique` rubric applied against the LOCKED redesign decisions (7-section sidebar, global density tenet + legibility floor, section-name-only titlebar, slim integrated footbar).
 > Date: 2026-06-10 · Auditor session: Advanced page
 

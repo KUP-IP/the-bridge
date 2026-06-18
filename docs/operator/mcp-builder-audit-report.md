@@ -2,7 +2,7 @@
 
 **Status:** Phase-1 read-only audit. No code edits. Input for Phase-2 consolidation.
 **Auditor:** Bridge MCP read-only research agent · 2026-05-19
-**Source of truth:** `NotionBridge/Modules/*.swift` registration sites + `NotionBridge/Server/ToolAnnotations.swift` + Anthropic `mcp-builder` SKILL.md (raw GitHub, `main`).
+**Source of truth:** `TheBridge/Modules/*.swift` registration sites + `TheBridge/Server/ToolAnnotations.swift` + Anthropic `mcp-builder` SKILL.md (raw GitHub, `main`).
 
 ---
 
@@ -298,7 +298,7 @@ Ranked by (impact × confidence) ÷ effort. Impact = how much the agent surface 
 
 **Sources:**
 - mcp-builder SKILL.md — `https://raw.githubusercontent.com/anthropics/skills/main/skills/mcp-builder/SKILL.md` (fetched at audit time, `main` branch). The reference/ and scripts/ subfolders of the same skill could not be fetched via WebFetch (404 / directory listing only); audit applied best-judgment mcp-builder principles to fill the gap.
-- Bridge MCP registration sites — `NotionBridge/Modules/*.swift`, 162 static tools extracted via regex over `ToolRegistration(name: ..., tier: ..., neverAutoApprove?: ..., description: ...)`.
-- Bridge MCP annotation catalog — `NotionBridge/Server/ToolAnnotations.swift`, 160 entries (2 newly-added `jobs_*_all` tools missing → will fail the audit-test invariant on next build; item 3 fixes that too).
+- Bridge MCP registration sites — `TheBridge/Modules/*.swift`, 162 static tools extracted via regex over `ToolRegistration(name: ..., tier: ..., neverAutoApprove?: ..., description: ...)`.
+- Bridge MCP annotation catalog — `TheBridge/Server/ToolAnnotations.swift`, 160 entries (2 newly-added `jobs_*_all` tools missing → will fail the audit-test invariant on next build; item 3 fixes that too).
 
 **Not in scope:** dynamically-discovered Stripe proxy tools (intentionally excluded from static catalog and from this audit). Implementation, alias plumbing, and deprecation copy live in Phase-2.

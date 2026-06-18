@@ -11,8 +11,8 @@
 #     assert expected BridgeAXID ids present  # per the harness manifest
 #
 # The pure-logic core + the per-section expected-id MANIFEST live in
-# NotionBridge/Modules/SettingsUIValidationHarness.swift (unit-tested in
-# NotionBridgeTests/SettingsAXIdentifierTests.swift). This script is the
+# TheBridge/Modules/SettingsUIValidationHarness.swift (unit-tested in
+# TheBridgeTests/SettingsAXIdentifierTests.swift). This script is the
 # on-device wiring; it expects the Bridge MCP tools to be invoked by the agent
 # harness and the resulting ax_tree JSON saved to a file it can grep.
 #

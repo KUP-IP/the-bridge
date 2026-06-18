@@ -66,7 +66,7 @@ def add_icon(base: Image.Image, icon_path: Path) -> None:
 
 def add_title(base: Image.Image) -> None:
     draw = ImageDraw.Draw(base)
-    draw.text((86, 42), "NotionBridge", fill=(255, 255, 255, 235))
+    draw.text((86, 42), "The Bridge", fill=(255, 255, 255, 235))
     draw.text((86, 72), "Drag the app into Applications to install.", fill=(230, 235, 245, 210))
 
 

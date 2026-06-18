@@ -6,11 +6,11 @@
 **Rubric:** `design:design-critique` (first-impression, usability, hierarchy, consistency, accessibility).
 
 Files in scope:
-- `NotionBridge/UI/BridgeShell.swift` — `BridgeStage`, `BridgeCarbonWeave`, `BridgeVectorIcon`/`BridgeIconShape`, `BridgeSectionNav`/`BridgeSectionNavItem`, `BridgeTitleBar` (L265), `BridgeFootBar` (L287).
-- `NotionBridge/UI/SettingsWindow.swift` — `SettingsWindowController` (window styleMask/size L69–96), `SettingsSection` enum (L114–142), `SettingsView.body` layout (L213–228), `detailContent` switch (L230–244).
-- `NotionBridge/UI/Sections/BridgeSettingsSectionHeader.swift` — shared per-page hero header + presets.
-- `NotionBridge/UI/BridgeTokens.swift` — color/radius tokens (no spacing scale exists yet).
-- `NotionBridge/UI/BridgeThemeV2.swift` — `BridgeSectionIcon.systemImage(for:)` (L290).
+- `TheBridge/UI/BridgeShell.swift` — `BridgeStage`, `BridgeCarbonWeave`, `BridgeVectorIcon`/`BridgeIconShape`, `BridgeSectionNav`/`BridgeSectionNavItem`, `BridgeTitleBar` (L265), `BridgeFootBar` (L287).
+- `TheBridge/UI/SettingsWindow.swift` — `SettingsWindowController` (window styleMask/size L69–96), `SettingsSection` enum (L114–142), `SettingsView.body` layout (L213–228), `detailContent` switch (L230–244).
+- `TheBridge/UI/Sections/BridgeSettingsSectionHeader.swift` — shared per-page hero header + presets.
+- `TheBridge/UI/BridgeTokens.swift` — color/radius tokens (no spacing scale exists yet).
+- `TheBridge/UI/BridgeThemeV2.swift` — `BridgeSectionIcon.systemImage(for:)` (L290).
 - `design/design-system/project/ui_kits/the-bridge/kit.css` — visual SSOT (`.titlebar` L62, `.secnav` L72, `.sec` L75, `.pane` L85, `.footbar` L178).
 
 ---

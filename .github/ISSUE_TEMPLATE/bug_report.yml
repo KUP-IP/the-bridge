@@ -1,5 +1,5 @@
 name: Bug report
-description: Something is broken in NotionBridge
+description: Something is broken in TheBridge
 labels: ["bug"]
 body:
   - type: markdown
@@ -9,8 +9,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: NotionBridge version
-      description: App menu or Settings — About, or `Notion Bridge` → version string.
+      label: TheBridge version
+      description: App menu or Settings — About, or `The Bridge` → version string.
       placeholder: e.g. 1.5.2 (8)
     validations:
       required: true
@@ -41,4 +41,4 @@ body:
     id: logs
     attributes:
       label: Logs / screenshots (optional)
-      description: Relevant excerpt from `~/Library/Logs/NotionBridge/notion-bridge.log` if applicable.
+      description: Relevant excerpt from `~/Library/Logs/TheBridge/notion-bridge.log` if applicable.

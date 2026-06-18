@@ -10,14 +10,14 @@
 
 | Path | Role |
 |------|------|
-| `NotionBridge/UI/ModuleGroupCard.swift` | `ModuleGroupCard` (group card + header + tool list) and `ModuleGroupList` (the page) |
-| `NotionBridge/UI/ToolRegistryView.swift` | legacy flat `Form`-based registry (still in tree; superseded by ModuleGroupList) |
-| `NotionBridge/UI/Sections/ToolDepLinks.swift` | dep-link derivation + `BridgeDepLinkRow` |
-| `NotionBridge/Core/ModuleGroup.swift` | `ModuleGroup` model, `masterState`, prefix derivation, dispatch gate |
-| `NotionBridge/UI/BridgeShell.swift` | shell primitives (titlebar, footbar, nav, glass) |
-| `NotionBridge/UI/BridgeThemeV2.swift` | `BridgeGlassCard`, `PartialToggle`/`TripleState`, `BridgeDepLink`, `BridgeCardLabel` |
-| `NotionBridge/UI/BridgeTokens.swift` | color tokens, `Radius` |
-| `NotionBridge/UI/BridgeTheme.swift` | `BridgeSpacing` scale (xxs 4 / xs 8 / sm 12 / md 16 / lg 24) |
+| `TheBridge/UI/ModuleGroupCard.swift` | `ModuleGroupCard` (group card + header + tool list) and `ModuleGroupList` (the page) |
+| `TheBridge/UI/ToolRegistryView.swift` | legacy flat `Form`-based registry (still in tree; superseded by ModuleGroupList) |
+| `TheBridge/UI/Sections/ToolDepLinks.swift` | dep-link derivation + `BridgeDepLinkRow` |
+| `TheBridge/Core/ModuleGroup.swift` | `ModuleGroup` model, `masterState`, prefix derivation, dispatch gate |
+| `TheBridge/UI/BridgeShell.swift` | shell primitives (titlebar, footbar, nav, glass) |
+| `TheBridge/UI/BridgeThemeV2.swift` | `BridgeGlassCard`, `PartialToggle`/`TripleState`, `BridgeDepLink`, `BridgeCardLabel` |
+| `TheBridge/UI/BridgeTokens.swift` | color tokens, `Radius` |
+| `TheBridge/UI/BridgeTheme.swift` | `BridgeSpacing` scale (xxs 4 / xs 8 / sm 12 / md 16 / lg 24) |
 
 ---
 

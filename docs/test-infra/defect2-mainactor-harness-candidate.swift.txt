@@ -1,5 +1,5 @@
 // TestRunner.swift – V1-06 Test Runner
-// NotionBridge · Tests (standalone executable — no XCTest needed)
+// TheBridge · Tests (standalone executable — no XCTest needed)
 //
 // Runs: SecurityGate, ToolRouter, AuditLog, Module tests, Integration/E2E tests
 // PKT-376: SecurityGate tests updated for 3-tier model
@@ -23,7 +23,7 @@ import Foundation
 
 
 import MCP
-import NotionBridgeLib
+import TheBridgeLib
 
 // MARK: - Test Harness (file scope — other test files call these as free functions)
 
@@ -75,7 +75,7 @@ nonisolated func makeSampleEntry(
 // MARK: - Entry point
 
 @main
-struct NotionBridgeTestRunner {
+struct TheBridgeTestRunner {
     // MAIN-ACTOR REENTRANCY FIX (corrected). Symptom: the suite froze at 0%
     // forward progress on ~50% of local runs, at varying points, always GREEN
     // when it did finish — a nondeterministic deadlock on the main actor.
@@ -688,4 +688,4 @@ await runEnableCloudAccessFlowTests()
 // summary and the floor gate derives pass/fail from the `Results:` count.
         exit(failed > 0 ? 1 : 0)
     } // static func runAllTests()
-} // @main struct NotionBridgeTestRunner
+} // @main struct TheBridgeTestRunner

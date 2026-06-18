@@ -18,7 +18,7 @@ Three security findings from Phase 1 have been **fixed and verified** in this ph
 ## Findings & Fixes
 
 ### SEC-01: Timing Attack on Bearer Token (CRITICAL → FIXED)
-**File:** `NotionBridge/Server/MCPHTTPValidation.swift:176`  
+**File:** `TheBridge/Server/MCPHTTPValidation.swift:176`  
 **Before:** `guard token == expectedToken else {`  
 **Issue:** Swift's `==` operator on strings short-circuits on first mismatch, leaking token length and prefix bytes via timing side-channel.  
 **Fix:** Replaced with constant-time XOR comparison:
@@ -31,7 +31,7 @@ Three security findings from Phase 1 have been **fixed and verified** in this ph
 **Verification:** Build passes. Line 186 contains `mismatch |= a ^ b`.
 
 ### SEC-02: Legacy SSE CORS Wildcard (MEDIUM → FIXED)
-**File:** `NotionBridge/Server/SSETransport.swift:783`  
+**File:** `TheBridge/Server/SSETransport.swift:783`  
 **Before:** `responseHead.headers.add(name: "Access-Control-Allow-Origin", value: "*")`  
 **Issue:** The `handleLegacySSE` function set `Access-Control-Allow-Origin: *`, allowing any web page to connect to the local MCP SSE endpoint. While the server is localhost-only, a malicious web page could exploit this to interact with the MCP server via cross-origin requests.  
 **Context:** Other endpoints in SSETransport.swift were already fixed per PKT-373 P1-4 comments, but this legacy handler was missed.  
@@ -39,7 +39,7 @@ Three security findings from Phase 1 have been **fixed and verified** in this ph
 **Verification:** Build passes. No remaining `Access-Control-Allow-Origin: *` in codebase.
 
 ### SEC-03: clipboard_write at .open Tier (LOW → FIXED)
-**File:** `NotionBridge/Modules/FileModule.swift:468`  
+**File:** `TheBridge/Modules/FileModule.swift:468`  
 **Before:** `tier: .open`  
 **Issue:** `clipboard_write` replaces the user's clipboard contents — a destructive, non-reversible mutation of user state. The `.open` tier allows execution without any user notification.  
 **Fix:** Upgraded to `tier: .notify`. Updated inline comment from "open" to "notify (SEC-03: upgraded from .open)".  

@@ -73,12 +73,12 @@ dialog above. Here the update *applied*, but left the app in a
 ## Root cause
 
 The app's menu-bar icon (and bundled skills) live in the SwiftPM **resource
-bundles** `NotionBridge_NotionBridge.bundle` (executable target) and
-`NotionBridge_NotionBridgeLib.bundle` (library target), copied into
+bundles** `TheBridge_TheBridge.bundle` (executable target) and
+`TheBridge_TheBridgeLib.bundle` (library target), copied into
 `The Bridge.app/Contents/Resources/` by the Makefile `app` target.
 
 On 2026-06-05 a Sparkle **staged-update swap** raced/partially-applied and left
-`NotionBridge_NotionBridge.bundle` on disk **without a `Contents/` directory** —
+`TheBridge_TheBridge.bundle` on disk **without a `Contents/` directory** —
 a structurally-corrupt bundle. The old code reached the icon through SwiftPM's
 generated `Bundle.module` accessor, which is **not** a normal optional lookup:
 SwiftPM synthesizes it to call `Swift.fatalError` ("could not load resource
@@ -97,7 +97,7 @@ reinstall.
 
 ### 1. Graceful degradation (the crash-loop killer — definitive)
 
-`NotionBridge/App/MenuBarIconResolver.swift` resolves the menu-bar icon WITHOUT
+`TheBridge/App/MenuBarIconResolver.swift` resolves the menu-bar icon WITHOUT
 ever touching the trapping `Bundle.module` accessor:
 
 - It probes candidate resource-bundle paths via `Bundle(path:)`, which **returns
@@ -106,7 +106,7 @@ ever touching the trapping `Bundle.module` accessor:
 - If nothing loads, it falls back to a **system SF Symbol**
   (`rectangle.connected.to.line.below`) and logs the degradation.
 
-`loadMenuBarIcon()` (in `NotionBridgeApp.swift`) now returns a non-optional
+`loadMenuBarIcon()` (in `TheBridgeApp.swift`) now returns a non-optional
 `NSImage` from the resolver, so the menu-bar item is **always** rendered and the
 app **always boots** — worst case it shows the SF Symbol glyph plus a unified-log
 line pointing here. `FilesystemSkillIndex.defaultBundledDirectory()` was likewise
@@ -116,7 +116,7 @@ of trapping the server-bootstrap path).
 
 ### 2. Pre-swap validation (best-effort — Sparkle API limited)
 
-`NotionBridge/App/StagedUpdateValidator.swift` is a pure, non-trapping predicate
+`TheBridge/App/StagedUpdateValidator.swift` is a pure, non-trapping predicate
 that flags the incident signature (a `.bundle` that exists but has no
 `Contents/`, or is unloadable). It is wired into the `SPUUpdaterDelegate`
 (`UpdaterLogger` in `AppDelegate.swift`):
@@ -154,7 +154,7 @@ appears then vanishes), recover by clearing Sparkle staging and reinstalling:
 ```sh
 # 1. Quit any running instance
 osascript -e 'tell application "The Bridge" to quit' 2>/dev/null || true
-pkill -f "The Bridge.app/Contents/MacOS/NotionBridge" 2>/dev/null || true
+pkill -f "The Bridge.app/Contents/MacOS/TheBridge" 2>/dev/null || true
 
 # 2. Clear pending Sparkle staged update (the corrupt swap source)
 rm -rf "$HOME/Library/Caches/kup.solutions.notion-bridge/org.sparkle-project.Sparkle/Installation/"*
@@ -183,9 +183,9 @@ exercise. The regression suite covers the pure guard logic
 
 ## Key references (staged-update guards)
 
-- `NotionBridge/App/MenuBarIconResolver.swift` — non-trapping icon resolution + SF Symbol fallback
-- `NotionBridge/App/StagedUpdateValidator.swift` — pure resource-bundle integrity predicate
-- `NotionBridge/App/AppDelegate.swift` → `UpdaterLogger` — `shouldProceedWithUpdate` veto + install-transition logging
-- `NotionBridge/App/NotionBridgeApp.swift` → `loadMenuBarIcon()` — calls the resolver
-- `NotionBridgeTests/SparkleResilienceTests.swift` — regression coverage
+- `TheBridge/App/MenuBarIconResolver.swift` — non-trapping icon resolution + SF Symbol fallback
+- `TheBridge/App/StagedUpdateValidator.swift` — pure resource-bundle integrity predicate
+- `TheBridge/App/AppDelegate.swift` → `UpdaterLogger` — `shouldProceedWithUpdate` veto + install-transition logging
+- `TheBridge/App/TheBridgeApp.swift` → `loadMenuBarIcon()` — calls the resolver
+- `TheBridgeTests/SparkleResilienceTests.swift` — regression coverage
 - `Makefile` → `PREINSTALL_SAFETY` / `VERIFY_INSTALL` — install-copy hardening (PR #31)

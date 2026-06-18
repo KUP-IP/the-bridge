@@ -175,7 +175,7 @@ Bundles the post-3.7.6 remediation work (14 branches), gated together (test floo
 
 ### Added — Keychain access-group scoping (PKT-933)
 
-- **`keychain-access-groups` entitlement** (`NotionBridge.entitlements`) declaring `VP24Z9CS22.kup.solutions.notion-bridge` — the app's *implicit default* access group, so existing credentials already reside there and the entitlement landing is **non-destructive by construction**.
+- **`keychain-access-groups` entitlement** (`TheBridge.entitlements`) declaring `VP24Z9CS22.kup.solutions.notion-bridge` — the app's *implicit default* access group, so existing credentials already reside there and the entitlement landing is **non-destructive by construction**.
 - **`AppIdentifierPrefix`** wired into `Info.plist` so `defaultKeychainAccessGroupForThisApp()` resolves at runtime (the `e550401` post-filter previously fell through to its default-DENY branch).
 - **`CredentialManager` scopes every `SecItem*` query** (save / read / list / delete) to the access group — but only when a cached entitlement probe confirms the capability. Unsigned dev builds, the test executable, and pre-entitlement production installs detect `errSecMissingEntitlement` and fall back to the read-time post-filter, so **this change is safe to ship before the entitlement is signed in**. Once entitled, foreign items are filtered at the system level and never reach the post-filter.
 - **Non-destructive migration sentinel** (`migrateToAccessGroupIfNeeded`, wired at launch in `AppDelegate`) — idempotent continuity check that confirms our items are reachable in-group and logs a one-line receipt. It **never** deletes or re-creates an item (credential loss is a release-blocker). Defers (and re-runs) until the entitled build is installed.
@@ -209,10 +209,10 @@ Bundles the post-3.7.6 remediation work (14 branches), gated together (test floo
 
 ### Added — Licensing foundation
 
-- **`LicenseManager`** actor at `NotionBridge/Core/Licensing/LicenseManager.swift` — single source of truth for the 30-day trial gate and paid-license activation. State persists to `~/Library/Application Support/The Bridge/license.json` via `BridgePaths`; atomic writes; offline-first.
-- **`LicenseToken`** at `NotionBridge/Core/Licensing/LicenseToken.swift` — Ed25519-signed JSON token format (`<base64url(payload)>.<base64url(sig)>`); verifier is pure + offline; signature tampering, payload tampering, wrong-key, malformed all fail closed.
-- **`LicenseState`** at `NotionBridge/Core/Licensing/LicenseState.swift` — on-disk schema (firstLaunchAt, optional token, grandfather flag, trial-expired-acknowledged); forwards-tolerant Codable.
-- **`LicenseRevocationClient`** at `NotionBridge/Core/Licensing/LicenseRevocationClient.swift` — best-effort online revocation check against the worker `/api/nb/verify` endpoint; injectable transport for tests; nil-on-network-error so a worker outage cannot lock users out (signature gate remains the security boundary).
+- **`LicenseManager`** actor at `TheBridge/Core/Licensing/LicenseManager.swift` — single source of truth for the 30-day trial gate and paid-license activation. State persists to `~/Library/Application Support/The Bridge/license.json` via `BridgePaths`; atomic writes; offline-first.
+- **`LicenseToken`** at `TheBridge/Core/Licensing/LicenseToken.swift` — Ed25519-signed JSON token format (`<base64url(payload)>.<base64url(sig)>`); verifier is pure + offline; signature tampering, payload tampering, wrong-key, malformed all fail closed.
+- **`LicenseState`** at `TheBridge/Core/Licensing/LicenseState.swift` — on-disk schema (firstLaunchAt, optional token, grandfather flag, trial-expired-acknowledged); forwards-tolerant Codable.
+- **`LicenseRevocationClient`** at `TheBridge/Core/Licensing/LicenseRevocationClient.swift` — best-effort online revocation check against the worker `/api/nb/verify` endpoint; injectable transport for tests; nil-on-network-error so a worker outage cannot lock users out (signature gate remains the security boundary).
 - **Grandfather SAFETY CONTRACT** — existing v3.4.x → v3.6.0 auto-update users (detected via PathMigration's `.bridge-migration-v3.5-complete` sentinel) land as `.grandfathered` and never see a trial countdown. The state is sticky across relaunches even if the sentinel is later removed.
 - **Settings → Advanced → License card** — status pill (Trial/Expired/Licensed/Grandfathered), paste field, Activate button with error states, Remove license, Buy a license deep-link. Self-hosted via `LicenseCardHost` so `AdvancedSection`'s signature is unchanged.
 - **Dashboard expired banner** — slim red banner above the status row when the trial or license has expired; clicking opens Settings → Advanced.
@@ -232,15 +232,15 @@ Bundles the post-3.7.6 remediation work (14 branches), gated together (test floo
 
 ## [3.6.0] — 2026-05-27 — Liquid Glass complete: rename, BridgePaths, Standing Orders, Command Bridge, ModuleGroup, Dashboard
 
-Project rename "NotionBridge → The Bridge" complete in user-visible surfaces. Bundle identifier (`kup.solutions.notion-bridge`), Keychain service name (`com.notionbridge`), and SPM binary/target names intentionally preserved to protect user data continuity. GitHub repository renamed `KUP-IP/Notion-bridge` → `KUP-IP/the-bridge`; Sparkle SUFeedURL and appcast download URLs updated in lockstep — existing v3.4.x installs will pick up this release via GitHub's automatic redirect from the old URL.
+Project rename "TheBridge → The Bridge" complete in user-visible surfaces. Bundle identifier (`kup.solutions.notion-bridge`), Keychain service name (`com.notionbridge`), and SPM binary/target names intentionally preserved to protect user data continuity. GitHub repository renamed `KUP-IP/Notion-bridge` → `KUP-IP/the-bridge`; Sparkle SUFeedURL and appcast download URLs updated in lockstep — existing v3.4.x installs will pick up this release via GitHub's automatic redirect from the old URL.
 
 ### Added — Foundation (v4.0 wave)
 
-- **`BridgePaths`** at `NotionBridge/Core/BridgePaths.swift` — single source of truth for all on-disk paths. `BridgePaths.applicationSupport(.commands)`, `.skills`, `.standingOrders`, `.jobs`, etc.; `BridgePaths.logs(.jobs)`, `.audit`, `.server`. All previously-hardcoded `~/Library/Application Support/NotionBridge/...` paths now route through here. Test hook `BridgePaths.overrideHomeForTesting(_:)` makes the entire FS layer redirectable to a temp dir.
-- **`PathMigration.runOnce()`** at `NotionBridge/Core/PathMigration.swift` — idempotent one-shot migration from `~/Library/Application Support/{Notion Bridge,NotionBridge}/` and `~/Library/Logs/{Notion Bridge,NotionBridge}/` to the canonical `~/Library/Application Support/The Bridge/` + `~/Library/Logs/The Bridge/`. Collisions get a `.pre-migrate-<timestamp>` sibling; the legacy dir gets renamed to `.legacy-<timestamp>` (not deleted, one release cycle of recovery). Sentinel `.bridge-migration-v3.5-complete` short-circuits subsequent runs.
-- **`CommandStore`** at `NotionBridge/Modules/Commands/CommandStore.swift` — 10-slot favorites with markdown-per-command + `index.json`. CRUD with duplicate-slug rejection; `setKeySlot(slug:slot:)` enforces 0–9 range with eviction; `recordUse` MRU + `search(query:)` for the Command Bridge popup; `Icon` enum (emoji / SF Symbol + NotionColor); `seedIfEmpty` ships 5 starter commands keyed to slots 1–5 on fresh install.
-- **`StandingOrdersStore` + `StandingOrdersComposer` + `RoutingIndex`** at `NotionBridge/Modules/StandingOrders/`. Store: `orders.md` + sibling `metadata.json` with per-client overlays. Composer: client-prefix overlay matching, trailer-suppression guard for inline `## Routing skills` sections, universal v6.5.0 principle preservation. RoutingIndex: renders the routing-skill table for the trailer.
-- **`BridgeThemeV2`** at `NotionBridge/UI/BridgeThemeV2.swift` — Liquid Glass primitive library: `BridgeGlassCard`, `BridgeGlassBubble`, `BridgeDepLink`, `PartialToggle` (TripleState off/partial/on), `BridgeCardLabel`, `NotionPalette` (semantic color tokens shared across the new UI).
+- **`BridgePaths`** at `TheBridge/Core/BridgePaths.swift` — single source of truth for all on-disk paths. `BridgePaths.applicationSupport(.commands)`, `.skills`, `.standingOrders`, `.jobs`, etc.; `BridgePaths.logs(.jobs)`, `.audit`, `.server`. All previously-hardcoded `~/Library/Application Support/TheBridge/...` paths now route through here. Test hook `BridgePaths.overrideHomeForTesting(_:)` makes the entire FS layer redirectable to a temp dir.
+- **`PathMigration.runOnce()`** at `TheBridge/Core/PathMigration.swift` — idempotent one-shot migration from `~/Library/Application Support/{The Bridge,TheBridge}/` and `~/Library/Logs/{The Bridge,TheBridge}/` to the canonical `~/Library/Application Support/The Bridge/` + `~/Library/Logs/The Bridge/`. Collisions get a `.pre-migrate-<timestamp>` sibling; the legacy dir gets renamed to `.legacy-<timestamp>` (not deleted, one release cycle of recovery). Sentinel `.bridge-migration-v3.5-complete` short-circuits subsequent runs.
+- **`CommandStore`** at `TheBridge/Modules/Commands/CommandStore.swift` — 10-slot favorites with markdown-per-command + `index.json`. CRUD with duplicate-slug rejection; `setKeySlot(slug:slot:)` enforces 0–9 range with eviction; `recordUse` MRU + `search(query:)` for the Command Bridge popup; `Icon` enum (emoji / SF Symbol + NotionColor); `seedIfEmpty` ships 5 starter commands keyed to slots 1–5 on fresh install.
+- **`StandingOrdersStore` + `StandingOrdersComposer` + `RoutingIndex`** at `TheBridge/Modules/StandingOrders/`. Store: `orders.md` + sibling `metadata.json` with per-client overlays. Composer: client-prefix overlay matching, trailer-suppression guard for inline `## Routing skills` sections, universal v6.5.0 principle preservation. RoutingIndex: renders the routing-skill table for the trailer.
+- **`BridgeThemeV2`** at `TheBridge/UI/BridgeThemeV2.swift` — Liquid Glass primitive library: `BridgeGlassCard`, `BridgeGlassBubble`, `BridgeDepLink`, `PartialToggle` (TripleState off/partial/on), `BridgeCardLabel`, `NotionPalette` (semantic color tokens shared across the new UI).
 
 ### Added — UI surface (v3.6 wave)
 
@@ -252,7 +252,7 @@ Project rename "NotionBridge → The Bridge" complete in user-visible surfaces. 
 ### Audit-driven polish (W1–W3 + v3.6·6)
 
 - **Credentials list scoping (D1).** `CredentialManager.isKeychainItemManagedByThisApp` previously returned `true` when the keychain item had no `kSecAttrAccessGroup` attribute, surfacing every system Keychain item (`Com.Apple.Scopedbookmarksagent.Xpc`, `Chrome Safe Storage`, `Spark`, etc.) under "Stored credentials". Flipped to `false`; Bridge-saved items still surface via the metadata-flag and `com.notionbridge` infrastructure-service fallbacks. Extracted `matchesAccessGroup(item:expected:)` as a pure helper for testability.
-- **Settings window title.** "Notion Bridge Settings" → "The Bridge Settings". `WindowTracker` matches both old and new for back-compat. Sweep also caught 4 other user-visible "Notion Bridge" strings (ToolRouter error, SecurityGate notification, PaymentModule error, About card).
+- **Settings window title.** "The Bridge Settings" → "The Bridge Settings". `WindowTracker` matches both old and new for back-compat. Sweep also caught 4 other user-visible "The Bridge" strings (ToolRouter error, SecurityGate notification, PaymentModule error, About card).
 - **Sidebar tint.** Settings sidebar List adopts `NotionPalette.blue` so selection state matches dep-link chips.
 - **Jobs stats card.** Hardcoded "Failed: 0" cell removed (failure-tracking infra not wired — a hardcoded zero was worse than no metric). `Total` cell color switched from `Color.white.opacity(0.9)` to `Color.primary` for dark-mode readability.
 - **Skills row visual hierarchy (D5).** Platform "Notion" badge and Routing/Palette toggles share a row but represent different action classes (informational vs. state). Added a vertical `Divider` between them. Skill name gains a small `arrow.up.right.square` glyph next to it to surface the click-to-open-in-browser affordance without requiring hover discovery.
@@ -295,7 +295,7 @@ Targeted regression patch. Two confirmed defects shipped in 3.4.1 are fixed; obs
 
 ### Fixed
 - **Hotkey recorder couldn't capture after "Record shortcut" click (H5).** The W4-3.4.1 conditional render — `if isRecordingHotkey { HotkeyRecorderField } else { BridgeKbdChips }` — meant the recorder NSView was freshly mounted at the moment the operator clicked Record, before any window existed to receive a `makeFirstResponder` call. The redundant `DispatchQueue.main.async` focus-grab in `updateNSView` fired before the view landed in a window hierarchy → `nsView.window` was nil → silent no-op, no retry. Two defenses added: (1) `viewDidMoveToWindow` override on `RecorderNSView` grabs first responder on the reliable AppKit signal that the WindowServer is ready to route key events; (2) `applyRecording(true, …)` now grabs first responder *synchronously* in the same runloop turn when the view is already windowed (covers the toggle-after-mount path).
-- **Skills MCP round-trip collapsed combined-state (H1).** Five `SkillConfig` reconstruction sites in [SkillsModule.swift](NotionBridge/Modules/SkillsModule.swift) (`set_metadata`, `sync_metadata_from_notion`, `toggle-enabled`, `rename`, `update_url`) re-built the row via `SkillConfig(..., visibility: cur.visibility, ...)` — the legacy enum ctor. The W4-3.4.1 back-compat enum→flag mapper would collapse the combined state (`routingDiscoverable=true && inCommandPalette=true`) down to `.command` (= `routingDiscoverable=false, inCommandPalette=true`), silently dropping the routing bit on every MCP write. Replaced all 5 reconstructions with the W4 flag-direct ctor that preserves the pair losslessly. Net effect: a skill flagged for both routing AND palette in the UI now survives any MCP-side mutation without drift.
+- **Skills MCP round-trip collapsed combined-state (H1).** Five `SkillConfig` reconstruction sites in [SkillsModule.swift](TheBridge/Modules/SkillsModule.swift) (`set_metadata`, `sync_metadata_from_notion`, `toggle-enabled`, `rename`, `update_url`) re-built the row via `SkillConfig(..., visibility: cur.visibility, ...)` — the legacy enum ctor. The W4-3.4.1 back-compat enum→flag mapper would collapse the combined state (`routingDiscoverable=true && inCommandPalette=true`) down to `.command` (= `routingDiscoverable=false, inCommandPalette=true`), silently dropping the routing bit on every MCP write. Replaced all 5 reconstructions with the W4 flag-direct ctor that preserves the pair losslessly. Net effect: a skill flagged for both routing AND palette in the UI now survives any MCP-side mutation without drift.
 
 ### Added
 - **MCP `list` envelope now exposes the flag pair.** Every `manage_skill action:"list"` result row carries `routingDiscoverable: Bool` + `inCommandPalette: Bool` *in addition to* the legacy `visibility: String` field. One-cycle back-compat preserved per the 3.5.0 deprecation plan; downstream callers can migrate to reading the flags directly while existing readers continue to work.
@@ -376,14 +376,14 @@ Phase 2 of the mcp-builder leverage program. Top-15 audit recommendations shippe
 
 ## [3.3.1] — 2026-05-19 — Ship the 3.3.0 bundled skills (Makefile fix)
 
-Hotfix. 3.3.0 (34) was released with the SKILL.md adoption code AND the 13 Apache-2.0 skills committed to the repo, but the `make install` packaging step copied only the executable target's SPM resource bundle into `.app/Contents/Resources/` and missed the `NotionBridgeLib` target's bundle — so the shipped binary had the loader code but no bundled skills to load. **No source changes; Makefile only.** Suite still 1204/0; same audit; same review.
+Hotfix. 3.3.0 (34) was released with the SKILL.md adoption code AND the 13 Apache-2.0 skills committed to the repo, but the `make install` packaging step copied only the executable target's SPM resource bundle into `.app/Contents/Resources/` and missed the `TheBridgeLib` target's bundle — so the shipped binary had the loader code but no bundled skills to load. **No source changes; Makefile only.** Suite still 1204/0; same audit; same review.
 
 ## [3.3.0] — 2026-05-19 — SKILL.md adoption + bundled skills + plugin manifests
 
 Phase 1 of the parity-or-better program. Bridge MCP now reads Anthropic's open SKILL.md format alongside its existing Notion-page skills, ships 13 Apache-2.0 skills out of the box, and exposes Claude Code marketplace manifests for distribution.
 
 ### Added
-- **SKILL.md filesystem skills.** `fetch_skill` and `list_routing_skills` now also read filesystem skills from `Bundle.module` (bundled defaults shipped with the app) and `~/Library/Application Support/Notion Bridge/skills/<name>/SKILL.md` (user-installable) — additive to today's Notion-page skills, no migration. File-source skills return `content` = the markdown body (via the shared `MentionResolver`) and `properties` = the flattened YAML frontmatter, keeping the `fetch_skill` envelope shape identical to the Notion path. Same-name collisions resolve **Notion-wins** with a visible `shadows: file:<path>` annotation in the routing list.
+- **SKILL.md filesystem skills.** `fetch_skill` and `list_routing_skills` now also read filesystem skills from `Bundle.module` (bundled defaults shipped with the app) and `~/Library/Application Support/The Bridge/skills/<name>/SKILL.md` (user-installable) — additive to today's Notion-page skills, no migration. File-source skills return `content` = the markdown body (via the shared `MentionResolver`) and `properties` = the flattened YAML frontmatter, keeping the `fetch_skill` envelope shape identical to the Notion path. Same-name collisions resolve **Notion-wins** with a visible `shadows: file:<path>` annotation in the routing list.
 - **13 bundled Apache-2.0 skills.** `algorithmic-art`, `brand-guidelines`, `canvas-design`, `claude-api`, `doc-coauthoring`, `frontend-design`, `internal-comms`, `mcp-builder`, `skill-creator`, `slack-gif-creator`, `theme-factory`, `web-artifacts-builder`, `webapp-testing` — verbatim SKILL.md only (no bundled scripts). 4 source-available skills (`docx`, `pdf`, `pptx`, `xlsx`) ship as stubs that link upstream rather than redistribute. Full attribution table at `docs/operator/skills-attributions.md`; Apache-2.0 LICENSE + NOTICE alongside the bundled skills per §4.
 - **Settings → Commands.** Per-row source badge (Notion vs File); file-source rows are read-only with "Reveal in Finder" and a per-path enable/disable toggle (the `.md` file is never shadow-edited).
 - **Claude Code plugin manifests.** `plugin.json` + `.mcp.json` at repo root describe Bridge MCP's tool surface in the Claude Code / Cowork plugin shape. The signed-`.app` vs npm-CLI shape mismatch is documented honestly rather than papered over; the marketplace submission spike captures the response.
@@ -457,7 +457,7 @@ v3.0 GA. Bridge is now reachable as a remote, OAuth-secured Streamable-HTTP MCP 
 v2.3 deck-clear. Retires the abandoned Cursor SDK integration and adds a menu-bar quick-page. Builds on the v2.2.1 rescue (landed per R1=Option A).
 
 ### Removed
-- **Cursor SDK integration retired in full.** Deleted the 5 `cursor_agent_*` tools, `CursorRuntime`, `CursorAgentRegistry`, `CursorCostLedger`, `CursorAutoPauseController`, `CursorHeartbeatWatchdog`, `CursorNotificationDispatcher`, `CursorNewRunFormLogic`, `CursorTypes`, `CursorAudit`, `CursorModule`, the `CursorAgentsWindow` / `CursorNewRunWindow` / `CursorMenuBarLabel` UI, the `cursor-sidecar` package, the `@cursor/sdk` dependency, `SPEC.md`, and 6 Cursor test suites. Rewired `ServerManager` / `AppDelegate` / `DashboardView` / `NotionBridgeApp` / `BridgeNotifications` / `Version.swift` / `EndToEndTests`. **−5,489 LOC.** Rationale: `@cursor/sdk@1.0.12` local agents are upstream-unusable and the cloud path is economically dominated by in-subscription delegation (Decision Log #8, sk decisions, conf 0.85). Scoped split — kept the zero-coupling hygiene utilities only.
+- **Cursor SDK integration retired in full.** Deleted the 5 `cursor_agent_*` tools, `CursorRuntime`, `CursorAgentRegistry`, `CursorCostLedger`, `CursorAutoPauseController`, `CursorHeartbeatWatchdog`, `CursorNotificationDispatcher`, `CursorNewRunFormLogic`, `CursorTypes`, `CursorAudit`, `CursorModule`, the `CursorAgentsWindow` / `CursorNewRunWindow` / `CursorMenuBarLabel` UI, the `cursor-sidecar` package, the `@cursor/sdk` dependency, `SPEC.md`, and 6 Cursor test suites. Rewired `ServerManager` / `AppDelegate` / `DashboardView` / `TheBridgeApp` / `BridgeNotifications` / `Version.swift` / `EndToEndTests`. **−5,489 LOC.** Rationale: `@cursor/sdk@1.0.12` local agents are upstream-unusable and the cloud path is economically dominated by in-subscription delegation (Decision Log #8, sk decisions, conf 0.85). Scoped split — kept the zero-coupling hygiene utilities only.
 - Tool surface 154 → **149**; module families 19 → **18**.
 
 ### Added
@@ -484,7 +484,7 @@ Live-wires the five `cursor_agent_*` sidecar methods that 2.2.0 shipped as `NOT_
 - **Info.plist** stamped to match `Version.swift` SSOT (was stuck at 1.9.5 / 26).
 
 ### Changed
-- **Cost ledger relocated** to `~/Library/Application Support/NotionBridge/cursor-sidecar/cost-ledger.json` (SPEC §7 canonical path); one-shot legacy migration leaves `.bak` of the old `cursor-cost-ledger.json`.
+- **Cost ledger relocated** to `~/Library/Application Support/TheBridge/cursor-sidecar/cost-ledger.json` (SPEC §7 canonical path); one-shot legacy migration leaves `.bak` of the old `cursor-cost-ledger.json`.
 - Sidecar bumped to `0.2.0`; sessions persisted under `cursor-sidecar/sessions/<run_id>.json` for Last-Event-ID re-attach (SPEC §8).
 
 ### Known Gaps
@@ -528,8 +528,8 @@ Successor to the v2 _Done venture (PRJCT-2722, closed 2026-05-05). Closes the fi
 - LSP `workspace/configuration` server-request handled (reply with array of `null`); unknown server requests → `MethodNotFound`; `showMessage`/`logMessage` drained.
 
 ### Verified
-- `swift run NotionBridgeTests` — **733 / 733 passed** on `bridge-v2.2/integration-closeout`.
-- `LSP_LIVE=1 swift run NotionBridgeTests` — full live LSP suite green: sourcekit-lsp cold-start **0.588s** + hover **0.438s**; TS-LSP cold-start **0.143s**, references **485ms** (≤500ms target), idle-dispose round-trip clean.
+- `swift run TheBridgeTests` — **733 / 733 passed** on `bridge-v2.2/integration-closeout`.
+- `LSP_LIVE=1 swift run TheBridgeTests` — full live LSP suite green: sourcekit-lsp cold-start **0.588s** + hover **0.438s**; TS-LSP cold-start **0.143s**, references **485ms** (≤500ms target), idle-dispose round-trip clean.
 - Live cross-tool integration verified: git_worktree round-trip, git_create_branch + switch, git_merge synthetic 2-way conflict surface, LSP server-init handshake on both adapters.
 
 ### Deferred (v2.2.x follow-up)
@@ -556,8 +556,8 @@ Successor to the v2 _Done venture (PRJCT-2722, closed 2026-05-05). Closes the fi
 - **Live LSP gate** — `LSP_LIVE=1` now passes SourceKit hover plus TypeScript initialize/idle/rename/reference checks.
 
 ### Verified
-- `swift run NotionBridgeTests` ✅ **726 passed / 0 failed**
-- `LSP_LIVE=1 BRIDGE_REPO=/Users/keepup/Developer/notion-bridge KEEPUP_CLUB=/Users/keepup/Developer/keepup-club swift run NotionBridgeTests` ✅ **731 passed / 0 failed**
+- `swift run TheBridgeTests` ✅ **726 passed / 0 failed**
+- `LSP_LIVE=1 BRIDGE_REPO=/Users/keepup/Developer/notion-bridge KEEPUP_CLUB=/Users/keepup/Developer/keepup-club swift run TheBridgeTests` ✅ **731 passed / 0 failed**
 - `node --check cursor-sidecar/dist/index.js` ✅
 
 ## [2.2.0-3.1] — 2026-05-12 — Artifact/diff helper toolkit (PKT-743)
@@ -576,18 +576,18 @@ Successor to the v2 _Done venture (PRJCT-2722, closed 2026-05-05). Closes the fi
 
 ### Verified
 - `swift build` ✅
-- `swift run NotionBridgeTests` ✅ **724 passed / 0 failed**
-- `LSP_LIVE=1 swift run NotionBridgeTests` ❌ still fails the seven live LSP cases at SourceKit/TS-LSP initialize or hover timeout; the framing tolerance patch did not clear that environment/runtime gate.
+- `swift run TheBridgeTests` ✅ **724 passed / 0 failed**
+- `LSP_LIVE=1 swift run TheBridgeTests` ❌ still fails the seven live LSP cases at SourceKit/TS-LSP initialize or hover timeout; the framing tolerance patch did not clear that environment/runtime gate.
 
 ## [2.2.0-2.3.1] — 2026-05-12 — LSP integration tests + live validation scaffold (PKT-789)
 
 ### Added
-- **`LspModuleTests.swift`** — 10 hermetic probe-only tests covering `LspModule` registration (6 `lsp_*` tools under module `dev`, tier `.request`), `probe()` shape for typescript/swift/aliases/unsupported, `inferLanguage()` extension mapping, and `findWorkspaceRoot()` for TS (`tsconfig.json`/`jsconfig.json`/`package.json`) + Swift (`Package.swift`) + unsupported-language nil case. All pass under `swift run NotionBridgeTests` without `LSP_LIVE=1` (CI safe).
+- **`LspModuleTests.swift`** — 10 hermetic probe-only tests covering `LspModule` registration (6 `lsp_*` tools under module `dev`, tier `.request`), `probe()` shape for typescript/swift/aliases/unsupported, `inferLanguage()` extension mapping, and `findWorkspaceRoot()` for TS (`tsconfig.json`/`jsconfig.json`/`package.json`) + Swift (`Package.swift`) + unsupported-language nil case. All pass under `swift run TheBridgeTests` without `LSP_LIVE=1` (CI safe).
 - **`LspModuleLiveExtraTests.swift`** — `LSP_LIVE=1`-gated suite: sourcekit-lsp hover on `LspRuntime` actor in the Bridge core, TS-LSP cold-start + idle-dispose round-trip (3s idle override + 5s sleep + re-cold-start, asserting registry state via `LspRuntime.listSessions()`), and TS rename + references on `~/Developer/keepup-club` (heuristic picks the first top-level `export`/`function`/`const`/`type`/`interface`/`class` name; logs reference count + rename file-count + latency for each).
-- **Wired** both entry points (`runLspModuleTests()` + `runLspModuleRenameRefsLiveTests()`) into `NotionBridgeTests/main.swift` after `runShellModuleTests()`.
+- **Wired** both entry points (`runLspModuleTests()` + `runLspModuleRenameRefsLiveTests()`) into `TheBridgeTests/main.swift` after `runShellModuleTests()`.
 
 ### Verified
-- **Floor preserved** — `swift run NotionBridgeTests`: **435 passed / 437 total** (vs prior 425/427 floor). Same 2 pre-existing E2E `staticFeatureModuleToolCount` failures persist (Scope OUT — separate housekeeping packet ownership). +10 new tests, all green.
+- **Floor preserved** — `swift run TheBridgeTests`: **435 passed / 437 total** (vs prior 425/427 floor). Same 2 pre-existing E2E `staticFeatureModuleToolCount` failures persist (Scope OUT — separate housekeeping packet ownership). +10 new tests, all green.
 - **sourcekit-lsp cold-start: 0.580s** (DoD QA target <2s — met for the Swift adapter).
 
 ### Deferred to follow-up packet
@@ -613,12 +613,12 @@ Successor to the v2 _Done venture (PRJCT-2722, closed 2026-05-05). Closes the fi
 ## [2.2.0-3.4.3.W1] — 2026-05-11 — Cursor hardening Wave 1: redaction + sensitive-repo allowlist (PKT-773)
 
 ### Added
-- **`SensitiveRepoMatcher`** (`NotionBridge/Modules/Cursor/SensitiveRepoMatcher.swift`) — repo allowlist matcher. Default globs `~/Developer/secure/*` and `~/Developer/secure/**` (covers nested descendants); user-extensible via UserDefaults `com.notionbridge.cursor.sensitiveRepoGlobs` (string array). Matches via POSIX `fnmatch(3)` (strict + permissive passes) plus a prefix fallback for `parent/*` and `parent/**` patterns. Returns `Verdict { isSensitive, matchedPattern, forceLocal, requiresExtraApproval }`. Used by `CursorRuntime.evaluateGates(...)` to force runtime=local when a Cursor agent run targets a sensitive repo.
-- **`PromptRedactor`** (`NotionBridge/Modules/Cursor/PromptRedactor.swift`) — inline gitleaks-style ruleset (16 built-in rules: AWS access/session keys, GitHub PAT/OAuth/App/fine-grained, Slack bot/user/webhook, OpenAI, Anthropic, Stripe, Google API, PEM private keys, JWTs, generic high-entropy ≥40-char strings). Replaces matches with `[REDACTED:<ruleId>]`. Returns `Result { scrubbed, count, ruleIds, promptHash }` where `promptHash` is sha256(original) hex via CryptoKit. User-extensible via UserDefaults `com.notionbridge.cursor.extraRedactionRules` (dict of `ruleId: regexPattern`). No external `gitleaks` binary required.
+- **`SensitiveRepoMatcher`** (`TheBridge/Modules/Cursor/SensitiveRepoMatcher.swift`) — repo allowlist matcher. Default globs `~/Developer/secure/*` and `~/Developer/secure/**` (covers nested descendants); user-extensible via UserDefaults `com.notionbridge.cursor.sensitiveRepoGlobs` (string array). Matches via POSIX `fnmatch(3)` (strict + permissive passes) plus a prefix fallback for `parent/*` and `parent/**` patterns. Returns `Verdict { isSensitive, matchedPattern, forceLocal, requiresExtraApproval }`. Used by `CursorRuntime.evaluateGates(...)` to force runtime=local when a Cursor agent run targets a sensitive repo.
+- **`PromptRedactor`** (`TheBridge/Modules/Cursor/PromptRedactor.swift`) — inline gitleaks-style ruleset (16 built-in rules: AWS access/session keys, GitHub PAT/OAuth/App/fine-grained, Slack bot/user/webhook, OpenAI, Anthropic, Stripe, Google API, PEM private keys, JWTs, generic high-entropy ≥40-char strings). Replaces matches with `[REDACTED:<ruleId>]`. Returns `Result { scrubbed, count, ruleIds, promptHash }` where `promptHash` is sha256(original) hex via CryptoKit. User-extensible via UserDefaults `com.notionbridge.cursor.extraRedactionRules` (dict of `ruleId: regexPattern`). No external `gitleaks` binary required.
 - **`CursorAudit.swift`** — `RedactionAuditEntry` + `CursorGateVerdict` DTOs. `RedactionAuditEntry` captures the metadata that PKT-3.4.1.W2's AI LOGS DS writer will drain into a Session-type entry: `runId`, `count`, `ruleIds`, `promptHash`, `repoPath`, `sensitiveRepoMatched`, `forcedLocal`, `redactedAt`. Never persists matched values; the unredacted prompt is referenced only by sha256 hash.
 - **`CursorRuntime.evaluateGates(prompt:runtime:repoPath:)`** — pre-dispatch hardening pass. Returns scrubbed prompt + effective runtime (cloud→local override on sensitive repo) + queued audit entry. Pure (never throws); safe to call from tests without triggering IPC. Called inside `agentRun(...)` before `requireCapability()` so the audit fires regardless of capability outcome.
 - **`CursorRuntime.pendingRedactionAudits()`** / **`drainPendingRedactionAudits()`** — actor-isolated read + drain on the queued audit entries. Wave 2 drains and writes to AI LOGS DS via `NotionAPIClient`.
-- **`NotionBridgeTests/CursorHardeningTests.swift`** — 13 new unit tests covering SensitiveRepoMatcher (5 cases including user-extensible globs + nil/empty path), PromptRedactor (6 cases including AWS-key scrub, GitHub PAT scrub, clean-prompt passthrough, never-echoes-matched-value, known sha256 fixture, user-extensible rules), CursorRuntime.evaluateGates integration (4 cases including scenarios G3 and H1, plus queue observability + drain semantics). Runs against per-suite `UserDefaults` to avoid polluting host defaults.
+- **`TheBridgeTests/CursorHardeningTests.swift`** — 13 new unit tests covering SensitiveRepoMatcher (5 cases including user-extensible globs + nil/empty path), PromptRedactor (6 cases including AWS-key scrub, GitHub PAT scrub, clean-prompt passthrough, never-echoes-matched-value, known sha256 fixture, user-extensible rules), CursorRuntime.evaluateGates integration (4 cases including scenarios G3 and H1, plus queue observability + drain semantics). Runs against per-suite `UserDefaults` to avoid polluting host defaults.
 
 ### Hardened
 - **`CursorRuntime.agentRun(...)`** — now runs the hardening pass before `requireCapability()`. When PKT-3.4.1.W2 wires real IPC, the scrubbed prompt + effective runtime are what flow through to the sidecar. Wave 1 continues to throw `notImplemented` post-gate (W2 contract unchanged; existing 501-test baseline preserved).
@@ -631,7 +631,7 @@ Successor to the v2 _Done venture (PRJCT-2722, closed 2026-05-05). Closes the fi
 - **Modal redaction warning surface** in the new-run modal — the audit entries are observable now (per `pendingRedactionAudits()`); PKT-3.4.2's new-run modal will subscribe.
 
 ### Tests
-- **+13** new tests in `runCursorHardeningTests()` (wired into `NotionBridgeTests/main.swift` after `runCursorModuleTests()`).
+- **+13** new tests in `runCursorHardeningTests()` (wired into `TheBridgeTests/main.swift` after `runCursorModuleTests()`).
 - Pre-existing **501** baseline preserved (the new `agentRun(...)` pre-gate hardening pass does not change the post-capability error contract that `CursorModuleTests` asserts).
 
 ### Provenance
@@ -674,8 +674,8 @@ Successor to the v2 _Done venture (PRJCT-2722, closed 2026-05-05). Closes the fi
 - Wrapped responses gain a `_deprecation_warning` sibling key so callers see the warning in JSON payloads in addition to stdout logging.
 
 ### Added
-- **`NotionBridge/Modules/StripeDeprecationShim.swift`** — mapping table (25 entries), `StripeDeprecationTelemetry` actor (per-tool counter + per-session log gate), `wrapHandler(toolName:)` factory, `translateArgs(toolName:originalArgs:)` pure function, and result-decoration helper.
-- **`NotionBridgeTests/StripeDeprecationShimTests.swift`** — 17 tests covering: 25-name mapping coverage, description prefix, decoratedDescription for both canonical paths, 5 spot-check argument translations (create_invoice → PostInvoices, list_invoices → GetInvoices, finalize_invoice → PostInvoicesInvoiceFinalize, retrieve_balance → GetBalance, cancel_subscription → DeleteSubscriptionsSubscriptionExposedId), search-canonical translations, fetch_stripe_resources id-prefix dispatch (5 prefixes), telemetry increment + shouldLogOnce gating, warning-message contents, result decoration, and operation_id verb-prefix coverage for all 23 execute-mapped entries.
+- **`TheBridge/Modules/StripeDeprecationShim.swift`** — mapping table (25 entries), `StripeDeprecationTelemetry` actor (per-tool counter + per-session log gate), `wrapHandler(toolName:)` factory, `translateArgs(toolName:originalArgs:)` pure function, and result-decoration helper.
+- **`TheBridgeTests/StripeDeprecationShimTests.swift`** — 17 tests covering: 25-name mapping coverage, description prefix, decoratedDescription for both canonical paths, 5 spot-check argument translations (create_invoice → PostInvoices, list_invoices → GetInvoices, finalize_invoice → PostInvoicesInvoiceFinalize, retrieve_balance → GetBalance, cancel_subscription → DeleteSubscriptionsSubscriptionExposedId), search-canonical translations, fetch_stripe_resources id-prefix dispatch (5 prefixes), telemetry increment + shouldLogOnce gating, warning-message contents, result decoration, and operation_id verb-prefix coverage for all 23 execute-mapped entries.
 
 ### Changed
 - **`StripeMcpModule.registerDiscoveredTools`** now branches per discovered tool: deprecated names get the prefixed description and the shim-wrapped handler; non-deprecated names retain the original pass-through handler.
@@ -691,7 +691,7 @@ Successor to the v2 _Done venture (PRJCT-2722, closed 2026-05-05). Closes the fi
 ## [2.2.0-4.1] — 2026-05-10 — MCP transport remediation: `bg_process_*` canonicalized (PKT-748)
 
 ### Decision spike (no code change)
-Direct inspection of `NotionBridge/Server/SSETransport.swift` and `NotionBridge/Modules/ShellModule.swift` established that the ~60–75 s ceiling forcing the W29 `nohup ... > /tmp/log 2>&1 & disown` workaround **is not in the Bridge**:
+Direct inspection of `TheBridge/Server/SSETransport.swift` and `TheBridge/Modules/ShellModule.swift` established that the ~60–75 s ceiling forcing the W29 `nohup ... > /tmp/log 2>&1 & disown` workaround **is not in the Bridge**:
 - SSE session lifetime: `SSEServer(sessionTimeout: 300, sessionCleanupInterval: 30)` — normalized to `max(30, sessionTimeout)`; sessions only evicted after 5 min idle.
 - `shell_exec` synchronous budget: `timeout = 600` s by default; background (`&`) commands capped at 5 s by design.
 - **The ~60–75 s ceiling is a client-side per-call HTTP/SSE response deadline** enforced by the MCP client (Claude Code / Cursor / Notion AI tool runner) on a single in-flight `tools/call`. No server-side chunked-SSE long-polling on `shell_exec` would lift it because the cap fires on the client's awaited response, not on the bridge's ability to keep the stream open.
@@ -715,7 +715,7 @@ Direct inspection of `NotionBridge/Server/SSETransport.swift` and `NotionBridge/
 ### Added
 - **`MouseClickModule`** registers **`mouse_click`** (.notify) — synthetic mouse click via CGEvent. Supports left/right/middle buttons and 1- or 2-click sequences. Accepts absolute screen coordinates by default, or window-relative coordinates (resolved via AX from the focused application’s focused window) when `windowRelative=true`. Returns `code="capability_missing"` with `settingsHint` deep-link when Accessibility is not granted; never silently no-ops.
 - **`CGEventModule`** registers **`cgevent_send`** (.notify) — raw CGEvent escape hatch (cliclick-equivalent). Posts `key_down` / `key_up` / `key_press` events with virtual key code and modifier flags (`cmd` / `shift` / `opt` / `ctrl` / `fn` / `capslock`), or `scroll` events with pixel deltas on both axes. Same AX gate + `capability_missing` surface.
-- **`PasteboardHistoryModule`** registers **`pasteboard_history`** (.open) — returns the rolling 50-entry pasteboard history captured by a background `NSPasteboard.changeCount` poller (750 ms interval, documented). Entries persist across bridge restarts to `~/Library/Application Support/NotionBridge/pasteboard-history.json`. No TCC grant required. Honors a `limit` parameter (1..50, default 50).
+- **`PasteboardHistoryModule`** registers **`pasteboard_history`** (.open) — returns the rolling 50-entry pasteboard history captured by a background `NSPasteboard.changeCount` poller (750 ms interval, documented). Entries persist across bridge restarts to `~/Library/Application Support/TheBridge/pasteboard-history.json`. No TCC grant required. Honors a `limit` parameter (1..50, default 50).
 
 ### Changed
 - **Tool-count baseline** bumped to **+3** static feature module tools (`mouse_click`, `cgevent_send`, `pasteboard_history`).
@@ -785,7 +785,7 @@ Direct inspection of `NotionBridge/Server/SSETransport.swift` and `NotionBridge/
 - **97 tool descriptions rewritten** across 18 modules per the §16 audit to improve routing specificity and reduce cross-tool overlap.
 
 ### Changed
-- **Settings window consolidation** — removed the duplicate SwiftUI `Settings { }` scene. A single `SettingsWindowController`-owned NSWindow is now the canonical Settings surface, with unified transparent titlebar, `setFrameAutosaveName("NotionBridgeSettings.v2")`, min 640×720, max 900×1100, default 720×900 — closer to Apple System Settings proportions.
+- **Settings window consolidation** — removed the duplicate SwiftUI `Settings { }` scene. A single `SettingsWindowController`-owned NSWindow is now the canonical Settings surface, with unified transparent titlebar, `setFrameAutosaveName("TheBridgeSettings.v2")`, min 640×720, max 900×1100, default 720×900 — closer to Apple System Settings proportions.
 - **Empty-state copy** — replaced `job_create tool` jargon with "Tap **New** to create a job, or import a job export file."
 
 ### Fixed
@@ -928,7 +928,7 @@ Direct inspection of `NotionBridge/Server/SSETransport.swift` and `NotionBridge/
 ### Notes
 - B3 (`notion_datasource_create`) and B4 (`notion_datasource_update`) are gated on Notion API endpoint confirmation. Deferred to v1.9.0.
 - Git hygiene: merged `fix/session-lifecycle-stability` and `feat/settings-connections-restructure` into main. Deleted ghost branches (`claude/fervent-lichterman`, `claude/sad-kapitsa`).
-- Tool count: 75 NotionBridge tools (74 base − 1 removed + 2 new) + N Stripe MCP tools.
+- Tool count: 75 TheBridge tools (74 base − 1 removed + 2 new) + N Stripe MCP tools.
 - Version: marketing **1.8.0**, build **15** (Version.swift, Info.plist).
 
 ## [1.7.0] — 2026-04-02
@@ -950,7 +950,7 @@ Direct inspection of `NotionBridge/Server/SSETransport.swift` and `NotionBridge/
 
 ### Notes
 - Remote MCP operator guidance now documents that browser-based clients (for example Claude chat) can be blocked by Cloudflare Browser Integrity Check or WAF challenges on `POST /mcp`; recommended mitigation is a path-scoped edge bypass plus the app bearer token.
-- Tool count: 74 NotionBridge tools (72 base + 2 new block tools) + N Stripe MCP tools.
+- Tool count: 74 TheBridge tools (72 base + 2 new block tools) + N Stripe MCP tools.
 - Version: marketing **1.7.0**, build **14** (Version.swift, Info.plist).
 - Feedback items resolved: F2, F3, F4, F5 (F1, F7 already fixed in v1.5.5/v1.6.0).
 
@@ -973,7 +973,7 @@ Direct inspection of `NotionBridge/Server/SSETransport.swift` and `NotionBridge/
 - **StripeMcpModule.swift** — Registers proxy-discovered tools with the MCP tool router. Maps Stripe tool input schemas to SecurityGate tiers. Passes tool calls through to `StripeMcpProxy.callTool()` at runtime.
 
 ### Notes
-- Tool count is now dynamic — base 72 NotionBridge tools + N Stripe MCP tools discovered at startup.
+- Tool count is now dynamic — base 72 TheBridge tools + N Stripe MCP tools discovered at startup.
 - Version: marketing **1.6.0**, build **13** (`Version.swift`, `Info.plist`).
 
 ## [1.5.5] — 2026-03-31
@@ -988,7 +988,7 @@ Direct inspection of `NotionBridge/Server/SSETransport.swift` and `NotionBridge/
 - **Credential namespace bridge** — `CredentialManager.read()` now returns infrastructure keys (service `com.notionbridge`) instead of throwing `invalidType`. Enables agents to access Stripe API key and other infrastructure credentials via `credential_read` MCP tool.
 - **Credential list visibility** — `CredentialManager.list()` now surfaces `com.notionbridge` infrastructure keys as metadata-only entries. No secrets exposed in list results.
 
-All notable changes to NotionBridge will be documented in this file.
+All notable changes to TheBridge will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -1035,7 +1035,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[README.md](README.md)** — Canonical tool counts (**73** = 72 module + `echo`); SkillsModule **3** tools; **Public updates (Sparkle)** and **Security disclosures** sections.
 - **[AGENTS.md](AGENTS.md)** — Aligned MCP tool count with runtime (`echo` as builtin).
 - **[PRIVACY.md](PRIVACY.md)**, **[TERMS.md](TERMS.md)** — Stripe as primary processor; Lemon Squeezy described only where applicable as merchant of record.
-- **[Version.swift](NotionBridge/Config/Version.swift)** — Build constant kept in sync with `Info.plist`.
+- **[Version.swift](TheBridge/Config/Version.swift)** — Build constant kept in sync with `Info.plist`.
 - **Settings → Connections** — Sections clarified: Notion workspaces vs API connections (Stripe); footers explain tunnel vs tokens. **API connections** list uses `ConnectionRegistry` `kind: .api` with provider badges.
 - **Settings → Skills** — Footer explains Standard / Routing visibility; optional summary line in skill rows.
 - **Settings → Advanced → Network** — Copy explains local SSE port vs remote tunnel; tunnel must forward to the same port after changes.
@@ -1137,7 +1137,7 @@ _Initial tracked release._
   - `CursorRuntime.swift` — actor singleton with synchronous `capabilityCheck()` (Node binary + sidecar entrypoint + Keychain `service=api_key:cursor / account=cursor`), nonisolated `locateNode()` / `detectNodeVersion()` / `readSidecarVersion()` helpers, public `readApiKey()` Keychain accessor, and the public 5-method API contract (`ping`, `capabilityProbe`, `agentRun`, `agentStatus`, `agentList`, `agentCancel`, `agentArtifacts`). Wave 1 returns `capability_missing` cleanly when the pre-flight fails; returns `not_implemented` after a successful gate — sidecar IPC + `@cursor/sdk` wiring lands in PKT-3.4.1.W2.
   - `CursorModule.swift` — 5 `cursor_agent_*` tool registrations under module `"cursor"`, all tier `.request`. Schemas describe `prompt` / `runtime` (`local`|`cloud`) / `model` / `repoPath` / `branch` / `maxCostCents`. Handlers proxy to `CursorRuntime` and return a structured error envelope (`ok=false`, `code`, `error`) when capability is missing.
 - **`ServerManager.setup`** registration after `GhModule.register` (line 118).
-- **`NotionBridgeTests/CursorModuleTests.swift`** — registration (5 tools, all `.request`, module name = `"cursor"`), `CursorTypes` JSON round-trip, capability surface, error-code registry, and a dispatch path verifying the structured error envelope shape on the Wave 1 stub path. Wired into `main.swift` after `runGhModuleTests()`.
+- **`TheBridgeTests/CursorModuleTests.swift`** — registration (5 tools, all `.request`, module name = `"cursor"`), `CursorTypes` JSON round-trip, capability surface, error-code registry, and a dispatch path verifying the structured error envelope shape on the Wave 1 stub path. Wired into `main.swift` after `runGhModuleTests()`.
 - **`cursor-sidecar/src/protocol.ts`** — TypeScript mirror DTOs (`CursorRuntimeKind`, `CursorRunStatus`, `CursorRun`, `CursorArtifact`, `CursorEvent`) so the Wave 2 sidecar runtime impl can replace the NOT_IMPLEMENTED stubs against a typed contract.
 
 ### Changed

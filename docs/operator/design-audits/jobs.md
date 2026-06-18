@@ -4,12 +4,12 @@ Scope: Settings → **Jobs** pane of The Bridge (macOS SwiftUI menu-bar app, MCP
 Method: `design:design-critique` rubric applied to the live source.
 Sources read (read-only):
 
-- `NotionBridge/UI/Sections/JobsSection.swift` — page composition (hero, alert, scheduled card, recent runs).
-- `NotionBridge/UI/JobsView.swift` — `JobGlassRow`, `JobDetailView`, `NewJobSheet`, `ImportSheet`.
-- `NotionBridge/UI/BridgeShell.swift` — `BridgeTitleBar` / `BridgeFootBar` / section nav.
-- `NotionBridge/UI/BridgeThemeV2.swift` — `BridgeGlassCard`, `BridgeCardLabel`, `BridgeDepLink`, `PartialToggle`.
-- `NotionBridge/UI/BridgeTokens.swift` — token SSOT.
-- `NotionBridge/UI/Sections/BridgeSettingsSectionHeader.swift` — the shared 5-caller hero (Jobs preset at L130–136).
+- `TheBridge/UI/Sections/JobsSection.swift` — page composition (hero, alert, scheduled card, recent runs).
+- `TheBridge/UI/JobsView.swift` — `JobGlassRow`, `JobDetailView`, `NewJobSheet`, `ImportSheet`.
+- `TheBridge/UI/BridgeShell.swift` — `BridgeTitleBar` / `BridgeFootBar` / section nav.
+- `TheBridge/UI/BridgeThemeV2.swift` — `BridgeGlassCard`, `BridgeCardLabel`, `BridgeDepLink`, `PartialToggle`.
+- `TheBridge/UI/BridgeTokens.swift` — token SSOT.
+- `TheBridge/UI/Sections/BridgeSettingsSectionHeader.swift` — the shared 5-caller hero (Jobs preset at L130–136).
 - `design/design-system/project/ui_kits/the-bridge/Jobs.jsx` + `kit.css` — locked mockup / visual SSOT.
 
 Locked redesign constraints applied: sidebar 7 (Jobs stays its own section), **global density tenet** (compact; the app wastes space), **legibility floor** (text ≥ 11–12px, real hit areas, truncate-with-reveal over shrinking), chrome = section-name-only titlebar + slim footbar.

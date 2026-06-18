@@ -18,8 +18,8 @@ The ~60–75 s ceiling that forced the W29 nohup workaround **is not a Bridge co
 
 | Layer | Setting | Source |
 | --- | --- | --- |
-| SSE session lifetime | `SSEServer(sessionTimeout: 300, sessionCleanupInterval: 30)` (normalized to `max(30, sessionTimeout)`; cleanup only evicts on `now - lastAccessedAt > sessionTimeout`) | `NotionBridge/Server/SSETransport.swift` |
-| `shell_exec` synchronous timeout | `timeout = 600` s default (10 min) | `NotionBridge/Modules/ShellModule.swift` |
+| SSE session lifetime | `SSEServer(sessionTimeout: 300, sessionCleanupInterval: 30)` (normalized to `max(30, sessionTimeout)`; cleanup only evicts on `now - lastAccessedAt > sessionTimeout`) | `TheBridge/Server/SSETransport.swift` |
+| `shell_exec` synchronous timeout | `timeout = 600` s default (10 min) | `TheBridge/Modules/ShellModule.swift` |
 | `shell_exec` background (`&`) cap | 5 s by design | `ShellModule.swift` |
 
 The ceiling fires on the **MCP client's** awaited response to a single in-flight `tools/call` (Claude Code / Cursor / Notion AI tool runner all enforce some flavor of this). Therefore:
@@ -43,7 +43,7 @@ If you can't predict the wall-clock, **default to `bg_process_*`**. The funnel c
 ## Public surface (frozen since PKT-744)
 
 - **Tools** (module `dev`, tier `.request`): `bg_process_start` · `bg_process_status` · `bg_process_logs` · `bg_process_kill` · `bg_process_list`.
-- **Job dir:** `~/Library/Application Support/NotionBridge/jobs/<id>/{stdout,stderr,meta.json}`.
+- **Job dir:** `~/Library/Application Support/TheBridge/jobs/<id>/{stdout,stderr,meta.json}`.
 - **Job id format:** `yyyyMMdd-HHmmss-<8hex>`.
 - **State machine:** `running → {done | failed | killed | unknown}` (`unknown` is the orphan-reconcile terminal state).
 - **`meta.json` schema:** `id, pid, pgid, command, workingDir?, label?, startedAt, endedAt?, exitCode?, status, killSignal?, lastReconcileAt?, note?`.
@@ -54,7 +54,7 @@ If you can't predict the wall-clock, **default to `bg_process_*`**. The funnel c
 - **Cleanup:** terminal jobs purged after 7 days (configurable on the `BgProcessRuntime` actor: `cleanupTTL`).
 - **Capability surface:** `capability_missing` if `posix_spawn` / Application Support dir unavailable.
 
-See `NotionBridge/Modules/BgProcessRuntime.swift` and `BgProcessModule.swift` for the implementation, and `NotionBridgeTests/BgProcessModuleTests.swift` for the 16 hermetic tests covering each state-machine path.
+See `TheBridge/Modules/BgProcessRuntime.swift` and `BgProcessModule.swift` for the implementation, and `TheBridgeTests/BgProcessModuleTests.swift` for the 16 hermetic tests covering each state-machine path.
 
 ## Anti-patterns (retired in v2.2)
 
