@@ -152,6 +152,13 @@ public enum BridgeSettingsHeaderPreset {
                 systemImage: BridgeSectionIcon.systemImage(for: .connection),
                 tint: NotionPalette.green
             )
+        case .datasources:
+            return Spec(
+                title: "Data Sources",
+                subtitle: "Map entities to your Notion data sources — cache + CRUD tools work against them.",
+                systemImage: BridgeSectionIcon.systemImage(for: .datasources),
+                tint: NotionPalette.blue
+            )
         case .advanced:
             return Spec(
                 title: "Advanced",

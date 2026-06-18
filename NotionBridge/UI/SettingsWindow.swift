@@ -156,6 +156,7 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
     case tools      = "Tools"
     case security   = "Security"          // Credentials + Permissions merged
     case connection = "Connection"        // Connections + Remote Access merged
+    case datasources = "Data Sources"     // Data-Source Registry: entity → Notion data source + property map
     case advanced   = "Advanced"
 
     public var id: String { rawValue }
@@ -171,6 +172,7 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
         case .tools:      return "Tools"
         case .security:   return "Security"
         case .connection: return "Connection"
+        case .datasources: return "Data Sources"
         case .advanced:   return "Advanced"
         }
     }
@@ -183,6 +185,7 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
         case .tools:      return "hammer"
         case .security:   return "lock.shield"
         case .connection: return "network"
+        case .datasources: return "tablecells"
         case .advanced:   return "wrench.and.screwdriver"
         }
     }
@@ -288,6 +291,7 @@ public struct SettingsView: View {
             case .tools: toolsSection
             case .security: securitySection
             case .connection: connectionSection
+            case .datasources: DataSourcesSection()
             case .advanced: advancedSection
             }
         }

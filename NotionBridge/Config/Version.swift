@@ -165,7 +165,11 @@ public enum BridgeConstants {
     /// PKT-1005 (Pillar A, 2026-06-17): + 1 (bridge_open_settings — deterministic
     ///   cold-open of the Settings window, joins the existing `automation` family).
     ///   161 + 1 = 162.
-    public static let staticFeatureModuleToolCount = 162
+    /// Data-Source Registry (2026-06-17): + 9 (registry_entities/add_entity/
+    ///   introspect/list/get/create/update/delete/possess — the new `registry`
+    ///   family: one generic CRUD set + entity registration + introspect + possess
+    ///   serving every configured entity). 162 + 9 = 171.
+    public static let staticFeatureModuleToolCount = 171
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.
@@ -189,5 +193,6 @@ public enum BridgeConstants {
     /// Tool-surface resurface (v3.7.11, 2026-06-14): − chrome, − payment, − swift
     ///   families (their tools were fully pruned); dev family survives via
     ///   git/gh/file_edit/code_search/http_fetch. 29 − 3 = 26.
-    public static let staticFeatureModuleFamilyCount = 26
+    /// Data-Source Registry (2026-06-17): + registry family = 27.
+    public static let staticFeatureModuleFamilyCount = 27
 }

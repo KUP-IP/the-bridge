@@ -686,6 +686,7 @@ public enum BridgeSectionIcon {
         case .tools:      return "hammer"
         case .security:   return "lock.shield"
         case .connection: return "network"
+        case .datasources: return "tablecells"
         case .advanced:   return "wrench.and.screwdriver"
         }
     }

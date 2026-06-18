@@ -1157,7 +1157,163 @@ set -euo pipefail
 # section-has-inner-control-ids, manifest well-formed+unique-per-section).
 # Measured integrated green = 2029 passed, 0 failed. FLOOR raised 2023 -> 2029
 # (+6) per the order-inversion rule.
-FLOOR="${BRIDGE_TEST_FLOOR:-2029}"
+# PKT-810 R5 (origin split — loopback never gated, 2026-06-17): fixed the
+# local↔cloud coexistence regression where a non-nil connectorAuth
+# (BRIDGE_ENABLE_HTTP=1) bearer-gated EVERY /mcp request — including direct
+# loopback. A local client (Claude Desktop) that sends no bearer 401'd into the
+# RFC 9728 challenge whose resource_metadata pointed at the PUBLIC cloud origin
+# (BRIDGE_PUBLIC_RESOURCE=https://mcp.kup.solutions/mcp), so the client followed
+# it into a WorkOS Dynamic Client Registration that dead-ends — violating the
+# documented contract (ConnectionsSection UI: "Local clients on this Mac connect
+# with no token — the bearer applies only off-loopback"). Fix is an ORIGIN
+# SPLIT: handleHTTPRequest now serves any DIRECT-LOOPBACK request (no Cloudflare
+# tunnel header) as already-authorized (connectorAuthed:true — skips the legacy
+# static-bearer phase too), so loopback is token-free end-to-end; only REMOTE
+# (Cf-* header) requests reach the OAuth gate. The prior "loopback static
+# bearer" fallback + ConnectorAuthContext.localBearer are REMOVED (they gated
+# loopback behind a secret the OAuth client never sends — the bug's root). The
+# RemoteOAuthOriginGatingTests file was rewritten to the new contract (still 8
+# test() blocks: loopback served token-free / with garbage bearer / full tool
+# surface / valid JWT; tunnel 401 on no-token / non-JWT bearer / served on valid
+# JWT). ServerManager also now only advertises the PUBLIC cloud PRM pointer when
+# WorkOS is live (else the local origin). The origin split is applied to the
+# LEGACY bearer phase too (createSession.bearerExempt): a direct-loopback /mcp
+# request skips the static-bearer / remote-tunnel-missing validators regardless
+# of whether the connector OAuth path is enabled — so an operator install with
+# `tunnelURL` + a static `mcpBearerToken` configured no longer 401s a local
+# client with "missing Bearer token for MCP HTTP". +1 MCPHTTPValidationTests
+# (loopback exempt from legacy bearer / tunnel still 401). The OriginGating file
+# was rewritten to the new contract (still 8 test() blocks) and the connector
+# E2E suites (Bearer/Hardening/S4) now stamp a Cf-Connecting-Ip tunnel header on
+# their gate requests (the OAuth/scope/step-up gate is remote-only). Net +1.
+# Measured integrated green = 2030 passed, 0 failed. FLOOR raised 2029 -> 2030.
+# Data-Source Registry W1 (2026-06-17): additive foundation for the registry
+# spec's first vertical slice (Skills = entity #1). New value model
+# (RegistryModels: RegistryProperty/Entity/Config — bind-by-property-id,
+# unbound seed per Decision 5, Skills seeded as entity #1), a durable config
+# store (RegistryConfigStore — atomic registry.json, missing→seed / corrupt→
+# throws, injectable path), and a generalized per-entity read-through ROW cache
+# (CachedRow + RegistryRowCache — stale-while-revalidate + offline reads,
+# generalized from SkillBodyCacheStore). No edits to load-bearing files (purely
+# additive; 2 new BridgePaths subdirs). +23 net-new test() blocks
+# (RegistryConfigTests 13: seed shape / unbound ids / binding / upsert / store
+# round-trip+seedIfMissing+corrupt / forwards-tolerant decode; RegistryRowCache
+# Tests 10: round-trip / id-normalization / per-entity isolation / TTL boundary
+# / evict+evictAll / callCount / forwards-tolerant decode / atomic persist).
+# Measured integrated green = 2053 passed, 0 failed. FLOOR raised 2030 -> 2053.
+# Data-Source Registry W2 (2026-06-17): the live data path. RegistryPropertyCodec
+# (typed Value ↔ Notion property JSON, decode/encode/isWritable for 12 writable
+# + read-only types), RegistryRateLimiter (central 2 req/s gate — Decision 4),
+# RegistrySchema + RegistryRowDecoder (Sendable row/schema models), Registry
+# SchemaBinder (bind-by-name → property ids + unmatched/type-drift — Decision 5/9),
+# RegistryNotionGateway protocol + LiveRegistryGateway (NotionClientRegistry +
+# limiter), RegistryReader (read-through cache: miss→fetch, fresh-hit, stale-
+# while-revalidate, offline serves cache; rename-safe projection by bound id;
+# possess body-load) and RegistryWriter (create-then-update / update / soft-
+# delete, keyed by property id). +49 net-new test() blocks (RegistryProperty
+# CodecTests 34; RegistryDataPathTests 15: binder bind/unmatched/drift, reader
+# miss+hit+forceRefresh+offline+list+project-rename-safe+possess, writer create-
+# then-update+update+unknown/unbound errors+delete, rate-limiter spacing) — all
+# against an in-memory fake gateway, no live Notion. Measured integrated green =
+# 2102 passed, 0 failed. FLOOR raised 2053 -> 2102.
+# Data-Source Registry W3 (2026-06-17): the MCP tool surface. RegistryModule
+# registers ONE generic CRUD set + introspect + possess (8 tools, module
+# `registry`) that serves every configured entity, validated per-entity against
+# its property map at dispatch — small stable surface vs N×CRUD. Wired into
+# BridgeModuleRegistry; +8 ToolAnnotationCatalog entries (deterministic CRUD
+# annotations); staticFeatureModuleToolCount 162→170, staticFeatureModuleFamily
+# Count 26→27. Injectable gatewayProvider + per-call config store make handlers
+# hermetically testable. +9 net-new test() blocks (RegistryModuleTests:
+# registration count/names, tier matrix, entities seed, introspect bind+persist,
+# list projection, get, create-then-update, possess, unknown-entity reject) —
+# plus the existing annotation-audit + static-count invariants validate the new
+# surface. Measured integrated green = 2111 passed, 0 failed. FLOOR raised
+# 2102 -> 2111.
+# Data-Source Registry W4 (2026-06-17): the front-end. DataSourcesViewModel (the
+# testable propose→confirm onboarding contract — Decision 5) backed by the SAME
+# RegistryConfigStore + RegistryModule.gateway() seam the MCP tools use (BE↔FE
+# alignment by construction), and DataSourcesSection (SwiftUI pane) wired into a
+# new SettingsSection.datasources. Touched the section-exhaustive switches
+# (icons, header presets, AX-validation harness) + the section-count/label
+# assertions (7→8). +10 net-new test() blocks (DataSourcesViewModelTests: load,
+# propose-without-persist, confirm-persists, missing-column drift, type drift,
+# cancel, setTTL persist, offline error, + 2 BE↔FE alignment: UI-confirmed
+# binding seen by registry_entities tool, tool binding seen by the pane).
+# Measured integrated green = 2121 passed, 0 failed. FLOOR raised 2111 -> 2121.
+# Data-Source Registry W5 (2026-06-17): + registry_add_entity — register any
+# Notion data source as a new entity at runtime (Decision 5 add flow; the
+# generic machinery already handles any entity, this is the missing "point at a
+# data source" capability). staticFeatureModuleToolCount 170→171; +1 annotation;
+# module registration-count test 8→9; +1 add_entity behavior test. The shipped
+# seed stays Skills-only (the validating slice — v1 hot Projects/Contacts/Memory
+# are added via this flow / the pane, NOT hardcoded per Decision 5). Measured
+# integrated green = 2122 passed, 0 failed. FLOOR raised 2121 -> 2122.
+# Data-Source Registry hardening (2026-06-17): adversarial edge-case sweep
+# (RegistryEdgeCaseTests, +30 test() blocks) that found + fixed FOUR real
+# architecture bugs and added two guards: (1) codec encode of title/rich_text
+# > 2000 chars now SPLITS into ≤2000-char runs (Notion rejects longer runs) —
+# `RegistryPropertyCodec.textRuns`; (2) `RegistryReader.list` now PAGINATES
+# (follows next_cursor up to a row limit + page-count backstop) instead of
+# silently truncating at one page — module arg `pageSize`→`limit` (max 500,
+# legacy name accepted); (3) config mutations route through ONE shared
+# `RegistryConfigStore` actor whose path resolves dynamically, so concurrent
+# add/introspect can't lose updates (atomic `upsertEntity`); module + view-model
+# now mutate via `.shared`; (4) `RegistrySchemaBinder.bind` is now AUTHORITATIVE
+# — an unmatched property's stale id is CLEARED (re-introspect after a dropped/
+# renamed column makes `isFullyBound` truthful + fails writes fast). Guards:
+# `RegistryWriter` rejects an all-non-encodable write (no empty no-op / untitled
+# page); `RegistryRowCache.safeComponent` caps over-long entity-key filenames
+# with a stable hash. Coverage: codec (chunking, unicode/emoji, multi_select
+# array-vs-comma, null-clear, relation/people, special chars), projection (empty/
+# missing title), cache (concurrent increment, corrupt-file miss, path-traversal
+# sanitize, complex Value round-trip, 400-char key), reader (multi-page, runaway
+# cap, offline, concurrent get), writer (long-text chunk, clear-to-null, no-title
+# single-create, empty-write reject), config (12-way concurrent upsert),
+# module/VM (upsert-replace, possess no-body, introspect fail-safe), limiter
+# (30-call burst). Measured integrated green = 2152 passed, 0 failed. FLOOR
+# raised 2122 -> 2152.
+# Live write-path smoke (2026-06-17): a real create→get→update→possess→delete
+# run against Notion (scripts/registry_live_smoke.py, marker-guarded so it only
+# ever deletes the row it creates) surfaced a 5th bug — a soft-deleted (trashed)
+# page is still returned by getPage, so registry_get read a just-deleted row
+# back as live. Fix: NotionRow carries `archived` (from in_trash/archived) and
+# RegistryReader.get treats a trashed page as not-found + evicts its cache. +1
+# test (archived → deleted error + cache evict). Measured = 2153.
+# Then a 6th bug (the most insidious — a silent write no-op): Notion returns
+# property ids percent-encoded for ids with special chars (e.g. id `AH`N` →
+# `AH%60N`), and that encoded id does NOT round-trip as a WRITE key — Notion
+# ignores it with no error, so registry_update wrote nothing yet "succeeded"
+# (only `title`, whose id is literally "title", landed). Fix:
+# `LiveRegistryGateway.encodeEnvelope` keys writes by property NAME (reliable),
+# not id; the bound id still drives read-projection + rename detection. +1 test
+# (envelope keys by name, percent-encoded id skipped). Measured = 2154.
+# Root cause (7th bug, the actual one): NotionClient.createPage WRAPS its
+# `properties` arg under {"parent":…,"properties":…} but updatePage sends its
+# arg AS the PATCH body UNWRAPPED — the gateway passed the raw envelope to both,
+# so updates went to Notion as a top-level {"Description":…} (not under
+# `properties`) and were silently ignored (create worked, update no-op'd). Fix:
+# LiveRegistryGateway.updateBody adds the {"properties":…} wrapper, createBody
+# stays raw; +1 test locks the asymmetry. (The fake gateway bypasses
+# NotionClient, so only the live write-path smoke caught this.) Measured = 2155.
+# FLOOR 2154 -> 2155.
+# /code-review remediation (2026-06-17, high-effort 3-pass review): fixed 6 real
+# findings + docs. (a) cache pageId path-traversal — pageId now run through
+# safeComponent like the entity key (was: only entity sanitized, `../x` escaped);
+# (b) multi_select/relation/people encode now SKIPS a non-coercible .bool/.object
+# value (returns nil) instead of silently writing an empty (clearing) list —
+# data-loss guard; (c) textRuns chunks by UTF-16 units (Notion's actual run
+# limit), grapheme-safe, not by Character count; (d) removed the unowned detached
+# stale-while-revalidate Task (could write to the wrong BridgePaths home after a
+# test cleared the override); (e) dead `row.id.isEmpty ? row.id : row.id` ternary
+# fixed + empty-id treated as not-found; (f) DataSourcesViewModel.Proposal.clean
+# now derives from the TYPED RegistryBindResult.isClean, not by string-matching
+# drift messages. Plus: create-then-update caches the titled row before the
+# follow-up PATCH (no invisible orphan on failure); stale "8 tools" comments →
+# 9; dropped the undiscoverable registry_list `pageSize` alias; cloudflared
+# trust-boundary documented at isRemoteTunnelRequest; CHANGELOG entry supersedes
+# the stale loopbackStaticBearerFallback note. +3 tests (non-coercible skip /
+# UTF-16 chunk / pageId traversal). Measured = 2158. FLOOR 2155 -> 2158.
+FLOOR="${BRIDGE_TEST_FLOOR:-2158}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

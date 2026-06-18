@@ -117,12 +117,13 @@ func runBridgeAutomationModuleTests() async {
         try expect(Set(raws) == Set(cases), "sectionRawValues drifted from SettingsSection")
     }
 
-    await test("sectionDisplayNames are the 7 friendly redesign labels") {
+    await test("sectionDisplayNames are the friendly redesign labels") {
         // IA change 2026-06-12: the top page's label is "Commands" (the
         // standing-orders doctrine moved to Connection).
+        // Data-Source Registry (2026-06-17): + "Data Sources".
         let names = await MainActor.run { BridgeSettingsAutomation.sectionDisplayNames }
         try expect(names == ["Commands", "Skills", "Jobs", "Tools",
-                             "Security", "Connection", "Advanced"],
+                             "Security", "Connection", "Data Sources", "Advanced"],
                    "sectionDisplayNames drift: \(names)")
     }
 

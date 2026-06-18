@@ -99,6 +99,13 @@ public enum SettingsUIValidationHarness {
                     BridgeAXID.Connection.clientsList,
                     BridgeAXID.Connection.toggleRemote,
                 ])
+            case .datasources:
+                // Match the control slugs DataSourcesSection actually emits.
+                ids.append(contentsOf: [
+                    BridgeAXID.control(.datasources, "introspect"),
+                    BridgeAXID.control(.datasources, "clearCache"),
+                    BridgeAXID.control(.datasources, "proposal.confirm"),
+                ])
             case .advanced:
                 ids.append(contentsOf: [
                     BridgeAXID.Advanced.checkUpdates,

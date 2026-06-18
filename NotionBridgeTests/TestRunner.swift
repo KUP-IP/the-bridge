@@ -623,6 +623,13 @@ await runShellModuleTests()
 await runFileModuleTests()
 await runSessionModuleTests()
 await runSessionPersistenceTests()   // ITEM [session]: MCP session durability across restart/install (persist + clean-shutdown marker + resumable reconnect)
+await runRegistryConfigTests()       // Data-Source Registry W1: config model + store (Skills = entity #1, bind-by-property-id)
+await runRegistryRowCacheTests()     // Data-Source Registry W1: generalized per-entity read-through row cache (stale-while-revalidate + offline)
+await runRegistryPropertyCodecTests() // Data-Source Registry W2: Notion property codec (typed Value ↔ Notion JSON, decode/encode/isWritable)
+await runRegistryDataPathTests()     // Data-Source Registry W2: live data path (schema binder · read-through reader · writer create-then-update · rate limiter)
+await runRegistryModuleTests()       // Data-Source Registry W3: MCP tool surface (8 generic CRUD + introspect + possess tools, registration + handler behavior)
+await runDataSourcesViewModelTests() // Data-Source Registry W4: Settings pane scenarios (propose→confirm, TTL, drift, errors) + BE↔FE alignment
+await runRegistryEdgeCaseTests()     // Data-Source Registry: adversarial edge cases (codec chunking, pagination, cache concurrency, config race, writer)
 await runMessagesModuleTests()
 await runMessagesSuiteAuditTests()   // Messages-suite every-angle-of-attack audit
 await runMailModuleTests()           // PKT-961 (v3.7·H): mail_* Apple Mail module (mock seam; send-guard)
@@ -719,7 +726,7 @@ await runRemoteOAuthHTTPTests()     // PKT-800 (S1): RFC 9728 PRM + transport ga
 await runRemoteOAuthBearerTests()   // PKT-800 (S2): JWTKit bearer + ScopeGate + 401/WWW-Auth
 await runRemoteOAuthHardeningTests() // PKT-800 (S3): step-up + confused-deputy + leak-sweep + gating
 await runRemoteOAuthHardeningS4Tests() // PKT-800 (S4): contacts.read split + TransportRouter seam + step-up scope-only
-await runRemoteOAuthOriginGatingTests() // PKT-810: local↔cloud coexistence (loopback static-bearer fallback, tunnel OAuth)
+await runRemoteOAuthOriginGatingTests() // PKT-810 R5: origin split — loopback token-free, tunnel OAuth-gated
 await runBridgeFeatureFlagsTests()  // PKT-798 (v2.3 · WS-C): fail-closed capability gates
 await runBridgeModuleRegistryTests() // PKT v3.0·0.4: single-source module registrar
 await runMCPToolFactoryTests()       // PKT v3.0·0.5: metadata contract + unified Tool factory

@@ -57,6 +57,8 @@ public enum BridgePaths {
         case screen         = "screen"
         case config         = "config"
         case sessions       = "sessions"        // MCP session durability snapshots
+        case registry       = "registry"        // data-source registry config (registry.json)
+        case registryCache  = "registry-cache"  // per-entity read-through row cache
     }
 
     // MARK: - Logs
