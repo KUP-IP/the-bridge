@@ -35,6 +35,11 @@ public struct DataSourcesSection: View {
     /// destructive (forgets the binding + evicts the cache), so it always routes
     /// through a confirmationDialog — with an extra-firm message for the seed.
     @State private var removalTarget: RegistryEntity?
+    /// Pending "bind a data source" input per UNBOUND entity (keyed by entity
+    /// key). Holds the pasted data-source id / Notion URL until "Bind" commits
+    /// it through the view-model. Cleared on a successful reload (the entity is
+    /// then bound and the empty-state row disappears).
+    @State private var bindDraft: [String: String] = [:]
 
     public init() {}
 
@@ -148,8 +153,20 @@ public struct DataSourcesSection: View {
         }
     }
 
-    /// The mono data-source id (truncated) + the cached-row count.
+    /// The entity's source row — the bound mono id + cached count once bound,
+    /// or a "connect a Notion data source" empty-state while unbound (the
+    /// shipped Skills template ships unbound — Decision 5).
+    @ViewBuilder
     private func entityMeta(_ entity: RegistryEntity) -> some View {
+        if entity.isBoundToSource {
+            boundMeta(entity)
+        } else {
+            unboundBindRow(entity)
+        }
+    }
+
+    /// The mono data-source id (truncated) + the cached-row count.
+    private func boundMeta(_ entity: RegistryEntity) -> some View {
         let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
         let cached = vm.cacheCounts[entity.key] ?? 0
         return HStack(spacing: 10) {
@@ -175,14 +192,68 @@ public struct DataSourcesSection: View {
         .bridgeBevel(BridgeTokens.bevelInset, radius: 10)
     }
 
+    /// Empty-state for an UNBOUND entity: a short prompt + a field to paste a
+    /// Notion data-source id (or database URL) + a "Bind" button. Mirrors the
+    /// recessed `wellFill` row idiom; binding routes through the view-model and
+    /// the shared store (Decision 5 — the customer supplies their own source).
+    private func unboundBindRow(_ entity: RegistryEntity) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        let fieldShape = RoundedRectangle(cornerRadius: BridgeTokens.Radius.control, style: .continuous)
+        let draft = Binding(
+            get: { bindDraft[entity.key] ?? "" },
+            set: { bindDraft[entity.key] = $0 })
+        let trimmed = draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Image(systemName: "link.badge.plus")
+                    .font(.system(size: 11, weight: .regular))
+                    .foregroundStyle(BridgeTokens.fg5)
+                    .accessibilityHidden(true)
+                Text("Not connected to a Notion data source yet")
+                    .font(BridgeTokens.Typeface.sub)
+                    .foregroundStyle(BridgeTokens.fg3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 8) {
+                TextField("Notion data-source id or database URL", text: draft)
+                    .textFieldStyle(.plain)
+                    .font(BridgeTokens.Typeface.mono)
+                    .foregroundStyle(BridgeTokens.fg2)
+                    .lineLimit(1)
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(fieldShape.fill(BridgeTokens.glassControl))
+                    .overlay(fieldShape.strokeBorder(BridgeTokens.hairlineStrong, lineWidth: 0.5))
+                    .bridgeBevel(BridgeTokens.bevelControl, radius: BridgeTokens.Radius.control)
+                    .disabled(vm.busy)
+                    .accessibilityIdentifier(ax("bindSource"))
+                BridgeButton("Bind", systemImage: "link", variant: .primary,
+                             isEnabled: !vm.busy && !trimmed.isEmpty) {
+                    Task { await vm.setDataSource(entity.key, idOrURL: trimmed) }
+                }
+                .accessibilityIdentifier(ax("bindSource.commit"))
+            }
+        }
+        .padding(.horizontal, 11).padding(.vertical, 10)
+        .background(shape.fill(BridgeTokens.wellFill))
+        .overlay(shape.strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+        .bridgeBevel(BridgeTokens.bevelInset, radius: 10)
+    }
+
     /// Introspect (propose) · Clear cache · a compact cache-TTL stepper. All
     /// disabled while the VM is busy so a click can't race a pending async call.
+    /// Introspect is ALSO disabled until the entity is bound to a data source
+    /// (introspection reads that source's live schema — there's nothing to read
+    /// without it); the help text says so.
     private func entityActions(_ entity: RegistryEntity) -> some View {
-        HStack(spacing: 8) {
+        let bound = entity.isBoundToSource
+        return HStack(spacing: 8) {
             BridgeButton("Introspect", systemImage: "arrow.triangle.2.circlepath",
-                         variant: .default, isEnabled: !vm.busy) {
+                         variant: .default, isEnabled: !vm.busy && bound) {
                 Task { await vm.proposeIntrospection(entity.key) }
             }
+            .help(bound
+                  ? "Read the live Notion schema and propose a property binding"
+                  : "Connect a Notion data source first, then Introspect to bind its properties")
             .accessibilityIdentifier(ax("introspect"))
 
             BridgeButton("Clear cache", systemImage: "trash",

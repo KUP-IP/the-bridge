@@ -109,6 +109,77 @@ func runDataSourcesViewModelTests() async {
         }
     }
 
+    // MARK: - Bind a data source (Decision 5: shipped seed is an UNBOUND template)
+
+    await test("Scenario: the shipped seed ships UNBOUND to any data source (Decision 5)") {
+        try await withVMEnv(VMFakeGateway(schema: fullSkillsSchema())) { vm in
+            await vm.load()
+            let (dsid, boundToSource, fullyBound) = await MainActor.run {
+                (vm.entities.first?.dataSourceId,
+                 vm.entities.first?.isBoundToSource,
+                 vm.entities.first?.isFullyBound)
+            }
+            try expect(dsid == "", "seed dataSourceId is empty (no hardcoded id)")
+            try expect(boundToSource == false, "seed not bound to a source")
+            try expect(fullyBound == false, "seed not fully bound (property ids unresolved)")
+        }
+    }
+
+    await test("Scenario: setDataSource with a raw 32-hex id binds + persists the entity") {
+        try await withVMEnv(VMFakeGateway(schema: fullSkillsSchema())) { vm in
+            await vm.load()
+            await vm.setDataSource("skill", idOrURL: "b6ff6ea539174af79c36278dc8bfb21f")
+            let (dsid, boundToSource, status) = await MainActor.run {
+                (vm.entities.first?.dataSourceId, vm.entities.first?.isBoundToSource, vm.status)
+            }
+            try expect(dsid == "b6ff6ea5-3917-4af7-9c36-278dc8bfb21f", "raw hex normalized to dashed uuid, got \(dsid ?? "nil")")
+            try expect(boundToSource == true, "entity now bound to a source")
+            try expect(status.contains("Introspect"), "status nudges to Introspect: \(status)")
+            // Persisted across a fresh view-model (shared store).
+            try await withFreshVM { vm2 in
+                await vm2.load()
+                let dsid2 = await MainActor.run { vm2.entities.first?.dataSourceId }
+                try expect(dsid2 == "b6ff6ea5-3917-4af7-9c36-278dc8bfb21f", "binding survived to disk")
+            }
+        }
+    }
+
+    await test("Scenario: setDataSource extracts the id from a notion.so URL") {
+        try await withVMEnv(VMFakeGateway(schema: fullSkillsSchema())) { vm in
+            await vm.load()
+            await vm.setDataSource("skill", idOrURL: "https://www.notion.so/myws/Skills-b6ff6ea539174af79c36278dc8bfb21f?v=2f1c0d9e4a5b4c6d8e7f0a1b2c3d4e5f")
+            let dsid = await MainActor.run { vm.entities.first?.dataSourceId }
+            try expect(dsid == "2f1c0d9e-4a5b-4c6d-8e7f-0a1b2c3d4e5f",
+                       "last 32-hex run (the ?v= view id) extracted + normalized, got \(dsid ?? "nil")")
+        }
+    }
+
+    await test("Scenario: setDataSource with garbage leaves the entity unbound + sets an error status") {
+        try await withVMEnv(VMFakeGateway(schema: fullSkillsSchema())) { vm in
+            await vm.load()
+            await vm.setDataSource("skill", idOrURL: "not a notion id")
+            let (dsid, boundToSource, status) = await MainActor.run {
+                (vm.entities.first?.dataSourceId, vm.entities.first?.isBoundToSource, vm.status)
+            }
+            try expect(dsid == "", "still unbound after a bad id")
+            try expect(boundToSource == false, "not bound to a source")
+            try expect(status.lowercased().contains("couldn't read") || status.lowercased().contains("couldn’t read"),
+                       "error surfaced in status: \(status)")
+        }
+    }
+
+    await test("Unit: parseDataSourceId handles dashed id, bare hex, URL, and rejects junk") {
+        let dashed = DataSourcesViewModel.parseDataSourceId("b6ff6ea5-3917-4af7-9c36-278dc8bfb21f")
+        try expect(dashed == "b6ff6ea5-3917-4af7-9c36-278dc8bfb21f", "dashed id round-trips, got \(dashed ?? "nil")")
+        let bare = DataSourcesViewModel.parseDataSourceId("B6FF6EA539174AF79C36278DC8BFB21F")
+        try expect(bare == "b6ff6ea5-3917-4af7-9c36-278dc8bfb21f", "bare uppercase hex normalized, got \(bare ?? "nil")")
+        let url = DataSourcesViewModel.parseDataSourceId("notion.so/Page-aaaa0000aaaa0000aaaa0000aaaa0000")
+        try expect(url == "aaaa0000-aaaa-0000-aaaa-0000aaaa0000", "id pulled from slug, got \(url ?? "nil")")
+        try expect(DataSourcesViewModel.parseDataSourceId("") == nil, "empty → nil")
+        try expect(DataSourcesViewModel.parseDataSourceId("nope, no id here") == nil, "no 32-hex run → nil")
+        try expect(DataSourcesViewModel.parseDataSourceId("dead") == nil, "short hex run → nil")
+    }
+
     // MARK: - Propose → review → confirm (Decision 5)
 
     await test("Scenario: propose binding sets a CLEAN proposal but does NOT persist") {

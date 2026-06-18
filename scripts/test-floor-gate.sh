@@ -1333,7 +1333,19 @@ set -euo pipefail
 # 171 -> 172. +6 tests (4 module: registration count 9->10, tier, add→remove
 # round-trip, seed-guard refuse/confirm, unknown-entity; 2 VM: pane remove +
 # isSeed). Measured = 2169. FLOOR 2163 -> 2169.
-FLOOR="${BRIDGE_TEST_FLOOR:-2169}"
+#
+# 2026-06-18 Sell-The-Bridge Packet A (customer-safe registry seed + pane bind):
+# productization fix — RegistryEntity.skillsSeed() now ships UNBOUND (dropped the
+# operator's PRIVATE dataSourceId b6ff6ea5… per Decision 5 "no hardcoded data-source
+# ids"); a fresh customer install gets a Skills TEMPLATE (property map intact) they
+# bind to their own Notion via a new Data Sources pane affordance (paste a data-source
+# id or Notion URL → DataSourcesViewModel.setDataSource → existing Introspect). Adds
+# RegistryEntity.isBoundToSource + DataSourcesViewModel.parseDataSourceId (handles
+# dashed UUID / bare 32-hex / Notion-URL slug; nonisolated, unit-tested). Only fresh
+# installs affected (seedIfMissing never overwrites an existing registry.json). +6
+# tests (seed-unbound, setDataSource raw-id/URL/garbage, parseDataSourceId unit,
+# registry_entities-unbound). Measured = 2175. FLOOR 2169 -> 2175.
+FLOOR="${BRIDGE_TEST_FLOOR:-2175}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

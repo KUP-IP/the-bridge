@@ -126,6 +126,90 @@ public final class DataSourcesViewModel: ObservableObject {
         status = "Cancelled"
     }
 
+    // MARK: - Bind a data source (Decision 5: customer supplies their own id)
+
+    /// Bind an UNBOUND entity (e.g. the shipped Skills template) to the
+    /// customer's own Notion data source. Accepts EITHER a raw data-source id
+    /// (32 hex, dashed or not) OR a Notion URL/page link (the id is the last
+    /// 32-hex run). Persists through the SHARED store — the SAME seam the
+    /// `registry_*` tools use — then reloads. After binding, the customer runs
+    /// Introspect to resolve the property ids.
+    public func setDataSource(_ key: String, idOrURL: String) async {
+        guard let id = Self.parseDataSourceId(idOrURL) else {
+            status = "Couldn't read a Notion data-source id from that"
+            return
+        }
+        guard var e = entity(key) else { status = "Unknown entity ‘\(key)’"; return }
+        e.dataSourceId = id
+        busy = true; defer { busy = false }
+        do {
+            _ = try await store().upsertEntity(e)   // atomic, serialized
+            await load()
+            status = "Bound \(e.displayName) — now run Introspect"
+        } catch {
+            status = "Could not bind \(e.displayName): \(error.localizedDescription)"
+        }
+    }
+
+    /// Parse a Notion data-source id from a raw id OR a Notion URL. Notion ids
+    /// are 32 hex chars; a URL/slug embeds the id as its LAST 32-hex run
+    /// (e.g. `…/Skills-b6ff6ea539174af79c36278dc8bfb21f?v=…`). Returns the id
+    /// normalized to dashed 8-4-4-4-12 UUID form, or `nil` if none is present.
+    /// Pure + static so it's unit-testable without the @MainActor view-model.
+    /// `nonisolated` so it can be called off the main actor (it touches no state).
+    nonisolated public static func parseDataSourceId(_ input: String) -> String? {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        // Take the LAST id-shaped token: either a dashed UUID (8-4-4-4-12) or a
+        // contiguous 32-hex run (bare id / URL slug). A dashed UUID must be
+        // matched explicitly — its dashes break the hex run, so a pure 32-run
+        // scan would miss it (regression caught by the unit test).
+        let hex = Set("0123456789abcdefABCDEF")
+        let chars = Array(trimmed)
+        let n = chars.count
+        var best: String?   // always stored as 32 undashed hex
+        var i = 0
+        while i < n {
+            guard hex.contains(chars[i]) else { i += 1; continue }
+            // dashed UUID starting here? (positions 8,13,18,23 are '-', rest hex)
+            if i + 36 <= n, Self.isDashedUUID(Array(chars[i..<i + 36])) {
+                best = String(chars[i..<i + 36]).replacingOccurrences(of: "-", with: "")
+                i += 36
+                continue
+            }
+            // else, a contiguous hex run; keep it if it's exactly 32 long
+            var j = i
+            while j < n && hex.contains(chars[j]) { j += 1 }
+            if j - i == 32 { best = String(chars[i..<j]) }
+            i = max(j, i + 1)
+        }
+        guard let raw = best else { return nil }
+        return Self.dashedUUID(raw)
+    }
+
+    /// True iff `c` is exactly a dashed UUID (8-4-4-4-12): dashes at 8/13/18/23,
+    /// hex everywhere else.
+    nonisolated private static func isDashedUUID(_ c: [Character]) -> Bool {
+        guard c.count == 36 else { return false }
+        let dashes: Set<Int> = [8, 13, 18, 23]
+        for (idx, ch) in c.enumerated() {
+            if dashes.contains(idx) { if ch != "-" { return false } }
+            else if !ch.isHexDigit { return false }
+        }
+        return true
+    }
+
+    /// Normalize 32 hex chars to lowercase dashed 8-4-4-4-12 UUID form.
+    nonisolated private static func dashedUUID(_ hex32: String) -> String {
+        let s = hex32.lowercased()
+        let a = s.prefix(8)
+        let b = s.dropFirst(8).prefix(4)
+        let c = s.dropFirst(12).prefix(4)
+        let d = s.dropFirst(16).prefix(4)
+        let e = s.dropFirst(20)
+        return "\(a)-\(b)-\(c)-\(d)-\(e)"
+    }
+
     // MARK: - Per-entity settings
 
     /// Set an entity's cache TTL (Decision 4) and persist.

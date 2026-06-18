@@ -120,6 +120,15 @@ func runRegistryModuleTests() async {
         }
     }
 
+    await test("registry_entities ships the seed UNBOUND to a data source (Decision 5: no hardcoded id)") {
+        try await withRegistryModuleEnv(ModFakeGateway(schema: skillsSchema())) {
+            let out = try await RegistryModule.makeEntities().handler(.object([:]))
+            guard case .array(let arr)? = obj(out)["entities"], let first = arr.first else { throw TestError.assertion("no entities") }
+            try expect(obj(first)["dataSourceId"] == .string(""), "seed ships with an empty dataSourceId (customer binds their own)")
+            try expect(obj(first)["fullyBound"] == .bool(false), "and is not fully bound")
+        }
+    }
+
     await test("registry_introspect binds by name, persists, reports clean+fullyBound") {
         try await withRegistryModuleEnv(ModFakeGateway(schema: skillsSchema())) {
             let out = try await RegistryModule.makeIntrospect().handler(.object(["entity": .string("skill")]))

@@ -159,6 +159,14 @@ public struct RegistryEntity: Codable, Sendable, Equatable {
         properties.first { $0.role == .title }
     }
 
+    /// Whether this entity is bound to a concrete Notion data source. The
+    /// shipped Skills seed ships UNBOUND (empty `dataSourceId`, Decision 5 — no
+    /// hardcoded data-source ids); the customer binds it to their own Notion
+    /// data source via the Settings → Data Sources pane before it can be
+    /// introspected. Distinct from `isFullyBound`, which is about the property
+    /// map being resolved to property ids (a later step, after binding).
+    public var isBoundToSource: Bool { !dataSourceId.isEmpty }
+
     /// Whether every declared property is bound to a Notion property id —
     /// i.e. the entity is ready for cache-backed reads/writes.
     public var isFullyBound: Bool {
@@ -244,16 +252,23 @@ public extension RegistryEntity {
     /// default a fresh install relies on.
     static let seedEntityKey = "skill"
 
-    /// Skills as a registry entity. The data source id is the operator's
-    /// verified Keepr/Skills source (a portable install rebinds it at setup);
-    /// property IDs are unbound (resolved by name against the live schema).
+    /// Skills as a registry entity — shipped as an UNBOUND TEMPLATE
+    /// (Decision 5: never ship hardcoded data-source ids). `dataSourceId` is
+    /// intentionally empty: a fresh install does NOT know the customer's
+    /// workspace, so the seed ships only the SCAFFOLD — the full property map,
+    /// roles, display name, body flag, and cache TTL — which guides
+    /// introspection once the customer binds it to their OWN Notion Skills data
+    /// source via the Settings → Data Sources pane (`setDataSource` →
+    /// `Introspect`). The scaffold is the valuable part; the source id is the
+    /// one thing only the customer can supply. (The operator's previously
+    /// hardcoded private source id has been removed — see `isBoundToSource`.)
     /// `hasBody == true`: a skill is property-queryable AND body-possessable
     /// (the `fetch_skill`/`possess` pattern — Decision 1 / Decision 2).
     static func skillsSeed() -> RegistryEntity {
         RegistryEntity(
             key: seedEntityKey,
             displayName: "Skills",
-            dataSourceId: "b6ff6ea5-3917-4af7-9c36-278dc8bfb21f",
+            dataSourceId: "",   // unbound template — customer binds via the pane (Decision 5)
             workspace: nil,
             properties: [
                 RegistryProperty(key: "name", notionName: "Skill Name", type: "title", role: .title),

@@ -39,8 +39,10 @@ func runRegistryConfigTests() async {
         }
         try expect(skill.displayName == "Skills", "displayName Skills")
         try expect(skill.hasBody, "skills are body-possessable (hasBody)")
-        try expect(skill.dataSourceId == "b6ff6ea5-3917-4af7-9c36-278dc8bfb21f",
-                   "seeded Keepr/Skills data source id")
+        // Decision 5: the shipped seed is an UNBOUND template — it carries NO
+        // hardcoded data-source id (the customer binds their own via the pane).
+        try expect(skill.dataSourceId == "", "seed ships unbound (no hardcoded data-source id)")
+        try expect(!skill.isBoundToSource, "isBoundToSource false until the customer binds it")
         try expect(skill.workspace == nil, "workspace nil → primary connection")
         try expect(skill.cacheTTLSeconds == 6 * 3600, "skills TTL 6h")
     }
