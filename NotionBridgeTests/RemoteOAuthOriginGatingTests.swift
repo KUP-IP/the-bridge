@@ -1,16 +1,20 @@
-// RemoteOAuthOriginGatingTests.swift — PKT-810 (local↔cloud coexistence)
+// RemoteOAuthOriginGatingTests.swift — PKT-810 R5 (origin split: loopback never gated)
 // NotionBridge · Tests (custom harness — no XCTest)
 //
-// The connector `/mcp` path serves TWO callers after PKT-810:
-//   • REMOTE (Cloudflare tunnel, Cf-Connecting-Ip / Cf-Ray present) → must
-//     present a valid AuthKit OAuth JWT.
-//   • LOCAL (direct loopback, no tunnel header) → a valid JWT still OAuth-
-//     validates; otherwise the loopback STATIC bearer is accepted as a
-//     fallback so the local desktop stdio-proxy keeps working.
+// The connector `/mcp` path serves TWO callers, split purely on origin:
+//   • REMOTE (Cloudflare tunnel — `Cf-Connecting-Ip` / `Cf-Ray` present) → must
+//     present a valid AuthKit OAuth JWT, else 401 + RFC 9728 challenge.
+//   • LOCAL (direct loopback — no tunnel header) → TOKEN-FREE. The documented
+//     contract (ConnectionsSection UI): "Local clients on this Mac connect with
+//     no token — the bearer applies only off-loopback." A loopback request is a
+//     local process on 127.0.0.1 and is served as already-authorized; it is
+//     NEVER pushed into a cloud OAuth discovery (the WorkOS Dynamic Client
+//     Registration dead-end the R5 fix removes).
 //
-// Security invariant under test: the static bearer is LOOPBACK-SCOPED — it can
-// NEVER authorize a tunnel request (no cloud OAuth bypass). And the fallback is
-// inert when no local bearer is configured (zero impact on the OAuth-only path).
+// Security invariant under test: the OAuth bearer gate applies to REMOTE
+// requests ONLY — a tunnel request can never be served without a valid JWT, and
+// the prior PKT-810 "loopback static bearer" (which gated loopback behind a
+// secret the OAuth desktop client never sends) is gone.
 
 import Foundation
 import JWTKit
@@ -20,7 +24,6 @@ import NotionBridgeLib
 private let ogIssuer = "https://auth.kup.solutions"
 private let ogResource = "http://127.0.0.1:9700/mcp"
 private let ogPRM = "http://127.0.0.1:9700/.well-known/oauth-protected-resource"
-private let ogLocalBearer = "loopback-static-secret-DEADBEEF"
 
 private struct OGKeys {
     let signing: JWTKeyCollection
@@ -44,7 +47,7 @@ private struct OGKeys {
 }
 
 func runRemoteOAuthOriginGatingTests() async {
-    print("\n\u{1F510} Remote OAuth Origin Gating (PKT-810 coexistence)")
+    print("\n\u{1F510} Remote OAuth Origin Gating (PKT-810 R5 — loopback token-free, tunnel OAuth-gated)")
 
     let keys = await OGKeys.make()
     let validator: @Sendable () -> ConnectorBearerValidator = {
@@ -53,24 +56,14 @@ func runRemoteOAuthOriginGatingTests() async {
             expectedIssuer: ogIssuer, expectedAudience: ogResource
         )
     }
-    // Connector context WITH a loopback static bearer configured.
-    let authWithLocal: @Sendable () -> ConnectorAuthContext = {
-        ConnectorAuthContext(
-            validator: validator(),
-            resourceMetadataURL: ogPRM,
-            localBearer: ogLocalBearer
-        )
-    }
-    // Connector context WITHOUT a local bearer (pure OAuth-only — proves the
-    // fallback is inert by default).
-    let authNoLocal: @Sendable () -> ConnectorAuthContext = {
+    let auth: @Sendable () -> ConnectorAuthContext = {
         ConnectorAuthContext(validator: validator(), resourceMetadataURL: ogPRM)
     }
 
-    func server(_ ctx: ConnectorAuthContext) -> SSEServer {
+    func server() -> SSEServer {
         SSEServer(
             router: ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog()),
-            onToolCall: {}, connectorAuth: ctx
+            onToolCall: {}, connectorAuth: auth()
         )
     }
 
@@ -84,6 +77,17 @@ func runRemoteOAuthOriginGatingTests() async {
         }
         return text
     }
+
+    func initBody() -> Data {
+        Data("""
+        {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"\(BridgeConstants.mcpProtocolVersion)","capabilities":{},"clientInfo":{"name":"origin-gating-check","version":"test"}}}
+        """.utf8)
+    }
+    let localHeaders = [
+        "Host": "127.0.0.1:9700",
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+    ]
 
     // MARK: - Pure discriminator
 
@@ -99,27 +103,34 @@ func runRemoteOAuthOriginGatingTests() async {
             "no CF header must mark local")
     }
 
-    // MARK: - Loopback static-bearer fallback
+    // MARK: - LOCAL (loopback) is token-free
 
-    await test("OriginGate: LOCAL + correct static bearer ⇒ passes auth (not 401)") {
-        let resp = await server(authWithLocal()).handleHTTPRequest(HTTPRequest(
-            method: "POST",
-            headers: ["Authorization": "Bearer \(ogLocalBearer)"],
-            body: Data(#"{"method":"tools/list"}"#.utf8)
+    await test("OriginGate: LOCAL + NO Authorization ⇒ served (not 401), session minted") {
+        let resp = await server().handleHTTPRequest(HTTPRequest(
+            method: "POST", headers: localHeaders, body: initBody()
         ))
-        // Auth passed → falls through to session machinery (pre-S2 contract);
-        // the point is it is NOT an auth rejection.
-        try expect(resp.statusCode != 401, "local+correct-bearer must not 401, got \(resp.statusCode)")
-        try expect(resp.statusCode != 403, "local+correct-bearer must not 403, got \(resp.statusCode)")
+        try expect(resp.statusCode != 401, "loopback with no token must not 401, got \(resp.statusCode)")
+        try expect(resp.headers[HTTPHeaderName.sessionID] != nil,
+                   "loopback initialize must mint a session id (token-free)")
     }
 
-    await test("OriginGate: LOCAL static bearer session keeps full local tool surface") {
+    await test("OriginGate: LOCAL + arbitrary non-JWT bearer ⇒ still served (loopback never gated)") {
+        var headers = localHeaders
+        headers["Authorization"] = "Bearer not-a-jwt-and-not-a-secret"
+        let resp = await server().handleHTTPRequest(HTTPRequest(
+            method: "POST", headers: headers, body: initBody()
+        ))
+        try expect(resp.statusCode != 401, "loopback must not 401 regardless of bearer, got \(resp.statusCode)")
+        try expect(resp.statusCode != 403, "loopback must not 403 regardless of bearer, got \(resp.statusCode)")
+    }
+
+    await test("OriginGate: LOCAL keeps full local tool surface (token-free init + tools/call)") {
         let router = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
         await router.register(ToolRegistration(
             name: "local_probe",
             module: "test",
             tier: .open,
-            description: "Local-only probe for static bearer sessions.",
+            description: "Local-only probe for token-free loopback sessions.",
             inputSchema: .object(["type": .string("object")]),
             handler: { _ in .string("local-ok") }
         ))
@@ -127,100 +138,70 @@ func runRemoteOAuthOriginGatingTests() async {
             router: router,
             onToolCall: {},
             toolAllowlist: ConnectorScopeGate.connectorReachableTools,
-            connectorAuth: authWithLocal()
+            connectorAuth: auth()
         )
-        let initBody = Data("""
-        {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"\(BridgeConstants.mcpProtocolVersion)","capabilities":{},"clientInfo":{"name":"codex-local-bridge-check","version":"test"}}}
-        """.utf8)
         let initResp = await s.handleHTTPRequest(HTTPRequest(
-            method: "POST",
-            headers: [
-                "Authorization": "Bearer \(ogLocalBearer)",
-                "Host": "127.0.0.1:9700",
-                "Accept": "application/json, text/event-stream",
-                "Content-Type": "application/json"
-            ],
-            body: initBody
+            method: "POST", headers: localHeaders, body: initBody()
         ))
         guard let sessionID = initResp.headers[HTTPHeaderName.sessionID] else {
-            throw TestError.assertion("local static bearer initialize must return a session id")
+            throw TestError.assertion("token-free loopback initialize must return a session id")
         }
         _ = try await streamText(from: initResp)
 
+        var callHeaders = localHeaders
+        callHeaders[HTTPHeaderName.sessionID] = sessionID
         let callBody = Data(#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"local_probe","arguments":{}}}"#.utf8)
         let callResp = await s.handleHTTPRequest(HTTPRequest(
-            method: "POST",
-            headers: [
-                "Authorization": "Bearer \(ogLocalBearer)",
-                "Mcp-Session-Id": sessionID,
-                "Host": "127.0.0.1:9700",
-                "Accept": "application/json, text/event-stream",
-                "Content-Type": "application/json"
-            ],
-            body: callBody
+            method: "POST", headers: callHeaders, body: callBody
         ))
         let callText = try await streamText(from: callResp)
         try expect(!callText.contains("not allowed in this session"),
-                   "loopback static-bearer session must not inherit connector allowlist: \(callText)")
+                   "loopback session must not inherit the connector allowlist: \(callText)")
         try expect(callText.contains("local-ok"),
-                   "local-only tool must dispatch on loopback static-bearer sessions: \(callText)")
+                   "local-only tool must dispatch on token-free loopback sessions: \(callText)")
     }
 
-    await test("OriginGate: LOCAL + wrong static bearer ⇒ 401") {
-        let resp = await server(authWithLocal()).handleHTTPRequest(HTTPRequest(
+    await test("OriginGate: LOCAL + valid JWT ⇒ also served (not 401)") {
+        let tok = try await keys.sign(scope: "offline_access")
+        var headers = localHeaders
+        headers["Authorization"] = "Bearer \(tok)"
+        let resp = await server().handleHTTPRequest(HTTPRequest(
+            method: "POST", headers: headers, body: initBody()
+        ))
+        try expect(resp.statusCode != 401, "local+valid-JWT must be served, got \(resp.statusCode)")
+    }
+
+    // MARK: - REMOTE (tunnel) stays fully OAuth-gated
+
+    await test("OriginGate: REMOTE + NO token ⇒ 401 (tunnel must authenticate)") {
+        let resp = await server().handleHTTPRequest(HTTPRequest(
             method: "POST",
-            headers: ["Authorization": "Bearer not-the-secret"],
+            headers: ["Cf-Ray": "abc-123", "Host": "127.0.0.1:9700"],
             body: nil
         ))
-        try expect(resp.statusCode == 401, "local+wrong-bearer must 401, got \(resp.statusCode)")
+        try expect(resp.statusCode == 401, "tunnel with no token must 401, got \(resp.statusCode)")
     }
 
-    // MARK: - Security invariant: static bearer is loopback-scoped
-
-    await test("OriginGate: REMOTE + static bearer ⇒ 401 (no cloud OAuth bypass)") {
-        let resp = await server(authWithLocal()).handleHTTPRequest(HTTPRequest(
+    await test("OriginGate: REMOTE + arbitrary non-JWT bearer ⇒ 401 (no static-bearer bypass)") {
+        let resp = await server().handleHTTPRequest(HTTPRequest(
             method: "POST",
             headers: [
-                "Authorization": "Bearer \(ogLocalBearer)",
+                "Authorization": "Bearer loopback-static-secret-DEADBEEF",
                 "Cf-Connecting-Ip": "203.0.113.7",
             ],
             body: nil
         ))
         try expect(resp.statusCode == 401,
-                   "static bearer over the tunnel MUST be rejected, got \(resp.statusCode)")
+                   "a non-JWT bearer over the tunnel MUST be rejected, got \(resp.statusCode)")
     }
-
-    // MARK: - OAuth path is origin-agnostic for valid JWTs
 
     await test("OriginGate: REMOTE + valid JWT ⇒ OAuth-validated (not 401)") {
         let tok = try await keys.sign(scope: "offline_access")
-        let resp = await server(authWithLocal()).handleHTTPRequest(HTTPRequest(
+        let resp = await server().handleHTTPRequest(HTTPRequest(
             method: "POST",
             headers: ["Authorization": "Bearer \(tok)", "Cf-Connecting-Ip": "203.0.113.7"],
             body: Data(#"{"method":"tools/list"}"#.utf8)
         ))
         try expect(resp.statusCode != 401, "remote+valid-JWT must pass OAuth, got \(resp.statusCode)")
-    }
-
-    await test("OriginGate: LOCAL + valid JWT ⇒ still OAuth-validated (not 401)") {
-        let tok = try await keys.sign(scope: "offline_access")
-        let resp = await server(authWithLocal()).handleHTTPRequest(HTTPRequest(
-            method: "POST",
-            headers: ["Authorization": "Bearer \(tok)"],
-            body: Data(#"{"method":"tools/list"}"#.utf8)
-        ))
-        try expect(resp.statusCode != 401, "local+valid-JWT must pass OAuth, got \(resp.statusCode)")
-    }
-
-    // MARK: - Fallback inert when no local bearer configured
-
-    await test("OriginGate: no localBearer ⇒ LOCAL + static bearer still 401 (pure OAuth-only)") {
-        let resp = await server(authNoLocal()).handleHTTPRequest(HTTPRequest(
-            method: "POST",
-            headers: ["Authorization": "Bearer \(ogLocalBearer)"],
-            body: nil
-        ))
-        try expect(resp.statusCode == 401,
-                   "with no local bearer, a non-JWT must 401 even on loopback, got \(resp.statusCode)")
     }
 }

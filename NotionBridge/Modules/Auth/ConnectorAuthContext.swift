@@ -32,14 +32,6 @@ public struct ConnectorAuthContext: Sendable {
     /// referenced from the `WWW-Authenticate` challenge so a client knows
     /// where to discover the authorization server.
     public let resourceMetadataURL: String
-    /// PKT-810 coexistence: the loopback (local desktop / stdio-proxy) static
-    /// bearer. Remote (tunnel) requests are OAuth-gated via `validator`; local
-    /// direct-loopback requests are gated on THIS shared secret instead, so a
-    /// second macOS account on a shared Mac cannot drive the Bridge over
-    /// 127.0.0.1. `nil`/empty ⇒ prior local-trust (loopback unauthenticated).
-    /// The bearer is loopback-scoped: tunnel requests never take the local
-    /// branch, so it can never bypass cloud OAuth.
-    public let localBearer: String?
 
     /// Connector tool-authorization policy. DEFAULT false = full parity: an
     /// authenticated connector token may reach every tool, gated only by the
@@ -56,7 +48,6 @@ public struct ConnectorAuthContext: Sendable {
         sessionBinding: ConnectorSessionBinding = ConnectorSessionBinding(),
         diagnostics: ConnectorAuthDiagnostics = ConnectorAuthDiagnostics(),
         resourceMetadataURL: String,
-        localBearer: String? = nil,
         strictScopes: Bool = false
     ) {
         self.validator = validator
@@ -65,7 +56,6 @@ public struct ConnectorAuthContext: Sendable {
         self.sessionBinding = sessionBinding
         self.diagnostics = diagnostics
         self.resourceMetadataURL = resourceMetadataURL
-        self.localBearer = localBearer
         self.strictScopes = strictScopes
     }
 
