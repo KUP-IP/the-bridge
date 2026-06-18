@@ -18,7 +18,7 @@ import Foundation
 public enum AppVersion {
     /// Marketing version (CFBundleShortVersionString equivalent).
     /// Format: MAJOR.MINOR.PATCH (Semantic Versioning).
-    public static let marketing = "3.8.0"
+    public static let marketing = "3.8.1"
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
@@ -71,7 +71,17 @@ public enum AppVersion {
     ///   (path-traversal / metachar / Stripe tokenization), IA restructure (Commands
     ///   its own page + Standing Orders → Connection handshake), wave page conformance,
     ///   titanium glass-depth fix. test-floor 1884 → 1930, zero regression.
-    public static let build = "59"
+    /// v3.8.1: 59 → 60 — PKT-810 R5 hardening (security): close the legacy-route
+    ///   tunnel bypass. The legacy SSE transport (GET /sse + POST /messages,
+    ///   PKT-336) is dispatched in the NIO handler BEFORE the /mcp connector-auth
+    ///   gate, and cloudflared forwards every path to :9700 (no path scoping) —
+    ///   so a Cloudflare-tunnel caller could open an UNAUTHENTICATED legacy MCP
+    ///   session and drive the full tool surface, bypassing the entire OAuth gate.
+    ///   Now tunnel-origin (Cf-*) legacy requests are refused (403); direct
+    ///   loopback (older local SSE clients) is unaffected. Also bundles the
+    ///   config-driven Data-Source Registry (9 `registry_*` tools) that landed on
+    ///   main post-v3.8.0. test-floor 2158 → 2163, zero regression.
+    public static let build = "60"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }
