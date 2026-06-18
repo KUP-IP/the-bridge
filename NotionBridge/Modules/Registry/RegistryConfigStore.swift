@@ -136,4 +136,20 @@ public actor RegistryConfigStore {
         try save(config)
         return config
     }
+
+    /// Remove one entity by key, persist, AND evict its row cache — the
+    /// "forget this data source entirely" operation (symmetric to `upsertEntity`).
+    /// A no-op (returns the current config, no save) if the key isn't present.
+    /// Does NOT touch Notion — only the Bridge's local binding + cache.
+    /// The Skills SEED is removable here like any other entity; the "explicit
+    /// confirm" guard for it lives in the CALLER (the tool / the pane), not the
+    /// store, so a deliberate programmatic removal stays simple.
+    @discardableResult
+    public func removeEntity(key: String) async throws -> RegistryConfig {
+        var config = try load()
+        guard config.removeEntity(key: key) else { return config }   // not present — no-op
+        try save(config)
+        await RegistryRowCache.shared.evictAll(entity: key)
+        return config
+    }
 }

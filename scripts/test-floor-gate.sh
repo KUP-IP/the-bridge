@@ -1324,7 +1324,16 @@ set -euo pipefail
 # isRemoteTunnelRequest(headers:) overload mirrors the HTTPRequest one for the
 # NIO dispatch layer. +5 tests (HTTPHeaders discriminator + real-NIO-decode of
 # tunnel/loopback × /sse,/messages). Measured = 2163. FLOOR 2158 -> 2163.
-FLOOR="${BRIDGE_TEST_FLOOR:-2163}"
+#
+# 2026-06-18 Registry entity-management completion: + registry_remove_entity (the
+# symmetric counterpart to registry_add_entity) + a "Remove" affordance in the
+# Data Sources pane. Removes a LOCAL entity binding + evicts its row cache (no
+# Notion write); .request tier; the seeded Skills entity is guarded behind an
+# explicit confirm in BOTH the tool and the pane. staticFeatureModuleToolCount
+# 171 -> 172. +6 tests (4 module: registration count 9->10, tier, add→remove
+# round-trip, seed-guard refuse/confirm, unknown-entity; 2 VM: pane remove +
+# isSeed). Measured = 2169. FLOOR 2163 -> 2169.
+FLOOR="${BRIDGE_TEST_FLOOR:-2169}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

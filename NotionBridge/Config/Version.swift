@@ -18,7 +18,7 @@ import Foundation
 public enum AppVersion {
     /// Marketing version (CFBundleShortVersionString equivalent).
     /// Format: MAJOR.MINOR.PATCH (Semantic Versioning).
-    public static let marketing = "3.8.1"
+    public static let marketing = "3.8.2"
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
@@ -81,7 +81,13 @@ public enum AppVersion {
     ///   loopback (older local SSE clients) is unaffected. Also bundles the
     ///   config-driven Data-Source Registry (9 `registry_*` tools) that landed on
     ///   main post-v3.8.0. test-floor 2158 → 2163, zero regression.
-    public static let build = "60"
+    /// v3.8.2: 60 → 61 — Data-Source Registry entity-management completion:
+    ///   + registry_remove_entity (symmetric to registry_add_entity — forgets a
+    ///   local entity binding + evicts its row cache, no Notion write; .request
+    ///   tier; seeded Skills entity guarded behind explicit confirm) + a "Remove"
+    ///   affordance in the Data Sources pane. staticFeatureModuleToolCount 171 →
+    ///   172. test-floor 2163 → 2169, zero regression.
+    public static let build = "61"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }
@@ -179,7 +185,10 @@ public enum BridgeConstants {
     ///   introspect/list/get/create/update/delete/possess — the new `registry`
     ///   family: one generic CRUD set + entity registration + introspect + possess
     ///   serving every configured entity). 162 + 9 = 171.
-    public static let staticFeatureModuleToolCount = 171
+    /// Registry entity-management completion (2026-06-18): + 1 (registry_remove_entity
+    ///   — the symmetric counterpart to registry_add_entity; drops a local
+    ///   entity binding + evicts its cache, no Notion write). 171 + 1 = 172.
+    public static let staticFeatureModuleToolCount = 172
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

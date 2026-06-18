@@ -149,4 +149,26 @@ public final class DataSourcesViewModel: ObservableObject {
         await refreshCacheCounts()
         status = "Cleared cache for \(key)"
     }
+
+    // MARK: - Remove data source
+
+    /// Whether `key` is the seeded Skills entity — the pane requires an extra,
+    /// explicit confirm before removing it (it's the validating fold-in + the
+    /// default a fresh install relies on). Mirrors the `registry_remove_entity`
+    /// tool guard so the UI and the MCP surface agree.
+    public func isSeed(_ key: String) -> Bool { key == RegistryEntity.seedEntityKey }
+
+    /// Remove an entity from the registry (forget its binding + evict its cache)
+    /// and persist. Goes through the SHARED store, so it serializes with the
+    /// registry tools' writes (BE↔FE alignment). Does NOT touch Notion.
+    public func removeEntity(_ key: String) async {
+        busy = true; defer { busy = false }
+        do {
+            _ = try await store().removeEntity(key: key)   // atomic, serialized, evicts cache
+            await load()
+            status = "Removed data source ‘\(key)’"
+        } catch {
+            status = "Could not remove ‘\(key)’: \(error.localizedDescription)"
+        }
+    }
 }

@@ -84,23 +84,24 @@ func runRegistryModuleTests() async {
 
     // MARK: - Registration
 
-    await test("RegistryModule registers exactly 9 tools with expected names") {
+    await test("RegistryModule registers exactly 10 tools with expected names") {
         let router = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
         await RegistryModule.register(on: router)
         let tools = await router.registrations(forModule: "registry")
-        try expect(tools.count == 9, "expected 9 registry tools, got \(tools.count)")
+        try expect(tools.count == 10, "expected 10 registry tools, got \(tools.count)")
         let names = Set(tools.map { $0.name })
-        try expect(names == ["registry_entities", "registry_add_entity", "registry_introspect", "registry_list",
-                             "registry_get", "registry_create", "registry_update", "registry_delete", "registry_possess"],
+        try expect(names == ["registry_entities", "registry_add_entity", "registry_remove_entity", "registry_introspect",
+                             "registry_list", "registry_get", "registry_create", "registry_update", "registry_delete", "registry_possess"],
                    "tool names: \(names.sorted())")
     }
 
-    await test("RegistryModule tiers: delete=request, writes=notify, reads=open") {
+    await test("RegistryModule tiers: delete+remove_entity=request, writes=notify, reads=open") {
         let router = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
         await RegistryModule.register(on: router)
         let tools = await router.registrations(forModule: "registry")
         func tier(_ n: String) -> SecurityTier? { tools.first { $0.name == n }?.tier }
         try expect(tier("registry_delete") == .request, "delete must be .request (confirmation)")
+        try expect(tier("registry_remove_entity") == .request, "remove_entity must be .request (destructive)")
         try expect(tier("registry_create") == .notify && tier("registry_update") == .notify && tier("registry_introspect") == .notify,
                    "writes are .notify")
         try expect(tier("registry_get") == .open && tier("registry_list") == .open && tier("registry_entities") == .open && tier("registry_possess") == .open,
@@ -201,6 +202,60 @@ func runRegistryModuleTests() async {
             guard case .array(let arr)? = obj(after)["entities"] else { throw TestError.assertion("no entities") }
             let keys = arr.compactMap { e -> String? in if case .string(let k)? = obj(e)["key"] { return k } else { return nil } }
             try expect(Set(keys) == ["skill", "project"], "skill + project configured, got \(keys)")
+        }
+    }
+
+    await test("registry_remove_entity removes a non-seed entity (add → remove → gone)") {
+        try await withRegistryModuleEnv(ModFakeGateway(schema: skillsSchema())) {
+            // Add a second entity, then remove it.
+            _ = try await RegistryModule.makeAddEntity().handler(.object([
+                "key": .string("project"),
+                "dataSourceId": .string("f6d6ae1d-bfb4-4494-be18-c46e87dea149"),
+                "properties": .array([
+                    .object(["key": .string("title"), "notionName": .string("Name"), "type": .string("title"), "role": .string("title")]),
+                ]),
+            ]))
+            let out = try await RegistryModule.makeRemoveEntity().handler(.object(["entity": .string("project")]))
+            try expect(obj(out)["removed"] == .bool(true), "removed")
+            // Persisted: registry_entities no longer lists project (skill seed remains).
+            let after = try await RegistryModule.makeEntities().handler(.object([:]))
+            guard case .array(let arr)? = obj(after)["entities"] else { throw TestError.assertion("no entities") }
+            let keys = arr.compactMap { e -> String? in if case .string(let k)? = obj(e)["key"] { return k } else { return nil } }
+            try expect(keys == ["skill"], "only the skill seed remains, got \(keys)")
+        }
+    }
+
+    await test("registry_remove_entity refuses the seeded Skills entity without confirm") {
+        try await withRegistryModuleEnv(ModFakeGateway(schema: skillsSchema())) {
+            var threw = false
+            do { _ = try await RegistryModule.makeRemoveEntity().handler(.object(["entity": .string("skill")])) }
+            catch { threw = true }
+            try expect(threw, "removing the seed without confirm:true must throw")
+            // Still present.
+            let after = try await RegistryModule.makeEntities().handler(.object([:]))
+            if case .array(let arr)? = obj(after)["entities"] {
+                try expect(arr.count == 1, "skill seed must survive a guarded removal attempt")
+            } else { throw TestError.assertion("entities missing") }
+        }
+    }
+
+    await test("registry_remove_entity removes the seed WITH confirm:true") {
+        try await withRegistryModuleEnv(ModFakeGateway(schema: skillsSchema())) {
+            let out = try await RegistryModule.makeRemoveEntity().handler(.object(["entity": .string("skill"), "confirm": .bool(true)]))
+            try expect(obj(out)["removed"] == .bool(true), "seed removed with explicit confirm")
+            let after = try await RegistryModule.makeEntities().handler(.object([:]))
+            if case .array(let arr)? = obj(after)["entities"] {
+                try expect(arr.isEmpty, "registry now empty after confirmed seed removal, got \(arr.count)")
+            } else { throw TestError.assertion("entities missing") }
+        }
+    }
+
+    await test("registry_remove_entity rejects unknown entity") {
+        try await withRegistryModuleEnv(ModFakeGateway(schema: skillsSchema())) {
+            var threw = false
+            do { _ = try await RegistryModule.makeRemoveEntity().handler(.object(["entity": .string("ghost")])) }
+            catch { threw = true }
+            try expect(threw, "removing an unknown entity must throw")
         }
     }
 

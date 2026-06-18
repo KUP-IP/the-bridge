@@ -79,6 +79,36 @@ func runDataSourcesViewModelTests() async {
         }
     }
 
+    // MARK: - Remove data source (pane affordance + seed guard)
+
+    await test("Scenario: remove a non-seed data source via the pane (forgets binding, seed remains)") {
+        try await withVMEnv(VMFakeGateway(schema: fullSkillsSchema())) { vm in
+            // Add a second entity through the SAME shared store the tools use.
+            _ = try await RegistryModule.makeAddEntity().handler(.object([
+                "key": .string("project"),
+                "dataSourceId": .string("f6d6ae1d-bfb4-4494-be18-c46e87dea149"),
+                "properties": .array([
+                    .object(["key": .string("title"), "notionName": .string("Name"), "type": .string("title"), "role": .string("title")]),
+                ]),
+            ]))
+            await vm.load()
+            let before = await MainActor.run { vm.entities.map { $0.key }.sorted() }
+            try expect(before == ["project", "skill"], "pane sees both, got \(before)")
+            await vm.removeEntity("project")
+            let (after, status) = await MainActor.run { (vm.entities.map { $0.key }, vm.status) }
+            try expect(after == ["skill"], "project removed, seed remains, got \(after)")
+            try expect(status.contains("Removed"), "status reflects removal: \(status)")
+        }
+    }
+
+    await test("Scenario: isSeed flags the Skills seed (extra-confirm guard) and not others") {
+        try await withVMEnv(VMFakeGateway(schema: fullSkillsSchema())) { vm in
+            let (seed, notSeed) = await MainActor.run { (vm.isSeed("skill"), vm.isSeed("project")) }
+            try expect(seed, "‘skill’ is the seed (pane shows the firm confirm)")
+            try expect(!notSeed, "‘project’ is not the seed")
+        }
+    }
+
     // MARK: - Propose → review → confirm (Decision 5)
 
     await test("Scenario: propose binding sets a CLEAN proposal but does NOT persist") {
