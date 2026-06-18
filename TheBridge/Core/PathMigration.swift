@@ -1,14 +1,18 @@
 // PathMigration.swift — One-time migration of legacy on-disk locations
 // to the new canonical "The Bridge" folders.
 //
-// PKT-1 (v3.5): Existing 3.x installs store data under one (or both!) of
-// these legacy locations:
-//   ~/Library/Application Support/The Bridge/   (display-name variant)
-//   ~/Library/Application Support/TheBridge/    (executable-name variant)
+// PKT-1 (v3.5): Existing pre-rebrand installs store data under one (or
+// both!) of these legacy locations:
+//   ~/Library/Application Support/Notion Bridge/   (display-name variant)
+//   ~/Library/Application Support/NotionBridge/    (executable-name variant)
 //
-// On first launch of 4.0+, we merge any legacy content into the new
-// canonical home:
+// On first launch we merge any legacy content into the new canonical home:
 //   ~/Library/Application Support/The Bridge/
+//
+// NOTE: the 2026-06 internal NotionBridge*→TheBridge* identifier rename
+// KEPT the on-disk dir "The Bridge" (and the bundle id), so "The Bridge"
+// is the canonical destination — never a legacy SOURCE. Legacy names are
+// the genuinely-old pre-rebrand dirs only (see BridgePaths.legacyNames).
 //
 // Properties guaranteed by `runOnce(fileManager:logger:)`:
 //   • Idempotent — running twice leaves the filesystem identical to

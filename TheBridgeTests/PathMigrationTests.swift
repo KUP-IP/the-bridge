@@ -18,8 +18,8 @@ func runPathMigrationTests() async {
     }
 
     await test("BridgePaths.legacyNames includes both 3.x variants") {
-        try expect(BridgePaths.legacyNames.contains("The Bridge"))
-        try expect(BridgePaths.legacyNames.contains("TheBridge"))
+        try expect(BridgePaths.legacyNames.contains("Notion Bridge"))
+        try expect(BridgePaths.legacyNames.contains("NotionBridge"))
     }
 
     await test("BridgePaths subdir helper composes paths correctly") {
@@ -42,11 +42,11 @@ func runPathMigrationTests() async {
         }
     }
 
-    await test("PathMigration moves entries from 'The Bridge' legacy dir") {
+    await test("PathMigration moves entries from 'Notion Bridge' legacy dir") {
         try await withTempHome { home in
             let fm = FileManager.default
             let legacy = home
-                .appendingPathComponent("Library/Application Support/The Bridge", isDirectory: true)
+                .appendingPathComponent("Library/Application Support/Notion Bridge", isDirectory: true)
             try fm.createDirectory(at: legacy, withIntermediateDirectories: true)
             let legacyFile = legacy.appendingPathComponent("snippets.json")
             try "ok".write(to: legacyFile, atomically: true, encoding: .utf8)
@@ -61,16 +61,16 @@ func runPathMigrationTests() async {
             try expect(!fm.fileExists(atPath: legacy.path), "legacy dir should no longer exist at original location")
             let support = home.appendingPathComponent("Library/Application Support", isDirectory: true)
             let children = try fm.contentsOfDirectory(atPath: support.path)
-            let archived = children.contains(where: { $0.hasPrefix("The Bridge.legacy-") })
+            let archived = children.contains(where: { $0.hasPrefix("Notion Bridge.legacy-") })
             try expect(archived, "expected archived legacy dir present, got \(children)")
         }
     }
 
-    await test("PathMigration moves entries from 'TheBridge' (no-space) legacy dir") {
+    await test("PathMigration moves entries from 'NotionBridge' (no-space) legacy dir") {
         try await withTempHome { home in
             let fm = FileManager.default
             let legacy = home
-                .appendingPathComponent("Library/Application Support/TheBridge", isDirectory: true)
+                .appendingPathComponent("Library/Application Support/NotionBridge", isDirectory: true)
             try fm.createDirectory(at: legacy, withIntermediateDirectories: true)
             try "config".write(to: legacy.appendingPathComponent("config.json"), atomically: true, encoding: .utf8)
 
@@ -86,8 +86,8 @@ func runPathMigrationTests() async {
             let fm = FileManager.default
             let supportRoot = home.appendingPathComponent("Library/Application Support", isDirectory: true)
 
-            let legacyA = supportRoot.appendingPathComponent("The Bridge", isDirectory: true)
-            let legacyB = supportRoot.appendingPathComponent("TheBridge", isDirectory: true)
+            let legacyA = supportRoot.appendingPathComponent("Notion Bridge", isDirectory: true)
+            let legacyB = supportRoot.appendingPathComponent("NotionBridge", isDirectory: true)
             try fm.createDirectory(at: legacyA, withIntermediateDirectories: true)
             try fm.createDirectory(at: legacyB, withIntermediateDirectories: true)
             try "A".write(to: legacyA.appendingPathComponent("from-A.txt"), atomically: true, encoding: .utf8)
@@ -112,7 +112,7 @@ func runPathMigrationTests() async {
                 atomically: true, encoding: .utf8)
 
             // Legacy has a same-named file with different content.
-            let legacy = home.appendingPathComponent("Library/Application Support/The Bridge", isDirectory: true)
+            let legacy = home.appendingPathComponent("Library/Application Support/Notion Bridge", isDirectory: true)
             try fm.createDirectory(at: legacy, withIntermediateDirectories: true)
             try "legacy-content".write(
                 to: legacy.appendingPathComponent("commands.json"),
@@ -136,7 +136,7 @@ func runPathMigrationTests() async {
     await test("PathMigration handles logs dir alongside application support") {
         try await withTempHome { home in
             let fm = FileManager.default
-            let legacyLogs = home.appendingPathComponent("Library/Logs/TheBridge", isDirectory: true)
+            let legacyLogs = home.appendingPathComponent("Library/Logs/NotionBridge", isDirectory: true)
             try fm.createDirectory(at: legacyLogs, withIntermediateDirectories: true)
             try "log-line".write(
                 to: legacyLogs.appendingPathComponent("bridge.log"),
