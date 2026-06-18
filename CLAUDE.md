@@ -10,7 +10,7 @@ A macOS menu-bar app that exposes the Mac + a Notion workspace to AI agents over
   executable wraps it. Tests are a custom harness (`NotionBridgeTests`), NOT XCTest.
 - **MCP server:** `Server/SSEServer` (`SSETransport.swift`) serves `/mcp`, `/sse`,
   `/health`, job callbacks. Tools register via `Server/BridgeModuleRegistry.swift`
-  (single source of truth, ~163 tools / 29 modules) → `ToolRouter` → `MCPToolFactory`.
+  (single source of truth, ~172 tools / 27 families) → `ToolRouter` → `MCPToolFactory`.
 - **Tools:** `ToolRegistration {name, module, tier, inputSchema (MCP Value), handler}`.
   Every live tool MUST have a `ToolAnnotationCatalog` entry — `ToolAnnotationAuditTests`
   hard-fails the build otherwise. Tiers: `.open`/`.notify`/`.request` (`SecurityGate`).
@@ -44,14 +44,22 @@ A macOS menu-bar app that exposes the Mac + a Notion workspace to AI agents over
   surgical body edits via `replacePageMarkdown` (read-modify-write, exact `old_str` match).
 - **Loopback contract (PKT-810 R5):** `/mcp` from direct loopback (no `Cf-*` header) is
   token-free; only tunnel (Cloudflare `Cf-Connecting-Ip`/`Cf-Ray`) requests are auth-gated.
-- **Version:** `Config/Version.swift` (marketing 3.8.0). +1 patch per published install.
+  The legacy `/sse` + `/messages` routes are dispatched *before* that gate, so they enforce
+  their own check: tunnel-origin legacy requests are **403'd (loopback-only)**; only `/health`
+  + the PRM doc are intentionally tunnel-reachable without auth. cloudflared forwards ALL paths
+  to `:9700` (no path scoping), so the server is the trust boundary.
+- **Version:** `Config/Version.swift` (marketing 3.8.1, build 60) + root `Info.plist`
+  (CFBundleShortVersionString/CFBundleVersion — the build reads the plist, keep both in sync).
+  +1 patch per published install.
 
 ## Current Sprint
 **Data-Source Registry — vertical slice SHIPPED + live-verified** (spec: config-driven
 `entity type → Notion data source + property map bound by PROPERTY ID`; foundation for
 "Sell The Bridge"). All under `Modules/Registry/` (13 files) + `UI/Sections/DataSourcesSection.swift`.
-Floor 2030→**2122** (+92 tests). Live-verified against real Notion (Skills 8/8 bound;
+Floor 2030→**2163** (+133 tests). Live-verified against real Notion (Skills 8/8 bound;
 Projects added+introspected with correct drift; possess loaded a 16KB skill body).
+**Shipped in v3.8.1** (PR #40 merged to main; build 60) alongside the PKT-810 R5 legacy-route
+tunnel-gate security fix (+5 tests).
 
 - **W1 ✓** `RegistryModels` (bind-by-property-id, Skills seeded entity #1) · `RegistryConfigStore`
   (atomic exportable `registry.json`) · `RegistryRowCache` (per-entity read-through, stale-

@@ -1313,7 +1313,18 @@ set -euo pipefail
 # trust-boundary documented at isRemoteTunnelRequest; CHANGELOG entry supersedes
 # the stale loopbackStaticBearerFallback note. +3 tests (non-coercible skip /
 # UTF-16 chunk / pageId traversal). Measured = 2158. FLOOR 2155 -> 2158.
-FLOOR="${BRIDGE_TEST_FLOOR:-2158}"
+#
+# 2026-06-18 PKT-810 R5 hardening (legacy-route tunnel gate): the legacy SSE
+# transport (GET /sse + POST /messages, PKT-336) is dispatched in the NIO handler
+# BEFORE the /mcp connector-auth gate, and cloudflared forwards every path to
+# :9700 (no path scoping) — so a Cloudflare-tunnel caller could open an
+# UNAUTHENTICATED legacy session and drive the full tool surface, bypassing the
+# entire OAuth gate. Fix: refuse tunnel-origin (Cf-*) legacy requests with 403;
+# direct loopback (older local SSE clients) is unaffected. New
+# isRemoteTunnelRequest(headers:) overload mirrors the HTTPRequest one for the
+# NIO dispatch layer. +5 tests (HTTPHeaders discriminator + real-NIO-decode of
+# tunnel/loopback × /sse,/messages). Measured = 2163. FLOOR 2158 -> 2163.
+FLOOR="${BRIDGE_TEST_FLOOR:-2163}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

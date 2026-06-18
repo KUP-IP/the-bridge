@@ -19,6 +19,9 @@
 import Foundation
 import JWTKit
 import MCP
+import NIOEmbedded
+import NIOCore
+import NIOHTTP1
 import NotionBridgeLib
 
 private let ogIssuer = "https://auth.kup.solutions"
@@ -203,5 +206,77 @@ func runRemoteOAuthOriginGatingTests() async {
             body: Data(#"{"method":"tools/list"}"#.utf8)
         ))
         try expect(resp.statusCode != 401, "remote+valid-JWT must pass OAuth, got \(resp.statusCode)")
+    }
+
+    // MARK: - Legacy /sse + /messages are LOOPBACK-ONLY (PKT-810 R5 hardening)
+    //
+    // The legacy SSE transport (PKT-336: GET /sse + POST /messages) is dispatched
+    // in the NIO handler BEFORE the `/mcp` connector-auth gate in
+    // `handleHTTPRequest`, so the gate that protects `/mcp` does NOT cover it.
+    // Without the explicit tunnel-origin refusal (R5 hardening), a Cloudflare
+    // tunnel caller could open an UNAUTHENTICATED legacy session and drive the
+    // full tool surface — a full bypass of the connector-auth gate. cloudflared
+    // forwards every path to :9700 (no path scoping), so the server itself must
+    // refuse tunnel-origin legacy requests. We prove the gate's decision inputs
+    // through REAL NIO header decoding: a tunnel request decodes to the legacy
+    // route AND trips the tunnel predicate (→ 403), while a loopback request
+    // decodes to the same route and does NOT (→ served, unchanged).
+
+    await test("OriginGate(legacy): HTTPHeaders discriminator mirrors the HTTPRequest one") {
+        try expect(SSEServer.isRemoteTunnelRequest(headers: HTTPHeaders([("Cf-Connecting-Ip", "1.2.3.4")])),
+                   "Cf-Connecting-Ip header must mark remote")
+        try expect(SSEServer.isRemoteTunnelRequest(headers: HTTPHeaders([("cf-ray", "abc-123")])),
+                   "Cf-Ray (any case) must mark remote")
+        try expect(!SSEServer.isRemoteTunnelRequest(headers: HTTPHeaders([("Authorization", "Bearer x")])),
+                   "no CF header must mark local")
+        try expect(!SSEServer.isRemoteTunnelRequest(headers: HTTPHeaders()),
+                   "empty headers must mark local")
+    }
+
+    func decodeHead(_ raw: String) throws -> HTTPRequestHead {
+        let channel = EmbeddedChannel()
+        try channel.pipeline.configureHTTPServerPipeline().wait()
+        var buf = channel.allocator.buffer(capacity: raw.utf8.count)
+        buf.writeString(raw)
+        try channel.writeInbound(buf)
+        defer { _ = try? channel.finish() }
+        guard let part = try channel.readInbound(as: HTTPServerRequestPart.self),
+              case .head(let head) = part else {
+            throw TestError.assertion("expected a decoded .head for: \(raw)")
+        }
+        return head
+    }
+
+    func legacyRoute(_ head: HTTPRequestHead) -> MCPHTTPRoute {
+        let path = head.uri.split(separator: "?").first.map(String.init) ?? head.uri
+        return MCPHTTPRoute.classify(method: head.method.rawValue, path: path, endpoint: "/mcp")
+    }
+
+    await test("OriginGate(legacy): TUNNEL GET /sse ⇒ legacySSE + tunnel predicate trips (would 403)") {
+        let head = try decodeHead("GET /sse HTTP/1.1\r\nHost: 127.0.0.1:9700\r\nCf-Ray: abc-123\r\n\r\n")
+        try expect(legacyRoute(head) == .legacySSE, "GET /sse must classify as legacySSE, got \(legacyRoute(head))")
+        try expect(SSEServer.isRemoteTunnelRequest(headers: head.headers),
+                   "a tunnel GET /sse MUST trip the loopback-only gate (→ refused)")
+    }
+
+    await test("OriginGate(legacy): LOOPBACK GET /sse ⇒ legacySSE + predicate false (served, unchanged)") {
+        let head = try decodeHead("GET /sse HTTP/1.1\r\nHost: 127.0.0.1:9700\r\n\r\n")
+        try expect(legacyRoute(head) == .legacySSE, "GET /sse must classify as legacySSE")
+        try expect(!SSEServer.isRemoteTunnelRequest(headers: head.headers),
+                   "a direct-loopback GET /sse must NOT trip the gate (older local clients keep working)")
+    }
+
+    await test("OriginGate(legacy): TUNNEL POST /messages ⇒ legacyMessages + tunnel predicate trips (would 403)") {
+        let head = try decodeHead("POST /messages?sessionId=x HTTP/1.1\r\nHost: 127.0.0.1:9700\r\nCf-Connecting-Ip: 203.0.113.7\r\nContent-Length: 0\r\n\r\n")
+        try expect(legacyRoute(head) == .legacyMessages, "POST /messages must classify as legacyMessages, got \(legacyRoute(head))")
+        try expect(SSEServer.isRemoteTunnelRequest(headers: head.headers),
+                   "a tunnel POST /messages MUST trip the loopback-only gate (→ refused)")
+    }
+
+    await test("OriginGate(legacy): LOOPBACK POST /messages ⇒ legacyMessages + predicate false (served, unchanged)") {
+        let head = try decodeHead("POST /messages?sessionId=x HTTP/1.1\r\nHost: 127.0.0.1:9700\r\nContent-Length: 0\r\n\r\n")
+        try expect(legacyRoute(head) == .legacyMessages, "POST /messages must classify as legacyMessages")
+        try expect(!SSEServer.isRemoteTunnelRequest(headers: head.headers),
+                   "a direct-loopback POST /messages must NOT trip the gate")
     }
 }

@@ -532,6 +532,15 @@ public actor SSEServer {
         request.header("Cf-Connecting-Ip") != nil || request.header("Cf-Ray") != nil
     }
 
+    /// Same tunnel-origin test for the NIO dispatch layer, which holds raw
+    /// `HTTPHeaders` (legacy `/sse` + `/messages`) rather than an `HTTPRequest`.
+    /// MUST mirror `isRemoteTunnelRequest(_:)` above — keep the two in lockstep
+    /// so the loopback exemption can never diverge between the `/mcp` funnel and
+    /// the legacy routes. `HTTPHeaders.first(name:)` is case-insensitive (RFC).
+    public static func isRemoteTunnelRequest(headers: HTTPHeaders) -> Bool {
+        headers.first(name: "Cf-Connecting-Ip") != nil || headers.first(name: "Cf-Ray") != nil
+    }
+
     public func handleHTTPRequest(_ request: HTTPRequest) async -> HTTPResponse {
         // PKT-800 S2 / PKT-810 — connector auth gate. ADDITIVE ISOLATION: this
         // block is a no-op (falls straight through) whenever
@@ -1635,11 +1644,36 @@ private final class SSEHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
             return
 
         case .legacySSE:
+            // PKT-810 R5 (hardening): the legacy SSE transport (PKT-336) is a
+            // LOOPBACK-ONLY compatibility path. It is dispatched HERE — before the
+            // `/mcp` connector-auth gate in `handleHTTPRequest` — so without this
+            // check a Cloudflare-tunnel caller could open an UNAUTHENTICATED legacy
+            // session and drive the full tool surface, bypassing the entire
+            // bearer/OAuth gate that protects `/mcp`. Refuse tunnel-origin requests
+            // (Cf-* present); direct loopback (older local SSE clients) is
+            // unaffected. Mirrors the `/mcp` origin split exactly.
+            if SSEServer.isRemoteTunnelRequest(headers: head.headers) {
+                logAccess(method: "GET", path: path, sessionID: nil, status: 403, start: startTime)
+                await writeResponse(
+                    .error(statusCode: 403, .invalidRequest("Legacy SSE transport is loopback-only")),
+                    version: head.version,
+                    context: context)
+                return
+            }
             logAccess(method: "GET", path: path, sessionID: nil, status: 200, start: startTime)
             await handleLegacySSE(head: head, context: context)
             return
 
         case .legacyMessages:
+            // PKT-810 R5 (hardening): loopback-only, same rationale as `.legacySSE`.
+            if SSEServer.isRemoteTunnelRequest(headers: head.headers) {
+                logAccess(method: "POST", path: path, sessionID: nil, status: 403, start: startTime)
+                await writeResponse(
+                    .error(statusCode: 403, .invalidRequest("Legacy messages transport is loopback-only")),
+                    version: head.version,
+                    context: context)
+                return
+            }
             logAccess(method: "POST", path: path, sessionID: nil, status: 200, start: startTime)
             await handleLegacyMessage(head: head, body: body, uri: fullURI, context: context)
             return
