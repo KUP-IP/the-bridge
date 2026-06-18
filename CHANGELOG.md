@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.8.2 — Registry entity-management: `registry_remove_entity` + pane Remove
+
+- **`registry_remove_entity` (10th registry tool).** The symmetric counterpart to `registry_add_entity`: forgets an entity's binding + property map and evicts its cached rows. **Does not touch Notion** — the data source and its rows remain; only the Bridge's local binding is removed. Destructive `.request` tier (confirmation-gated). The seeded **Skills** entity is guarded behind an explicit `confirm:true` so an offhand call can't strip the default a fresh install relies on. Symmetric `RegistryConfigStore.removeEntity(key:)` (atomic persist + cache evict).
+- **Settings → Data Sources: a "Remove" affordance** on each entity card, routed through a confirmation dialog with an extra-firm message for the seed. The pane and the MCP tool share the same store + seed guard (BE↔FE alignment).
+- `staticFeatureModuleToolCount` 171 → 172. +6 tests (registration count 9→10, tier, add→remove round-trip, seed-guard refuse/confirm, unknown-entity, pane remove + `isSeed`); floor 2163 → 2169, zero regression.
+
 ## v3.8.1 — Security: close the legacy-route tunnel bypass (+ Data-Source Registry)
 
 - **Security — legacy `/sse` + `/messages` are now loopback-only (PKT-810 R5 hardening).** The legacy SSE transport (PKT-336: `GET /sse` + `POST /messages`) is dispatched in the NIO handler **before** the `/mcp` connector-auth gate, and cloudflared forwards every path to `:9700` (no path scoping) — so a Cloudflare-tunnel caller could open an **unauthenticated** legacy MCP session and drive the full tool surface, bypassing the entire OAuth gate that protects `/mcp`. Tunnel-origin (`Cf-*`) requests to the legacy routes are now refused with **403**; direct loopback (older local SSE clients) is unaffected. A new `SSEServer.isRemoteTunnelRequest(headers:)` mirrors the `/mcp` origin split for the NIO dispatch layer (kept in lockstep with the `HTTPRequest` overload). +5 tests (HTTPHeaders discriminator + real-NIO-decode of tunnel/loopback × `/sse`,`/messages`); floor 2158 → 2163.

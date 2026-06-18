@@ -214,6 +214,15 @@ public struct RegistryConfig: Codable, Sendable, Equatable {
             entities.append(entity)
         }
     }
+
+    /// Remove an entity by key. Returns true if one was present and removed
+    /// (false ⇒ no-op, key wasn't configured).
+    @discardableResult
+    public mutating func removeEntity(key: String) -> Bool {
+        guard let i = entities.firstIndex(where: { $0.key == key }) else { return false }
+        entities.remove(at: i)
+        return true
+    }
 }
 
 // MARK: - Default seed (Skills as entity #1 — Decision 7)
@@ -229,6 +238,12 @@ public extension RegistryConfig {
 }
 
 public extension RegistryEntity {
+    /// Canonical key of the seeded Skills entity (entity #1). Special-cased by
+    /// destructive ops — `registry_remove_entity` + the pane guard it behind an
+    /// explicit confirm, since it's the validating fold-in (Decision 7) and the
+    /// default a fresh install relies on.
+    static let seedEntityKey = "skill"
+
     /// Skills as a registry entity. The data source id is the operator's
     /// verified Keepr/Skills source (a portable install rebinds it at setup);
     /// property IDs are unbound (resolved by name against the live schema).
@@ -236,7 +251,7 @@ public extension RegistryEntity {
     /// (the `fetch_skill`/`possess` pattern — Decision 1 / Decision 2).
     static func skillsSeed() -> RegistryEntity {
         RegistryEntity(
-            key: "skill",
+            key: seedEntityKey,
             displayName: "Skills",
             dataSourceId: "b6ff6ea5-3917-4af7-9c36-278dc8bfb21f",
             workspace: nil,

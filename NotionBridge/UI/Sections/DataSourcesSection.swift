@@ -31,6 +31,10 @@ import SwiftUI
 
 public struct DataSourcesSection: View {
     @StateObject private var vm = DataSourcesViewModel()
+    /// The entity awaiting a remove confirmation (nil ⇒ no dialog). Removal is
+    /// destructive (forgets the binding + evicts the cache), so it always routes
+    /// through a confirmationDialog — with an extra-firm message for the seed.
+    @State private var removalTarget: RegistryEntity?
 
     public init() {}
 
@@ -55,6 +59,25 @@ public struct DataSourcesSection: View {
         }
         .background(Color.clear)
         .task { await vm.load() }
+        .confirmationDialog(
+            removalTarget.map { "Remove \($0.displayName)?" } ?? "Remove data source?",
+            isPresented: Binding(get: { removalTarget != nil },
+                                 set: { if !$0 { removalTarget = nil } }),
+            presenting: removalTarget
+        ) { entity in
+            Button("Remove \(entity.displayName)", role: .destructive) {
+                let key = entity.key
+                removalTarget = nil
+                Task { await vm.removeEntity(key) }
+            }
+            Button("Cancel", role: .cancel) { removalTarget = nil }
+        } message: { entity in
+            if vm.isSeed(entity.key) {
+                Text("‘\(entity.displayName)’ is the seeded entity The Bridge ships with. Removing it forgets its binding and cached rows — your Notion data source and its rows are NOT touched, and you can re-add it via Introspect. This can’t be undone from here.")
+            } else {
+                Text("Forget this entity’s binding + property map and evict its cached rows. Your Notion data source and its rows are not touched.")
+            }
+        }
     }
 
     // MARK: - Header (what the registry is + a subtle live status)
@@ -167,6 +190,13 @@ public struct DataSourcesSection: View {
                 Task { await vm.clearCache(entity.key) }
             }
             .accessibilityIdentifier(ax("clearCache"))
+
+            BridgeButton("Remove", systemImage: "minus.circle",
+                         variant: .default, isEnabled: !vm.busy) {
+                removalTarget = entity
+            }
+            .help("Remove this data source from the registry (does not touch Notion)")
+            .accessibilityIdentifier(ax("remove"))
 
             Spacer(minLength: 8)
 

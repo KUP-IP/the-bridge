@@ -100,6 +100,7 @@ public enum RegistryModule {
     public static func register(on router: ToolRouter) async {
         await router.register(makeEntities())
         await router.register(makeAddEntity())
+        await router.register(makeRemoveEntity())
         await router.register(makeIntrospect())
         await router.register(makeList())
         await router.register(makeGet())
@@ -175,6 +176,41 @@ public enum RegistryModule {
                 // Atomic upsert on the shared actor (serialized).
                 _ = try await configStore().upsertEntity(entity)
                 return .object(["added": .bool(true), "entity": entityValue(entity)])
+            })
+    }
+
+    // MARK: - registry_remove_entity
+
+    public static func makeRemoveEntity() -> ToolRegistration {
+        ToolRegistration(
+            name: "registry_remove_entity", module: moduleName, tier: .request,
+            description: "Remove an entity from the data-source registry: forget its entity→data-source mapping + property map and evict its cached rows. Does NOT touch Notion — the data source and its rows remain; only the Bridge's local binding is removed. Removing the seeded Skills entity requires confirm:true.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "entity": .object(["type": .string("string"), "description": .string("Entity key to remove, e.g. ‘project’.")]),
+                    "confirm": .object(["type": .string("boolean"), "description": .string("Required (true) to remove the seeded Skills entity.")]),
+                ]),
+                "required": .array([.string("entity")]),
+            ]),
+            handler: { args in
+                guard case .object(let a) = args, let key = string(a, "entity") else {
+                    throw ToolRouterError.invalidArguments(toolName: "registry_remove_entity", reason: "missing ‘entity’")
+                }
+                let config = await loadConfig()
+                _ = try requireEntity(key, in: config, tool: "registry_remove_entity")   // 404 on unknown
+                // Guard the seeded Skills entity (entity #1 — the validating
+                // fold-in + the default a fresh install relies on): removing it
+                // needs an explicit confirm so an offhand call can't strip it.
+                var confirm = false
+                if case .bool(let b)? = a["confirm"] { confirm = b }
+                if key == RegistryEntity.seedEntityKey && !confirm {
+                    throw ToolRouterError.invalidArguments(
+                        toolName: "registry_remove_entity",
+                        reason: "‘\(key)’ is the seeded Skills entity — pass confirm:true to remove it")
+                }
+                _ = try await configStore().removeEntity(key: key)
+                return .object(["removed": .bool(true), "entity": .string(key)])
             })
     }
 

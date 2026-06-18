@@ -243,6 +243,9 @@ public enum ToolAnnotationCatalog {
         // config (idempotent). `registry_entities` reads LOCAL config (closed).
         "registry_entities": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
         "registry_add_entity": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
+        // remove_entity drops a LOCAL binding + evicts its cache (no Notion write
+        // → closed world); destructive + confirmation-gated (.request tier).
+        "registry_remove_entity": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: true, openWorld: false),
         "registry_introspect": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         "registry_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         "registry_get": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
