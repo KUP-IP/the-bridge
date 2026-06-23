@@ -31,7 +31,7 @@ fi
 # break the generated Swift string literal — fail loud rather than emit broken code.
 for v in "$ISS" "$RES" "$CID" "$WBU" "$WRU"; do
   case "$v" in
-    *'"'*|*'\'*|$'*'\n'*) echo "❌ inject-remote-access: illegal character in an identity value" >&2; exit 1;;
+    *'"'*|*'\'*|*$'\n'*) echo "❌ inject-remote-access: illegal character in an identity value" >&2; exit 1;;
   esac
 done
 
