@@ -40,3 +40,11 @@ confirmed *high* is a test-coverage hole, not a security defect.
 3. **Auth-sensitive (REVIEW-FIRST — must not change loopback behavior; keep `/health` + a correctly-configured PRM tunnel-reachable):**
    - #1 = **Packet E Wave 3**: wire `isMisconfigured()` into the PRM-serving path (`SSETransport.swift:1634-1644`) so a misconfigured build refuses to advertise the placeholder AS (503/omit `authorization_servers`) + surfaces the misconfig to the operator at launch when HTTP is active; add a *serving-path* test.
    - #2: add end-to-end NIO tests in `RemoteOAuthOriginGatingTests.swift` driving real dispatch (tunnel-origin `GET /sse` / `POST /messages` → assert outbound 403 `loopback-only`; loopback twins assert served).
+
+## Remediation status (updated 2026-06-23)
+
+- **Batch 1** (`1e85bb6`, `28c46ca`, + pre-audit `1e85bb6`): #10 `skill_delete` confirm-gate + #7 `bg_run` double-escape + `job_delete` confirm-gate. ✅
+- **Batch 2** (`20b24f9`): all six non-auth findings — **#3** `BgProcessRuntime` coverage (6 tests via the `init(baseDir:)` seam), **#4** `file_read` bounded read + non-regular-file rejection, **#5** `bg_poll` 256 KB tail window, **#6** bg_* coverage (concurrency/SIGKILL/terminated/login-shell), **#8** `config.json` `0o600`, **#9** `bg_kill` process-group signalling — implemented + gate-green. Floor 2227 → **2242** (+15 tests). ✅
+  - **#9 caveat:** `set -m` + `kill(-pid,…)` closes the common recycled-pid vector; the `ESRCH`→single-pid fallback retains a *narrow* residual TOCTOU (recycled pid that is a live non-group-leader). Acceptable for a low finding — tighten later by dropping the fallback for `set -m`-era jobs if desired.
+  - **#4 note:** `file_read` now imposes a **50 MB default ceiling** where reads were previously unbounded — intended hardening; revisit if a legitimate >50 MB read without `maxBytes` is needed.
+- **Remaining — REVIEW-FIRST (auth):** **#1** Packet E Wave 3 fail-loud gate · **#2** legacy-403 E2E test. Not yet implemented; require careful review against the R5 contract.
