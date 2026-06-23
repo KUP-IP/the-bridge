@@ -30,7 +30,7 @@ The codebase is well-structured with clean actor isolation, a universal security
 ## Critical Findings
 
 ### SEC-01: Bearer Token Timing Attack Vector (CRITICAL)
-**File:** `NotionBridge/Server/MCPHTTPValidation.swift`
+**File:** `TheBridge/Server/MCPHTTPValidation.swift`
 **Line:** ~155 (MCPBearerTokenValidator.validate)
 **Detail:** Bearer token comparison uses Swift standard `==` operator (`guard token == expectedToken`). This is NOT timing-safe — string equality short-circuits on first mismatched byte, leaking token length and prefix information via response timing.
 **Impact:** Remote attacker with tunnel access could extract the bearer token via timing side-channel.
@@ -38,7 +38,7 @@ The codebase is well-structured with clean actor isolation, a universal security
 **Severity:** Critical (exploitable when remote tunnel is active)
 
 ### SEC-02: Legacy SSE CORS Wildcard Inconsistency
-**File:** `NotionBridge/Server/SSETransport.swift`
+**File:** `TheBridge/Server/SSETransport.swift`
 **Line:** ~handleLegacySSE method
 **Detail:** Legacy SSE handler (`GET /sse`) still sets `Access-Control-Allow-Origin: *` while all other endpoints had CORS wildcard removed per PKT-373 P1-4.
 **Impact:** Cross-origin access to the legacy SSE stream from any web page.
@@ -188,7 +188,7 @@ The codebase is well-structured with clean actor isolation, a universal security
 ### App Layer
 
 #### AppDelegate.swift (456 lines) — NOT YET READ
-#### NotionBridgeApp.swift (62 lines) — NOT YET READ
+#### TheBridgeApp.swift (62 lines) — NOT YET READ
 #### StatusBarController.swift (213 lines) — NOT YET READ
 #### WindowTracker.swift (101 lines) — NOT YET READ
 
@@ -200,7 +200,7 @@ The codebase is well-structured with clean actor isolation, a universal security
 
 **Finding:** The live Bridge tool registry (`listTools`) reports `notion_page_markdown_write` as an available tool, but D3 removed it from NotionModule.swift source code. The installed app is v1.8.0 build 15 (commit 5b8a3e7 which includes D3).
 
-**Hypothesis:** The running `/Applications/Notion Bridge.app` binary may be stale — either:
+**Hypothesis:** The running `/Applications/The Bridge.app` binary may be stale — either:
 1. `make app` / `make install-copy` was not run after the D3 commit, OR
 2. The app was rebuilt but not restarted
 

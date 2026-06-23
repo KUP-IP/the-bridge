@@ -8,7 +8,7 @@ resume + harness-side re-initialize deferred — see "Deferred / External asks")
 ## Problem
 
 The Bridge **hosts** the MCP server in-process (the menu-bar app *is* the
-server — `ServerManager` + `SSEServer` run inside the `NotionBridge` target).
+server — `ServerManager` + `SSEServer` run inside the `TheBridge` target).
 So any app restart or `make install` tears down the in-memory session map
 (`SSEServer.sessions`). A client that had a live Streamable-HTTP session and
 keeps sending its prior `Mcp-Session-Id` then hit a hard:
@@ -26,7 +26,7 @@ Evidence dates: 05-16, 05-20, 05-22, 06-02, 06-04.
 
 ### 1. Persist active session state to disk
 
-New `SessionPersistenceStore` (actor, `NotionBridge/Server/SessionPersistenceStore.swift`),
+New `SessionPersistenceStore` (actor, `TheBridge/Server/SessionPersistenceStore.swift`),
 modelled on `SnippetStore`'s crash-safe posture:
 
 - Single JSON document at
@@ -86,7 +86,7 @@ are idempotent.
 
 ## Tests
 
-`NotionBridgeTests/SessionPersistenceTests.swift` (+17, floor 1777 → 1794):
+`TheBridgeTests/SessionPersistenceTests.swift` (+17, floor 1777 → 1794):
 store round-trip + restart durability, idempotent upsert, remove/touch
 durability, corrupt-file recovery, resume-lookup decision (unknown vs
 resumable, clean vs unclean), clean-shutdown marker + dirty-run liveness, the

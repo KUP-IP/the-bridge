@@ -1,4 +1,4 @@
-# Terms of Service — NotionBridge
+# Terms of Service — The Bridge
 
 **Effective Date:** March 25, 2026
 **Last Updated:** 2026-03-30
@@ -7,19 +7,19 @@
 
 ## 1. Agreement
 
-By purchasing, downloading, installing, or using NotionBridge ("the Software"), you agree to these Terms of Service ("Terms"). If you do not agree, do not use the Software.
+By purchasing, downloading, installing, or using The Bridge ("the Software"), you agree to these Terms of Service ("Terms"). If you do not agree, do not use the Software.
 
 ---
 
 ## 2. License Grant
 
-Subject to these Terms, KUP Solutions ("we," "us") grants you a **non-exclusive, non-transferable, revocable license** to install and use one copy of NotionBridge on a single Mac computer that you own or control, for personal or commercial use.
+Subject to these Terms, KUP Solutions ("we," "us") grants you a **non-exclusive, non-transferable, revocable license** to install and use one copy of The Bridge on a single Mac computer that you own or control, for personal or commercial use.
 
 **You may:**
 
-- Install and run NotionBridge on one Mac at a time
-- Configure Cloudflare Tunnels or other networking to access your own NotionBridge instance remotely
-- Use NotionBridge with any compatible AI agent or MCP client
+- Install and run The Bridge on one Mac at a time
+- Configure Cloudflare Tunnels or other networking to access your own The Bridge instance remotely
+- Use The Bridge with any compatible AI agent or MCP client
 
 **You may not:**
 
@@ -33,15 +33,15 @@ Subject to these Terms, KUP Solutions ("we," "us") grants you a **non-exclusive,
 
 ## 3. Purchase and Payment
 
-NotionBridge is available for a **one-time purchase of $14.99 USD** (or regional equivalent) via [kup.solutions](https://kup.solutions). **Stripe** is the primary payment processor. Some storefront or regional flows may use **Lemon Squeezy** (or another provider) as **merchant of record**; your order confirmation or receipt identifies which processor applied. We do not store your full payment card number — card data is handled by the applicable processor under PCI-DSS standards.
+The Bridge is available for a **one-time purchase of $14.99 USD** (or regional equivalent) via [kup.solutions](https://kup.solutions). **Stripe** is the primary payment processor. Some storefront or regional flows may use **Lemon Squeezy** (or another provider) as **merchant of record**; your order confirmation or receipt identifies which processor applied. We do not store your full payment card number — card data is handled by the applicable processor under PCI-DSS standards.
 
-**Refund Policy:** If you are not satisfied with NotionBridge, you may request a full refund within **7 days** of purchase by emailing [isaiah@kup.solutions](mailto:isaiah@kup.solutions) with your order confirmation. After 7 days, refunds are at our sole discretion.
+**Refund Policy:** If you are not satisfied with The Bridge, you may request a full refund within **14 days** of purchase by emailing [isaiah@kup.solutions](mailto:isaiah@kup.solutions) with your order confirmation. After 14 days, refunds are at our sole discretion.
 
 ---
 
 ## 4. System Requirements
 
-NotionBridge requires:
+The Bridge requires:
 
 - macOS 26 (Tahoe) or later
 - Apple Silicon (M1 or later)
@@ -53,7 +53,7 @@ The Software is **not compatible** with Intel-based Macs, earlier macOS versions
 
 ## 5. Updates
 
-We may release updates to NotionBridge from time to time via the Sparkle auto-update framework. Updates may include bug fixes, new features, or security patches. You are encouraged to keep the Software up to date but are not required to install updates.
+We may release updates to The Bridge from time to time via the Sparkle auto-update framework. Updates may include bug fixes, new features, or security patches. You are encouraged to keep the Software up to date but are not required to install updates.
 
 We reserve the right to discontinue updates at any time. The Software is designed to function independently and does not require an active connection to our services for continued operation.
 
@@ -61,38 +61,38 @@ We reserve the right to discontinue updates at any time. The Software is designe
 
 ## 6. Intellectual Property
 
-NotionBridge and all associated intellectual property are owned by KUP Solutions. The Software is licensed, not sold. These Terms do not grant you any ownership rights in the Software.
+The Bridge and all associated intellectual property are owned by KUP Solutions. The Software is licensed, not sold. These Terms do not grant you any ownership rights in the Software.
 
-"NotionBridge," the NotionBridge icon, and "KUP Solutions" are trademarks of KUP Solutions. "Notion" is a trademark of Notion Labs, Inc. **NotionBridge is an independent third-party product and is not affiliated with, endorsed by, sponsored by, or approved by Notion Labs, Inc.** The use of the word "Notion" in the product name refers to the product's function as a bridge to the Notion platform and does not imply any official relationship with Notion Labs, Inc.
+"The Bridge," the The Bridge icon, and "KUP Solutions" are trademarks of KUP Solutions. "Notion" is a trademark of Notion Labs, Inc. **The Bridge is an independent third-party product and is not affiliated with, endorsed by, sponsored by, or approved by Notion Labs, Inc.** The use of the word "Notion" in the product name refers to the product's function as a bridge to the Notion platform and does not imply any official relationship with Notion Labs, Inc.
 
 ---
 
 ## 7. Data and Privacy
 
-Your use of NotionBridge is also governed by our Privacy Policy, available at [kup.solutions/privacy](https://kup.solutions/privacy). By using the Software, you acknowledge and agree to our data practices as described therein.
+Your use of The Bridge is also governed by our Privacy Policy, available at [kup.solutions/privacy](https://kup.solutions/privacy). By using the Software, you acknowledge and agree to our data practices as described therein.
 
-**In summary:** NotionBridge processes data locally on your Mac. We do not collect, store, or transmit your data. You are responsible for the security of your own machine and any credentials you configure within the Software.
+**In summary:** The Bridge processes data locally on your Mac. We do not collect, store, or transmit your data. You are responsible for the security of your own machine and any credentials you configure within the Software.
 
 ---
 
 ## 8. Security and Responsibility
 
-NotionBridge provides powerful system access tools (shell execution, file operations, message sending, accessibility control, screen capture). **You are responsible for:**
+The Bridge provides powerful system access tools (shell execution, file operations, message sending, accessibility control, screen capture). **You are responsible for:**
 
-- Understanding the tools you or your AI agents invoke through NotionBridge
+- Understanding the tools you or your AI agents invoke through The Bridge
 - Reviewing the audit log for unexpected or unauthorized actions
 - Securing your Mac, including the MCP server port (default: localhost:9700)
 - Managing Cloudflare Tunnel access if configured for remote use
 - Safeguarding any API tokens, credentials, or secrets configured in the Software
 
-We are not responsible for actions taken by third-party AI agents through NotionBridge, even if those actions result in data loss, unintended modifications, or other consequences.
+We are not responsible for actions taken by third-party AI agents through The Bridge, even if those actions result in data loss, unintended modifications, or other consequences.
 
 **You expressly acknowledge and agree that:**
 
-- NotionBridge interacts directly with your macOS operating system, filesystem, applications, and user accounts. We are not responsible for any damage to your Mac, operating system, applications, or user accounts resulting from the use of the Software.
-- NotionBridge can read, write, move, and delete files on your system when granted appropriate permissions. We are not responsible for any accidental or unintended deletion, modification, corruption, or loss of data, files, or documents.
-- NotionBridge can interact with third-party services (Notion, Stripe, Cloudflare) using credentials you provide. We are not responsible for any disruption, data loss, account suspension, or other issues with your third-party accounts resulting from the use of the Software.
-- NotionBridge can send iMessages and SMS messages, execute shell commands, control applications via AppleScript, and perform accessibility actions. We are not responsible for any unintended communications sent, commands executed, or actions performed through these tools.
+- The Bridge interacts directly with your macOS operating system, filesystem, applications, and user accounts. We are not responsible for any damage to your Mac, operating system, applications, or user accounts resulting from the use of the Software.
+- The Bridge can read, write, move, and delete files on your system when granted appropriate permissions. We are not responsible for any accidental or unintended deletion, modification, corruption, or loss of data, files, or documents.
+- The Bridge can interact with third-party services (Notion, Stripe, Cloudflare) using credentials you provide. We are not responsible for any disruption, data loss, account suspension, or other issues with your third-party accounts resulting from the use of the Software.
+- The Bridge can send iMessages and SMS messages, execute shell commands, control applications via AppleScript, and perform accessibility actions. We are not responsible for any unintended communications sent, commands executed, or actions performed through these tools.
 - You are solely responsible for maintaining backups of your data and for reviewing the audit log to monitor tool activity on your system.
 
 ---

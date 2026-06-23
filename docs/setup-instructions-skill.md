@@ -1,11 +1,11 @@
-# Notion Bridge — setup instructions (skill page template)
+# The Bridge — setup instructions (skill page template)
 
 Copy into a Notion skill page. Adjust URLs if your Advanced port or tunnel differs.
 
 ## Local MCP (same Mac)
 
 - Default: `http://127.0.0.1:9700/mcp` (Streamable HTTP). Health: `http://127.0.0.1:9700/health`.
-- If you changed **Advanced → SSE Port**: use that port instead. **Restart Notion Bridge** after saving.
+- If you changed **Advanced → SSE Port**: use that port instead. **Restart The Bridge** after saving.
 
 ## Remote MCP (another machine / Notion in cloud)
 

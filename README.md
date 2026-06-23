@@ -10,13 +10,13 @@ The Bridge exposes your local Mac and connected services as Model Context Protoc
 
 **Product page:** https://kup.solutions/notion-bridge
 
-> **Naming history:** "NotionBridge" was the product's original name; the user-facing brand is **The Bridge**. The Swift target and bundle identifier (`kup.solutions.notion-bridge`) are intentionally preserved for data continuity. The Keychain service was renamed `com.notionbridge` → `kup.solutions.the-bridge` (v3.7.8), and all prior services are still read so existing secrets migrate with zero loss.
+> **Naming history:** "TheBridge" was the product's original name; the user-facing brand is **The Bridge**. The Swift target and bundle identifier (`kup.solutions.notion-bridge`) are intentionally preserved for data continuity. The Keychain service was renamed `com.notionbridge` → `kup.solutions.the-bridge` (v3.7.8), and all prior services are still read so existing secrets migrate with zero loss.
 
 ---
 
 ## What this repo is
 
-This is the product repository for **The Bridge** (Swift target name `NotionBridge`).
+This is the product repository for **The Bridge** (Swift target name `TheBridge`).
 
 It is not a generic Swift experiment and it is not an open-source demo server. It is the source-available codebase for a commercial macOS product that bridges Notion agents, local coding tools, and the user's Mac.
 
@@ -70,7 +70,7 @@ Core product traits:
 
 1. Download the latest DMG from [GitHub Releases](https://github.com/KUP-IP/the-bridge/releases).
 2. Open the DMG.
-3. Drag **The Bridge** (`NotionBridge.app` in the DMG; renamed on install) into `/Applications`.
+3. Drag **The Bridge** (`TheBridge.app` in the DMG; renamed on install) into `/Applications`.
 4. Launch the app and complete onboarding.
 
 ### Option 2: Build from source
@@ -81,9 +81,9 @@ cd Notion-bridge
 make app
 ```
 
-The app bundle is written to `.build/NotionBridge.app`.
+The app bundle is written to `.build/TheBridge.app`.
 
-> **Install naming:** The Swift target is `NotionBridge` (no space), so build output and DMG contents use `NotionBridge.app`. The Finder display name is **Notion Bridge** (with space), set by `CFBundleName` / `CFBundleDisplayName` in `Info.plist`. `make install` places the app at `/Applications/The Bridge.app` to match the display name. Both names refer to the same product.
+> **Install naming:** The Swift target is `TheBridge` (no space), so build output and DMG contents use `TheBridge.app`. The Finder display name is **The Bridge** (with space), set by `CFBundleName` / `CFBundleDisplayName` in `Info.plist`. `make install` places the app at `/Applications/The Bridge.app` to match the display name. Both names refer to the same product.
 
 ---
 
@@ -137,7 +137,7 @@ This is the primary HTTP MCP endpoint. The listener is bound to **loopback** onl
 
 ### Remote MCP security
 
-When a tunnel URL is set, **`POST /mcp` requires** a configured **MCP remote token** in the same settings section (generate/copy there) and matching **`Authorization: Bearer …`** in your MCP client. Without a token, new MCP sessions are rejected (fail closed). With an **empty** tunnel URL, local use is unchanged and a bearer is optional (you can still set a token to harden localhost-only clients). Tokens are stored in the **Keychain** (service `kup.solutions.the-bridge`, account `mcp_bearer_token`); the legacy UserDefaults key `com.notionbridge.mcpBearerToken` remains a fallback read path. This static bearer is for the loopback/tunnel path; cloud clients use OAuth instead (see [Cloud connector](#cloud-connector)). For defense in depth at the edge, operators can put **Cloudflare Access** in front of the tunnel hostname — see [docs/operator/cloudflare-access-notion-bridge.md](docs/operator/cloudflare-access-notion-bridge.md). Browser-based clients such as Claude chat generally cannot supply Cloudflare service-token headers, and Cloudflare browser challenges or Browser Integrity Check on `/mcp` can block valid MCP traffic before it reaches the app. In that case, use a narrow path-scoped bypass for `POST /mcp` and rely on the NotionBridge bearer token at the app layer.
+When a tunnel URL is set, **`POST /mcp` requires** a configured **MCP remote token** in the same settings section (generate/copy there) and matching **`Authorization: Bearer …`** in your MCP client. Without a token, new MCP sessions are rejected (fail closed). With an **empty** tunnel URL, local use is unchanged and a bearer is optional (you can still set a token to harden localhost-only clients). Tokens are stored in the **Keychain** (service `kup.solutions.the-bridge`, account `mcp_bearer_token`); the legacy UserDefaults key `com.notionbridge.mcpBearerToken` remains a fallback read path. This static bearer is for the loopback/tunnel path; cloud clients use OAuth instead (see [Cloud connector](#cloud-connector)). For defense in depth at the edge, operators can put **Cloudflare Access** in front of the tunnel hostname — see [docs/operator/cloudflare-access-notion-bridge.md](docs/operator/cloudflare-access-notion-bridge.md). Browser-based clients such as Claude chat generally cannot supply Cloudflare service-token headers, and Cloudflare browser challenges or Browser Integrity Check on `/mcp` can block valid MCP traffic before it reaches the app. In that case, use a narrow path-scoped bypass for `POST /mcp` and rely on the TheBridge bearer token at the app layer.
 
 ### Legacy SSE
 
@@ -162,7 +162,7 @@ You can launch the Bridge process with a `--multi-instance` flag (bypasses singl
 {
   "mcpServers": {
     "Bridge MCP": {
-      "command": "/path/to/NotionBridge",
+      "command": "/path/to/TheBridge",
       "args": [
         "--multi-instance",
         "--allow-tools",
@@ -246,7 +246,7 @@ Sparkle cache-busting is handled at the app level via httpHeaders (PKT-431). Pre
 
 ```text
 the-bridge/
-├── NotionBridge/
+├── TheBridge/
 │   ├── App/
 │   ├── Config/
 │   ├── Modules/
@@ -254,7 +254,7 @@ the-bridge/
 │   ├── Security/
 │   ├── Server/
 │   └── UI/
-├── NotionBridgeTests/
+├── TheBridgeTests/
 ├── .github/
 ├── Package.swift
 ├── Makefile

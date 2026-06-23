@@ -6,13 +6,13 @@
 // PKT-3.4.2 Wave 3: Adds the four Cursor agent categories
 // (CURSOR_AGENT_READY / FAILED / STALLED / NEEDS_APPROVAL) on top of the
 // existing SECURITY_APPROVAL pattern. Same userInfo plumbing — the dispatcher
-// (NotionBridgeLib > CursorNotificationDispatcher) populates the keys.
+// (TheBridgeLib > CursorNotificationDispatcher) populates the keys.
 //
 // Extension point:  com.apple.usernotifications.content-extension
 // Principal class:  NotificationViewController
 //
 // The extension runs in its own process sandbox and cannot import
-// NotionBridgeLib / BridgeTheme directly, so design tokens are duplicated
+// TheBridgeLib / BridgeTheme directly, so design tokens are duplicated
 // locally in `NotificationColors`.
 //
 // Categories handled:

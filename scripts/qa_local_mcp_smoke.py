@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Smoke-test local Streamable HTTP MCP: GET /health + POST /mcp initialize.
 
-Requires Notion Bridge running (menu bar). Port: NOTION_BRIDGE_PORT env or arg (default 9700).
+Requires The Bridge running (menu bar). Port: NOTION_BRIDGE_PORT env or arg (default 9700).
 
 Exit 0 on success; non-zero if connection refused or non-200/expected errors.
 """
@@ -33,7 +33,7 @@ def main() -> int:
             print("health OK:", body[:300])
     except urllib.error.URLError as e:
         print(
-            f"FAIL: could not reach {health_url} — is Notion Bridge running? ({e})",
+            f"FAIL: could not reach {health_url} — is The Bridge running? ({e})",
             file=sys.stderr,
         )
         return 2

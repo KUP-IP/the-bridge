@@ -4,7 +4,7 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 ## Project Overview
 
-NotionBridge is a native macOS menu bar app (Swift 6.2, macOS 26+, Apple Silicon) that runs an MCP (Model Context Protocol) server. It exposes **81+N** MCP tools in a typical configuration — **80** from registered feature modules (`BridgeConstants.staticFeatureModuleToolCount`), **1** builtin (`echo`), plus **N** tools from the optional remote Stripe MCP proxy when API discovery succeeds (**N=0** if Stripe is not configured or discovery fails) — over Streamable HTTP, legacy SSE, and stdio, routing every call through a security gate with an append-only audit log. Feature code is organized in **15** Swift modules (`*Module`); `echo` is registered separately as `builtin`, and Stripe tools are registered dynamically from `StripeMcpModule`.
+TheBridge is a native macOS menu bar app (Swift 6.2, macOS 26+, Apple Silicon) that runs an MCP (Model Context Protocol) server. It exposes **81+N** MCP tools in a typical configuration — **80** from registered feature modules (`BridgeConstants.staticFeatureModuleToolCount`), **1** builtin (`echo`), plus **N** tools from the optional remote Stripe MCP proxy when API discovery succeeds (**N=0** if Stripe is not configured or discovery fails) — over Streamable HTTP, legacy SSE, and stdio, routing every call through a security gate with an append-only audit log. Feature code is organized in **15** Swift modules (`*Module`); `echo` is registered separately as `builtin`, and Stripe tools are registered dynamically from `StripeMcpModule`.
 
 Bundle ID: `kup.solutions.notion-bridge` (legacy: `solutions.kup.keepr`)
 
@@ -33,16 +33,16 @@ The test suite is a **standalone executable**, not XCTest. It must be compiled a
 
 ```bash
 make test
-# Equivalent to: swift build -c debug && .build/debug/NotionBridgeTests
+# Equivalent to: swift build -c debug && .build/debug/TheBridgeTests
 ```
 
-There is no way to run a single test file in isolation — all tests run from `NotionBridgeTests/main.swift`, which calls module-level `run*Tests()` functions.
+There is no way to run a single test file in isolation — all tests run from `TheBridgeTests/main.swift`, which calls module-level `run*Tests()` functions.
 
 ### App Bundle & Distribution
 
 ```bash
-make app           # Release build + package .build/NotionBridge.app
-make install       # sign → notarize → staple → ditto → /Applications/Notion Bridge.app (needs Developer ID + notary keychain profile)
+make app           # Release build + package .build/TheBridge.app
+make install       # sign → notarize → staple → ditto → /Applications/The Bridge.app (needs Developer ID + notary keychain profile)
 make install-copy  # Same .app to /Applications without sign/notarize — local dev only
 make dmg           # Create distributable DMG
 make sign          # Code-sign with Developer ID
@@ -53,7 +53,7 @@ make check-appcast # Fail if appcast.xml does not match Info.plist version/build
 
 **Production install ladder (canonical):** `make test` → `make app` → `make install` when signing credentials exist; otherwise `make install-copy` and accept ad-hoc / Gatekeeper differences. **`swift build` alone does not refresh `/Applications`** — always use the Makefile app target.
 
-**Agents / Cursor / MCP-driven sessions:** After `make app`, use **`make install-copy`** or **`make install-agent-safe`** (same target) to copy `.build/NotionBridge.app` → `/Applications/Notion Bridge.app` without running the full notarize pipeline. Avoid long `make install` / `make release` from the same session that hosts your MCP connection if the workflow would time out or abort. The `install` target only sends `killall Dock` (icon refresh), not the Notion Bridge process—historical friction is documented in `AGENT_FEEDBACK.md` and resolved by preferring `install-copy` for copy-only installs.
+**Agents / Cursor / MCP-driven sessions:** After `make app`, use **`make install-copy`** or **`make install-agent-safe`** (same target) to copy `.build/TheBridge.app` → `/Applications/The Bridge.app` without running the full notarize pipeline. Avoid long `make install` / `make release` from the same session that hosts your MCP connection if the workflow would time out or abort. The `install` target only sends `killall Dock` (icon refresh), not the The Bridge process—historical friction is documented in `AGENT_FEEDBACK.md` and resolved by preferring `install-copy` for copy-only installs.
 
 If `make app` warns that `actool` failed, icons may fall back to PNGs; see Makefile `app` target (asset compile is best-effort). A common cause is a broken **ibtoold** plugin load (`xcodebuild -runFirstLaunch` or opening **Xcode** once to refresh system content), not Swift source errors.
 
@@ -76,7 +76,7 @@ make clean-tcc  # Reset TCC permissions for both legacy (solutions.kup.keepr) an
 
 Set the HTTP/SSE port (default 9700):
 ```bash
-NOTION_BRIDGE_PORT=9701 .build/release/NotionBridge
+NOTION_BRIDGE_PORT=9701 .build/release/TheBridge
 ```
 
 Set the Notion API token (resolution priority order):
@@ -93,7 +93,7 @@ Set the Notion API token (resolution priority order):
 - Do not push mixed emergency or verification state directly to `main` without review.
 - Use `backup/*` branches as recovery snapshots; fold them into `main` when ready, then avoid long-lived duplicate integration lines.
 - Split stability fixes, settings/UI restructures, and unrelated documentation or test drift into separate reviewable commits when feasible.
-- When installing a production candidate, verify the running binary path is `/Applications/Notion Bridge.app/Contents/MacOS/NotionBridge`, not a `.build` artifact.
+- When installing a production candidate, verify the running binary path is `/Applications/The Bridge.app/Contents/MacOS/TheBridge`, not a `.build` artifact.
 
 ### Branching strategy (trunk-based, short-lived branches)
 
@@ -123,9 +123,9 @@ Trunk = `origin/main`. Branches are short-lived and **rebased onto current main 
 ### Package Structure
 
 `Package.swift` defines three targets:
-- **`NotionBridgeLib`** — shared library containing all core logic. Covers everything in `NotionBridge/` except `App/NotionBridgeApp.swift` and `Server/main.swift`. Both the app and the test executable depend on this.
-- **`NotionBridge`** — app executable. Entry point is `App/NotionBridgeApp.swift`.
-- **`NotionBridgeTests`** — test executable. Entry point is `NotionBridgeTests/main.swift`.
+- **`TheBridgeLib`** — shared library containing all core logic. Covers everything in `TheBridge/` except `App/TheBridgeApp.swift` and `Server/main.swift`. Both the app and the test executable depend on this.
+- **`TheBridge`** — app executable. Entry point is `App/TheBridgeApp.swift`.
+- **`TheBridgeTests`** — test executable. Entry point is `TheBridgeTests/main.swift`.
 
 Dependencies: `MCP` (MCP Swift SDK 0.11.0), `NIOCore/NIOPosix/NIOHTTP1` (swift-nio 2.65+).
 
@@ -142,11 +142,11 @@ Client → Transport (stdio or SSE) → ServerManager → ToolRouter.dispatch()
 
 ### Core Components
 
-**`ServerManager`** (`NotionBridge/Server/ServerManager.swift`) — actor that orchestrates startup: creates `SecurityGate`, `AuditLog`, and `ToolRouter`; registers all modules; wires MCP `ListTools`/`CallTool` handlers; starts both transports concurrently via `TaskGroup`. The `NOTION_BRIDGE_PORT` env var is read here.
+**`ServerManager`** (`TheBridge/Server/ServerManager.swift`) — actor that orchestrates startup: creates `SecurityGate`, `AuditLog`, and `ToolRouter`; registers all modules; wires MCP `ListTools`/`CallTool` handlers; starts both transports concurrently via `TaskGroup`. The `NOTION_BRIDGE_PORT` env var is read here.
 
-**`ToolRouter`** (`NotionBridge/Server/ToolRouter.swift`) — actor. Central registry and dispatch hub. Each `ToolRegistration` carries a name, module, `SecurityTier`, description, JSON input schema, and a `@Sendable` async handler closure. `dispatchFormatted()` is the shared helper used by all transports (returns `(text: String, isError: Bool)` for MCP `CallTool` responses).
+**`ToolRouter`** (`TheBridge/Server/ToolRouter.swift`) — actor. Central registry and dispatch hub. Each `ToolRegistration` carries a name, module, `SecurityTier`, description, JSON input schema, and a `@Sendable` async handler closure. `dispatchFormatted()` is the shared helper used by all transports (returns `(text: String, isError: Bool)` for MCP `CallTool` responses).
 
-**`SecurityGate`** (`NotionBridge/Security/SecurityGate.swift`) — actor. Enforces a 3-tier model:
+**`SecurityGate`** (`TheBridge/Security/SecurityGate.swift`) — actor. Enforces a 3-tier model:
 - `.open` — execute immediately, no user interaction
 - `.notify` — execute immediately, then send a fire-and-forget notification via `UNUserNotificationCenter`
 - `.request` — request explicit user approval before execution; 30-second timeout defaults to deny
@@ -155,16 +155,16 @@ Three decision outcomes: `.allow`, `.reject(reason:)`, `.handoff(command:explana
 
 For `shell_exec`/`cli_exec` tools, commands matching `safeCommandPatterns` (read-only: `ls`, `cat`, `git status`, etc.) auto-allow. Commands matching `dangerousCommandPatterns` (pipe to shell, `chmod 777`, etc.) produce handoff.
 
-**`AuditLog`** (`NotionBridge/Security/AuditLog.swift`) — actor. Append-only in-memory log with disk persistence via `LogManager`. Writes to `~/Library/Logs/NotionBridge/notion-bridge.log` (JSON lines, 10MB rotation with one backup). Every tool call gets an `AuditEntry` regardless of outcome (approved / rejected / escalated / error).
+**`AuditLog`** (`TheBridge/Security/AuditLog.swift`) — actor. Append-only in-memory log with disk persistence via `LogManager`. Writes to `~/Library/Logs/TheBridge/notion-bridge.log` (JSON lines, 10MB rotation with one backup). Every tool call gets an `AuditEntry` regardless of outcome (approved / rejected / escalated / error).
 
-**`SSEServer`** (`NotionBridge/Server/SSETransport.swift`) — actor. NIO-based HTTP server with two transport modes:
+**`SSEServer`** (`TheBridge/Server/SSETransport.swift`) — actor. NIO-based HTTP server with two transport modes:
 - **Streamable HTTP**: `POST /mcp` with `Mcp-Session-Id` header — each session gets its own `StatefulHTTPServerTransport` and `Server` instance, all sharing one `ToolRouter`. Request validation is built by **`MCPHTTPValidation.streamableHTTPPipeline`**: localhost-only origins/hosts by default; if **`tunnelURL`** (Remote access in UI) is set **and** parses to a host allowlist, the tunnel host is merged into the allowlist and **`POST /mcp` requires** a configured MCP bearer (**Keychain** `mcp_bearer_token`, else **`com.notionbridge.mcpBearerToken`** for migration) plus `Authorization: Bearer` — fail closed if the tunnel is active but no token is set. If **`tunnelURL`** is empty, bearer remains optional (same token keys when set). The HTTP server still listens on **127.0.0.1** only (`ServerManager`); there is no LAN-wide bind. Operators often add **Cloudflare Access** on the tunnel hostname; see `docs/operator/cloudflare-access-notion-bridge.md`.
 - **Legacy SSE**: `GET /sse` + `POST /messages` — for clients like Notion that use the standard split SSE spec
 - **Health endpoint**: `GET /health` returns JSON `{status, tools, uptime, version, clients}`
 
 `LegacySSEBridge` is `@unchecked Sendable` (uses `NSLock`) to safely write SSE events to NIO channels from async contexts.
 
-**`AppDelegate`** (`NotionBridge/App/AppDelegate.swift`) — single-instance guard (PID check), `SMAppService` login item registration, signal handlers (SIGTERM/SIGABRT → `fsync` for crash breadcrumbs), launches both transports in a `Task.detached` group.
+**`AppDelegate`** (`TheBridge/App/AppDelegate.swift`) — single-instance guard (PID check), `SMAppService` login item registration, signal handlers (SIGTERM/SIGABRT → `fsync` for crash breadcrumbs), launches both transports in a `Task.detached` group.
 
 ### Module Registration Pattern
 
@@ -191,7 +191,7 @@ Enable **Keychain credentials** in Settings to expose `credential_*` MCP tools a
 
 ### Notion Token Configuration
 
-`NotionTokenResolver` (`NotionBridge/Notion/NotionClient.swift`) handles token resolution at runtime. To update the token from the UI, call `NotionTokenResolver.writeToken(_:)` (writes to `~/.config/notion-bridge/config.json`) and post `Notification.Name.notionTokenDidChange` to trigger re-validation. Token format must start with `ntn_` or `secret_` and be ≥20 characters.
+`NotionTokenResolver` (`TheBridge/Notion/NotionClient.swift`) handles token resolution at runtime. To update the token from the UI, call `NotionTokenResolver.writeToken(_:)` (writes to `~/.config/notion-bridge/config.json`) and post `Notification.Name.notionTokenDidChange` to trigger re-validation. Token format must start with `ntn_` or `secret_` and be ≥20 characters.
 
 ### Swift 6 Concurrency Notes
 
@@ -208,7 +208,7 @@ The app requires Full Disk Access, Automation, and optionally Screen Recording a
 
 ## Jobs (scheduler module) — v1.9.1
 
-The scheduler module exposes 15 MCP tools for background job management. Jobs are backed by SQLite (`~/Library/Application Support/NotionBridge/jobs.sqlite`) and launchd LaunchAgents in `~/Library/LaunchAgents/solutions.kup.notionbridge.job.<id>.plist`. Each job runs a chain of up to 10 tool invocations via the bridge's own ToolRouter, with `$prev_result` templating between steps.
+The scheduler module exposes 15 MCP tools for background job management. Jobs are backed by SQLite (`~/Library/Application Support/TheBridge/jobs.sqlite`) and launchd LaunchAgents in `~/Library/LaunchAgents/solutions.kup.notionbridge.job.<id>.plist`. Each job runs a chain of up to 10 tool invocations via the bridge's own ToolRouter, with `$prev_result` templating between steps.
 
 ### Tool inventory (15)
 

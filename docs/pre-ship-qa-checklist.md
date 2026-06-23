@@ -55,13 +55,13 @@ Use before merging to `main` or tagging a release. Automated: `make test`, `make
 
 ## MCP smoke (requires running app)
 
-1. Start **Notion Bridge** (menu bar).
+1. Start **The Bridge** (menu bar).
 2. Run: `python3 scripts/qa_local_mcp_smoke.py`  
    Or connect **Cursor** (or another client) to `http://127.0.0.1:<port>/mcp` with Streamable HTTP.
 3. [ ] `initialize` succeeds; [ ] tool list non-empty (typical config).
 
 ## Git / release
 
-- [ ] `AppVersion` in [`Version.swift`](../NotionBridge/Config/Version.swift) matches `Info.plist` (`CFBundleShortVersionString`, `CFBundleVersion`).
+- [ ] `AppVersion` in [`Version.swift`](../TheBridge/Config/Version.swift) matches `Info.plist` (`CFBundleShortVersionString`, `CFBundleVersion`).
 - [ ] `CHANGELOG.md` entry for the release is complete.
 - [ ] No force-push to `main` ([`AGENTS.md`](../AGENTS.md)); push `main` / tag when review is done (workspace may show `ahead` of `origin` until push).

@@ -5,10 +5,10 @@ Cocoa→Carbon mapping, OSStatus classification, visibility filter, empty-state
 decision) is 100% unit-tested in the suite. The items below are the
 **irreducible operator-smoke ceiling** — they require a live login session /
 WindowServer and cannot be asserted headlessly. Run them after every
-`make install` + relaunch of Notion Bridge.
+`make install` + relaunch of The Bridge.
 
 ## Pre-req
-- [ ] Quit and relaunch **Notion Bridge** (install does not kill the running app).
+- [ ] Quit and relaunch **The Bridge** (install does not kill the running app).
 - [ ] Open **Settings → Commands**.
 
 ## 1. Status row (Bug 2 regression guard)

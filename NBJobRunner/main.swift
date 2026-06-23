@@ -2,7 +2,7 @@
 //
 // Replaces /usr/bin/curl in job LaunchAgent plists so that macOS Background
 // Task Management (BTM) attributes scheduled-job background items to
-// Notion Bridge (via Developer ID code signature) instead of to the system
+// The Bridge (via Developer ID code signature) instead of to the system
 // curl binary. One BTM entry total, regardless of job count.
 //
 // Invoked by launchd as:

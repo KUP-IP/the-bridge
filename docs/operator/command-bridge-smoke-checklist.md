@@ -2,7 +2,7 @@
 
 This checklist covers the manual smoke surface for the Command Bridge
 popup rebuild. The DECISION layer underneath is fully unit-tested
-headlessly — see `NotionBridgeTests/CommandBridgeControllerTests.swift`
+headlessly — see `TheBridgeTests/CommandBridgeControllerTests.swift`
 for placement math, recents MRU, animation config, view-model
 builders, the clipboard contract, lifecycle defaults, and the
 modifier-less hot-key plumbing-failure shape. What this document

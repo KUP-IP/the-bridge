@@ -2,10 +2,10 @@
 
 **Scope:** The merged **Orders** section = "Standing Orders" doctrine (renamed, display-only) + **Commands** folded in as a sub-area.
 **Sources audited:**
-- `NotionBridge/UI/Sections/StandingOrdersSection.swift` (712 lines)
-- `NotionBridge/UI/Sections/CommandsSection.swift` (238 lines)
-- `NotionBridge/UI/Sections/CommandsEditorView.swift` (637 lines)
-- Shared chrome: `NotionBridge/UI/BridgeShell.swift`, `NotionBridge/UI/Sections/BridgeSettingsSectionHeader.swift`, `NotionBridge/UI/BridgeThemeV2.swift`, `NotionBridge/UI/BridgeTokens.swift`, `NotionBridge/UI/SettingsWindow.swift`
+- `TheBridge/UI/Sections/StandingOrdersSection.swift` (712 lines)
+- `TheBridge/UI/Sections/CommandsSection.swift` (238 lines)
+- `TheBridge/UI/Sections/CommandsEditorView.swift` (637 lines)
+- Shared chrome: `TheBridge/UI/BridgeShell.swift`, `TheBridge/UI/Sections/BridgeSettingsSectionHeader.swift`, `TheBridge/UI/BridgeThemeV2.swift`, `TheBridge/UI/BridgeTokens.swift`, `TheBridge/UI/SettingsWindow.swift`
 
 **Method:** `design:design-critique` rubric (first impression → usability → hierarchy → consistency → accessibility), then a merge-target proposal. Source is read-only; this is a spec, not a patch.
 

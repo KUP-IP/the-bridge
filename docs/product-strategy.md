@@ -130,7 +130,7 @@ Hold N credentials, route by account.
 
 ## Glossary
 
-- **The Bridge / NotionBridge** — the native macOS MCP server app.
+- **The Bridge / TheBridge** — the native macOS MCP server app.
 - **Bridge Cloud Access** — the in-flight multi-tenant Cloudflare deployment (multi-tenant routing, `/provision` + `/heartbeat`, add-to-claude.ai install flow).
 - **Standing orders** — the portable-identity mechanism; one identity referenced from each platform's instruction surface.
 - **Graduation marker** — the trigger to build the cloud execution tier: idea validated AND the **operator's own** async work needing laptop-independent execution. (Client work never qualifies — see D3 client-SLA ruling.)

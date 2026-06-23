@@ -10,7 +10,7 @@ implementation packet; it does **not** authorize implementation.
 
 ## TL;DR
 
-The Bridge today is a **single process**: one `NotionBridge` executable, launched
+The Bridge today is a **single process**: one `TheBridge` executable, launched
 as a menu-bar app (`LSUIElement`), hosts the MCP server, the `:9700` HTTP/SSE
 listener, all in-process tool modules, the SecurityGate, Sparkle, and (when
 enabled) the cloudflared tunnel. When that process dies — for **any** reason: an
@@ -52,19 +52,19 @@ references confirmed by reading the source, not inferred).
 
 ### 1.1 One process owns everything
 
-`NotionBridge` is a SwiftUI `MenuBarExtra` app with `LSUIElement = true`
+`TheBridge` is a SwiftUI `MenuBarExtra` app with `LSUIElement = true`
 (`Info.plist:40`) and no Dock presence by default. `AppDelegate`
-(`NotionBridge/App/AppDelegate.swift`) is the lifecycle owner. On
+(`TheBridge/App/AppDelegate.swift`) is the lifecycle owner. On
 `applicationDidFinishLaunching` it:
 
 1. Enforces a **single-instance guard** (`ensureSingleInstance()`,
-   `AppDelegate.swift:179`) — only one `NotionBridge` may run at a time.
+   `AppDelegate.swift:179`) — only one `TheBridge` may run at a time.
 2. Bootstraps licensing, path migration, credential migration.
 3. Calls `startMCPServer()` (`AppDelegate.swift:525`), which constructs a
    `ServerManager` and launches it in a **detached `Task`** (`serverTask`,
    `AppDelegate.swift:562`).
 
-`ServerManager.setup()` (`NotionBridge/Server/ServerManager.swift:117`) builds the
+`ServerManager.setup()` (`TheBridge/Server/ServerManager.swift:117`) builds the
 core components in-process:
 
 - `SecurityGate`, `AuditLog`, `ToolRouter` (the dispatcher).
@@ -120,7 +120,7 @@ The tunnel is **not** the local transport. `:9700` is `127.0.0.1`-only
 (loopback). The cloudflared tunnel belongs to **Bridge Cloud Access** (the WS-C
 program): a persistent *outbound* connection from the Mac that a control plane
 delivers capabilities over. It is modeled behind the injectable `TunnelProcess`
-protocol (`NotionBridge/Modules/Cloud/TunnelProcess.swift`) and owned by
+protocol (`TheBridge/Modules/Cloud/TunnelProcess.swift`) and owned by
 `BridgeCloudManager`.
 
 Two facts matter for this design:
@@ -163,7 +163,7 @@ app-owns-everything coupling is already operationally painful.
   hardened runtime (`--options runtime`), `notarytool submit … --wait` + `stapler`
   (`Makefile:371`).
 - `LSMinimumSystemVersion 26.0` (`Info.plist:38`).
-- Entitlements (`NotionBridge.entitlements`): `allow-jit`,
+- Entitlements (`TheBridge.entitlements`): `allow-jit`,
   `allow-unsigned-executable-memory`, `disable-library-validation`,
   `automation.apple-events`, `personal-information.addressbook`,
   `personal-information.calendars`.
@@ -187,7 +187,7 @@ extension of a pattern The Bridge already uses, not a greenfield architecture.
 
 ```
                        ┌──────────────────────────────────────────────┐
-                       │  NotionBridge.app  (single process, LSUIElement)│
+                       │  TheBridge.app  (single process, LSUIElement)│
    MCP clients         │                                                │
  (Claude Code,         │  AppDelegate                                   │
   Cursor, claude.ai,   │   ├─ Sparkle (SPUStandardUpdaterController)    │
@@ -544,7 +544,7 @@ LaunchAgent, and empirically confirm which TCC categories prompt, which inherit,
 and whether a user who already granted the app must re-grant the helper. The
 existing live-QA discipline ("declare the entitlement but verify notarize+launch+
 prompt on device" — see the calendars-entitlement note in
-`NotionBridge.entitlements`) is mandatory here. Do **not** assume inheritance.
+`TheBridge.entitlements`) is mandatory here. Do **not** assume inheritance.
 
 ### 6.3 Auth between UI and helper
 
@@ -559,7 +559,7 @@ prompt on device" — see the calendars-entitlement note in
   (`ServerManager.requestSecurityNotificationPermission`); confirm that a
   LaunchAgent-hosted helper can post `UNUserNotification` approvals (it runs in the
   user session, so it should — but verify, given the 2026-06-02 Reminders
-  "headless NotionBridge can't surface a consent prompt" finding).
+  "headless TheBridge can't surface a consent prompt" finding).
 
 ### 6.4 Config & state migration
 
@@ -625,7 +625,7 @@ hourly Sparkle UI update).
 | # | Risk | Severity | Mitigation |
 | --- | --- | --- | --- |
 | R1 | **TCC grants don't inherit** to the helper; tools that need Automation/Contacts/Calendar/Reminders/Screen/AX break or re-prompt | **High** | Dedicated empirical spike (§6.2); per-user LaunchAgent (not daemon) so the helper runs in the user TCC context; ensure all `NS*UsageDescription` strings exist in the helper Info.plist; drive consent from the Permissions page for the helper's identity |
-| R2 | **Codesigning/notarization of a second binary** — a Developer-ID app outside the App Store has *no embedded provisioning profile*; an entitlement the notarization refuses makes launchd **reject the binary at spawn** (POSIX 163 "Launchd job spawn failed") even when codesign+notarize+Gatekeeper pass | **High** | This already bit The Bridge **twice** (`NotionBridge.entitlements`: keychain-access-groups removed 2026-05-30; calendars entitlement live-QA gate). Sign the helper with the same Developer-ID identity + hardened runtime; give it the **minimum** entitlements it needs; **build+sign+notarize+launch the helper on device before shipping**; have a documented fallback (drop the offending entitlement) |
+| R2 | **Codesigning/notarization of a second binary** — a Developer-ID app outside the App Store has *no embedded provisioning profile*; an entitlement the notarization refuses makes launchd **reject the binary at spawn** (POSIX 163 "Launchd job spawn failed") even when codesign+notarize+Gatekeeper pass | **High** | This already bit The Bridge **twice** (`TheBridge.entitlements`: keychain-access-groups removed 2026-05-30; calendars entitlement live-QA gate). Sign the helper with the same Developer-ID identity + hardened runtime; give it the **minimum** entitlements it needs; **build+sign+notarize+launch the helper on device before shipping**; have a documented fallback (drop the offending entitlement) |
 | R3 | **Security/auth on the control channel** — a malicious local process could drive control verbs (start tunnel, change config) if auth is weak | High | XPC with a hard code-signing requirement (Team ID + bundle id); keep control verbs *off* the `:9700` data plane; data plane stays loopback-only + CORS-off + SecurityGate intact |
 | R4 | **SecurityGate prompts undeliverable from a headless helper** — approval notifications might not surface without a foreground app | Medium | Per-user LaunchAgent runs in the GUI session and can post `UNUserNotification`; verify on device (the 2026-06-02 Reminders finding shows headless consent is *not* guaranteed); the UI app can also broker prompts over XPC when present |
 | R5 | **Two-process state divergence** — Settings toggle in the app doesn't reach the helper (separate UserDefaults domains / stale config) | Medium | Share the UserDefaults suite, or push every config change over the XPC control channel; single owner for `PathMigration` |

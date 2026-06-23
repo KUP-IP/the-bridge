@@ -10,6 +10,12 @@
 #     appcast with this; ed25519 is deterministic, so the CI signature is
 #     byte-identical to a local `make dmg`. WITHOUT this secret the workflow
 #     still publishes the DMG but skips appcast regeneration (warns loudly).
+# - LICENSE_PUBLIC_KEY_BASE64URL: Ed25519 license PUBLIC key (base64url, raw
+#     32-byte) compiled into the build by `make inject-license-key` (Packet B,
+#     PRJCT-2754). Generate a keypair with `swift run license-cli keygen`; the
+#     operator holds the matching PRIVATE key in custody (mints customer tokens
+#     with `license-cli mint`, never committed). WITHOUT this secret the build
+#     is FAIL-CLOSED — no pasted license token activates (trial gate only).
 #
 # Branch-protection note: the "Commit appcast to main" step pushes appcast.xml
 # back to `main` (the Sparkle SUFeedURL is the raw main appcast.xml). The
@@ -58,6 +64,18 @@ jobs:
     env:
       SIGNING_IDENTITY: "Developer ID Application: Isaiah Peters (VP24Z9CS22)"
       NOTARIZE_PROFILE: notarytool-profile
+      # Packet B (PRJCT-2754): compiled into the build via `make inject-license-key`
+      # (make dmg → make build → inject-license-key). Empty/unset → fail-closed.
+      LICENSE_PUBLIC_KEY_BASE64URL: ${{ secrets.LICENSE_PUBLIC_KEY_BASE64URL }}
+      # Packet E (PRJCT-2754): operator WorkOS/OAuth IdP identity (all NON-SECRET —
+      # public issuer/clientID/redirect/resource), baked via `make inject-remote-access`
+      # so the cloud connector's OAuth identity is present at every launch with no
+      # launchctl-setenv dependency. Empty/unset → fail-closed placeholder (.misconfigured).
+      BRIDGE_OAUTH_ISSUER: ${{ secrets.BRIDGE_OAUTH_ISSUER }}
+      BRIDGE_PUBLIC_RESOURCE: ${{ secrets.BRIDGE_PUBLIC_RESOURCE }}
+      WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
+      WORKOS_BASE_URL: ${{ secrets.WORKOS_BASE_URL }}
+      WORKOS_REDIRECT_URI: ${{ secrets.WORKOS_REDIRECT_URI }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

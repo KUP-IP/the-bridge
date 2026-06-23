@@ -7,9 +7,9 @@
 	<key>CFBundleDisplayName</key>
 	<string>The Bridge</string>
 	<key>CFBundleExecutable</key>
-	<string>NotionBridge</string>
+	<string>TheBridge</string>
 	<key>CFBundleIconFile</key>
-	<string>NotionBridge</string>
+	<string>TheBridge</string>
 	<key>CFBundleIdentifier</key>
 	<string>kup.solutions.notion-bridge</string>
 	<key>CFBundleInfoDictionaryVersion</key>

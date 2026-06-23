@@ -2,7 +2,7 @@
 # test-floor-gate.sh — WS-C (v2.3, PKT-798)
 #
 # Locks the green test baseline as a CI gate. The custom harness
-# (.build/debug/NotionBridgeTests) already exits non-zero on any failing
+# (.build/debug/TheBridgeTests) already exits non-zero on any failing
 # test, but that does NOT catch tests being silently deleted or disabled —
 # a suite that shrinks from 710 → 600 with 0 failures would otherwise pass
 # CI unnoticed. This gate fails the build if the passing count drops below
@@ -80,7 +80,7 @@
 # 9728 §5.1); scope-insufficient tools/call → 403 with NO dispatch. Also
 # fixed the S1 finding: ProtectedResourceMetadataProvider.resource now
 # derives from the resolved SSE port (config.json → NOTION_BRIDGE_PORT →
-# 9700) instead of a hardcoded 9700, and the NotionBridgeTests target now
+# 9700) instead of a hardcoded 9700, and the TheBridgeTests target now
 # declares explicit NIOHTTP1 + NIOCore products. Added RemoteOAuthBearerTests
 # (47 harness `test()` blocks): header extraction, accept/expired/nbf/
 # wrong-iss/wrong-aud/bad-sig/malformed/missing/fail-closed validation,
@@ -216,7 +216,7 @@
 # expected; lowering it requires a conscious decision recorded alongside
 # the change.
 # cmd-w2 (Commands data layer, 2026-05-18): additive-isolated new files
-# only — NotionBridge/Modules/Commands/MentionResolver.swift +
+# only — TheBridge/Modules/Commands/MentionResolver.swift +
 # CommandsManager.swift (a Snippet-shaped `Command` model, an in-memory
 # TTL `CommandCache` cloned from SkillsModule.SkillCache + offline-
 # fallback semantics, and a `CommandsManager` actor that fetches a
@@ -420,7 +420,7 @@
 # SkillSource discriminated enum (Codable + legacy notionPageId
 # backward-compat decode + synthesized-mirror encode → stable round-trip
 # fixed point); FilesystemSkillIndex actor (Bundle.module bundled scan
-# + ~/Library/Application Support/Notion Bridge/skills user dir +
+# + ~/Library/Application Support/The Bridge/skills user dir +
 # DispatchSource FS watcher + 60s TTL); fetch_skill file-source path
 # (content = MentionResolver-rendered body, properties = YAML
 # frontmatter map; envelope-key parity); list_routing_skills merged
@@ -428,7 +428,7 @@
 # Notion/File source badge + Reveal-in-Finder + per-path enable toggle
 # (BridgeDefaults.fileSkillEnabled); pure FrontmatterParser
 # (never-throws, defensive over BOM/malformed/unclosed-quote/embedded
-# ---). (W3) 13 Apache-2.0 skills bundled at NotionBridge/Resources/
+# ---). (W3) 13 Apache-2.0 skills bundled at TheBridge/Resources/
 # skills/ via Package.swift .copy('Resources/skills') + LICENSE-APACHE-
 # 2.0.txt + NOTICE; 4 source-available stubs (docx/pdf/pptx/xlsx)
 # linked-not-redistributed; docs/operator/skills-attributions.md
@@ -946,7 +946,7 @@ set -euo pipefail
 # silently dropped.
 # fix(sparkle) (2026-06-05): staged-update crash-loop guard. The 2026-06-05
 # incident was a raced Sparkle staged-update swap that left the SPM resource
-# bundle `NotionBridge_NotionBridge.bundle` an empty husk → SwiftPM's generated
+# bundle `TheBridge_TheBridge.bundle` an empty husk → SwiftPM's generated
 # `Bundle.module` accessor TRAPPED (`Swift.fatalError`) at the menu-bar-icon load
 # site → EXC_BREAKPOINT/SIGTRAP crash-loop on every launch. Fix: (1) graceful
 # degradation — MenuBarIconResolver resolves the icon via non-trapping
@@ -1333,7 +1333,86 @@ set -euo pipefail
 # 171 -> 172. +6 tests (4 module: registration count 9->10, tier, add→remove
 # round-trip, seed-guard refuse/confirm, unknown-entity; 2 VM: pane remove +
 # isSeed). Measured = 2169. FLOOR 2163 -> 2169.
-FLOOR="${BRIDGE_TEST_FLOOR:-2169}"
+#
+# 2026-06-18 Sell-The-Bridge Packet A (customer-safe registry seed + pane bind):
+# productization fix — RegistryEntity.skillsSeed() now ships UNBOUND (dropped the
+# operator's PRIVATE dataSourceId b6ff6ea5… per Decision 5 "no hardcoded data-source
+# ids"); a fresh customer install gets a Skills TEMPLATE (property map intact) they
+# bind to their own Notion via a new Data Sources pane affordance (paste a data-source
+# id or Notion URL → DataSourcesViewModel.setDataSource → existing Introspect). Adds
+# RegistryEntity.isBoundToSource + DataSourcesViewModel.parseDataSourceId (handles
+# dashed UUID / bare 32-hex / Notion-URL slug; nonisolated, unit-tested). Only fresh
+# installs affected (seedIfMissing never overwrites an existing registry.json). +6
+# tests (seed-unbound, setDataSource raw-id/URL/garbage, parseDataSourceId unit,
+# registry_entities-unbound). Measured = 2175. FLOOR 2169 -> 2175.
+# Packet B (PRJCT-2754 · Ship The Bridge v4, Wave 1, 2026-06-18): license
+# public-key build injection (LicensePublicKeyInjected.swift + make
+# inject-license-key + release.yml secret) + scripts/license-cli
+# (keygen/mint/verify, reusing LicenseToken.encode) + a dev-keypair
+# mint→verify→entitled round-trip. +6 LicenseCLITests (fail-closed seam,
+# injected-key decode, mint/verify round-trip, wrong-key forgery reject,
+# entitled via computeStatus, expired→licenseExpired). Measured integrated
+# green 2175 → 2181; floor raised per the order-inversion rule.
+# Payment P1 (PRJCT-2754 · Wave 1, 2026-06-18): StripeClient.createCheckoutSession
+# (hosted Checkout) + BridgeCheckout brand config + LicenseCard "Get a license"
+# entry. +4 StripeClientTests (request shape mode/price/urls/brand-metadata/
+# client_reference_id + parse; empty-priceID fail-fast no-network; Stripe error
+# response; brand metadata + priceID provider). 2181 → 2185.
+# Packet E (PRJCT-2754 · Wave 1, 2026-06-22): durable Remote-Access OAuth identity
+# — build-baked RemoteAccessIdentity + env→config.json→baked→fail-closed resolution
+# in ProtectedResourceMetadataProvider (ends the launchctl-setenv placeholder-PRM
+# revert). +9 RemoteAccessIdentityTests (issuer + resource precedence ×4 layers,
+# isMisconfigured, committed-fail-closed default). 2185 → 2194.
+# Packet E (PRJCT-2754 · Wave 2, 2026-06-23): config-back the remaining four
+# remote-access readers with the SAME env→config.json→baked→fail-closed layering
+# (injectable config/baked seams, pure): WorkOSConfig.resolved (per-field, baked
+# RemoteAccessIdentity.workos*), TransportRouter (BRIDGE_ENABLE_HTTP env→config
+# `enableHTTP`→off), ConnectorBearerValidator.fromEnvironment (BRIDGE_OAUTH_JWKS
+# env→config `oauthJWKS`→fail-closed), EnableCloudAccessFlow.resolvedProvisionBaseURL
+# (arg→BRIDGE_CLOUD_BASE_URL→config `cloudBaseURL`→placeholder). Gate/dispatch +
+# PKT-810 R5 loopback split UNCHANGED — only the resolution feeding the readers.
+# +17 RemoteAccessConfigWave2Tests (WorkOS ×5, TransportRouter ×4, JWKS ×4,
+# cloud-base-url ×4). Measured integrated green 2194 → 2211.
+# Tool-Dev bg_* (PRJCT-2754 · 2026-06-23): bg_run/bg_poll/bg_kill detached
+# background execution (`bgprocess` family) — ported onto the post-rename
+# TheBridge/ tree (the workflow worker built it on the stale pre-rename base).
+# File-backed stateless job state under bg-process/<ts-uuid>.{log,done,pid};
+# bg_run returns immediately, bg_poll reports running/exited/terminated, bg_kill
+# SIGTERM/SIGKILL. staticFeatureModuleToolCount 172→175, family 27→28. +15
+# BgProcessModuleTests (registration/tier/annotation + input/path-traversal
+# guards + 3 LIVE run→poll→exit / non-zero / bg_kill round-trips). Measured
+# integrated green 2211 → 2226.
+# Security-audit remediation batch 1 (PRJCT-2754 · 2026-06-23): from the v4
+# multi-agent security/test audit (verdict: minor-gaps, zero exploitable
+# off-loopback findings; R5 contract verified correct). (#10) skill_delete
+# .notify → .request + neverAutoApprove (irreversible hard-delete now requires
+# confirmation, matching the job_delete fix) + lockstep ToolAnnotations
+# requiresConfirmation:true. (#7) bg_run no longer double-escapes single quotes
+# in the user command (embedded raw; the single launcher escape suffices) —
+# fixes `echo "it's"` corruption; +1 LIVE regression test. 2226 → 2227.
+# Security-audit remediation batch 2 — non-auth (PRJCT-2754 · 2026-06-23): six
+# reliability/DoS/coverage findings from the same v4 audit (auth/R5 surface left
+# untouched). (#3) FIRST coverage for the BgProcessRuntime actor via the
+# init(baseDir:cleanupTTL:killGracePeriodSec:) hermetic seam: reconcileOrphans
+# dead→.unknown / live-job watcher-reattach across a fresh runtime / terminal-TTL
+# sweep, SIGTERM→SIGKILL cascade on a TERM-ignoring child, finalizeExit
+# signaled-without-prior-kill ⇒ .failed (not .killed), concurrency-safe start
+# (+6). (#4) file_read no longer slurps the whole file before the cap — stat +
+# reject non-regular files (a FIFO/char-device can't be streamed) then
+# FileHandle.read(ofLength: min(maxBytes, 50 MB)); +3 (cap, full-small-file,
+# FIFO refusal). (#5) bg_poll reads only the trailing 256 KB window (seek-from-
+# EOF + drop leading partial line) instead of the entire log every poll; +1 LIVE
+# (>window log → last lines only, logTruncated true). (#6) bg_run/bg_kill
+# coverage: ~20 concurrent launches → distinct ids/paths, force:true ⇒ SIGKILL,
+# pid-dead-no-sentinel ⇒ terminated, loginShell branch; +4. (#8) config.json
+# written 0o600 (chmod the final path post-atomic-rename) so secrets aren't
+# world-readable; +1. (#9) bg_kill TOCTOU blast-radius: bg_run launches under
+# `set -m` so the recorded pid is its process-group leader (pgid==pid) and
+# bg_kill signals the GROUP (kill(-pid,…)); killpg succeeds only while that pid
+# still leads a group, so a recycled pid yields ESRCH→already_terminated instead
+# of hitting an unrelated process (covered by the #6 group-kill case). Measured
+# integrated green 2227 → 2242.
+FLOOR="${BRIDGE_TEST_FLOOR:-2242}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
@@ -1434,7 +1513,7 @@ FLOOR="${BRIDGE_TEST_FLOOR:-2169}"
 # Recommended badge invariant, IconPickerCatalog emoji + SF Symbol
 # curation + de-duped + NSImage resolvable, CommandStore icon round-trip.
 # Baseline 1275 at HEAD 4554d32 + 14 + 25 + 19 + 27 = 1360.
-BIN=".build/debug/NotionBridgeTests"
+BIN=".build/debug/TheBridgeTests"
 
 echo "🧪 test-floor-gate: building debug + running suite (floor=${FLOOR})..."
 swift build -c debug

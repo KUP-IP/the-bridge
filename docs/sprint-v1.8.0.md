@@ -43,7 +43,7 @@ Four tracks delivered as separate branches, merged to main individually upon com
 
 #### Track B — New Notion Tools (`feat/notion-api-tools`)
 
-All tools follow Workflow B (7-step NotionBridge Tool Development Protocol). Step 6 (Reload) hands off to `sk mac ops`.
+All tools follow Workflow B (7-step TheBridge Tool Development Protocol). Step 6 (Reload) hands off to `sk mac ops`.
 
 | ID | Tool | Client Method | API Endpoint | Definition of Done |
 |----|------|--------------|-------------|---------------------|
@@ -112,8 +112,8 @@ Merge order recommendation: D → A → C → B. Shortest to longest, lower risk
 Run this before committing the version bump. All three locations must agree.
 
 ```bash
-V_SWIFT=$(grep 'marketing =' NotionBridge/Config/Version.swift | sed 's/.*"\(.*\)".*/\1/')
-B_SWIFT=$(grep 'build =' NotionBridge/Config/Version.swift | sed 's/.*"\(.*\)".*/\1/')
+V_SWIFT=$(grep 'marketing =' TheBridge/Config/Version.swift | sed 's/.*"\(.*\)".*/\1/')
+B_SWIFT=$(grep 'build =' TheBridge/Config/Version.swift | sed 's/.*"\(.*\)".*/\1/')
 V_PLIST=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' Info.plist)
 B_PLIST=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' Info.plist)
 CL_VER=$(grep -m1 '^## \[' CHANGELOG.md | sed 's/.*\[\(.*\)\].*/\1/')
@@ -170,11 +170,11 @@ nohup bash -c '
   make app >> "$LOG" 2>&1
   make sign >> "$LOG" 2>&1
   make notarize >> "$LOG" 2>&1
-  pkill -x NotionBridge >> "$LOG" 2>&1
+  pkill -x TheBridge >> "$LOG" 2>&1
   sleep 3
-  rm -rf "/Applications/Notion Bridge.app" "/Applications/NotionBridge.app"
-  ditto .build/NotionBridge.app "/Applications/Notion Bridge.app" >> "$LOG" 2>&1
-  open "/Applications/Notion Bridge.app"
+  rm -rf "/Applications/The Bridge.app" "/Applications/TheBridge.app"
+  ditto .build/TheBridge.app "/Applications/The Bridge.app" >> "$LOG" 2>&1
+  open "/Applications/The Bridge.app"
   echo "=== UPDATE COMPLETE $(date) ===" >> "$LOG"
 ' > /dev/null 2>&1 &
 ```
@@ -226,4 +226,4 @@ Sprint is complete when all of the following pass:
 - [ ] `notion_search`, `notion_page_create` descriptions updated in `NotionModule.swift`
 - [ ] `notion_page_markdown_write` absent from tool registry, client, and tests (already done)
 - [ ] `Version.swift`, `Info.plist`, `CHANGELOG.md` all agree on `1.8.0` / build `15`
-- [ ] NotionBridge v1.8.0 built, signed, notarized, installed, and reconnects successfully
+- [ ] TheBridge v1.8.0 built, signed, notarized, installed, and reconnects successfully

@@ -1,4 +1,4 @@
-# Makefile – Notion Bridge
+# Makefile – The Bridge
 # PKT-329: V1-14b Build System + Connection Setup
 # PKT-346: V1-QUALITY-POLISH — Added install and clean-tcc targets
 #
@@ -9,11 +9,11 @@
 APP_NAME        = The Bridge
 DMG_VOLUME_NAME = The Bridge
 BUNDLE_ID       = kup.solutions.notion-bridge
-BINARY_NAME     = NotionBridge
+BINARY_NAME     = TheBridge
 BUILD_DIR       = .build
 RELEASE_DIR     = $(BUILD_DIR)/release
 DEBUG_DIR       = $(BUILD_DIR)/debug
-APP_BUNDLE      = $(BUILD_DIR)/NotionBridge.app
+APP_BUNDLE      = $(BUILD_DIR)/TheBridge.app
 FRAMEWORKS_DIR  = $(APP_BUNDLE)/Contents/Frameworks
 # PKT-551: Notification Content Extension (.appex) paths
 PLUGINS_DIR     = $(APP_BUNDLE)/Contents/PlugIns
@@ -49,14 +49,22 @@ GENERATE_APPCAST ?= 1
 #   .build/artifacts/sparkle/Sparkle/bin/generate_keys -x key.txt
 SPARKLE_ED_KEY_FILE ?=
 
+# Packet B (PRJCT-2754): Ed25519 license PUBLIC key injected into the build.
+# Empty (local default) → fail-closed (no bundled key; trial-only gate).
+# release.yml sets it from the LICENSE_PUBLIC_KEY_BASE64URL repo secret (the
+# production key). Local dev demo:
+#   make build LICENSE_PUBLIC_KEY_BASE64URL=<dev-public-key-base64url>
+LICENSE_PUBLIC_KEY_BASE64URL ?=
+LICENSE_KEY_INJECT_FILE = TheBridge/Core/Licensing/LicensePublicKeyInjected.swift
+
 INFO_PLIST      = Info.plist
-RESOURCES_DIR   = NotionBridge/App/Resources
+RESOURCES_DIR   = TheBridge/App/Resources
 DMG_ICON        = $(RESOURCES_DIR)/Assets.xcassets/AppIcon.appiconset/icon_512x512.png
 SPARKLE_ARTIFACT_DIR = $(BUILD_DIR)/artifacts/sparkle/Sparkle
 SPARKLE_FRAMEWORK = $(SPARKLE_ARTIFACT_DIR)/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework
 SPARKLE_TOOLS_DIR = $(SPARKLE_ARTIFACT_DIR)/bin
 
-.PHONY: debug build test app extension jobrunner appcast dmg dmg-background sign notarize verify verify-sparkle-feed check-update-flow check-appcast release clean install install-copy install-agent-safe clean-tcc patch-deps check-stale-build
+.PHONY: debug build test app extension jobrunner appcast dmg dmg-background sign notarize verify verify-sparkle-feed check-update-flow check-appcast release clean install install-copy install-agent-safe clean-tcc patch-deps check-stale-build inject-license-key inject-remote-access
 
 # ── Debug Build ────────────────────────────────────────────────
 debug:
@@ -65,7 +73,28 @@ debug:
 	@echo "✅ Debug build: $(DEBUG_DIR)/$(BINARY_NAME)"
 
 # ── Release Build ──────────────────────────────────────────────
-build:
+# ── License public-key injection (Packet B) ───────────────────
+# Rewrites the single injected constant from LICENSE_PUBLIC_KEY_BASE64URL.
+# Idempotent: with the var EMPTY it rewrites the fail-closed default
+# (byte-identical to the committed file → no git churn). base64url has no
+# sed-special chars, so the '|'-delimited substitution is safe.
+inject-license-key:
+	@sed -i '' -E 's|^.*// INJECT:LICENSE_PUBLIC_KEY.*$$|    static let injectedBase64URL = "$(LICENSE_PUBLIC_KEY_BASE64URL)"   // INJECT:LICENSE_PUBLIC_KEY — do not hand-edit|' $(LICENSE_KEY_INJECT_FILE)
+	@if [ -n "$(LICENSE_PUBLIC_KEY_BASE64URL)" ]; then \
+		echo "🔑 Injected license public key into $(LICENSE_KEY_INJECT_FILE)"; \
+	else \
+		echo "🔑 License public key empty → fail-closed build (trial-only)"; \
+	fi
+
+# ── Remote-Access IdP identity injection (Packet E) ───────────
+# Bakes the operator WorkOS/OAuth identity into RemoteAccessIdentity.swift so
+# the cloud connector's OAuth identity is present at every launch (no
+# launchctl-setenv dependency — the root cause of the placeholder-PRM revert).
+# No-op when no identity is in the env (leaves the committed fail-closed default).
+inject-remote-access:
+	@bash scripts/inject-remote-access.sh
+
+build: inject-license-key inject-remote-access
 	@echo "🔨 Building release binary with strict concurrency..."
 	swift build -c release \
 		-Xswiftc -strict-concurrency=complete
@@ -76,7 +105,7 @@ build:
 test:
 	@echo "🧪 Running test suite..."
 	swift build -c debug
-	$(DEBUG_DIR)/NotionBridgeTests
+	$(DEBUG_DIR)/TheBridgeTests
 	@echo "✅ Tests complete"
 
 # WS-C (PKT-798) → v3.0·0.5 → Dev-suite audit → PKT-800 S1 → S2 → S3 → S4
@@ -107,45 +136,45 @@ app: build extension jobrunner
 	@cp $(RELEASE_DIR)/$(BINARY_NAME) "$(APP_BUNDLE)/Contents/MacOS/$(BINARY_NAME)"
 	@install_name_tool -add_rpath "@loader_path/../Frameworks" "$(APP_BUNDLE)/Contents/MacOS/$(BINARY_NAME)"
 	@cp $(INFO_PLIST) $(APP_BUNDLE)/Contents/Info.plist
-	@test -f $(RESOURCES_DIR)/NotionBridge.icns && \
-		cp $(RESOURCES_DIR)/NotionBridge.icns $(APP_BUNDLE)/Contents/Resources/ || true
+	@test -f $(RESOURCES_DIR)/TheBridge.icns && \
+		cp $(RESOURCES_DIR)/TheBridge.icns $(APP_BUNDLE)/Contents/Resources/ || true
 	@for f in $(RESOURCES_DIR)/*.png; do \
 		test -f "$$f" && cp "$$f" $(APP_BUNDLE)/Contents/Resources/ || true; \
 	done
 	@# ── Copy SPM resource bundle to Contents/Resources (where Bundle.module expects it) ──
-	@SPM_BUNDLE="$(RELEASE_DIR)/NotionBridge_NotionBridge.bundle"; \
+	@SPM_BUNDLE="$(RELEASE_DIR)/TheBridge_TheBridge.bundle"; \
 		if [ -d "$$SPM_BUNDLE" ]; then \
 			cp -R "$$SPM_BUNDLE" "$(APP_BUNDLE)/Contents/Resources/"; \
-			echo "  ↳ Copied SPM resource bundle (NotionBridge) to Contents/Resources"; \
+			echo "  ↳ Copied SPM resource bundle (TheBridge) to Contents/Resources"; \
 		fi
-	@# ── Copy NotionBridgeLib resource bundle too (3.3.0 W3: bundled SKILL.md ──
-	@# ── skills declared in Package.swift on the NotionBridgeLib target — its  ──
+	@# ── Copy TheBridgeLib resource bundle too (3.3.0 W3: bundled SKILL.md ──
+	@# ── skills declared in Package.swift on the TheBridgeLib target — its  ──
 	@# ── Bundle.module lookup needs the sibling library-target bundle).        ──
-	@LIB_BUNDLE="$(RELEASE_DIR)/NotionBridge_NotionBridgeLib.bundle"; \
+	@LIB_BUNDLE="$(RELEASE_DIR)/TheBridge_TheBridgeLib.bundle"; \
 		if [ -d "$$LIB_BUNDLE" ]; then \
 			cp -R "$$LIB_BUNDLE" "$(APP_BUNDLE)/Contents/Resources/"; \
-			echo "  ↳ Copied SPM resource bundle (NotionBridgeLib — bundled skills) to Contents/Resources"; \
+			echo "  ↳ Copied SPM resource bundle (TheBridgeLib — bundled skills) to Contents/Resources"; \
 		fi
 	@# ── Add MenuBarIcon-named copies for image(forResource:) lookup ──
-	@if [ -f "$(APP_BUNDLE)/Contents/Resources/NotionBridge_NotionBridge.bundle/notionbridge-menubar.png" ]; then \
-		cp "$(APP_BUNDLE)/Contents/Resources/NotionBridge_NotionBridge.bundle/notionbridge-menubar.png" \
-			"$(APP_BUNDLE)/Contents/Resources/NotionBridge_NotionBridge.bundle/MenuBarIcon.png"; \
-		cp "$(APP_BUNDLE)/Contents/Resources/NotionBridge_NotionBridge.bundle/notionbridge-menubar@2x.png" \
-			"$(APP_BUNDLE)/Contents/Resources/NotionBridge_NotionBridge.bundle/MenuBarIcon@2x.png"; \
+	@if [ -f "$(APP_BUNDLE)/Contents/Resources/TheBridge_TheBridge.bundle/thebridge-menubar.png" ]; then \
+		cp "$(APP_BUNDLE)/Contents/Resources/TheBridge_TheBridge.bundle/thebridge-menubar.png" \
+			"$(APP_BUNDLE)/Contents/Resources/TheBridge_TheBridge.bundle/MenuBarIcon.png"; \
+		cp "$(APP_BUNDLE)/Contents/Resources/TheBridge_TheBridge.bundle/thebridge-menubar@2x.png" \
+			"$(APP_BUNDLE)/Contents/Resources/TheBridge_TheBridge.bundle/MenuBarIcon@2x.png"; \
 		echo "  ↳ Added MenuBarIcon.png + @2x aliases"; \
 	fi
 	@# ── Copy MenuBarIcon to top-level Contents/Resources for Bundle.main fallback ──
-	@if [ -f "$(APP_BUNDLE)/Contents/Resources/notionbridge-menubar.png" ]; then \
-		cp "$(APP_BUNDLE)/Contents/Resources/notionbridge-menubar.png" \
+	@if [ -f "$(APP_BUNDLE)/Contents/Resources/thebridge-menubar.png" ]; then \
+		cp "$(APP_BUNDLE)/Contents/Resources/thebridge-menubar.png" \
 			"$(APP_BUNDLE)/Contents/Resources/MenuBarIcon.png"; \
-		cp "$(APP_BUNDLE)/Contents/Resources/notionbridge-menubar@2x.png" \
+		cp "$(APP_BUNDLE)/Contents/Resources/thebridge-menubar@2x.png" \
 			"$(APP_BUNDLE)/Contents/Resources/MenuBarIcon@2x.png"; \
 		echo "  ↳ Added top-level MenuBarIcon.png + @2x for Bundle.main"; \
 	fi
 	@# ── Compile Assets.xcassets → Assets.car via actool ──
-	@XCASSETS="$(APP_BUNDLE)/Contents/Resources/NotionBridge_NotionBridge.bundle/Assets.xcassets"; \
+	@XCASSETS="$(APP_BUNDLE)/Contents/Resources/TheBridge_TheBridge.bundle/Assets.xcassets"; \
 		if [ -d "$$XCASSETS" ]; then \
-			actool --compile "$(APP_BUNDLE)/Contents/Resources/NotionBridge_NotionBridge.bundle" \
+			actool --compile "$(APP_BUNDLE)/Contents/Resources/TheBridge_TheBridge.bundle" \
 				--platform macosx --minimum-deployment-target 14.0 \
 				--app-icon AppIcon --output-partial-info-plist /dev/null \
 				"$$XCASSETS" >/dev/null 2>&1 && \
@@ -193,7 +222,7 @@ extension:
 
 # ── NBJobRunner helper binary (v1.9.2) ──
 # Builds the signed launchd callback helper. Replaces /usr/bin/curl in job
-# plists so macOS BTM attributes background items to Notion Bridge.
+# plists so macOS BTM attributes background items to The Bridge.
 jobrunner:
 	@echo "🔨 Building $(JOB_RUNNER_NAME) binary..."
 	swift build -c release --product $(JOB_RUNNER_NAME)
@@ -224,9 +253,9 @@ check-stale-build:
 define PREINSTALL_SAFETY
 @echo "⏏️  Quitting any running $(APP_NAME) (prevents install/Sparkle race)..."
 @osascript -e 'tell application "The Bridge" to quit' >/dev/null 2>&1 || true
-@pkill -f "The Bridge.app/Contents/MacOS/NotionBridge" 2>/dev/null || true
+@pkill -f "The Bridge.app/Contents/MacOS/TheBridge" 2>/dev/null || true
 @pkill -f "NBJobRunner" 2>/dev/null || true
-@i=0; while pgrep -f "The Bridge.app/Contents/MacOS/NotionBridge" >/dev/null 2>&1 && [ $$i -lt 20 ]; do sleep 0.5; i=$$((i+1)); done
+@i=0; while pgrep -f "The Bridge.app/Contents/MacOS/TheBridge" >/dev/null 2>&1 && [ $$i -lt 20 ]; do sleep 0.5; i=$$((i+1)); done
 @echo "🧹 Clearing any pending Sparkle staged update (prevents revert-over-install)..."
 @rm -rf "$$HOME/Library/Caches/$(BUNDLE_ID)/org.sparkle-project.Sparkle/Installation/"* "$$HOME/Library/Caches/$(BUNDLE_ID)/org.sparkle-project.Sparkle/PersistentDownloads/"* 2>/dev/null || true
 endef
@@ -237,7 +266,7 @@ define VERIFY_INSTALL
 	if [ -z "$$DST_VER" ] || [ "$$SRC_VER" != "$$DST_VER" ]; then \
 		echo "❌ install verify: version mismatch (source '$$SRC_VER' != installed '$$DST_VER') — bundle may be raced/corrupt"; exit 1; \
 	fi; \
-	if [ ! -d "/Applications/The Bridge.app/Contents/Resources/NotionBridge_NotionBridge.bundle" ]; then \
+	if [ ! -d "/Applications/The Bridge.app/Contents/Resources/TheBridge_TheBridge.bundle" ]; then \
 		echo "❌ install verify: SPM resource bundle missing — app would crash at launch (Bundle.module)"; exit 1; \
 	fi; \
 	echo "✅ install verify: version $$DST_VER + SPM resource bundle present"
@@ -245,13 +274,13 @@ endef
 
 # ── Install ────────────────────────────────────────────────────────────
 # PKT-1 v3.5: destination renamed to "/Applications/The Bridge.app".
-# Cleanup removes the new path AND both legacy variants ("Notion Bridge.app"
-# from 3.x display-name installs, "NotionBridge.app" from any executable-
+# Cleanup removes the new path AND both legacy variants ("The Bridge.app"
+# from 3.x display-name installs, "TheBridge.app" from any executable-
 # name installs) so re-installs land cleanly regardless of prior state.
 install: check-stale-build notarize
 	@echo "📲 Installing notarized app to /Applications..."
 	$(PREINSTALL_SAFETY)
-	@rm -rf "/Applications/The Bridge.app" "/Applications/Notion Bridge.app" "/Applications/NotionBridge.app"
+	@rm -rf "/Applications/The Bridge.app" "/Applications/The Bridge.app" "/Applications/TheBridge.app"
 	@ditto "$(APP_BUNDLE)" "/Applications/The Bridge.app"
 	@spctl --assess --verbose "/Applications/The Bridge.app"
 	@echo "🔄 Re-registering with Launch Services..."
@@ -265,7 +294,7 @@ install-copy: check-stale-build sign
 	@echo "⚠️  install-copy replaces the Sparkle-managed /Applications/The Bridge.app — the running app is quit automatically below to avoid an install/Sparkle race."
 	@echo "Installing app to /Applications (copy-only)..."
 	$(PREINSTALL_SAFETY)
-	@rm -rf "/Applications/The Bridge.app" "/Applications/Notion Bridge.app" "/Applications/NotionBridge.app"
+	@rm -rf "/Applications/The Bridge.app" "/Applications/The Bridge.app" "/Applications/TheBridge.app"
 	@ditto "$(APP_BUNDLE)" "/Applications/The Bridge.app"
 	@echo "🔄 Re-registering with Launch Services..."
 	@/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f "/Applications/The Bridge.app"
@@ -318,7 +347,7 @@ dmg: notarize dmg-background
 	@rm -f "$(DMG_PATH)"
 	create-dmg \
 		--volname "$(DMG_VOLUME_NAME)" \
-		--volicon "$(RESOURCES_DIR)/NotionBridge.icns" \
+		--volicon "$(RESOURCES_DIR)/TheBridge.icns" \
 		--background "$(DMG_BACKGROUND)" \
 		--window-pos 220 140 \
 		--window-size 640 360 \
@@ -359,7 +388,7 @@ sign: app
 		echo "  ↳ Signed $(EXT_NAME).appex (nested)"; \
 	fi
 	codesign --force --deep --sign "$(SIGNING_ID)" \
-		--entitlements NotionBridge.entitlements \
+		--entitlements TheBridge.entitlements \
 		--options runtime \
 		--timestamp \
 		$(APP_BUNDLE)
@@ -370,8 +399,8 @@ sign: app
 # ── Notarize ───────────────────────────────────────────────────
 notarize: sign
 	@echo "📤 Submitting for notarization..."
-	ditto -c -k --keepParent $(APP_BUNDLE) $(BUILD_DIR)/NotionBridge.zip
-	xcrun notarytool submit $(BUILD_DIR)/NotionBridge.zip \
+	ditto -c -k --keepParent $(APP_BUNDLE) $(BUILD_DIR)/TheBridge.zip
+	xcrun notarytool submit $(BUILD_DIR)/TheBridge.zip \
 		--keychain-profile "$(NOTARIZE_PROFILE)" \
 		--wait
 	xcrun stapler staple $(APP_BUNDLE)

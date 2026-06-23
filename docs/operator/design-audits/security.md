@@ -9,15 +9,15 @@
 
 | Surface | File | Role in the merge |
 |---|---|---|
-| Credentials vault | `NotionBridge/UI/Sections/CredentialsSection.swift` | Vault tab body (hero, keychain banner, rows, policy card) |
-| Add/replace sheet | `NotionBridge/UI/Sections/CredentialAddSheet.swift` | Vault add/rotate/reconnect modal |
-| System grants (TCC) | `NotionBridge/UI/Sections/PermissionsSection.swift` | Gates? — actually **System-grant** content, see §1 |
-| Legacy TCC view | `NotionBridge/UI/PermissionView.swift` | Onboarding twin + upcoming-capability gating |
-| Tool tier control | `NotionBridge/UI/ModuleGroupCard.swift` (`ModuleGroupToolRow` L36–132, `ModuleGroupList` L443–696) | **The real "Gates" mechanism** (Open/Notify/Request per tool) |
-| Tier resolution | `NotionBridge/UI/ToolTierResolution.swift` | Precedence: own override > module grant > registered default |
-| Tier enum | `NotionBridge/Security/SecurityGate.swift` L58–62 | `open` / `notify` / `request` |
-| Section hero | `NotionBridge/UI/Sections/BridgeSettingsSectionHeader.swift` | Shared hero contract + presets |
-| Primitives + tokens | `NotionBridge/UI/BridgeThemeV2.swift`, `NotionBridge/UI/BridgeTokens.swift`, `NotionBridge/UI/BridgeShell.swift` | `BridgeGlassCard`, `BridgeCardLabel`, `BridgeDepLink(Row)`, `PartialToggle`, all tokens |
+| Credentials vault | `TheBridge/UI/Sections/CredentialsSection.swift` | Vault tab body (hero, keychain banner, rows, policy card) |
+| Add/replace sheet | `TheBridge/UI/Sections/CredentialAddSheet.swift` | Vault add/rotate/reconnect modal |
+| System grants (TCC) | `TheBridge/UI/Sections/PermissionsSection.swift` | Gates? — actually **System-grant** content, see §1 |
+| Legacy TCC view | `TheBridge/UI/PermissionView.swift` | Onboarding twin + upcoming-capability gating |
+| Tool tier control | `TheBridge/UI/ModuleGroupCard.swift` (`ModuleGroupToolRow` L36–132, `ModuleGroupList` L443–696) | **The real "Gates" mechanism** (Open/Notify/Request per tool) |
+| Tier resolution | `TheBridge/UI/ToolTierResolution.swift` | Precedence: own override > module grant > registered default |
+| Tier enum | `TheBridge/Security/SecurityGate.swift` L58–62 | `open` / `notify` / `request` |
+| Section hero | `TheBridge/UI/Sections/BridgeSettingsSectionHeader.swift` | Shared hero contract + presets |
+| Primitives + tokens | `TheBridge/UI/BridgeThemeV2.swift`, `TheBridge/UI/BridgeTokens.swift`, `TheBridge/UI/BridgeShell.swift` | `BridgeGlassCard`, `BridgeCardLabel`, `BridgeDepLink(Row)`, `PartialToggle`, all tokens |
 
 ---
 

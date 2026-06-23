@@ -3,12 +3,12 @@
 > Scope: Settings → **Skills** section of The Bridge (macOS SwiftUI menu-bar app, MCP connector).
 > Method: `design:design-critique` rubric applied against current source, read-only.
 > Sources audited:
-> - `NotionBridge/UI/Sections/SkillsSection.swift` (pane scaffold: hero + cache card + embedded master–detail)
-> - `NotionBridge/UI/SkillsView.swift` (twin master–detail: list column + detail column)
-> - `NotionBridge/UI/BridgeShell.swift` (chrome: stage, secnav, titlebar, footbar)
-> - `NotionBridge/UI/BridgeThemeV2.swift` + `NotionBridge/UI/BridgeTheme.swift` (BridgeGlassCard, BridgeCardLabel, BridgeBadge, BridgeSpacing)
-> - `NotionBridge/UI/BridgeTokens.swift` (color/radius SSOT mirror)
-> - `NotionBridge/UI/Sections/BridgeSettingsSectionHeader.swift` (the shared 5-caller hero pattern Skills does NOT use)
+> - `TheBridge/UI/Sections/SkillsSection.swift` (pane scaffold: hero + cache card + embedded master–detail)
+> - `TheBridge/UI/SkillsView.swift` (twin master–detail: list column + detail column)
+> - `TheBridge/UI/BridgeShell.swift` (chrome: stage, secnav, titlebar, footbar)
+> - `TheBridge/UI/BridgeThemeV2.swift` + `TheBridge/UI/BridgeTheme.swift` (BridgeGlassCard, BridgeCardLabel, BridgeBadge, BridgeSpacing)
+> - `TheBridge/UI/BridgeTokens.swift` (color/radius SSOT mirror)
+> - `TheBridge/UI/Sections/BridgeSettingsSectionHeader.swift` (the shared 5-caller hero pattern Skills does NOT use)
 > - `design/design-system/project/ui_kits/the-bridge/kit.css` (visual SSOT)
 > Conformance target: LOCKED redesign — sidebar 10→7 (Orders · Skills · Jobs · Tools · Security · Connection · Advanced; Skills keeps its own section), GLOBAL DENSITY TENET (tighten vertical rhythm + padding; legibility floor ≥ 11–12px), chrome = section-name-only left-aligned titlebar with no divider, slim integrated footbar.
 

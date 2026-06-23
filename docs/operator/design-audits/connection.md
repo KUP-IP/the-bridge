@@ -4,12 +4,12 @@
 **Status:** New merged page in the locked 7-section sidebar (`Orders · Skills · Jobs · Tools · Security · Connection · Advanced`).
 **Method:** `design:design-critique` rubric (First impression → Usability → Hierarchy → Consistency → Accessibility) applied against the live source.
 **Source (READ-ONLY):**
-- `NotionBridge/UI/Sections/ConnectionsSection.swift` (hero orb · transport card · integrations grid · active clients · lifecycle)
-- `NotionBridge/UI/Sections/RemoteAccessSection.swift` (cloud hero · status/toggle card · security posture)
-- `NotionBridge/UI/ConnectionsManagementView.swift` (**dead code** — not instantiated)
-- `NotionBridge/UI/ConnectionSetupView.swift` (**dead code** — not instantiated)
-- `NotionBridge/UI/StripeConnectionSection.swift` (**dead code** — not instantiated)
-- `NotionBridge/UI/BridgeShell.swift`, `NotionBridge/UI/BridgeThemeV2.swift`, `NotionBridge/UI/BridgeTokens.swift`
+- `TheBridge/UI/Sections/ConnectionsSection.swift` (hero orb · transport card · integrations grid · active clients · lifecycle)
+- `TheBridge/UI/Sections/RemoteAccessSection.swift` (cloud hero · status/toggle card · security posture)
+- `TheBridge/UI/ConnectionsManagementView.swift` (**dead code** — not instantiated)
+- `TheBridge/UI/ConnectionSetupView.swift` (**dead code** — not instantiated)
+- `TheBridge/UI/StripeConnectionSection.swift` (**dead code** — not instantiated)
+- `TheBridge/UI/BridgeShell.swift`, `TheBridge/UI/BridgeThemeV2.swift`, `TheBridge/UI/BridgeTokens.swift`
 
 ---
 
