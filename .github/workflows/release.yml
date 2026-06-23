@@ -67,6 +67,15 @@ jobs:
       # Packet B (PRJCT-2754): compiled into the build via `make inject-license-key`
       # (make dmg → make build → inject-license-key). Empty/unset → fail-closed.
       LICENSE_PUBLIC_KEY_BASE64URL: ${{ secrets.LICENSE_PUBLIC_KEY_BASE64URL }}
+      # Packet E (PRJCT-2754): operator WorkOS/OAuth IdP identity (all NON-SECRET —
+      # public issuer/clientID/redirect/resource), baked via `make inject-remote-access`
+      # so the cloud connector's OAuth identity is present at every launch with no
+      # launchctl-setenv dependency. Empty/unset → fail-closed placeholder (.misconfigured).
+      BRIDGE_OAUTH_ISSUER: ${{ secrets.BRIDGE_OAUTH_ISSUER }}
+      BRIDGE_PUBLIC_RESOURCE: ${{ secrets.BRIDGE_PUBLIC_RESOURCE }}
+      WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
+      WORKOS_BASE_URL: ${{ secrets.WORKOS_BASE_URL }}
+      WORKOS_REDIRECT_URI: ${{ secrets.WORKOS_REDIRECT_URI }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

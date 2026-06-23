@@ -64,7 +64,7 @@ SPARKLE_ARTIFACT_DIR = $(BUILD_DIR)/artifacts/sparkle/Sparkle
 SPARKLE_FRAMEWORK = $(SPARKLE_ARTIFACT_DIR)/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework
 SPARKLE_TOOLS_DIR = $(SPARKLE_ARTIFACT_DIR)/bin
 
-.PHONY: debug build test app extension jobrunner appcast dmg dmg-background sign notarize verify verify-sparkle-feed check-update-flow check-appcast release clean install install-copy install-agent-safe clean-tcc patch-deps check-stale-build inject-license-key
+.PHONY: debug build test app extension jobrunner appcast dmg dmg-background sign notarize verify verify-sparkle-feed check-update-flow check-appcast release clean install install-copy install-agent-safe clean-tcc patch-deps check-stale-build inject-license-key inject-remote-access
 
 # ── Debug Build ────────────────────────────────────────────────
 debug:
@@ -86,7 +86,15 @@ inject-license-key:
 		echo "🔑 License public key empty → fail-closed build (trial-only)"; \
 	fi
 
-build: inject-license-key
+# ── Remote-Access IdP identity injection (Packet E) ───────────
+# Bakes the operator WorkOS/OAuth identity into RemoteAccessIdentity.swift so
+# the cloud connector's OAuth identity is present at every launch (no
+# launchctl-setenv dependency — the root cause of the placeholder-PRM revert).
+# No-op when no identity is in the env (leaves the committed fail-closed default).
+inject-remote-access:
+	@bash scripts/inject-remote-access.sh
+
+build: inject-license-key inject-remote-access
 	@echo "🔨 Building release binary with strict concurrency..."
 	swift build -c release \
 		-Xswiftc -strict-concurrency=complete

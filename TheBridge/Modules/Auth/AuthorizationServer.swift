@@ -95,14 +95,38 @@ public enum ProtectedResourceMetadataProvider {
         "openid", "email", "profile", "offline_access",
     ]
 
-    /// Resolves the authorization-server issuer: `BRIDGE_OAUTH_ISSUER`
-    /// (trimmed, non-empty) if set, else the documented default.
+    /// Resolves the authorization-server issuer with a durable precedence
+    /// (Packet E): `BRIDGE_OAUTH_ISSUER` env override → config.json
+    /// (`oauthIssuer`, per-install) → the build-baked operator default
+    /// (`RemoteAccessIdentity.issuer`, present at every launch) → the
+    /// documented fail-closed placeholder. The baked layer is what ends the
+    /// launchctl-setenv revert: it needs no runtime env and survives reboots.
+    /// `config` / `baked` are injectable so this stays pure under test.
     public static func resolvedIssuer(
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        config: (String) -> String? = { ConfigManager.shared.value(forKey: $0) as? String },
+        baked: String? = nil
     ) -> String {
-        let raw = environment[issuerEnvKey]?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return raw.isEmpty ? defaultIssuer : raw
+        if let e = environment[issuerEnvKey]?.trimmingCharacters(in: .whitespacesAndNewlines), !e.isEmpty {
+            return e
+        }
+        if let c = config("oauthIssuer")?.trimmingCharacters(in: .whitespacesAndNewlines), !c.isEmpty {
+            return c
+        }
+        let b = (baked ?? RemoteAccessIdentity.issuer).trimmingCharacters(in: .whitespacesAndNewlines)
+        return b.isEmpty ? defaultIssuer : b
+    }
+
+    /// True when the resolved issuer is still the fail-closed placeholder —
+    /// i.e. the build was never baked and no env/config override is present.
+    /// Wave 3 uses this to fail loud (refuse to advertise a placeholder AS)
+    /// instead of silently serving a broken cloud-connector identity.
+    public static func isMisconfigured(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        config: (String) -> String? = { ConfigManager.shared.value(forKey: $0) as? String },
+        baked: String? = nil
+    ) -> Bool {
+        resolvedIssuer(environment: environment, config: config, baked: baked) == defaultIssuer
     }
 
     /// PKT-800 S2 (fix S1 finding #4a): the resource identifier must
@@ -123,11 +147,23 @@ public enum ProtectedResourceMetadataProvider {
 
     public static func resolvedResource(
         port: Int? = nil,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        config: (String) -> String? = { ConfigManager.shared.value(forKey: $0) as? String },
+        baked: String? = nil
     ) -> String {
+        // Durable precedence (Packet E): env override → config.json
+        // (`publicResource`, per-install / multi-tenant) → build-baked operator
+        // default → fail-closed local-origin derivation (loopback dev).
         if let pub = environment[publicResourceEnvKey]?
             .trimmingCharacters(in: .whitespacesAndNewlines), !pub.isEmpty {
             return pub
+        }
+        if let c = config("publicResource")?.trimmingCharacters(in: .whitespacesAndNewlines), !c.isEmpty {
+            return c
+        }
+        let b = (baked ?? RemoteAccessIdentity.publicResource).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !b.isEmpty {
+            return b
         }
         let resolvedPort: Int
         if let port {

@@ -1358,7 +1358,12 @@ set -euo pipefail
 # entry. +4 StripeClientTests (request shape mode/price/urls/brand-metadata/
 # client_reference_id + parse; empty-priceID fail-fast no-network; Stripe error
 # response; brand metadata + priceID provider). 2181 → 2185.
-FLOOR="${BRIDGE_TEST_FLOOR:-2185}"
+# Packet E (PRJCT-2754 · Wave 1, 2026-06-22): durable Remote-Access OAuth identity
+# — build-baked RemoteAccessIdentity + env→config.json→baked→fail-closed resolution
+# in ProtectedResourceMetadataProvider (ends the launchctl-setenv placeholder-PRM
+# revert). +9 RemoteAccessIdentityTests (issuer + resource precedence ×4 layers,
+# isMisconfigured, committed-fail-closed default). 2185 → 2194.
+FLOOR="${BRIDGE_TEST_FLOOR:-2194}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

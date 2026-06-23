@@ -792,6 +792,8 @@ await runLicenseRevocationTests()
 await runLicenseDispatchGateTests()
 // Packet B (PRJCT-2754 · Ship The Bridge v4): pubkey injection + mint→verify→entitled.
 await runLicenseCLITests()
+// Packet E (PRJCT-2754): durable Remote-Access OAuth identity resolution precedence.
+await runRemoteAccessIdentityTests()
 
 // v3.7·A: SkillsCacheReader/Writer pipeline — Notion-source eager
 // enumeration carve-out closure (PKT-907) + StandingOrders cached
