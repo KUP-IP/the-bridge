@@ -212,7 +212,7 @@ public enum ShellModule {
                     "terminationReason": .string(terminationReason),
                     "duration": .double(durationSec),
                     "backgroundCommand": .bool(isBackground),
-                    "recoveryHint": .string(isBackground ? "Background commands are capped at 5s by the MCP request. Redirect output to a log file and poll the log or process separately." : "For long-running work, increase timeout or run a detached command that writes to a log path."),
+                    "recoveryHint": .string(isBackground ? "Background commands (trailing &) are capped at 5s by the MCP request. For work that must outlive the request, use bg_run (detached, returns immediately) and poll it with bg_poll." : "For long-running work, increase timeout — or use bg_run to launch it detached (returns a jobId immediately) and poll with bg_poll / stop with bg_kill."),
                     "stdoutLineCount": .int(stdoutSummary.lineCount),
                     "stderrLineCount": .int(stderrSummary.lineCount),
                     "stdoutTruncated": .bool(stdoutSummary.truncated),

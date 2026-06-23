@@ -1373,7 +1373,16 @@ set -euo pipefail
 # PKT-810 R5 loopback split UNCHANGED — only the resolution feeding the readers.
 # +17 RemoteAccessConfigWave2Tests (WorkOS ×5, TransportRouter ×4, JWKS ×4,
 # cloud-base-url ×4). Measured integrated green 2194 → 2211.
-FLOOR="${BRIDGE_TEST_FLOOR:-2211}"
+# Tool-Dev bg_* (PRJCT-2754 · 2026-06-23): bg_run/bg_poll/bg_kill detached
+# background execution (`bgprocess` family) — ported onto the post-rename
+# TheBridge/ tree (the workflow worker built it on the stale pre-rename base).
+# File-backed stateless job state under bg-process/<ts-uuid>.{log,done,pid};
+# bg_run returns immediately, bg_poll reports running/exited/terminated, bg_kill
+# SIGTERM/SIGKILL. staticFeatureModuleToolCount 172→175, family 27→28. +15
+# BgProcessModuleTests (registration/tier/annotation + input/path-traversal
+# guards + 3 LIVE run→poll→exit / non-zero / bg_kill round-trips). Measured
+# integrated green 2211 → 2226.
+FLOOR="${BRIDGE_TEST_FLOOR:-2226}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

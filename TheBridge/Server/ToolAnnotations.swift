@@ -310,6 +310,18 @@ public enum ToolAnnotationCatalog {
         "session_clear": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "session_info": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "shell_exec": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: true, openWorld: true),
+        // Tool-Dev (PRJCT-2754): detached background execution (`bgprocess` family).
+        // bg_run launches an arbitrary detached command — same destructive posture
+        // as shell_exec (not read-only, can do anything, not idempotent since each
+        // call spawns a NEW job), tier .request ⇒ requiresConfirmation:true, openWorld
+        // (compiler / dependency fetch / wider machine). bg_poll is a pure read of
+        // file-backed job state (read-only + idempotent, closed local world, no gate).
+        // bg_kill terminates a process (destructive, but idempotent — killing a dead
+        // job is a no-op / set-to-terminated), tier .notify ⇒ requiresConfirmation:false,
+        // openWorld (acts on a process in the wider machine).
+        "bg_run": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: true, openWorld: true),
+        "bg_poll": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
+        "bg_kill": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         // shortcuts_* (PKT-959, v3.7·F): Apple Shortcuts via /usr/bin/shortcuts.
         // _list is read-only (.open). _run is destructive (a Shortcut can do
         // anything) but tier .notify, so requiresConfirmation stays false —

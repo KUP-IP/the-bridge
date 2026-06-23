@@ -188,7 +188,12 @@ public enum BridgeConstants {
     /// Registry entity-management completion (2026-06-18): + 1 (registry_remove_entity
     ///   — the symmetric counterpart to registry_add_entity; drops a local
     ///   entity binding + evicts its cache, no Notion write). 171 + 1 = 172.
-    public static let staticFeatureModuleToolCount = 172
+    /// Tool-Dev (PRJCT-2754): + 3 (bg_run/bg_poll/bg_kill — detached background
+    ///   shell execution, the new `bgprocess` family: file-backed stateless job
+    ///   state under bg-process/<ts-uuid>.{log,done,pid}; bg_run returns
+    ///   immediately, bg_poll reports running/exited/terminated, bg_kill
+    ///   SIGTERMs/SIGKILLs a running job). 172 + 3 = 175.
+    public static let staticFeatureModuleToolCount = 175
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.
@@ -213,5 +218,6 @@ public enum BridgeConstants {
     ///   families (their tools were fully pruned); dev family survives via
     ///   git/gh/file_edit/code_search/http_fetch. 29 − 3 = 26.
     /// Data-Source Registry (2026-06-17): + registry family = 27.
-    public static let staticFeatureModuleFamilyCount = 27
+    /// Tool-Dev (PRJCT-2754): + bgprocess family (bg_run/bg_poll/bg_kill) = 28.
+    public static let staticFeatureModuleFamilyCount = 28
 }

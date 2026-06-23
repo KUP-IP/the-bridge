@@ -620,6 +620,7 @@ await test("AuditEntry is Codable (JSON round-trip)") {
 // SKIPPED: checkAll() hangs in CLI — NSAppleScript probes need AppKit run loop
 // await runPermissionManagerTests()
 await runShellModuleTests()
+await runBgProcessModuleTests()   // Tool-Dev (PRJCT-2754): bg_run/bg_poll/bg_kill detached background execution (registration/tier/annotation + LIVE run→poll→exit round-trip + bg_kill SIGTERM)
 await runFileModuleTests()
 await runSessionModuleTests()
 await runSessionPersistenceTests()   // ITEM [session]: MCP session durability across restart/install (persist + clean-shutdown marker + resumable reconnect)

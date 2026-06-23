@@ -36,6 +36,7 @@ public enum BridgeModuleRegistry {
         registerSession: (ToolRouter) async -> Void
     ) async {
         await ShellModule.register(on: router)
+        await BgProcessModule.register(on: router)         // Tool-Dev (PRJCT-2754): bg_run/bg_poll/bg_kill detached background execution (3 tools)
         await FileModule.register(on: router)
         await registerSession(router)
         await MessagesModule.register(on: router)
