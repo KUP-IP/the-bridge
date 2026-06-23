@@ -1382,7 +1382,15 @@ set -euo pipefail
 # BgProcessModuleTests (registration/tier/annotation + input/path-traversal
 # guards + 3 LIVE run→poll→exit / non-zero / bg_kill round-trips). Measured
 # integrated green 2211 → 2226.
-FLOOR="${BRIDGE_TEST_FLOOR:-2226}"
+# Security-audit remediation batch 1 (PRJCT-2754 · 2026-06-23): from the v4
+# multi-agent security/test audit (verdict: minor-gaps, zero exploitable
+# off-loopback findings; R5 contract verified correct). (#10) skill_delete
+# .notify → .request + neverAutoApprove (irreversible hard-delete now requires
+# confirmation, matching the job_delete fix) + lockstep ToolAnnotations
+# requiresConfirmation:true. (#7) bg_run no longer double-escapes single quotes
+# in the user command (embedded raw; the single launcher escape suffices) —
+# fixes `echo "it's"` corruption; +1 LIVE regression test. 2226 → 2227.
+FLOOR="${BRIDGE_TEST_FLOOR:-2227}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

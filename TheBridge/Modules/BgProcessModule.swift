@@ -200,21 +200,25 @@ public enum BgProcessModule {
                 let loginShell = valueToBool(args["loginShell"])
                 let innerFlag = loginShell ? "-lc" : "-c"
 
-                // The worker shell. Single-quote the user command for the inner
-                // bash by escaping embedded single quotes ('→'\''). The worker
-                // runs the command in a SUBSHELL `( … )`, redirects ALL output to
-                // the log, then writes the exit code to the .done sentinel — that
-                // write is the atomic "finished" signal bg_poll keys on. The
-                // subshell (NOT a `{ …; }` group) is load-bearing: a group runs in
-                // the SAME shell, so a user command ending in `exit N` would
-                // terminate the worker before it reaches the sentinel write,
-                // leaving the job stuck looking "terminated". A subshell confines
-                // the user `exit` so `$?` is captured and the sentinel is always
-                // written.
-                let escapedCommand = command.replacingOccurrences(of: "'", with: "'\\''")
+                // The worker shell runs the command in a SUBSHELL `( … )`,
+                // redirects ALL output to the log, then writes the exit code to the
+                // .done sentinel — that write is the atomic "finished" signal
+                // bg_poll keys on. The subshell (NOT a `{ …; }` group) is
+                // load-bearing: a group runs in the SAME shell, so a user command
+                // ending in `exit N` would terminate the worker before it reaches
+                // the sentinel write, leaving the job stuck looking "terminated". A
+                // subshell confines the user `exit` so `$?` is captured and the
+                // sentinel is always written.
+                //
+                // `command` is embedded RAW: the single `escapedWorker` transform
+                // below single-quote-escapes the ENTIRE worker for the launcher's
+                // `'…'` wrapping, which already passes the user command through
+                // verbatim. Escaping the command a SECOND time here would
+                // double-escape any embedded single quote and corrupt a command
+                // like `echo "it's"` (regression-tested in BgProcessModuleTests).
                 let logPath = paths.log.path
                 let donePath = paths.done.path
-                let workerScript = "( \(escapedCommand) ) > '\(logPath)' 2>&1; echo $? > '\(donePath)'"
+                let workerScript = "( \(command) ) > '\(logPath)' 2>&1; echo $? > '\(donePath)'"
                 let escapedWorker = workerScript.replacingOccurrences(of: "'", with: "'\\''")
 
                 // Launcher: start the worker via nohup, fully detached (its own

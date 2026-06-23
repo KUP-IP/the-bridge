@@ -696,7 +696,8 @@ public enum SkillsModule {
         await router.register(ToolRegistration(
             name: "skill_delete",
             module: moduleName,
-            tier: .notify,
+            tier: .request,
+            neverAutoApprove: true,
             description: "Delete one skill by name. Replaces manage_skill action='delete'.",
             inputSchema: .object([
                 "type": .string("object"),

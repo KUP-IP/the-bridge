@@ -198,6 +198,33 @@ func runBgProcessModuleTests() async {
         }
     }
 
+    await test("LIVE: bg_run preserves single quotes (no double-escape regression)") {
+        try await bgWithTempHome { _ in
+            let router = await makeRouter()
+            // An apostrophe inside double quotes must round-trip verbatim. The
+            // pre-fix code escaped the command once for an inner single-quote
+            // context that does not exist, then the whole worker again for the
+            // launcher, so this surfaced corrupted as `it'\''s` in the log.
+            let run = try await bgDispatch(router, "bg_run", .object([
+                "command": .string("echo \"it's a 'quoted' test\"")
+            ]))
+            let jobId = try { () -> String in
+                guard let j = bgString(run, "jobId") else { throw TestError.assertion("no jobId") }
+                return j
+            }()
+            let final = try await bgPollUntilDone(router, jobId: jobId)
+            try expect(bgString(final, "status") == "exited",
+                       "expected exited, got \(bgString(final, "status") ?? "nil")")
+            try expect(bgInt(final, "exitCode") == 0,
+                       "expected exitCode 0, got \(String(describing: bgInt(final, "exitCode")))")
+            let tail = bgString(final, "tail") ?? ""
+            try expect(tail.contains("it's a 'quoted' test"),
+                       "apostrophe/quote corrupted in output: \(tail)")
+            try expect(!tail.contains("'\\''"),
+                       "output shows shell double-escaping: \(tail)")
+        }
+    }
+
     await test("LIVE: a non-zero exit is reported with the real exit code") {
         try await bgWithTempHome { _ in
             let router = await makeRouter()
