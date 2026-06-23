@@ -12,6 +12,7 @@
 // short (echo / sleep) so the suite stays fast and never leaves stray processes.
 
 import Foundation
+import Darwin   // Darwin.kill / SIGKILL for the pid-dead-no-sentinel "terminated" case (v4 audit #6)
 import MCP
 import TheBridgeLib
 
@@ -311,6 +312,155 @@ func runBgProcessModuleTests() async {
             let final = try await bgPollUntilDone(router, jobId: jobId)
             let tail = bgString(final, "tail") ?? ""
             try expect(tail.contains("VAL=xyzzy"), "env var not threaded into worker; tail: \(tail)")
+        }
+    }
+
+    // MARK: bg_poll bounded tail-window read (v4 audit #5)
+
+    await test("LIVE: bg_poll on a >window log returns only trailing lines (no whole-file read)") {
+        try await bgWithTempHome { _ in
+            let router = await makeRouter()
+            // Emit ~60k short lines (~0.5 MB) — comfortably past the 256 KB tail
+            // window. The job exits, then we poll for the tail.
+            let run = try await bgDispatch(router, "bg_run", .object([
+                "command": .string("for i in $(seq 1 60000); do echo \"line-$i\"; done")
+            ]))
+            guard let jobId = bgString(run, "jobId") else { throw TestError.assertion("no jobId") }
+            let logPath = bgString(run, "logPath") ?? ""
+
+            // bg_run with a 5-line tail. Poll until exited (this loop body asks for
+            // 50 lines; do one explicit small-tail poll after it's terminal).
+            _ = try await bgPollUntilDone(router, jobId: jobId, maxAttempts: 300)
+            let final = try await bgDispatch(router, "bg_poll", .object([
+                "jobId": .string(jobId), "tailLines": .int(5)
+            ]))
+            try expect(bgString(final, "status") == "exited",
+                       "expected exited, got \(bgString(final, "status") ?? "nil")")
+
+            let tail = bgString(final, "tail") ?? ""
+            // The LAST line must be present, the FIRST line must NOT (it is far
+            // outside the 256 KB window).
+            try expect(tail.contains("line-60000"), "tail must contain the last line; got: \(tail.suffix(120))")
+            try expect(!tail.contains("line-1\n") && !tail.hasPrefix("line-1"),
+                       "tail must NOT contain the first line (proves no whole-file read)")
+            // Exactly 5 trailing lines were requested.
+            let lineCount = tail.split(separator: "\n", omittingEmptySubsequences: false).filter { !$0.isEmpty }.count
+            try expect(lineCount == 5, "expected 5 trailing lines, got \(lineCount): \(tail)")
+
+            // logTruncated must be surfaced as true for an over-window log, and the
+            // on-disk log must actually be larger than the window we read.
+            if case .object(let d) = final, case .bool(let truncated) = d["logTruncated"] {
+                try expect(truncated == true, "logTruncated must be true for an over-window log")
+            } else {
+                throw TestError.assertion("expected a logTruncated bool on the exited poll")
+            }
+            let onDiskAttrs = try? FileManager.default.attributesOfItem(atPath: logPath)
+            let onDisk = (onDiskAttrs?[.size] as? Int) ?? 0
+            try expect(onDisk > 256 * 1024, "log on disk should exceed the 256 KB window, was \(onDisk) bytes")
+        }
+    }
+
+    // MARK: bg_run / bg_kill coverage (v4 audit #6)
+
+    await test("bg_run: ~20 concurrent launches yield distinct jobIds + distinct {log,done,pid} paths") {
+        try await bgWithTempHome { _ in
+            let router = await makeRouter()
+            let n = 20
+            // Launch n short jobs in parallel through the live handler.
+            let results: [Value] = await withTaskGroup(of: Value?.self) { group in
+                for i in 0..<n {
+                    group.addTask {
+                        try? await bgDispatch(router, "bg_run", .object(["command": .string("echo concurrent-\(i)")]))
+                    }
+                }
+                var acc: [Value] = []
+                for await r in group { if let r { acc.append(r) } }
+                return acc
+            }
+            try expect(results.count == n, "expected \(n) launch results, got \(results.count)")
+            let jobIds = results.compactMap { bgString($0, "jobId") }
+            try expect(jobIds.count == n, "expected \(n) jobIds, got \(jobIds.count)")
+            try expect(Set(jobIds).count == n, "jobIds must be distinct — \(Set(jobIds).count) unique of \(n)")
+            // Distinct log/done/pid paths (logPath uniqueness implies all three,
+            // since they share the <ts-uuid> stem).
+            let logPaths = results.compactMap { bgString($0, "logPath") }
+            try expect(Set(logPaths).count == n, "log paths must be distinct — \(Set(logPaths).count) of \(n)")
+            let donePaths = results.compactMap { bgString($0, "donePath") }
+            try expect(Set(donePaths).count == n, "done paths must be distinct — \(Set(donePaths).count) of \(n)")
+            // Drain to terminal so no worker outlives the test.
+            for id in jobIds { _ = try await bgPollUntilDone(router, jobId: id, maxAttempts: 100) }
+        }
+    }
+
+    await test("LIVE: bg_kill force:true sends SIGKILL to a long-running job") {
+        try await bgWithTempHome { _ in
+            let router = await makeRouter()
+            let run = try await bgDispatch(router, "bg_run", .object(["command": .string("sleep 60")]))
+            guard let jobId = bgString(run, "jobId") else { throw TestError.assertion("no jobId") }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            let polled = try await bgDispatch(router, "bg_poll", .object(["jobId": .string(jobId)]))
+            try expect(bgString(polled, "status") == "running",
+                       "expected running before force-kill, got \(bgString(polled, "status") ?? "nil")")
+
+            let killed = try await bgDispatch(router, "bg_kill", .object([
+                "jobId": .string(jobId), "force": .bool(true)
+            ]))
+            try expect(bgString(killed, "status") == "signalled",
+                       "expected signalled, got \(bgString(killed, "status") ?? "nil")")
+            try expect(bgString(killed, "signal") == "SIGKILL",
+                       "force:true must send SIGKILL, got \(bgString(killed, "signal") ?? "nil")")
+
+            // The job must leave 'running' (SIGKILL writes no sentinel ⇒ terminated).
+            let after = try await bgPollUntilDone(router, jobId: jobId, maxAttempts: 80)
+            try expect(bgString(after, "status") != "running",
+                       "job must not still be running after SIGKILL, got \(bgString(after, "status") ?? "nil")")
+        }
+    }
+
+    await test("bg_poll: a job whose pid is dead with NO .done sentinel reports 'terminated'") {
+        try await bgWithTempHome { _ in
+            let router = await makeRouter()
+            // Launch, capture the pid, group-kill it WITHOUT letting the worker
+            // write its .done sentinel (SIGKILL the whole group so neither the
+            // launcher-spawned worker nor its sleep child records an exit code).
+            let run = try await bgDispatch(router, "bg_run", .object(["command": .string("sleep 60")]))
+            guard let jobId = bgString(run, "jobId"), let pid = bgInt(run, "pid") else {
+                throw TestError.assertion("no jobId/pid")
+            }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            // SIGKILL the process group (set -m ⇒ pgid == pid). No sentinel write.
+            _ = Darwin.kill(-Int32(pid), SIGKILL)
+
+            // Poll until the pid is observed dead. With no .done present, the
+            // honest status is 'terminated'.
+            var status = ""
+            for _ in 0..<80 {
+                let r = try await bgDispatch(router, "bg_poll", .object(["jobId": .string(jobId)]))
+                status = bgString(r, "status") ?? ""
+                if status != "running" { break }
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            try expect(status == "terminated",
+                       "pid-dead + no-sentinel must report 'terminated', got '\(status)'")
+        }
+    }
+
+    await test("LIVE: bg_run loginShell:true runs the command (login-shell branch)") {
+        try await bgWithTempHome { _ in
+            let router = await makeRouter()
+            let run = try await bgDispatch(router, "bg_run", .object([
+                "command": .string("echo LOGIN_SHELL_OK"),
+                "loginShell": .bool(true)
+            ]))
+            try expect(bgString(run, "status") == "started",
+                       "loginShell run should start, got \(bgString(run, "status") ?? "nil")")
+            guard let jobId = bgString(run, "jobId") else { throw TestError.assertion("no jobId") }
+            let final = try await bgPollUntilDone(router, jobId: jobId)
+            try expect(bgString(final, "status") == "exited",
+                       "loginShell job should exit, got \(bgString(final, "status") ?? "nil")")
+            try expect(bgInt(final, "exitCode") == 0, "loginShell job exit code should be 0")
+            let tail = bgString(final, "tail") ?? ""
+            try expect(tail.contains("LOGIN_SHELL_OK"), "loginShell branch output missing; tail: \(tail)")
         }
     }
 }

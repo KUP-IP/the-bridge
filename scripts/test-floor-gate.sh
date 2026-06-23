@@ -1390,7 +1390,29 @@ set -euo pipefail
 # requiresConfirmation:true. (#7) bg_run no longer double-escapes single quotes
 # in the user command (embedded raw; the single launcher escape suffices) —
 # fixes `echo "it's"` corruption; +1 LIVE regression test. 2226 → 2227.
-FLOOR="${BRIDGE_TEST_FLOOR:-2227}"
+# Security-audit remediation batch 2 — non-auth (PRJCT-2754 · 2026-06-23): six
+# reliability/DoS/coverage findings from the same v4 audit (auth/R5 surface left
+# untouched). (#3) FIRST coverage for the BgProcessRuntime actor via the
+# init(baseDir:cleanupTTL:killGracePeriodSec:) hermetic seam: reconcileOrphans
+# dead→.unknown / live-job watcher-reattach across a fresh runtime / terminal-TTL
+# sweep, SIGTERM→SIGKILL cascade on a TERM-ignoring child, finalizeExit
+# signaled-without-prior-kill ⇒ .failed (not .killed), concurrency-safe start
+# (+6). (#4) file_read no longer slurps the whole file before the cap — stat +
+# reject non-regular files (a FIFO/char-device can't be streamed) then
+# FileHandle.read(ofLength: min(maxBytes, 50 MB)); +3 (cap, full-small-file,
+# FIFO refusal). (#5) bg_poll reads only the trailing 256 KB window (seek-from-
+# EOF + drop leading partial line) instead of the entire log every poll; +1 LIVE
+# (>window log → last lines only, logTruncated true). (#6) bg_run/bg_kill
+# coverage: ~20 concurrent launches → distinct ids/paths, force:true ⇒ SIGKILL,
+# pid-dead-no-sentinel ⇒ terminated, loginShell branch; +4. (#8) config.json
+# written 0o600 (chmod the final path post-atomic-rename) so secrets aren't
+# world-readable; +1. (#9) bg_kill TOCTOU blast-radius: bg_run launches under
+# `set -m` so the recorded pid is its process-group leader (pgid==pid) and
+# bg_kill signals the GROUP (kill(-pid,…)); killpg succeeds only while that pid
+# still leads a group, so a recycled pid yields ESRCH→already_terminated instead
+# of hitting an unrelated process (covered by the #6 group-kill case). Measured
+# integrated green 2227 → 2242.
+FLOOR="${BRIDGE_TEST_FLOOR:-2242}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

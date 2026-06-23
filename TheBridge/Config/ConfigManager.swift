@@ -55,9 +55,15 @@ public final class ConfigManager: @unchecked Sendable {
     }
 
     /// Atomic write via Data.write(options: .atomic) — writes to temp file, then renames.
+    ///
+    /// Security (v4 audit #8): config.json can hold secrets (Notion token, Stripe
+    /// key, OAuth JWKS), so it must not be world-readable. After the atomic write
+    /// we chmod it to 0o600 (owner read/write only). The chmod runs on the FINAL
+    /// path post-rename, so the mode sticks regardless of the temp file's umask.
     private func writeConfig(_ config: [String: Any]) throws {
         let data = try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: configURL, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
     }
 
     // MARK: - Sensitive Paths (PKT-363 D1 + D2)

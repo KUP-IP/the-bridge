@@ -64,4 +64,24 @@ func runConfigManagerTests() async {
 
         ConfigManager.shared.sensitivePaths = original
     }
+
+    // Test 3 (v4 audit #8): config.json may hold secrets (Notion token, Stripe
+    // key, OAuth JWKS) — it must be owner-only (0o600), never world-readable.
+    // Any write through ConfigManager (here, the sensitivePaths setter →
+    // writeConfig) must chmod the FINAL file to 0o600.
+    await test("config.json is written with 0o600 (owner-only) perms — secrets not world-readable") {
+        let original = ConfigManager.shared.sensitivePaths
+        // Force a write through the standard path.
+        ConfigManager.shared.sensitivePaths = ["~/.perm-check"]
+
+        let attrs = try FileManager.default.attributesOfItem(atPath: configPath.path)
+        guard let perms = (attrs[.posixPermissions] as? NSNumber)?.intValue else {
+            throw TestError.assertion("config.json has no POSIX permissions attribute")
+        }
+        // Mask to the permission bits and require exactly rw-------.
+        try expect(perms & 0o777 == 0o600,
+                   "config.json perms must be 0o600, got 0o\(String(perms & 0o777, radix: 8))")
+
+        ConfigManager.shared.sensitivePaths = original
+    }
 }

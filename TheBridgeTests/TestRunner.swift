@@ -621,6 +621,7 @@ await test("AuditEntry is Codable (JSON round-trip)") {
 // await runPermissionManagerTests()
 await runShellModuleTests()
 await runBgProcessModuleTests()   // Tool-Dev (PRJCT-2754): bg_run/bg_poll/bg_kill detached background execution (registration/tier/annotation + LIVE run→poll→exit round-trip + bg_kill SIGTERM)
+await runBgProcessRuntimeTests()  // v4 audit #3: BgProcessRuntime actor — kill cascade SIGTERM→SIGKILL, reconcileOrphans (dead→unknown / live-reattach / TTL sweep), finalizeExit signaled-not-killed, concurrency-safe start
 await runFileModuleTests()
 await runSessionModuleTests()
 await runSessionPersistenceTests()   // ITEM [session]: MCP session durability across restart/install (persist + clean-shutdown marker + resumable reconnect)

@@ -2,6 +2,7 @@
 // TheBridge · Tests
 
 import Foundation
+import Darwin   // mkfifo / strerror / errno for the file_read non-regular-file guard test (v4 audit #4)
 import MCP
 import TheBridgeLib
 
@@ -397,4 +398,63 @@ func runFileModuleTests() async {
         try expect(fileCopy.tier == .notify, "file_copy must be notify tier (was .open before PKT-373)")
     }
 
+    // MARK: - file_read DoS guard (v4 audit #4)
+    // file_read must NOT slurp the whole file before applying the cap: it reads
+    // at most maxBytes (or a 50 MB ceiling) off a FileHandle, and refuses
+    // non-regular files (so a character device like /dev/zero can't be streamed).
+
+    await test("file_read: maxBytes caps the bytes actually read (no whole-file slurp)") {
+        let bigPath = "\(testDir)/cap_target.txt"
+        // 20 KB of 'A' — far larger than the cap we ask for.
+        let big = String(repeating: "A", count: 20_000)
+        try big.write(toFile: bigPath, atomically: true, encoding: .utf8)
+        let result = try await router.dispatch(
+            toolName: "file_read",
+            arguments: .object(["path": .string(bigPath), "maxBytes": .int(100)])
+        )
+        guard case .object(let dict) = result,
+              case .string(let content) = dict["content"],
+              case .int(let size) = dict["size"] else {
+            throw TestError.assertion("Expected content + size fields, got \(result)")
+        }
+        try expect(content.count == 100, "Expected exactly 100 chars, got \(content.count)")
+        try expect(size == 100, "Expected size 100, got \(size)")
+    }
+
+    await test("file_read: a normal small file still reads in full (cap unset → ceiling)") {
+        let smallPath = "\(testDir)/small_full.txt"
+        let body = "the quick brown fox\njumped over\n"
+        try body.write(toFile: smallPath, atomically: true, encoding: .utf8)
+        let result = try await router.dispatch(
+            toolName: "file_read",
+            arguments: .object(["path": .string(smallPath)])
+        )
+        guard case .object(let dict) = result, case .string(let content) = dict["content"] else {
+            throw TestError.assertion("Expected content field")
+        }
+        try expect(content == body, "Small file must read fully and verbatim, got: \(content)")
+    }
+
+    await test("file_read: refuses a non-regular file (FIFO can't be streamed → no DoS)") {
+        let fifoDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("filemodule-fifo-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: fifoDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: fifoDir) }
+        let fifoPath = fifoDir.appendingPathComponent("pipe").path
+        // Create a named pipe. mkfifo returns 0 on success.
+        try expect(mkfifo(fifoPath, 0o600) == 0, "mkfifo failed: \(String(cString: strerror(errno)))")
+
+        // A read with a small cap must REFUSE the FIFO (not block, not stream).
+        // (A FileHandle.read on an empty FIFO with no writer would block forever;
+        // the stat-based regular-file guard rejects it before any open/read.)
+        let result = try await router.dispatch(
+            toolName: "file_read",
+            arguments: .object(["path": .string(fifoPath), "maxBytes": .int(16)])
+        )
+        guard case .object(let dict) = result, case .string(let err) = dict["error"] else {
+            throw TestError.assertion("Expected an error field refusing the FIFO, got \(result)")
+        }
+        try expect(err.lowercased().contains("regular file"),
+                   "Error should explain it is not a regular file, got: \(err)")
+    }
 }

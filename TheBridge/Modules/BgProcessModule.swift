@@ -126,6 +126,36 @@ public enum BgProcessModule {
         return String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
     }
 
+    /// Default tail window: read at most this many trailing bytes of a log so a
+    /// multi-megabyte log never loads whole on every bg_poll (v4 audit #5).
+    private static let tailWindowBytes = 256 * 1024  // 256 KB
+
+    /// Read the trailing `window` bytes of a (possibly large) log without slurping
+    /// the whole file: stat the size, seek to max(0, size-window), read only the
+    /// tail. When the window starts mid-file we drop the first (likely partial)
+    /// line so a UTF-8 multibyte sequence or a half-line never corrupts the head
+    /// of the returned text — the subsequent line-based tail() then trims to the
+    /// requested line count. Returns ("", false) for an absent/unreadable file.
+    private static func readTailWindow(_ url: URL, window: Int = tailWindowBytes) -> (text: String, truncated: Bool) {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let total = (attrs?[.size] as? NSNumber)?.intValue ?? 0
+        guard total > 0 else { return ("", false) }
+        let win = max(0, window)
+        let start = total > win ? total - win : 0
+        let truncated = start > 0
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return ("", false) }
+        defer { try? handle.close() }
+        try? handle.seek(toOffset: UInt64(start))
+        let chunk = handle.readData(ofLength: total - start)
+        var text = String(data: chunk, encoding: .utf8) ?? String(decoding: chunk, as: UTF8.self)
+        // Drop a leading partial line at the window boundary (only when we
+        // actually started mid-file — a from-zero read is already whole lines).
+        if truncated, let nl = text.firstIndex(of: "\n") {
+            text = String(text[text.index(after: nl)...])
+        }
+        return (text, truncated)
+    }
+
     private static func fileModificationDate(_ url: URL) -> Date? {
         let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
         return attrs?[.modificationDate] as? Date
@@ -227,7 +257,18 @@ public enum BgProcessModule {
                 // PID-capture below returns immediately and we never hold the
                 // child's pipes (strict-concurrency safe: no waited pipe is
                 // captured across the detached spawn).
-                let launcher = "nohup bash \(innerFlag) '\(escapedWorker)' </dev/null >/dev/null 2>&1 & echo $!"
+                //
+                // `set -m` (job-control / monitor mode) is load-bearing for the
+                // TOCTOU hardening (v4 audit #9): under monitor mode bash puts each
+                // backgrounded job in its OWN process group whose pgid == the
+                // child pid we capture in `$!`. bg_kill then signals the GROUP
+                // (kill(-pgid, …)) rather than a bare pid. killpg only succeeds
+                // when that pid is still a live group leader, so a recycled pid —
+                // which would not be a leader of a group with that id — yields
+                // ESRCH and is reported as already_terminated instead of
+                // signalling an unrelated process. Bonus: the whole worker subtree
+                // (the user command's children) is reaped, not just the wrapper.
+                let launcher = "set -m; nohup bash \(innerFlag) '\(escapedWorker)' </dev/null >/dev/null 2>&1 & echo $!"
 
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/bin/bash")
@@ -317,8 +358,11 @@ public enum BgProcessModule {
                 }
 
                 let tailLines = valueToInt(args["tailLines"]) ?? 50
-                let logText = readFile(paths.log)
-                let tailText = tail(logText, lines: tailLines)
+                // DoS guard (v4 audit #5): read only the trailing window of the
+                // log, not the whole file — a multi-MB log no longer loads whole
+                // on every poll. tail() then trims that window to the line count.
+                let (windowText, windowTruncated) = readTailWindow(paths.log)
+                let tailText = tail(windowText, lines: tailLines)
                 let startDate = fileModificationDate(paths.pid) ?? fileModificationDate(paths.log)
 
                 // Terminal: the .done sentinel exists ⇒ the worker finished and
@@ -327,6 +371,10 @@ public enum BgProcessModule {
                     let doneRaw = readFile(paths.done).trimmingCharacters(in: .whitespacesAndNewlines)
                     let exitCode = Int(doneRaw) ?? -1
                     let endDate = fileModificationDate(paths.done)
+                    // Line count is over the (bounded) tail window — truthfully
+                    // flagged when the window was truncated, so we never imply a
+                    // whole-file count we didn't read (v4 audit #5).
+                    let windowLineCount = windowText.isEmpty ? 0 : windowText.split(separator: "\n", omittingEmptySubsequences: false).count
                     var out: [String: Value] = [
                         "jobId": .string(jobId),
                         "status": .string("exited"),
@@ -334,7 +382,8 @@ public enum BgProcessModule {
                         "success": .bool(exitCode == 0),
                         "tail": .string(tailText),
                         "logPath": .string(paths.log.path),
-                        "logLineCount": .int(logText.isEmpty ? 0 : logText.split(separator: "\n", omittingEmptySubsequences: false).count)
+                        "logLineCount": .int(windowLineCount),
+                        "logTruncated": .bool(windowTruncated)
                     ]
                     if let s = startDate, let e = endDate {
                         out["duration"] = .double(max(0, e.timeIntervalSince(s)))
@@ -426,6 +475,7 @@ public enum BgProcessModule {
                 }
 
                 // Already dead (no sentinel) — report terminated, don't signal.
+                // kill(pid,0) probes the recorded leader pid for liveness.
                 guard Darwin.kill(pid, 0) == 0 else {
                     return .object([
                         "jobId": .string(jobId),
@@ -435,7 +485,31 @@ public enum BgProcessModule {
 
                 let force = valueToBool(args["force"])
                 let signal: Int32 = force ? SIGKILL : SIGTERM
-                let rc = Darwin.kill(pid, signal)
+                // TOCTOU hardening (v4 audit #9): signal the worker's process
+                // GROUP, not a bare pid. bg_run launches under `set -m`, so the
+                // recorded pid is the group leader (pgid == pid) and kill(-pid, …)
+                // reaches the whole worker subtree. killpg only succeeds while
+                // that pid is still a live group leader — a recycled pid would not
+                // lead a group with that id, so we get ESRCH and report
+                // already_terminated rather than signalling an unrelated process.
+                // Fallback to a single-pid signal only on ESRCH (e.g. a legacy job
+                // spawned before this fix, hence not a group leader) so we never
+                // regress the ability to stop an already-running job.
+                var rc = Darwin.kill(-pid, signal)
+                if rc != 0 && errno == ESRCH {
+                    // No process group with this id. Either the leader just died,
+                    // or it's a pre-`set -m` legacy job. Re-probe the bare pid: if
+                    // it's still our recorded leader, single-pid signal it; else it
+                    // is genuinely gone.
+                    if Darwin.kill(pid, 0) == 0 {
+                        rc = Darwin.kill(pid, signal)
+                    } else {
+                        return .object([
+                            "jobId": .string(jobId),
+                            "status": .string("already_terminated")
+                        ])
+                    }
+                }
                 guard rc == 0 else {
                     return .object([
                         "jobId": .string(jobId),

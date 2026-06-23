@@ -281,10 +281,29 @@ public enum FileModule {
                     return .utf8
                 }()
 
-                var data = try Data(contentsOf: URL(fileURLWithPath: path))
-                if case .int(let max) = args["maxBytes"], max > 0, data.count > max {
-                    data = data.prefix(max)
+                // DoS guard (v4 audit #4): never slurp the whole file before
+                // applying the cap. Reject non-regular files first (a character
+                // device like /dev/zero is infinite — a post-read .prefix() would
+                // never return), then read AT MOST `ceiling` bytes off a
+                // FileHandle. When the caller gives no maxBytes we still impose a
+                // sane 50 MB ceiling instead of "unlimited".
+                let readURL = URL(fileURLWithPath: path)
+                let attrs = try FileManager.default.attributesOfItem(atPath: path)
+                if let ftype = attrs[.type] as? FileAttributeType, ftype != .typeRegular {
+                    return .object(["error": .string("Not a regular file (type: \(ftype.rawValue)) — refusing to read")])
                 }
+                let defaultCeiling = 50 * 1024 * 1024  // 50 MB
+                let cap: Int = {
+                    if case .int(let max) = args["maxBytes"], max > 0 {
+                        return min(max, defaultCeiling)
+                    }
+                    return defaultCeiling
+                }()
+                let handle = try FileHandle(forReadingFrom: readURL)
+                defer { try? handle.close() }
+                // readData(ofLength:) returns AT MOST `cap` bytes (fewer at EOF),
+                // so `cap = min(maxBytes, ceiling)` is the only bound we need.
+                let data = handle.readData(ofLength: cap)
 
                 let content: String
                 if let decoded = String(data: data, encoding: encoding) {
