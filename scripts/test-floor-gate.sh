@@ -1363,7 +1363,17 @@ set -euo pipefail
 # in ProtectedResourceMetadataProvider (ends the launchctl-setenv placeholder-PRM
 # revert). +9 RemoteAccessIdentityTests (issuer + resource precedence ×4 layers,
 # isMisconfigured, committed-fail-closed default). 2185 → 2194.
-FLOOR="${BRIDGE_TEST_FLOOR:-2194}"
+# Packet E (PRJCT-2754 · Wave 2, 2026-06-23): config-back the remaining four
+# remote-access readers with the SAME env→config.json→baked→fail-closed layering
+# (injectable config/baked seams, pure): WorkOSConfig.resolved (per-field, baked
+# RemoteAccessIdentity.workos*), TransportRouter (BRIDGE_ENABLE_HTTP env→config
+# `enableHTTP`→off), ConnectorBearerValidator.fromEnvironment (BRIDGE_OAUTH_JWKS
+# env→config `oauthJWKS`→fail-closed), EnableCloudAccessFlow.resolvedProvisionBaseURL
+# (arg→BRIDGE_CLOUD_BASE_URL→config `cloudBaseURL`→placeholder). Gate/dispatch +
+# PKT-810 R5 loopback split UNCHANGED — only the resolution feeding the readers.
+# +17 RemoteAccessConfigWave2Tests (WorkOS ×5, TransportRouter ×4, JWKS ×4,
+# cloud-base-url ×4). Measured integrated green 2194 → 2211.
+FLOOR="${BRIDGE_TEST_FLOOR:-2211}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

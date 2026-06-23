@@ -446,7 +446,7 @@ func runRemoteOAuthHardeningTests() async {
         // The harness must not set BRIDGE_ENABLE_HTTP → default off.
         try expect(!m.isStreamableHTTPActive,
                    "default config must keep the connector gate off")
-        let off = TransportRouter(environment: [:])
+        let off = TransportRouter(environment: [:], config: { _ in nil })
         try expect(!off.isActive(.streamableHTTP), "env-unset must keep connector gate off")
         let on = TransportRouter(environment: ["BRIDGE_ENABLE_HTTP": "1"])
         try expect(on.isActive(.streamableHTTP), "env=1 must open the connector gate")

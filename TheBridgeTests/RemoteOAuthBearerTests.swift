@@ -261,8 +261,12 @@ func runRemoteOAuthBearerTests() async {
     }
 
     await test("Validator: fromEnvironment with no BRIDGE_OAUTH_JWKS is fail-closed") {
+        // Pin the config seam empty (Packet E W2): env-absent now falls
+        // through to config.json (`oauthJWKS`), so inject nil to keep this
+        // hermetic regardless of any on-disk key source.
         let v = await ConnectorBearerValidator.fromEnvironment(
-            environment: [:], expectedIssuer: kIssuer, expectedAudience: kResource
+            environment: [:], config: { _ in nil },
+            expectedIssuer: kIssuer, expectedAudience: kResource
         )
         let tok = try await keys.sign(iss: kIssuer, aud: kResource, scope: "snippets.read")
         do {

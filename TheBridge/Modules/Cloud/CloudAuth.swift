@@ -68,16 +68,42 @@ public struct WorkOSConfig: Sendable, Equatable {
         redirectURI: "bridge-auth://callback"
     )
 
-    /// Resolve config from the environment, falling back to `placeholder`
-    /// for any unset value. Injectable `environment` keeps this pure for
-    /// tests (no real `ProcessInfo` dependency).
+    /// Resolve config with a durable, per-field precedence (Packet E W2,
+    /// mirroring `ProtectedResourceMetadataProvider.resolvedIssuer`): env
+    /// override → config.json (`workosClientID` / `workosBaseURL` /
+    /// `workosRedirectURI`, per-install) → the build-baked operator default
+    /// (`RemoteAccessIdentity.workos*`, present at every launch with no
+    /// dependency on launchctl-setenv timing) → the documented `placeholder`.
+    /// The baked layer is what ends the launchctl-setenv revert for the
+    /// Enable-Cloud-Access WorkOS identity. `config` / the per-field `baked*`
+    /// seams are injectable so this stays pure under test (no disk, no
+    /// ConfigManager singleton, no ProcessInfo dependency).
     public static func resolved(
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        config: (String) -> String? = { ConfigManager.shared.value(forKey: $0) as? String },
+        bakedClientID: String? = nil,
+        bakedBaseURL: String? = nil,
+        bakedRedirectURI: String? = nil
     ) -> WorkOSConfig {
-        WorkOSConfig(
-            baseURL: environment["WORKOS_BASE_URL"]?.nonEmpty ?? placeholder.baseURL,
-            clientID: environment["WORKOS_CLIENT_ID"]?.nonEmpty ?? placeholder.clientID,
-            redirectURI: environment["WORKOS_REDIRECT_URI"]?.nonEmpty ?? placeholder.redirectURI
+        func resolve(env: String, configKey: String, baked: String?, placeholder: String) -> String {
+            if let e = environment[env]?.nonEmpty { return e }
+            if let c = config(configKey)?.nonEmpty { return c }
+            if let b = (baked ?? "").nonEmpty { return b }
+            return placeholder
+        }
+        return WorkOSConfig(
+            baseURL: resolve(
+                env: "WORKOS_BASE_URL", configKey: "workosBaseURL",
+                baked: bakedBaseURL ?? RemoteAccessIdentity.workosBaseURL,
+                placeholder: placeholder.baseURL),
+            clientID: resolve(
+                env: "WORKOS_CLIENT_ID", configKey: "workosClientID",
+                baked: bakedClientID ?? RemoteAccessIdentity.workosClientID,
+                placeholder: placeholder.clientID),
+            redirectURI: resolve(
+                env: "WORKOS_REDIRECT_URI", configKey: "workosRedirectURI",
+                baked: bakedRedirectURI ?? RemoteAccessIdentity.workosRedirectURI,
+                placeholder: placeholder.redirectURI)
         )
     }
 }

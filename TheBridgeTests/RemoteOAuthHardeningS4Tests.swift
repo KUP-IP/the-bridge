@@ -273,7 +273,7 @@ func runRemoteOAuthHardeningS4Tests() async {
     }
 
     await test("A2: injected INACTIVE router → isStreamableHTTPActive == false (production default shape)") {
-        let inactiveRouter = TransportRouter(environment: [:])
+        let inactiveRouter = TransportRouter(environment: [:], config: { _ in nil })
         let m = ServerManager(onToolCall: {}, transportRouter: inactiveRouter)
         try expect(!m.isStreamableHTTPActive,
                    "injected inactive router must report streamableHTTP inactive")
@@ -314,7 +314,7 @@ func runRemoteOAuthHardeningS4Tests() async {
     }
 
     await test("A2: injected INACTIVE router → runStreamableHTTP() throws transportInactive(.streamableHTTP)") {
-        let inactiveRouter = TransportRouter(environment: [:])
+        let inactiveRouter = TransportRouter(environment: [:], config: { _ in nil })
         let m = ServerManager(onToolCall: {}, transportRouter: inactiveRouter)
         _ = await m.setup()
         do {

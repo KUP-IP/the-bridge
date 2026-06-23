@@ -187,21 +187,32 @@ public struct ConnectorBearerValidator: Sendable {
         self.expectedAudience = expectedAudience
     }
 
-    /// Production initializer — resolves the key set from
-    /// `BRIDGE_OAUTH_JWKS` (inline JSON or local file). Any failure to
-    /// load keys yields a fail-closed (key-less) validator.
+    /// Production initializer — resolves the JWKS source with a durable
+    /// precedence (Packet E W2, mirroring
+    /// `ProtectedResourceMetadataProvider.resolvedIssuer`): `BRIDGE_OAUTH_JWKS`
+    /// env override → config.json (`oauthJWKS`, per-install) → fail-closed
+    /// (no source ⇒ a key-less validator that rejects every token). The
+    /// resolved value is either inline JWKS JSON (begins with `{`) or a local
+    /// file path — NEVER fetched over the network. There is intentionally no
+    /// build-baked layer here: a JWKS is operator/tenant-specific signing
+    /// material, not a non-secret build constant, so the durable layer is
+    /// config.json (alongside `oauthIssuer` / `publicResource`). `config` is
+    /// injectable so this stays pure under test. Any failure to load keys
+    /// yields a fail-closed (key-less) validator.
     public static func fromEnvironment(
         environment: [String: String] = ProcessInfo.processInfo.environment,
+        config: (String) -> String? = { ConfigManager.shared.value(forKey: $0) as? String },
         expectedIssuer: String,
         expectedAudience: String
     ) async -> ConnectorBearerValidator {
         let collection = JWTKeyCollection()
         var loaded = false
 
-        if let raw = environment[jwksEnvKey]?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !raw.isEmpty
-        {
+        let resolvedSource: String? =
+            environment[jwksEnvKey]?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+            ?? config("oauthJWKS")?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+
+        if let raw = resolvedSource {
             let jwksJSON: String?
             if raw.hasPrefix("{") {
                 jwksJSON = raw
@@ -287,4 +298,12 @@ public struct ConnectorBearerValidator: Sendable {
             throw BearerValidationError.malformedToken("\(error)")
         }
     }
+}
+
+// MARK: - Small private helpers
+
+private extension String {
+    /// `nil` when empty so the `env ?? config` precedence chain skips a
+    /// blank layer (Packet E W2 resolution).
+    var nonEmpty: String? { isEmpty ? nil : self }
 }

@@ -266,13 +266,15 @@ func runEnableCloudAccessFlowTests() async {
     }
 
     await test("WS-F config: env override wins; absent falls back to placeholder") {
+        // Packet E W2: pin the config seam empty so env-absent fields fall to
+        // the (empty) baked layer → placeholder, hermetic from any config.json.
         let resolved = WorkOSConfig.resolved(environment: [
             "WORKOS_CLIENT_ID": "client_env",
-        ])
+        ], config: { _ in nil })
         try expect(resolved.clientID == "client_env", "env client id should win")
         try expect(resolved.baseURL == WorkOSConfig.placeholder.baseURL,
                    "absent base URL should fall back to placeholder")
-        let empty = WorkOSConfig.resolved(environment: [:])
+        let empty = WorkOSConfig.resolved(environment: [:], config: { _ in nil })
         try expect(empty == .placeholder, "empty env should equal placeholder")
     }
 
@@ -603,9 +605,12 @@ func runEnableCloudAccessFlowTests() async {
     }
 
     await test("PKT-933 isConfigured: resolved() — empty env not configured, env client id configured") {
-        try expect(!WorkOSConfig.resolved(environment: [:]).isConfigured,
+        // Packet E W2: pin config seam empty so the un-provisioned case stays
+        // the placeholder (hermetic from any on-disk `workosClientID`).
+        try expect(!WorkOSConfig.resolved(environment: [:], config: { _ in nil }).isConfigured,
                    "un-provisioned build (placeholder) must be not-configured")
-        try expect(WorkOSConfig.resolved(environment: ["WORKOS_CLIENT_ID": "client_live_x"]).isConfigured,
+        try expect(WorkOSConfig.resolved(
+            environment: ["WORKOS_CLIENT_ID": "client_live_x"], config: { _ in nil }).isConfigured,
                    "env-provided client id must be configured")
     }
 

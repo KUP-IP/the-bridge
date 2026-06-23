@@ -794,6 +794,9 @@ await runLicenseDispatchGateTests()
 await runLicenseCLITests()
 // Packet E (PRJCT-2754): durable Remote-Access OAuth identity resolution precedence.
 await runRemoteAccessIdentityTests()
+// Packet E Wave 2 (PRJCT-2754): config-backed WorkOS / JWKS / TransportRouter /
+// cloud-base-url reader precedence (env → config.json → baked → fail-closed).
+await runRemoteAccessConfigWave2Tests()
 
 // v3.7·A: SkillsCacheReader/Writer pipeline — Notion-source eager
 // enumeration carve-out closure (PKT-907) + StandingOrders cached

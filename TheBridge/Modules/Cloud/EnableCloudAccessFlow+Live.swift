@@ -57,23 +57,57 @@ public final class UserDefaultsCloudFlowDefaults: CloudFlowDefaults, @unchecked 
     }
 }
 
+// MARK: - Provision base-URL resolution (Packet E W2)
+
+public extension EnableCloudAccessFlow {
+    /// config.json key for the durable cloud control-plane base URL.
+    nonisolated static var provisionBaseURLConfigKey: String { "cloudBaseURL" }
+
+    /// Documented placeholder used when no layer supplies a base URL, so the
+    /// build runs before the WS-A Worker endpoint is live.
+    nonisolated static var defaultProvisionBaseURL: String { "https://cloud.kup.solutions" }
+
+    /// Resolves the WS-A Worker provisioning base URL with a durable precedence
+    /// (Packet E W2, mirroring `ProtectedResourceMetadataProvider`): explicit
+    /// `arg` → `BRIDGE_CLOUD_BASE_URL` env → config.json (`cloudBaseURL`,
+    /// per-install) → `defaultProvisionBaseURL`. Blank layers are skipped. No
+    /// build-baked layer (the control-plane host is a deployment choice, not a
+    /// binary constant). Pure + nonisolated so the precedence is unit-testable
+    /// off the `@MainActor` `.live()` factory; `.live()` delegates here, so the
+    /// two cannot drift.
+    nonisolated static func resolvedProvisionBaseURL(
+        arg: String?,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        config: (String) -> String? = { ConfigManager.shared.value(forKey: $0) as? String }
+    ) -> String {
+        arg?.cloudNonEmpty
+            ?? environment["BRIDGE_CLOUD_BASE_URL"]?.cloudNonEmpty
+            ?? config(provisionBaseURLConfigKey)?.cloudNonEmpty
+            ?? defaultProvisionBaseURL
+    }
+}
+
 // MARK: - .live() factory
 
 @MainActor
 public extension EnableCloudAccessFlow {
     /// Assemble the production Enable flow. `provisioner` is the live
     /// `BridgeCloudManager` (on `main` per the packet); `provisionBaseURL`
-    /// is the WS-A Worker endpoint (configurable — defaults to the env var
-    /// `BRIDGE_CLOUD_BASE_URL` or a documented placeholder so the build runs
-    /// before WS-A is live).
+    /// is the WS-A Worker endpoint, resolved with a durable precedence
+    /// (Packet E W2, mirroring `ProtectedResourceMetadataProvider`):
+    /// explicit arg → `BRIDGE_CLOUD_BASE_URL` env → config.json
+    /// (`cloudBaseURL`, per-install) → a documented placeholder so the build
+    /// runs before WS-A is live. No build-baked layer: the cloud control-plane
+    /// host is an operator/deployment choice, not a binary constant.
+    /// `configValue` is injectable so this stays pure under test.
     static func live(
         provisioner: CloudProvisioning,
         provisionBaseURL: String? = nil,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        configValue: (String) -> String? = { ConfigManager.shared.value(forKey: $0) as? String }
     ) -> EnableCloudAccessFlow {
-        let baseURL = provisionBaseURL
-            ?? environment["BRIDGE_CLOUD_BASE_URL"]
-            ?? "https://cloud.kup.solutions"
+        let baseURL = resolvedProvisionBaseURL(
+            arg: provisionBaseURL, environment: environment, config: configValue)
         return EnableCloudAccessFlow(
             tokenStore: KeychainCloudTokenStore(),
             browser: SystemBrowserOpener(),
@@ -87,5 +121,16 @@ public extension EnableCloudAccessFlow {
             config: .resolved(environment: environment),
             provisionBaseURL: baseURL
         )
+    }
+}
+
+// MARK: - Small private helpers
+
+private extension String {
+    /// Trimmed value, or `nil` when blank — so a blank layer is skipped in
+    /// the `arg ?? env ?? config` precedence chain (Packet E W2 resolution).
+    var cloudNonEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

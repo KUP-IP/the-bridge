@@ -176,7 +176,10 @@ func runTransportRouterTests() async {
     print("\n\u{1F50C} TransportRouter (PKT-803 · WS-B)")
 
     await test("default config: activeTransports == [.stdio] only") {
-        let r = TransportRouter(environment: [:])
+        // Pin the config seam empty (Packet E W2): env-absent now falls
+        // through to config.json, so inject nil to keep this hermetic
+        // regardless of any on-disk `enableHTTP`.
+        let r = TransportRouter(environment: [:], config: { _ in nil })
         try expect(r.activeTransports == [.stdio], "got \(r.activeTransports)")
         try expect(r.isActive(.stdio) && !r.isActive(.streamableHTTP),
                    "stdio active, http inactive by default")
