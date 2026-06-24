@@ -220,6 +220,7 @@ public actor ServerManager {
         if BridgeDefaults.cloudAccessEnabledValue {
             let manager = Self.makeCloudManager()
             self.cloudManager = manager
+            _ = await manager.enable()
             await BridgeModuleRegistry.registerCloudStatusTool(on: router, manager: manager)
             await startCloudHeartbeat(for: manager)
         }
@@ -369,6 +370,7 @@ public actor ServerManager {
         // blocked by the (potentially long) catch-up drain.
         Task.detached { [router] in
             await JobsManager.shared.bootstrap(router: router)
+            await VoiceMemoReviewLifecycle.sweepIfNeeded(router: router)
         }
 
         return await router.allRegistrations().count
