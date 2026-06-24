@@ -581,3 +581,42 @@ def maintenance_plan(due_items: list, *, max_items: int = 10, time_budget_s: int
         "qualification_row_after_brief_and_notify": True,
         "uses_separate_control_plane": False,       # T81: no scheduler/DB/ledger
     }
+
+
+# ── §6 step 1 controller-side non-overlap latch ──────────────────────────────
+# Integration finding (2026-06-23): Claude Code Routines documents NO routine-level
+# non-overlap guard, no single-flight config, no skip-on-overlap signal (see
+# evidence/INTEGRATION_NON_OVERLAP.md). §8.5A permits a "deterministic provider-
+# native fail-closed latch"; the controller therefore enforces non-overlap itself
+# with a single-writer latch checked BEFORE any FOCUS write, persisted in the
+# durable evidence destination / a Notion property (Notion has no compare-and-swap,
+# so acquisition is best-effort + re-read-verified — §6 best-effort acquisition).
+@dataclass
+class OverlapLatch:
+    holder: str            # native execution reference / cycle id of the holder
+    acquired_at: datetime
+    expires_at: datetime   # acquired_at + cycle_timeout (< schedule interval, §8.5A)
+
+
+def overlap_gate(latch, now: datetime, our_id: str):
+    """§6 step 1 non-overlap decision over the current latch. Returns
+    (action, classification):
+      - latch absent        → ('ACQUIRE','PROCEED')  — write latch, then overlap_verify
+      - latch held by us     → ('HELD','PROCEED')     — idempotent re-entry
+      - fresh latch (other)  → ('REFUSE','NOT_STARTED_OVERLAP') — start no packet, do NOT overwrite the active brief
+      - stale latch (other)  → ('STALE','FAILED')     — overlap cannot be ruled out → pause-required
+    [T99 deterministic sub-helper]"""
+    if latch is None:
+        return ('ACQUIRE', 'PROCEED')
+    if latch.holder == our_id:
+        return ('HELD', 'PROCEED')
+    if now < latch.expires_at:
+        return ('REFUSE', 'NOT_STARTED_OVERLAP')   # the clean overlap case (§6/§8.20: breaks the streak)
+    return ('STALE', 'FAILED')                      # ambiguous — a prior cycle left a latch past cycle_timeout
+
+
+def overlap_verify(reread_latch, our_id: str) -> str:
+    """§6 'best-effort single-writer acquisition': after writing the latch, re-read.
+    PROCEED only when the re-read shows OUR holder; otherwise a concurrent writer won
+    or the write didn't stick → overlap cannot be ruled out → FAILED, no packet started. [T99]"""
+    return 'PROCEED' if (reread_latch is not None and reread_latch.holder == our_id) else 'FAILED'

@@ -448,6 +448,27 @@ def no_cleanup_control_plane():
     assert plan["uses_separate_control_plane"] is False
 
 
+# ── non-overlap latch (§6 step 1) ─────────────────────────────────────────────
+@t("T99")
+def overlap_gate_cases():
+    now = NOW
+    assert d.overlap_gate(None, now, "cycleA") == ('ACQUIRE', 'PROCEED')
+    mine = d.OverlapLatch("cycleA", now, now + timedelta(minutes=10))
+    assert d.overlap_gate(mine, now, "cycleA") == ('HELD', 'PROCEED')   # idempotent
+    fresh_other = d.OverlapLatch("cycleB", now - timedelta(minutes=1), now + timedelta(minutes=9))
+    assert d.overlap_gate(fresh_other, now, "cycleA") == ('REFUSE', 'NOT_STARTED_OVERLAP')
+    stale_other = d.OverlapLatch("cycleB", now - timedelta(hours=1), now - timedelta(minutes=1))
+    assert d.overlap_gate(stale_other, now, "cycleA") == ('STALE', 'FAILED')   # ambiguous → fail-closed
+
+
+@t("T99")
+def overlap_verify_best_effort():
+    now = NOW
+    assert d.overlap_verify(d.OverlapLatch("cycleA", now, now + timedelta(minutes=10)), "cycleA") == 'PROCEED'
+    assert d.overlap_verify(d.OverlapLatch("cycleB", now, now + timedelta(minutes=10)), "cycleA") == 'FAILED'  # lost the race
+    assert d.overlap_verify(None, "cycleA") == 'FAILED'   # write didn't stick
+
+
 def main():
     covered = set()
     passed = failed = 0
