@@ -776,6 +776,9 @@ await runPKT879DashboardTests()
 await runPKT879OnboardingTests()
 await runPKT879IconPickerTests()
 
+// PKT-1010 (Packet C activation + onboarding UX polish): token trim + validate.
+await runPKT1010OnboardingTests()
+
 // v3.6.0 D1: Credentials scope filter regression guard.
 await runCredentialsScopeFilterTests()
 

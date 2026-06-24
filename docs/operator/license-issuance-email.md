@@ -59,9 +59,9 @@ NEXT STEPS
      Open the DMG and drag "The Bridge" into /Applications.
 
   3. Activate
-     Launch The Bridge. In Settings → License, paste the key above
-     and click Activate. The Bridge will validate online once and
-     then run normally on this Mac.
+     Launch The Bridge. Open Settings → Security → License, paste
+     your key, and click Activate. The Bridge validates the key once
+     and then runs normally on this Mac.
 
   4. Onboarding & docs
      {{onboarding_url}}
@@ -72,7 +72,7 @@ LICENSE TERMS (the short version)
   • You receive all patch updates on the v{{version}} minor line for life.
   • Upgrades to future major/minor versions are a separate purchase.
   • Moving to a new Mac? Deactivate the old one first in
-    Settings → License, or email {{support_email}}.
+    Settings → Security → License, or email {{support_email}}.
   • 14-day refund — reply to your Stripe receipt or email
     {{support_email}} within 14 days of purchase.
 
@@ -159,7 +159,7 @@ Thanks for supporting independent software.
                   <strong>Install.</strong> Open the DMG and drag <em>The Bridge</em> into <code style="background:#f1f5f9;padding:1px 6px;border-radius:4px;font-size:13px;">/Applications</code>.
                 </li>
                 <li style="margin-bottom:14px;">
-                  <strong>Activate.</strong> Launch The Bridge. In <em>Settings → License</em>, paste your key and click <em>Activate</em>.
+                  <strong>Activate.</strong> Launch The Bridge. Open <em>Settings → Security → License</em>, paste your key, and click <em>Activate</em>.
                 </li>
                 <li style="margin-bottom:0;">
                   <strong>Onboarding & docs.</strong>
@@ -177,7 +177,7 @@ Thanks for supporting independent software.
                 <li style="margin-bottom:6px;">One license = one Mac, one named user.</li>
                 <li style="margin-bottom:6px;">All patch updates on the {{version}} minor line for the lifetime of that version.</li>
                 <li style="margin-bottom:6px;">Future major/minor upgrades are a separate purchase.</li>
-                <li style="margin-bottom:6px;">Moving Macs? Deactivate the old one in <em>Settings → License</em>, or email <a href="mailto:{{support_email}}" style="color:#1d4ed8;">{{support_email}}</a>.</li>
+                <li style="margin-bottom:6px;">Moving Macs? Deactivate the old one in <em>Settings → Security → License</em>, or email <a href="mailto:{{support_email}}" style="color:#1d4ed8;">{{support_email}}</a>.</li>
                 <li style="margin-bottom:6px;">14-day refund — reply to your Stripe receipt or email <a href="mailto:{{support_email}}" style="color:#1d4ed8;">{{support_email}}</a> within 14 days.</li>
               </ul>
               <p style="margin:12px 0 0 0;font-size:13px;color:#64748b;">

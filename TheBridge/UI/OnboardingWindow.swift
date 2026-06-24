@@ -541,36 +541,51 @@ struct OnboardingView: View {
             obHero("key.fill", tone: .gold)
                 .padding(.top, 8)
 
-            obTitle("Connect a workspace")
+            obTitle("Connect a Notion workspace")
                 .padding(.top, 18)
 
-            obSub("Paste a secret. It's stored in your Keychain — never sent anywhere. Add more connections later in Settings.")
+            obSub("Create a Notion integration, copy its secret, and paste it here. The token is stored in your Keychain\u{2014}never sent to us.")
                 .padding(.top, 14)
+
+            // PKT-1010: Notion integration walkthrough — 3-step inline guide
+            // so the user knows exactly where to find the token without leaving the wizard.
+            VStack(alignment: .leading, spacing: 8) {
+                notionWalkthroughRow(step: "1", text: "Open **notion.so/profile/integrations** and click **New integration**.")
+                notionWalkthroughRow(step: "2", text: "Give it a name, choose your workspace, and click **Save**.")
+                notionWalkthroughRow(step: "3", text: "Copy the **Internal Integration Secret** (starts with `ntn_`) and paste it below.")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+            .padding(.top, 14)
 
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 6) {
-                    obFieldLabel("Workspace")
+                    obFieldLabel("Workspace name")
                     // `.ob-input` — v4 inset-well field (W2 BridgeInput).
                     BridgeInput(selectedProvider.namePlaceholder, text: $workspaceName)
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
-                    obFieldLabel("Integration token")
-                    // Secret token: BridgeInput has no secure variant, so this
-                    // wraps SecureField in the same `.ob-input` glass-well chrome
-                    // (wellFill + bevelInset + hairline, mono caret = accentStrong).
+                    obFieldLabel("Integration secret")
+                    // PKT-1010: Token auto-trimmed on save; SecureField used so the raw
+                    // secret is never visible in the UI. Leading-whitespace/newline from
+                    // paste-via-clipboard is common and silent — trim handles it.
                     obSecureField(selectedProvider.tokenPlaceholder, text: $workspaceToken)
                 }
 
                 if let helpURL = selectedProvider.helpURL {
                     // `.ob-help` external link — v4 `.btn.link` (trailing ↗).
-                    BridgeButton(selectedProvider.helpLabel, variant: .link) {
+                    BridgeButton("Open Notion integrations page", variant: .link) {
                         NSWorkspace.shared.open(helpURL)
                     }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 20)
+            .padding(.top, 16)
 
             if let workspaceError {
                 HStack(spacing: 6) {
@@ -599,17 +614,40 @@ struct OnboardingView: View {
         .frame(maxWidth: .infinity)
     }
 
+    /// Numbered walkthrough row for the Notion integration guide (PKT-1010).
+    private func notionWalkthroughRow(step: String, text: LocalizedStringKey) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(step)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(BridgeTokens.accentLink)
+                .frame(width: 20, height: 20)
+                .background(BridgeTokens.accent.opacity(0.22), in: Circle())
+            Text(text)
+                .font(.system(size: 12))
+                .foregroundStyle(BridgeTokens.fg3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     private func saveWorkspaceConnection() async {
         await MainActor.run {
             isSavingWorkspace = true
             workspaceError = nil
         }
 
+        // PKT-1010: Trim whitespace/newlines — paste-from-clipboard commonly adds
+        // a trailing newline or leading space that is invisible in a SecureField
+        // but causes a silent format mismatch. Trimming is always safe: real
+        // tokens never start or end with whitespace.
         let trimmedToken = workspaceToken.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard trimmedToken.hasPrefix("ntn_") else {
+        // PKT-1010: Accept both Notion Internal Integration Secret (ntn_) and the
+        // older public-integration secret format (secret_). Mirror the validation
+        // in NotionClient.validateTokenFormat for consistency.
+        let (formatValid, formatError) = OnboardingTokenValidator.validateFormat(trimmedToken)
+        guard formatValid else {
             await MainActor.run {
-                workspaceError = "Invalid token u{2014} must start with ntn_"
+                workspaceError = formatError ?? "Invalid integration secret format"
                 isSavingWorkspace = false
             }
             return
@@ -618,7 +656,7 @@ struct OnboardingView: View {
         do {
             _ = try await ConnectionRegistry.shared.configureNotionConnection(
                 name: workspaceName,
-                token: workspaceToken,
+                token: trimmedToken,
                 primary: true
             )
             await MainActor.run {
@@ -805,6 +843,31 @@ struct OnboardingView: View {
                     .padding(.vertical, 8)
                 }
                 .padding(.top, 16)
+
+                // PKT-1010: Post-onboarding data-source binding guidance.
+                // Shown only after a successful health check so it doesn't
+                // compete with the initial "test the connection" CTA.
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "square.stack.3d.up.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(BridgeTokens.accentLink)
+                        Text("Next: bind your data sources")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(BridgeTokens.fg1)
+                    }
+                    Text("Open **Settings \u{2192} Data Sources** and connect your Notion databases for Skills, Contacts, Projects, and more. Each data source unlocks a new family of AI tools.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(BridgeTokens.fg3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(BridgeTokens.accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(BridgeTokens.accentBorder, lineWidth: 0.5))
+                .padding(.top, 12)
             } else {
                 // `.btn.primary.lg` — the verify CTA (W2 BridgeButton).
                 BridgeButton(healthCheckButtonLabel,
@@ -1026,6 +1089,46 @@ extension OnboardingView.HealthCheckStatus {
     }
 }
 
+// MARK: - PKT-1010: Onboarding token validator (testable pure logic)
+
+/// Pure validation logic for Notion integration tokens entered during onboarding.
+/// Exposed as a `public` type so `TheBridgeTests/PKT1010OnboardingTests.swift`
+/// can exercise the format + trim rules without importing any SwiftUI surface.
+///
+/// Rules (mirrors `NotionClient.validateTokenFormat` for consistency):
+///   1. Trim leading/trailing whitespace (paste-from-clipboard routinely adds it).
+///   2. Token must be ≥ 20 characters after trimming.
+///   3. Token must start with `ntn_` (Internal Integration Secret) or `secret_`
+///      (legacy Public Integration token — still valid on the Notion API).
+public enum OnboardingTokenValidator {
+    /// Validate a Notion integration token entered by the user.
+    ///
+    /// - Parameter raw: The raw string exactly as entered/pasted (may contain
+    ///   leading/trailing whitespace).
+    /// - Returns: `(valid: Bool, error: String?)` — `valid` is true when the
+    ///   trimmed token passes format validation; `error` is a user-facing message
+    ///   when `valid` is false.
+    public static func validateFormat(_ raw: String) -> (valid: Bool, error: String?) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return (false, "Integration secret is required")
+        }
+        guard trimmed.count >= 20 else {
+            return (false, "Integration secret is too short \u{2014} it should be at least 20 characters")
+        }
+        guard trimmed.hasPrefix("ntn_") || trimmed.hasPrefix("secret_") else {
+            return (false, "Integration secret must start with \u{2018}ntn_\u{2019} or \u{2018}secret_\u{2019}")
+        }
+        return (true, nil)
+    }
+
+    /// Trim a raw token the same way `saveWorkspaceConnection` does, returning
+    /// the cleaned string ready to pass to `ConnectionRegistry`.
+    public static func trimmedToken(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 // MARK: - PKT-879 constants surface (pinned by tests)
 
 /// Locked layout / step-count contract for the v3.6.4 onboarding refresh.
@@ -1121,16 +1224,26 @@ private enum OBGrantPresentation {
         }
     }
 
+    // PKT-1010: Per-permission rationale copy — answers "why does The Bridge need this?"
+    // in plain language. One short sentence each: capability + reason.
     static func detail(for grant: PermissionManager.Grant) -> String {
         switch grant {
-        case .accessibility:   return "UI control \u{00B7} focus \u{00B7} window management"
-        case .automation:      return "Drive Messages, Mail, Calendar"
-        case .contacts:        return "Look up people for Messages & Mail"
-        case .notifications:   return "Approval prompts for destructive actions"
-        case .screenRecording: return "Read on-screen UI & capture screenshots"
-        case .fullDiskAccess:  return "Read files across protected folders"
-        case .reminders:       return "Create & complete your reminders"
-        case .calendar:        return "Read & write calendar events"
+        case .accessibility:
+            return "Read and control on-screen UI elements so Bridge can focus windows and interact with apps on your behalf."
+        case .automation:
+            return "Send AppleScript instructions to Messages, Mail, and Calendar so Bridge can compose messages and manage events."
+        case .contacts:
+            return "Look up names, emails, and phone numbers so Bridge can address messages and identify people correctly."
+        case .notifications:
+            return "Deliver approval prompts when a destructive action\u{2014}like deleting a file\u{2014}needs your explicit OK before proceeding."
+        case .screenRecording:
+            return "Capture screen content and read on-screen text so Bridge can answer questions about what's visible on your Mac."
+        case .fullDiskAccess:
+            return "Read files in protected locations like ~/Library and ~/Documents that macOS sandboxing would otherwise block."
+        case .reminders:
+            return "Create, complete, and list reminders in Reminders.app on your behalf."
+        case .calendar:
+            return "Read your calendar and create or update events across all your calendars."
         }
     }
 }

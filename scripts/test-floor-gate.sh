@@ -1424,7 +1424,10 @@ set -euo pipefail
 # proven WIRED, not only seam-reachable). The origin-decision logic
 # (isRemoteTunnelRequest, the legacy-route loopback-only 403, the loopback /mcp
 # split) is byte-unchanged. Measured integrated green 2242 → 2250.
-FLOOR="${BRIDGE_TEST_FLOOR:-2250}"
+FLOOR="${BRIDGE_TEST_FLOOR:-2268}"
+# PKT-1010 (2026-06-24): Packet C activation + onboarding UX polish. +18 OnboardingTokenValidator
+# tests (trim + validate: ntn_/secret_ prefix, short token, whitespace-only, trimmed clean, etc.).
+# Measured integrated green 2250 → 2268.
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
