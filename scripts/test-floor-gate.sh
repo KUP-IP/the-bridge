@@ -1412,7 +1412,11 @@ set -euo pipefail
 # still leads a group, so a recycled pid yields ESRCH→already_terminated instead
 # of hitting an unrelated process (covered by the #6 group-kill case). Measured
 # integrated green 2227 → 2242.
-FLOOR="${BRIDGE_TEST_FLOOR:-2242}"
+# Packet Runner v1 (2026-06-23): +10 RegistryHydrationTests — packet-registry-v1
+# one-hop envelope (FR-1/§8.3): envelope shape, missing/inaccessible relations,
+# offline cache, one-hop guard, explicit-deeper-body, body-gate, status fail-closed,
+# module tool path, unknown-entity. Measured integrated green 2242 → 2252.
+FLOOR="${BRIDGE_TEST_FLOOR:-2252}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

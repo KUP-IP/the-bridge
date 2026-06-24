@@ -145,4 +145,73 @@ public struct RegistryReader: Sendable {
         guard entity.hasBody else { return "" }
         return try await gateway.markdown(pageId: pageId, workspace: entity.workspace)
     }
+
+    // MARK: - Hydrate (packet-registry-v1 envelope — FR-1 / §8.3)
+
+    /// Hydrate one entity row into the `packet-registry-v1` envelope: primary
+    /// non-relation properties + page body + curated ONE-HOP relation
+    /// projections + provenance + unresolved-relation warnings (PRD FR-1, §8.3).
+    ///
+    /// One hop only — each related page is fetched once for its compact
+    /// projection; its relations and body are never loaded (FR-1 "Deeper reads
+    /// are explicit"). A missing / inaccessible / archived target is omitted and
+    /// a warning appended, never guessed (FR-4, §8.3). The primary read reuses
+    /// `get` (warm-cache + offline-tolerant); the body is best-effort so an
+    /// offline cycle still yields a valid envelope.
+    public func hydrate(entity: RegistryEntity, pageId: String, forceRefresh: Bool = false, now: Date = Date()) async throws -> PacketRegistryEnvelope {
+        let primaryRow = try await get(entity: entity, pageId: pageId, forceRefresh: forceRefresh)
+
+        // Split the flat projection: relation props → one-hop slots; everything
+        // else except the title (surfaced as primary.title) → primary.properties.
+        let relationKeys = Set(entity.properties.filter { $0.role == .relation }.map { $0.key })
+        let titleKeys = Set(entity.properties.filter { $0.role == .title }.map { $0.key })
+        var primaryProps: [String: Value] = [:]
+        var relationIds: [String: [String]] = [:]
+        if case .object(let all) = primaryRow.properties {
+            for (k, v) in all {
+                if relationKeys.contains(k) {
+                    if case .array(let arr) = v {
+                        relationIds[k] = arr.compactMap { if case .string(let s) = $0 { return s } else { return nil } }
+                    }
+                } else if !titleKeys.contains(k) {
+                    primaryProps[k] = v
+                }
+            }
+        }
+
+        var body = ""
+        if entity.hasBody { body = (try? await self.body(entity: entity, pageId: pageId)) ?? "" }
+
+        // One-hop relation projection (fetch each distinct target once).
+        var relations: [String: [Value]] = [:]
+        var warnings: [String] = []
+        for (key, ids) in relationIds {
+            guard let slot = PacketRelationProjection.slotForKey[key] else { continue }
+            var items: [Value] = []
+            var seen = Set<String>()
+            for rid in ids {
+                guard seen.insert(CachedRow.normalize(rid)).inserted else { continue }   // dedup
+                do {
+                    let target = try await gateway.page(pageId: rid, workspace: entity.workspace)
+                    if target.archived || target.id.isEmpty {
+                        warnings.append("relation ‘\(slot)’: target \(rid) is archived or inaccessible — omitted")
+                        continue
+                    }
+                    items.append(PacketRelationProjection.projectTarget(target, slot: slot))
+                } catch {
+                    warnings.append("relation ‘\(slot)’: target \(rid) could not be fetched — omitted")
+                }
+            }
+            relations[slot] = items
+        }
+
+        let primary = PacketRegistryEnvelope.Primary(
+            id: PacketRegistryEnvelope.dashedId(primaryRow.pageId),
+            title: primaryRow.title,
+            lastEditedTime: primaryRow.lastEditedTime,
+            properties: .object(primaryProps))
+        return PacketRegistryEnvelope(
+            primary: primary, body: body, relations: relations,
+            fetchedAt: CachedRow.iso8601.string(from: now), warnings: warnings)
+    }
 }

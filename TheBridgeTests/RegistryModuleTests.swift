@@ -84,14 +84,15 @@ func runRegistryModuleTests() async {
 
     // MARK: - Registration
 
-    await test("RegistryModule registers exactly 10 tools with expected names") {
+    await test("RegistryModule registers exactly 11 tools with expected names") {
         let router = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
         await RegistryModule.register(on: router)
         let tools = await router.registrations(forModule: "registry")
-        try expect(tools.count == 10, "expected 10 registry tools, got \(tools.count)")
+        try expect(tools.count == 11, "expected 11 registry tools, got \(tools.count)")
         let names = Set(tools.map { $0.name })
         try expect(names == ["registry_entities", "registry_add_entity", "registry_remove_entity", "registry_introspect",
-                             "registry_list", "registry_get", "registry_create", "registry_update", "registry_delete", "registry_possess"],
+                             "registry_list", "registry_get", "registry_create", "registry_update", "registry_delete", "registry_possess",
+                             "registry_hydrate"],
                    "tool names: \(names.sorted())")
     }
 
