@@ -872,6 +872,13 @@ await runCloudAccessWSGTests()
 // a TEMP DB path (never the real config-dir store, never the shared singleton).
 await runMemoryModuleTests()
 
+// PKT-1007 Slice 1: Dense-vector recall + RRF fusion. StubMemoryEmbedder
+// (deterministic, no CoreML assets), MemoryEmbeddingIndex (index/rank/evict),
+// ReciprocaLRankFusion (single-list, dual-list, hybrid boost), MemoryStore.recall
+// with injected stub embedder (RRF plumbing E2E without model assets), and
+// NLContextualEmbedder unit tests (gated on asset availability, skip gracefully).
+await runMemorySemanticRecallTests()
+
 // v3.7.6 (system-tethered Light/Dark theme): the appearance-adaptive
 // BridgeTokens contract. Resolves every adaptive token under .darkAqua and
 // .aqua and asserts (a) the DARK branch equals the exact v3.7.5 carbon literal

@@ -1432,7 +1432,14 @@ set -euo pipefail
 # handler TTL test (+1), Q4 SettingsSection Memory case tests (+4 across
 # WSHMenuBarTests/BridgeAutomationModuleTests/SettingsSectionsLGTests),
 # Q2 expiredEntries sweep path fix. Batch-merged onto PKT-1010: 2268 + 12 = 2280.
-FLOOR="${BRIDGE_TEST_FLOOR:-2280}"
+# PKT-1007 (2026-06-24): Semantic Recall dense-vector arm (NLContextualEmbedding)
+# + Reciprocal-Rank-Fusion (RRF). +31 new tests: StubMemoryEmbedder (5),
+# MemoryEmbeddingIndex (5), ReciprocaLRankFusion/RRF (5), MemoryStore recall E2E
+# with stub embedder (7), NLContextualEmbedder unit + live asset tests (9).
+# MemoryModuleTests FTS-recall assertion relaxed (count=1→≥1) to allow hybrid
+# recall semantics; "deploy pipeline" FTS match still ranks first via RRF+bias.
+# Batch-merged onto PKT-977: 2280 + 31 = 2311.
+FLOOR="${BRIDGE_TEST_FLOOR:-2311}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
