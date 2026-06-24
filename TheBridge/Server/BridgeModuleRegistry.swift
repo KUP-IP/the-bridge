@@ -70,6 +70,8 @@ public enum BridgeModuleRegistry {
         await ShortcutsModule.register(on: router)
         await MemoryModule.register(on: router)
         await RegistryModule.register(on: router)          // Data-Source Registry: generic CRUD + add/remove_entity + introspect + possess (10 tools)
+        await VoiceMemoModule.register(on: router)       // Voice Memos curator: voice_memo_list + voice_memo_process (2 tools)
+        await OllamaModule.register(on: router)          // Local Ollama: ollama_health + ollama_list_models (2 tools)
         await BridgeAutomationModule.register(on: router) // FB-AUTOMATION: bridge_settings_navigate
         await PermissionsModule.register(on: router)       // fb-permissions: permissions_status
     }

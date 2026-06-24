@@ -38,6 +38,7 @@ public struct MemorySection: View {
     @State private var expandedIds: Set<String> = []
     @State private var actionMessage: String?
     @State private var resolvingIds: Set<String> = []
+    @State private var inboxFilter: InboxFilter = .all
 
     public enum Tab: String, Hashable, CaseIterable, Sendable {
         case inbox, notion, agent
@@ -47,6 +48,20 @@ public struct MemorySection: View {
             case .inbox: return "Inbox"
             case .notion: return "Notion"
             case .agent: return "Agent"
+            }
+        }
+    }
+
+    /// Inbox status filter — matches notification deep-link intent (PKT-MEM-104 follow-up).
+    public enum InboxFilter: String, CaseIterable, Sendable {
+        case all, noTranscript, routingFailed, lowConfidence
+
+        var label: String {
+            switch self {
+            case .all: return "All"
+            case .noTranscript: return "No transcript"
+            case .routingFailed: return "Routing failed"
+            case .lowConfidence: return "Low confidence"
             }
         }
     }
@@ -165,18 +180,30 @@ public struct MemorySection: View {
 
     // MARK: - Inbox
 
+    private var filteredEntries: [VoiceMemoReviewEntry] {
+        entries.filter { entry in
+            switch inboxFilter {
+            case .all: return true
+            case .noTranscript: return statusLabel(for: entry) == "No transcript"
+            case .routingFailed: return statusLabel(for: entry) == "Routing failed"
+            case .lowConfidence: return statusLabel(for: entry) == "Low confidence"
+            }
+        }
+    }
+
     private var inboxTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: BridgeTokens.Space.cardGap) {
+                inboxFilterBar
                 if let actionMessage {
                     Text(actionMessage)
                         .font(BridgeTokens.Typeface.sub)
                         .foregroundStyle(BridgeTokens.fg3)
                 }
-                if entries.isEmpty {
+                if filteredEntries.isEmpty {
                     emptyInbox
                 } else {
-                    ForEach(entries) { entry in
+                    ForEach(filteredEntries) { entry in
                         inboxRow(entry)
                     }
                 }
@@ -186,6 +213,30 @@ public struct MemorySection: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .accessibilityIdentifier(BridgeAXID.Memory.inboxList)
+    }
+
+    private var inboxFilterBar: some View {
+        HStack(spacing: 6) {
+            ForEach(InboxFilter.allCases, id: \.self) { filter in
+                let on = inboxFilter == filter
+                Button {
+                    withAnimation(.easeInOut(duration: 0.14)) { inboxFilter = filter }
+                } label: {
+                    Text(filter.label)
+                        .font(.system(size: 11.5, weight: on ? .semibold : .regular))
+                        .foregroundStyle(on ? BridgeTokens.fg1 : BridgeTokens.fg3)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background {
+                            if on {
+                                Capsule().fill(BridgeTokens.accent.opacity(0.16))
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier(BridgeAXID.Memory.inboxFilterBar + ".\(filter.rawValue)")
+            }
+        }
+        .accessibilityIdentifier(BridgeAXID.Memory.inboxFilterBar)
     }
 
     private var emptyInbox: some View {
@@ -252,6 +303,14 @@ public struct MemorySection: View {
                         .accessibilityIdentifier(BridgeAXID.Memory.revealInFinder)
                     }
                     Spacer(minLength: 0)
+                    BridgeButton("Add reminder", variant: .link) {
+                        resolveEntry(entry, action: .reminder)
+                    }
+                    .accessibilityIdentifier(BridgeAXID.Memory.addReminder)
+                    BridgeButton("Agent should know", variant: .link) {
+                        resolveEntry(entry, action: .agentRemember)
+                    }
+                    .accessibilityIdentifier(BridgeAXID.Memory.agentRemember)
                     BridgeButton("Retry routing", variant: .link) {
                         resolveEntry(entry, action: .retryRouting)
                     }
@@ -348,13 +407,14 @@ public struct MemorySection: View {
     private func transcriptSourceLabel(for entry: VoiceMemoReviewEntry) -> String {
         guard let path = entry.memoPath else { return "Missing" }
         let audio = URL(fileURLWithPath: path)
-        if VoiceMemoDiscovery.loadTranscriptSidecar(for: audio) != nil {
-            return "Sidecar"
+        switch VoiceMemoDiscovery.detectTranscriptSource(for: audio) {
+        case .apple: return "Apple"
+        case .parakeet: return "Parakeet"
+        case .sidecar: return "Sidecar"
+        case .none:
+            return entry.transcriptExcerpt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Missing" : "Sidecar"
         }
-        if entry.transcriptExcerpt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Missing"
-        }
-        return "Sidecar"
     }
 
     private func transcriptSourceTone(for entry: VoiceMemoReviewEntry) -> BridgeBadge.Tone {

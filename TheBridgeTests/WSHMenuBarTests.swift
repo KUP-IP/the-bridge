@@ -52,7 +52,7 @@ func runWSHMenuBarTests() async {
         // Connection + Advanced). Commands folds into Orders;
         // Credentials+Permissions→Security; Connections+Remote Access→Connection.
         // Data-Source Registry (2026-06-17): + Data Sources = 8.
-        // PKT-977 Wave 2 (2026-06-24): + Memory = 9.
+        // Memory-Hub (2026-06-25): + Memory = 9.
         try expect(SettingsSection.allCases.count == 9, "expected 9 sections, got \(SettingsSection.allCases.count)")
         try expect(SettingsSection.tools.icon == "hammer",
                    "tools icon: \(SettingsSection.tools.icon)")
@@ -67,11 +67,11 @@ func runWSHMenuBarTests() async {
         // agents reach it → everything else). rawValues carry the stable ids.
         let order = SettingsSection.allCases.map(\.rawValue)
         let expected = ["Standing Orders", "Skills", "Jobs", "Tools",
-                        "Security", "Connection", "Data Sources", "Memory", "Advanced"]
+                        "Security", "Connection", "Memory", "Data Sources", "Advanced"]
         try expect(order == expected, "sidebar order drifted: \(order)")
         let labels = SettingsSection.allCases.map(\.displayName)
         let expectedLabels = ["Commands", "Skills", "Jobs", "Tools",
-                              "Security", "Connection", "Data Sources", "Memory", "Advanced"]
+                              "Security", "Connection", "Memory", "Data Sources", "Advanced"]
         try expect(labels == expectedLabels, "display-label order drifted: \(labels)")
     }
 

@@ -99,6 +99,19 @@ public enum SettingsUIValidationHarness {
                     BridgeAXID.Connection.clientsList,
                     BridgeAXID.Connection.toggleRemote,
                 ])
+            case .memory:
+                ids.append(contentsOf: [
+                    BridgeAXID.Memory.tabBar,
+                    BridgeAXID.Memory.tab("inbox"),
+                    BridgeAXID.Memory.tab("notion"),
+                    BridgeAXID.Memory.tab("agent"),
+                    BridgeAXID.Memory.inboxList,
+                    BridgeAXID.Memory.dismiss,
+                    BridgeAXID.Memory.notionList,
+                    BridgeAXID.Memory.agentList,
+                    BridgeAXID.Memory.agentScopeFilter,
+                    BridgeAXID.Memory.agentTypeFilter,
+                ])
             case .datasources:
                 // Match the control slugs DataSourcesSection actually emits.
                 ids.append(contentsOf: [

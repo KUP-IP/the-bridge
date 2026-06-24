@@ -28,6 +28,7 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.65.0"),
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0"),
         .package(url: "https://github.com/vapor/jwt-kit.git", exact: "5.5.0"),
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.12.4"),
     ],
     targets: [
         .target(
@@ -39,6 +40,7 @@ let package = Package(
                 .product(name: "NIOHTTP1", package: "swift-nio"),
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "JWTKit", package: "jwt-kit"),
+                .product(name: "FluidAudio", package: "FluidAudio"),
             ],
             path: "TheBridge",
             exclude: ["App/TheBridgeApp.swift", "App/Resources"],

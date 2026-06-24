@@ -158,4 +158,91 @@ public enum BridgeDefaults {
     /// button); read by RemoteAccessSection before presenting the sheet on the
     /// first transition to `.online`. ABSENT ⇒ not yet seen (modal shows once).
     public static let hasSeenCloudAccessFirstRun = "com.notionbridge.hasSeenCloudAccessFirstRun"
+
+    // MARK: - Local Models (Ollama · Wave 2a)
+
+    /// Base URL for the local Ollama HTTP API. String. Default `http://127.0.0.1:11434`.
+    public static let ollamaBaseURL = "com.notionbridge.ollama.baseURL"
+
+    /// Selected Ollama model for voice-memo intent routing. String. ABSENT ⇒ heuristics only.
+    public static let ollamaRoutingModel = "com.notionbridge.ollama.routingModel"
+
+    /// Selected Ollama model for on-device transcription (Wave 2). String. ABSENT ⇒ sidecar `.txt` only.
+    public static let ollamaTranscriptionModel = "com.notionbridge.ollama.transcriptionModel"
+
+    /// When true, voice memo parsing may call Ollama for routing when a routing model is set.
+    public static let voiceMemoOllamaRouting = "com.notionbridge.voiceMemo.ollamaRouting"
+
+    /// When true, memos without a `.txt` sidecar are transcribed via FluidAudio Parakeet v3.
+    public static let voiceMemoParakeetTranscription = "com.notionbridge.voiceMemo.parakeetTranscription"
+
+    /// When true, extract Apple embedded `tsrp` transcript before Parakeet fallback.
+    public static let voiceMemoAppleTranscript = "com.notionbridge.voiceMemo.appleTranscript"
+
+    /// Ollama model for one-sentence Memory summaries (Relevant:). Falls back to routing model.
+    public static let ollamaSummarizationModel = "com.notionbridge.ollama.summarizationModel"
+
+    /// Suggested default routing model (M1 16 GB — Gemma4 12B).
+    public static let ollamaRoutingModelDefault = "gemma4:12b"
+
+    public static var ollamaBaseURLEffective: URL {
+        let raw = UserDefaults.standard.string(forKey: ollamaBaseURL)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let raw, !raw.isEmpty, let url = URL(string: raw) {
+            return url
+        }
+        return URL(string: "http://127.0.0.1:11434")!
+    }
+
+    public static var ollamaRoutingModelEffective: String? {
+        let raw = UserDefaults.standard.string(forKey: ollamaRoutingModel)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw?.isEmpty == false ? raw : nil
+    }
+
+    public static var ollamaTranscriptionModelEffective: String? {
+        let raw = UserDefaults.standard.string(forKey: ollamaTranscriptionModel)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw?.isEmpty == false ? raw : nil
+    }
+
+    public static var voiceMemoOllamaRoutingEffective: Bool {
+        UserDefaults.standard.bool(forKey: voiceMemoOllamaRouting)
+    }
+
+    /// Parakeet transcription defaults ON when unset (Wave 2).
+    public static var voiceMemoParakeetTranscriptionEffective: Bool {
+        if UserDefaults.standard.object(forKey: voiceMemoParakeetTranscription) == nil { return true }
+        return UserDefaults.standard.bool(forKey: voiceMemoParakeetTranscription)
+    }
+
+    /// Apple tsrp extraction defaults ON when unset (Memory Hub Wave 1).
+    public static var voiceMemoAppleTranscriptEffective: Bool {
+        if UserDefaults.standard.object(forKey: voiceMemoAppleTranscript) == nil { return true }
+        return UserDefaults.standard.bool(forKey: voiceMemoAppleTranscript)
+    }
+
+    public static var ollamaSummarizationModelEffective: String? {
+        let raw = UserDefaults.standard.string(forKey: ollamaSummarizationModel)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let raw, !raw.isEmpty { return raw }
+        return ollamaRoutingModelEffective
+    }
+
+    /// Apply first-run defaults for local models when keys are absent.
+    public static func seedOllamaDefaultsIfNeeded() {
+        let d = UserDefaults.standard
+        if d.string(forKey: ollamaRoutingModel)?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+            d.set(ollamaRoutingModelDefault, forKey: ollamaRoutingModel)
+        }
+        if d.object(forKey: voiceMemoOllamaRouting) == nil {
+            d.set(true, forKey: voiceMemoOllamaRouting)
+        }
+        if d.object(forKey: voiceMemoAppleTranscript) == nil {
+            d.set(true, forKey: voiceMemoAppleTranscript)
+        }
+        if d.object(forKey: voiceMemoParakeetTranscription) == nil {
+            d.set(true, forKey: voiceMemoParakeetTranscription)
+        }
+    }
 }

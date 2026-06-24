@@ -123,7 +123,7 @@ func runBridgeAutomationModuleTests() async {
         // Data-Source Registry (2026-06-17): + "Data Sources".
         let names = await MainActor.run { BridgeSettingsAutomation.sectionDisplayNames }
         try expect(names == ["Commands", "Skills", "Jobs", "Tools",
-                             "Security", "Connection", "Data Sources", "Memory", "Advanced"],
+                             "Security", "Connection", "Memory", "Data Sources", "Advanced"],
                    "sectionDisplayNames drift: \(names)")
     }
 

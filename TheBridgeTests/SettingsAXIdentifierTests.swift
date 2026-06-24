@@ -76,10 +76,10 @@ func runSettingsAXIdentifierTests() async {
 
     // MARK: - Headless UI-validation harness (Pillar D) — pure logic
 
-    await test("PKT-1005: harness manifest covers all 7 sections with a root id") {
+    await test("PKT-1005: harness manifest covers all sections with a root id") {
         let manifest = SettingsUIValidationHarness.expectedIdentifiers
         try expect(manifest.count == SettingsSection.allCases.count,
-                   "manifest must cover all 7 sections, has \(manifest.count)")
+                   "manifest must cover all sections, has \(manifest.count)")
         for section in SettingsSection.allCases {
             let ids = manifest[section] ?? []
             let rootID = await MainActor.run { BridgeAXID.control(section, "root") }
@@ -198,7 +198,7 @@ func runSettingsAXIdentifierTests() async {
         var union = Set<String>()
         for ids in SettingsUIValidationHarness.expectedIdentifiers.values { union.formUnion(ids) }
         let reports = SettingsUIValidationHarness.validateAll(observedIdentifiers: union)
-        try expect(reports.count == SettingsSection.allCases.count, "expected 7 reports")
+        try expect(reports.count == SettingsSection.allCases.count, "expected \(SettingsSection.allCases.count) reports")
         try expect(reports.allSatisfy { $0.passed }, "all sections should pass with the full union")
     }
 }

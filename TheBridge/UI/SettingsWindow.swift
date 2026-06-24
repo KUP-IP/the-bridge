@@ -156,8 +156,8 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
     case tools      = "Tools"
     case security   = "Security"          // Credentials + Permissions merged
     case connection = "Connection"        // Connections + Remote Access merged
+    case memory     = "Memory"            // Voice memo inbox + Notion Memory + agent recall (PKT-977 + memory-hub)
     case datasources = "Data Sources"     // Data-Source Registry: entity → Notion data source + property map
-    case memory     = "Memory"            // PKT-977 Wave 2 Q4: Unified Memory inspector
     case advanced   = "Advanced"
 
     public var id: String { rawValue }
@@ -173,8 +173,8 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
         case .tools:      return "Tools"
         case .security:   return "Security"
         case .connection: return "Connection"
-        case .datasources: return "Data Sources"
         case .memory:     return "Memory"
+        case .datasources: return "Data Sources"
         case .advanced:   return "Advanced"
         }
     }
@@ -187,8 +187,8 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
         case .tools:      return "hammer"
         case .security:   return "lock.shield"
         case .connection: return "network"
+        case .memory:     return "brain.head.profile"
         case .datasources: return "tablecells"
-        case .memory:     return "brain"
         case .advanced:   return "wrench.and.screwdriver"
         }
     }
@@ -294,8 +294,8 @@ public struct SettingsView: View {
             case .tools: toolsSection
             case .security: securitySection
             case .connection: connectionSection
+            case .memory: MemorySection(anchor: nav.anchor)
             case .datasources: DataSourcesSection()
-            case .memory: MemorySection()
             case .advanced: advancedSection
             }
         }

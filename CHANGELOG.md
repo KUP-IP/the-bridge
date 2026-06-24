@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — Memory Hub + Voice Memo curator
+
+- **Settings → Memory** — dedicated pane (Inbox · Notion · Agent) replaces voice-memo review in Advanced. Inbox shows the review queue with transcript preview, source badges (Apple / Parakeet / Sidecar), status filters, and dispositions (File as Memory, Add reminder, Agent should know, Retry routing, Mark handled, Dismiss). Sidebar badge when pending count > 0.
+- **Transcription ladder** — sidecar cache → Apple Voice Memos embedded `tsrp` → FluidAudio Parakeet fallback; `transcript.meta.json` provenance; `voice_memo_list.transcriptSource`.
+- **Review resolve MCP** — `voice_memo_review_resolve` + `voice_memo_transcript_refresh`; TTL sweep (pending 30d auto-dismiss, dismissed 7d purge) on launch/wake.
+- **Notifications** — distinct copy for review / no-transcript / routing-failed; tap opens **Memory → Inbox** via `BridgeNotificationDeepLink`.
+- **Ollama / Local Models** — Qwen thinking fallback, Gemma4:12b summarization defaults, Local Models section in Advanced.
+- **Jobs** — `job_run` on paused jobs via `allowPaused: true` (backlog drain still skips paused).
+- Test floor 2270 → **2292** (+22). `staticFeatureModuleToolCount` 181 → **183**.
+
 ## v3.8.2 — Registry entity-management: `registry_remove_entity` + pane Remove
 
 - **`registry_remove_entity` (10th registry tool).** The symmetric counterpart to `registry_add_entity`: forgets an entity's binding + property map and evicts its cached rows. **Does not touch Notion** — the data source and its rows remain; only the Bridge's local binding is removed. Destructive `.request` tier (confirmation-gated). The seeded **Skills** entity is guarded behind an explicit `confirm:true` so an offhand call can't strip the default a fresh install relies on. Symmetric `RegistryConfigStore.removeEntity(key:)` (atomic persist + cache evict).

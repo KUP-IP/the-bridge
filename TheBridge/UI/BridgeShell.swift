@@ -182,6 +182,12 @@ public enum BridgeAXID {
         public static let retryRouting   = id("inbox.retryRouting")
         /// Mark handled disposition.
         public static let markHandled    = id("inbox.markHandled")
+        /// Add reminder disposition.
+        public static let addReminder    = id("inbox.addReminder")
+        /// Agent should know disposition.
+        public static let agentRemember  = id("inbox.agentRemember")
+        /// Inbox filter chip bar.
+        public static let inboxFilterBar = id("inbox.filterBar")
         /// Notion tab list container.
         public static let notionList     = id("notion.list")
         /// A Notion Memory row.

@@ -1169,6 +1169,19 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
         let identifier = response.notification.request.identifier
         let userInfo = response.notification.request.content.userInfo
 
+        // PKT-MEM-104: banner tap → Settings deep-link (voice memo triage, etc.)
+        if response.actionIdentifier == UNNotificationDefaultActionIdentifier,
+           let sectionRaw = userInfo[BridgeNotificationDeepLink.settingsSectionKey] as? String {
+            let anchor = userInfo[BridgeNotificationDeepLink.settingsAnchorKey] as? String
+            Task { @MainActor in
+                if let section = BridgeSettingsAutomation.resolveSection(sectionRaw) {
+                    _ = BridgeSettingsAutomation.navigate(to: section, anchor: anchor)
+                }
+            }
+            completionHandler()
+            return
+        }
+
         // PKT-552: Notify-tier action handlers — no pending continuation to resume.
         switch response.actionIdentifier {
         case Self.openPageActionIdentifier:

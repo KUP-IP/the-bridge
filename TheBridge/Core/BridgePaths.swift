@@ -59,6 +59,7 @@ public enum BridgePaths {
         case sessions       = "sessions"        // MCP session durability snapshots
         case registry       = "registry"        // data-source registry config (registry.json)
         case registryCache  = "registry-cache"  // per-entity read-through row cache
+        case voiceMemos     = "voice-memos"     // Voice Memos curator manifest + state
     }
 
     // MARK: - Logs
