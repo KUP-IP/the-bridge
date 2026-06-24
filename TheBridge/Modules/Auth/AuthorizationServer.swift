@@ -189,15 +189,25 @@ public enum ProtectedResourceMetadataProvider {
     ///     `NOTION_BRIDGE_PORT`-override / default cases) — ignored when
     ///     `resource` is supplied explicitly.
     ///   - environment: process environment (injectable for tests).
+    ///   - config / baked: injectable resolution seams (Packet E follow-up),
+    ///     threaded to `resolvedResource` / `resolvedIssuer` so a hermetic test
+    ///     can pin the PRM document independent of the build-injected
+    ///     `RemoteAccessIdentity`. `baked` is a UNIFORM override: nil (default /
+    ///     production) ⇒ each resolver uses its own `RemoteAccessIdentity` field
+    ///     (behaviour is byte-identical to before); pass "" to force the
+    ///     fail-closed placeholder issuer + localhost resource regardless of what
+    ///     `make build` baked into this binary.
     public static func metadata(
         resource: String? = nil,
         port: Int? = nil,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        config: (String) -> String? = { ConfigManager.shared.value(forKey: $0) as? String },
+        baked: String? = nil
     ) -> ProtectedResourceMetadata {
-        let resolved = resource ?? resolvedResource(port: port, environment: environment)
+        let resolved = resource ?? resolvedResource(port: port, environment: environment, config: config, baked: baked)
         return ProtectedResourceMetadata(
             resource: resolved,
-            authorizationServers: [resolvedIssuer(environment: environment)],
+            authorizationServers: [resolvedIssuer(environment: environment, config: config, baked: baked)],
             scopesSupported: advertisedAuthKitScopes,
             bearerMethodsSupported: ["header"]
         )
@@ -208,9 +218,11 @@ public enum ProtectedResourceMetadataProvider {
     public static func jsonBody(
         resource: String? = nil,
         port: Int? = nil,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        config: (String) -> String? = { ConfigManager.shared.value(forKey: $0) as? String },
+        baked: String? = nil
     ) -> Data {
-        let doc = metadata(resource: resource, port: port, environment: environment)
+        let doc = metadata(resource: resource, port: port, environment: environment, config: config, baked: baked)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         return (try? encoder.encode(doc)) ?? Data("{}".utf8)
