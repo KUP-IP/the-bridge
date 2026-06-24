@@ -279,4 +279,159 @@ func runRemoteOAuthOriginGatingTests() async {
         try expect(!SSEServer.isRemoteTunnelRequest(headers: head.headers),
                    "a direct-loopback POST /messages must NOT trip the gate")
     }
+
+    // MARK: - E2E: legacy /sse + /messages 403 OUTBOUND through real dispatch
+    //
+    // The predicate tests above prove the gate's *decision inputs*. These drive
+    // the UNMODIFIED `SSEHTTPHandler.processRequest` (via the public
+    // `runHTTPHandlerForTesting` seam) against a real `EmbeddedChannel` and
+    // assert the OUTBOUND response: a tunnel-origin legacy request must emit a
+    // 403 whose body says loopback-only, and its direct-loopback twin must NOT
+    // be 403 (served normally). cloudflared forwards every path to :9700, so
+    // the server itself is the trust boundary for these legacy routes.
+
+    /// Run one decoded request through the live dispatch and drain the captured
+    /// outbound (status, body) from the embedded channel.
+    func driveOutbound(_ raw: String, body: Data? = nil) async throws -> (status: Int, body: String) {
+        let head = try decodeHead(raw)
+        let channel = EmbeddedChannel()
+        // A fresh loop the handler's `eventLoop.execute` writes will target.
+        try await SSEServer.runHTTPHandlerForTesting(on: channel, head: head, body: body)
+        (channel.eventLoop as! EmbeddedEventLoop).run()
+        var status = -1
+        var text = ""
+        while let out = try? channel.readOutbound(as: HTTPServerResponsePart.self) {
+            switch out {
+            case .head(let h): if status == -1 { status = Int(h.status.code) }
+            case .body(let d):
+                if case .byteBuffer(var b) = d, let s = b.readString(length: b.readableBytes) { text += s }
+            case .end: break
+            }
+        }
+        _ = try? channel.finish()
+        return (status, text)
+    }
+
+    await test("OriginGate(legacy E2E): TUNNEL GET /sse ⇒ OUTBOUND 403 loopback-only") {
+        let r = try await driveOutbound("GET /sse HTTP/1.1\r\nHost: 127.0.0.1:9700\r\nCf-Ray: abc-123\r\n\r\n")
+        try expect(r.status == 403, "tunnel GET /sse must emit 403, got \(r.status)")
+        try expect(r.body.lowercased().contains("loopback"),
+                   "403 body must say loopback-only, got: \(r.body)")
+    }
+
+    await test("OriginGate(legacy E2E): LOOPBACK GET /sse ⇒ NOT 403 (served)") {
+        let r = try await driveOutbound("GET /sse HTTP/1.1\r\nHost: 127.0.0.1:9700\r\n\r\n")
+        try expect(r.status != 403, "direct-loopback GET /sse must NOT be 403, got \(r.status)")
+        try expect(r.status == 200, "direct-loopback GET /sse must be served (200 SSE head), got \(r.status)")
+    }
+
+    await test("OriginGate(legacy E2E): TUNNEL POST /messages ⇒ OUTBOUND 403 loopback-only") {
+        let r = try await driveOutbound(
+            "POST /messages?sessionId=x HTTP/1.1\r\nHost: 127.0.0.1:9700\r\nCf-Connecting-Ip: 203.0.113.7\r\nContent-Length: 0\r\n\r\n")
+        try expect(r.status == 403, "tunnel POST /messages must emit 403, got \(r.status)")
+        try expect(r.body.lowercased().contains("loopback"),
+                   "403 body must say loopback-only, got: \(r.body)")
+    }
+
+    await test("OriginGate(legacy E2E): LOOPBACK POST /messages ⇒ NOT 403 (served)") {
+        // A real body so the handler reaches the 202 accept path (a body-less
+        // POST is a legitimate 400 — still NOT the loopback-only 403, which is
+        // the security point). The tunnel twin above 403s BEFORE body handling.
+        let payload = Data(#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#.utf8)
+        let r = try await driveOutbound(
+            "POST /messages?sessionId=x HTTP/1.1\r\nHost: 127.0.0.1:9700\r\nContent-Length: \(payload.count)\r\n\r\n",
+            body: payload)
+        try expect(r.status != 403, "direct-loopback POST /messages must NOT be 403, got \(r.status)")
+        try expect(r.status == 202, "direct-loopback POST /messages must be accepted (202), got \(r.status)")
+    }
+
+    // Non-regression guard: /health stays tunnel-reachable without auth (it is
+    // dispatched before the gate and carries no secret).
+    await test("OriginGate(legacy E2E): TUNNEL GET /health ⇒ NOT 403 (intentionally reachable)") {
+        let r = try await driveOutbound("GET /health HTTP/1.1\r\nHost: 127.0.0.1:9700\r\nCf-Ray: abc-123\r\n\r\n")
+        try expect(r.status != 403, "tunnel GET /health must NOT be 403, got \(r.status)")
+        try expect(r.status == 200, "GET /health must be served 200 even over the tunnel, got \(r.status)")
+    }
+
+    // MARK: - E2E: PRM fail-loud serving path (Packet E Wave 3 — audit #1)
+    //
+    // The pure `isMisconfigured()` is covered in RemoteAccessIdentityTests; this
+    // proves the SERVING path: when misconfigured the `.well-known/oauth-
+    // protected-resource` route refuses (503, NO placeholder authorization
+    // server in the body), and when a valid identity is injected it serves a
+    // normal 200 PRM (byte-identical to the pre-Wave-3 behaviour). The decision
+    // is injected via the seam so both branches are hermetic (no env / no
+    // ConfigManager mutation).
+
+    func drivePRM(decision: @escaping @Sendable () -> ProtectedResourceMetadataProvider.PRMServingDecision)
+        async throws -> (status: Int, body: String) {
+        let head = try decodeHead("GET /.well-known/oauth-protected-resource HTTP/1.1\r\nHost: 127.0.0.1:9700\r\n\r\n")
+        let channel = EmbeddedChannel()
+        try await SSEServer.runHTTPHandlerForTesting(on: channel, head: head, prmDecisionForTesting: decision)
+        (channel.eventLoop as! EmbeddedEventLoop).run()
+        var status = -1
+        var text = ""
+        while let out = try? channel.readOutbound(as: HTTPServerResponsePart.self) {
+            switch out {
+            case .head(let h): if status == -1 { status = Int(h.status.code) }
+            case .body(let d):
+                if case .byteBuffer(var b) = d, let s = b.readString(length: b.readableBytes) { text += s }
+            case .end: break
+            }
+        }
+        _ = try? channel.finish()
+        return (status, text)
+    }
+
+    await test("PRM E2E: misconfigured ⇒ 503 and NO placeholder authorization server advertised") {
+        let r = try await drivePRM { .refuseMisconfigured }
+        try expect(r.status == 503, "misconfigured PRM route must emit 503, got \(r.status)")
+        try expect(!r.body.contains(ProtectedResourceMetadataProvider.defaultIssuer),
+                   "503 body must NOT advertise the auth.example.invalid placeholder, got: \(r.body)")
+        try expect(!r.body.contains("authorization_servers"),
+                   "503 body must NOT carry an authorization_servers list, got: \(r.body)")
+    }
+
+    await test("PRM E2E: configured (valid identity injected) ⇒ normal 200 PRM with that AS") {
+        let goodBody = ProtectedResourceMetadataProvider.jsonBody(
+            resource: "https://mcp.kup.solutions/mcp",
+            environment: ["BRIDGE_OAUTH_ISSUER": "https://real.authkit.app"])
+        let r = try await drivePRM { .serve(goodBody) }
+        try expect(r.status == 200, "configured PRM route must serve 200, got \(r.status)")
+        // JSONEncoder escapes the scheme slashes (https:\/\/…), so match the
+        // host substring rather than the full URL.
+        try expect(r.body.contains("real.authkit.app"),
+                   "200 PRM must advertise the injected authorization server, got: \(r.body)")
+        try expect(r.body.contains("authorization_servers"),
+                   "200 PRM must carry the authorization_servers list, got: \(r.body)")
+        try expect(!r.body.contains("auth.example.invalid"),
+                   "a configured 200 PRM must never contain the placeholder issuer, got: \(r.body)")
+    }
+
+    // The serving path with NO injected decision must agree with the live
+    // `prmServingDecision()` default — proving the gate is actually WIRED to it,
+    // not only reachable via the injected seam. Robust in BOTH a baked and an
+    // unbaked environment: if the real resolver reports misconfigured (the
+    // committed fail-closed default) the route MUST 503; if a real identity is
+    // baked/env-set it MUST serve 200. Either way the wiring is proven.
+    await test("PRM E2E: default decision tracks the live prmServingDecision (gate is wired)") {
+        let head = try decodeHead("GET /.well-known/oauth-protected-resource HTTP/1.1\r\nHost: 127.0.0.1:9700\r\n\r\n")
+        let channel = EmbeddedChannel()
+        // No prmDecisionForTesting ⇒ the live `prmServingDecision()` runs.
+        try await SSEServer.runHTTPHandlerForTesting(on: channel, head: head)
+        (channel.eventLoop as! EmbeddedEventLoop).run()
+        var status = -1
+        while let out = try? channel.readOutbound(as: HTTPServerResponsePart.self) {
+            if case .head(let h) = out { status = Int(h.status.code); break }
+        }
+        _ = try? channel.finish()
+        let misconfigured = ProtectedResourceMetadataProvider.isMisconfigured()
+        if misconfigured {
+            try expect(status == 503,
+                       "misconfigured (placeholder issuer) build must hit the fail-loud 503, got \(status)")
+        } else {
+            try expect(status == 200,
+                       "a configured build must serve a normal 200 PRM, got \(status)")
+        }
+    }
 }
