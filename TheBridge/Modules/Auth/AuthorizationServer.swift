@@ -189,15 +189,25 @@ public enum ProtectedResourceMetadataProvider {
     ///     `NOTION_BRIDGE_PORT`-override / default cases) — ignored when
     ///     `resource` is supplied explicitly.
     ///   - environment: process environment (injectable for tests).
+    ///   - config / baked: injectable resolution seams (Packet E follow-up),
+    ///     threaded to `resolvedResource` / `resolvedIssuer` so a hermetic test
+    ///     can pin the PRM document independent of the build-injected
+    ///     `RemoteAccessIdentity`. `baked` is a UNIFORM override: nil (default /
+    ///     production) ⇒ each resolver uses its own `RemoteAccessIdentity` field
+    ///     (behaviour is byte-identical to before); pass "" to force the
+    ///     fail-closed placeholder issuer + localhost resource regardless of what
+    ///     `make build` baked into this binary.
     public static func metadata(
         resource: String? = nil,
         port: Int? = nil,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        config: (String) -> String? = { ConfigManager.shared.value(forKey: $0) as? String },
+        baked: String? = nil
     ) -> ProtectedResourceMetadata {
-        let resolved = resource ?? resolvedResource(port: port, environment: environment)
+        let resolved = resource ?? resolvedResource(port: port, environment: environment, config: config, baked: baked)
         return ProtectedResourceMetadata(
             resource: resolved,
-            authorizationServers: [resolvedIssuer(environment: environment)],
+            authorizationServers: [resolvedIssuer(environment: environment, config: config, baked: baked)],
             scopesSupported: advertisedAuthKitScopes,
             bearerMethodsSupported: ["header"]
         )
@@ -208,13 +218,59 @@ public enum ProtectedResourceMetadataProvider {
     public static func jsonBody(
         resource: String? = nil,
         port: Int? = nil,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        config: (String) -> String? = { ConfigManager.shared.value(forKey: $0) as? String },
+        baked: String? = nil
     ) -> Data {
-        let doc = metadata(resource: resource, port: port, environment: environment)
+        let doc = metadata(resource: resource, port: port, environment: environment, config: config, baked: baked)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         return (try? encoder.encode(doc)) ?? Data("{}".utf8)
     }
+
+    /// Packet E Wave 3 — fail-loud PRM serving decision.
+    ///
+    /// What the `/.well-known/oauth-protected-resource` route should emit:
+    ///   • `.serve(body)` — the build is configured (env / config.json / baked
+    ///     identity present), so advertise the normal RFC 9728 document. The
+    ///     body is exactly `jsonBody(...)`, so a configured deployment is
+    ///     byte-identical to the pre-Wave-3 behaviour (a normal 200 PRM).
+    ///   • `.refuseMisconfigured` — `isMisconfigured()` is true: the resolved
+    ///     issuer is still the fail-closed `auth.example.invalid` placeholder.
+    ///     The caller MUST NOT serve a 200 advertising a placeholder
+    ///     authorization server (a client would be sent into a dead OAuth
+    ///     discovery against a non-resolvable host). Fail loud instead.
+    ///
+    /// Pure + injectable (env / config / baked seams) so the serving-path
+    /// decision is hermetically testable; the live serving path calls it with
+    /// the defaults (real environment, ConfigManager, baked identity), so the
+    /// gate fires off exactly the same signal that `isMisconfigured()` reports.
+    public enum PRMServingDecision: Sendable, Equatable {
+        case serve(Data)
+        case refuseMisconfigured
+    }
+
+    public static func prmServingDecision(
+        resource: String? = nil,
+        port: Int? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        config: (String) -> String? = { ConfigManager.shared.value(forKey: $0) as? String },
+        baked: String? = nil
+    ) -> PRMServingDecision {
+        if isMisconfigured(environment: environment, config: config, baked: baked) {
+            return .refuseMisconfigured
+        }
+        return .serve(jsonBody(resource: resource, port: port, environment: environment))
+    }
+
+    /// Short human-readable error message for the 503 the PRM route returns
+    /// when the build is misconfigured (placeholder issuer). The 503 body
+    /// deliberately advertises NO `authorization_servers` — it signals "remote
+    /// access is not configured" rather than handing out the `.invalid`
+    /// placeholder authorization server.
+    public static let misconfiguredPRMErrorMessage =
+        "remote access not configured: no authorization server is advertised "
+        + "until BRIDGE_OAUTH_ISSUER / config / a baked identity is set"
 }
 
 /// PKCE challenge pair (RFC 7636). `method` is `S256` for OAuth 2.1.
