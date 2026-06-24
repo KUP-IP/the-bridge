@@ -797,6 +797,8 @@ await runLicenseRevocationTests()
 await runLicenseDispatchGateTests()
 // Packet B (PRJCT-2754 · Ship The Bridge v4): pubkey injection + mint→verify→entitled.
 await runLicenseCLITests()
+// PKT-1014 T2: comprehensive coverage sweep (payment, licensing, UI, edge/error envelopes).
+await runPaymentLicenseT2Tests()
 // Packet E (PRJCT-2754): durable Remote-Access OAuth identity resolution precedence.
 await runRemoteAccessIdentityTests()
 // Packet E Wave 2 (PRJCT-2754): config-backed WorkOS / JWKS / TransportRouter /
