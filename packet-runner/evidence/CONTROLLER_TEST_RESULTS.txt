@@ -53,7 +53,9 @@
   ✅ [T81] no_cleanup_control_plane
   ✅ [T99] overlap_gate_cases
   ✅ [T99] overlap_verify_best_effort
+  ✅ [T57] pause_gate_aborts_when_disabled
+  ✅ [T58] reenable_is_operator_only
 ============================================================
-Results: 55 passed, 0 failed, 55 total
-Distinct acceptance IDs exercised: 62 → T1,T2,T3,T4,T5,T8,T10,T11,T12,T13,T16,T17,T18,T19,T20,T24,T28,T29,T30,T31,T32,T33,T36,T37,T40,T42,T43,T46,T49,T54,T55,T56,T60,T61,T64,T65,T66,T67,T68,T69,T70,T71,T72,T73,T74,T75,T76,T78,T79,T81,T88,T89,T92,T93,T99,T100,T102,T103,T105,T107,T110,T113
+Results: 57 passed, 0 failed, 57 total
+Distinct acceptance IDs exercised: 64 → T1,T2,T3,T4,T5,T8,T10,T11,T12,T13,T16,T17,T18,T19,T20,T24,T28,T29,T30,T31,T32,T33,T36,T37,T40,T42,T43,T46,T49,T54,T55,T56,T57,T58,T60,T61,T64,T65,T66,T67,T68,T69,T70,T71,T72,T73,T74,T75,T76,T78,T79,T81,T88,T89,T92,T93,T99,T100,T102,T103,T105,T107,T110,T113
 ✅ ALL DETERMINISTIC CONTROLLER TESTS PASSED

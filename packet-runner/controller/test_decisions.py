@@ -469,6 +469,21 @@ def overlap_verify_best_effort():
     assert d.overlap_verify(None, "cycleA") == 'FAILED'   # write didn't stick
 
 
+# ── fail-closed kill-switch (§8.13) ───────────────────────────────────────────
+@t("T57")
+def pause_gate_aborts_when_disabled():
+    assert d.pause_gate(True) == 'PAUSED'
+    assert d.pause_gate(False) == 'PROCEED'
+    assert d.request_pause(reread_disabled=True) == 'CONFIRMED'
+    assert d.request_pause(reread_disabled=False) == 'UNCONFIRMED'   # write didn't stick → critical control issue
+
+
+@t("T58")
+def reenable_is_operator_only():
+    assert d.may_reenable(actor_is_authorized_operator=True) is True
+    assert d.may_reenable(actor_is_authorized_operator=False) is False  # routine can never self-re-enable
+
+
 def main():
     covered = set()
     passed = failed = 0

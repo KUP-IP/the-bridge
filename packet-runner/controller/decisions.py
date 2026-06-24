@@ -620,3 +620,30 @@ def overlap_verify(reread_latch, our_id: str) -> str:
     PROCEED only when the re-read shows OUR holder; otherwise a concurrent writer won
     or the write didn't stick → overlap cannot be ruled out → FAILED, no packet started. [T99]"""
     return 'PROCEED' if (reread_latch is not None and reread_latch.holder == our_id) else 'FAILED'
+
+
+# ── §8.13 fail-closed kill-switch (provider pause is UI-only, not machine-callable) ──
+# Integration finding (2026-06-24): Routines pause/disable is **UI-ONLY** — no API
+# (the only documented Routines endpoint is POST .../fire). §8.13 says a UI toggle
+# does NOT satisfy the autonomous-pause exception, but §8.5A permits a controller
+# fail-closed latch. So the same single-writer latch store carries a `disabled`
+# flag: Packet Runner may SET it on a critical incident (autonomous pause), and
+# every cycle reads it at start and aborts before any work. The controller may
+# NEVER clear it — re-enable is operator-only (T58).
+def pause_gate(disabled: bool) -> str:
+    """§8.13/§8.5A fail-closed kill-switch, read at cycle start. disabled ⇒ abort
+    before any packet work; else PROCEED. [T57 deterministic core]"""
+    return 'PAUSED' if disabled else 'PROCEED'
+
+
+def request_pause(reread_disabled: bool) -> str:
+    """§8.13 + FR-18: an autonomous pause is only honored once the flag write is
+    CONFIRMED by re-read ('Failure to confirm the pause is itself surfaced as a
+    critical unresolved control issue'). Returns 'CONFIRMED' | 'UNCONFIRMED'."""
+    return 'CONFIRMED' if reread_disabled else 'UNCONFIRMED'
+
+
+def may_reenable(actor_is_authorized_operator: bool) -> bool:
+    """§8.13 / T58: re-enable is an explicit operator decision; the controller may
+    NEVER re-enable itself. Returns False for any non-operator (incl. the routine)."""
+    return bool(actor_is_authorized_operator)
