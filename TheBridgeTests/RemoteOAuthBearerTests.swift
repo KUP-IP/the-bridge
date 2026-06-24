@@ -586,13 +586,13 @@ func runRemoteOAuthBearerTests() async {
 
     await test("PRM fix: resource reflects NOTION_BRIDGE_PORT override") {
         let m = ProtectedResourceMetadataProvider.metadata(
-            environment: ["NOTION_BRIDGE_PORT": "8123"]
+            environment: ["NOTION_BRIDGE_PORT": "8123"], config: { _ in nil }, baked: ""
         )
         try expect(m.resource == "http://127.0.0.1:8123/mcp", "got \(m.resource)")
     }
 
     await test("PRM fix: resolvedResource honors explicit port arg") {
-        let r = ProtectedResourceMetadataProvider.resolvedResource(port: 5555, environment: [:])
+        let r = ProtectedResourceMetadataProvider.resolvedResource(port: 5555, environment: [:], config: { _ in nil }, baked: "")
         try expect(r == "http://127.0.0.1:5555/mcp", "got \(r)")
     }
 
@@ -611,7 +611,7 @@ func runRemoteOAuthBearerTests() async {
     }
 
     await test("PKT-810 Model B: blank/whitespace BRIDGE_PUBLIC_RESOURCE falls through to local") {
-        let r = ProtectedResourceMetadataProvider.resolvedResource(port: 9700, environment: ["BRIDGE_PUBLIC_RESOURCE": "   "])
+        let r = ProtectedResourceMetadataProvider.resolvedResource(port: 9700, environment: ["BRIDGE_PUBLIC_RESOURCE": "   "], config: { _ in nil }, baked: "")
         try expect(r == "http://127.0.0.1:9700/mcp", "blank override must not poison; got \(r)")
     }
 
@@ -619,7 +619,7 @@ func runRemoteOAuthBearerTests() async {
         // Non-numeric / out-of-range env value must NOT poison the URL;
         // resolver falls through to ConfigManager (default 9700 in test env).
         let r = ProtectedResourceMetadataProvider.resolvedResource(
-            environment: ["NOTION_BRIDGE_PORT": "not-a-port"]
+            environment: ["NOTION_BRIDGE_PORT": "not-a-port"], config: { _ in nil }, baked: ""
         )
         try expect(r.hasPrefix("http://127.0.0.1:"), "got \(r)")
         try expect(r.hasSuffix("/mcp"), "got \(r)")
@@ -636,7 +636,7 @@ func runRemoteOAuthBearerTests() async {
 
     await test("PRM fix: jsonBody resource reflects port override end-to-end") {
         let data = ProtectedResourceMetadataProvider.jsonBody(
-            environment: ["NOTION_BRIDGE_PORT": "7001"]
+            environment: ["NOTION_BRIDGE_PORT": "7001"], config: { _ in nil }, baked: ""
         )
         let obj = try (JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
         try expect(obj["resource"] as? String == "http://127.0.0.1:7001/mcp", "got \(String(describing: obj["resource"]))")

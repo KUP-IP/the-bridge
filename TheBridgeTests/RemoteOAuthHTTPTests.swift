@@ -37,7 +37,9 @@ func runRemoteOAuthHTTPTests() async {
     }
 
     await test("PRM: authorization_servers reflects documented default when env unset") {
-        let m = ProtectedResourceMetadataProvider.metadata(environment: [:])
+        // Hermetic (Packet E follow-up): pin config+baked empty so this holds
+        // regardless of any identity `make build` baked into this binary.
+        let m = ProtectedResourceMetadataProvider.metadata(environment: [:], config: { _ in nil }, baked: "")
         try expect(
             m.authorizationServers == [ProtectedResourceMetadataProvider.defaultIssuer],
             "expected default issuer, got \(m.authorizationServers)"
@@ -58,9 +60,9 @@ func runRemoteOAuthHTTPTests() async {
     }
 
     await test("PRM: blank / whitespace BRIDGE_OAUTH_ISSUER falls back to default") {
-        let m1 = ProtectedResourceMetadataProvider.metadata(environment: ["BRIDGE_OAUTH_ISSUER": "   "])
+        let m1 = ProtectedResourceMetadataProvider.metadata(environment: ["BRIDGE_OAUTH_ISSUER": "   "], config: { _ in nil }, baked: "")
         try expect(m1.authorizationServers == [ProtectedResourceMetadataProvider.defaultIssuer])
-        let m2 = ProtectedResourceMetadataProvider.metadata(environment: ["BRIDGE_OAUTH_ISSUER": ""])
+        let m2 = ProtectedResourceMetadataProvider.metadata(environment: ["BRIDGE_OAUTH_ISSUER": ""], config: { _ in nil }, baked: "")
         try expect(m2.authorizationServers == [ProtectedResourceMetadataProvider.defaultIssuer])
     }
 
@@ -92,7 +94,7 @@ func runRemoteOAuthHTTPTests() async {
     }
 
     await test("PRM: resource defaults to localhost Streamable HTTP endpoint") {
-        let m = ProtectedResourceMetadataProvider.metadata(environment: [:])
+        let m = ProtectedResourceMetadataProvider.metadata(environment: [:], config: { _ in nil }, baked: "")
         try expect(m.resource.contains("/mcp"), "resource should target /mcp endpoint")
         try expect(m.resource.contains("127.0.0.1"), "resource should be localhost in S1")
     }
