@@ -157,6 +157,7 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
     case security   = "Security"          // Credentials + Permissions merged
     case connection = "Connection"        // Connections + Remote Access merged
     case datasources = "Data Sources"     // Data-Source Registry: entity → Notion data source + property map
+    case memory     = "Memory"            // PKT-977 Wave 2 Q4: Unified Memory inspector
     case advanced   = "Advanced"
 
     public var id: String { rawValue }
@@ -173,6 +174,7 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
         case .security:   return "Security"
         case .connection: return "Connection"
         case .datasources: return "Data Sources"
+        case .memory:     return "Memory"
         case .advanced:   return "Advanced"
         }
     }
@@ -186,6 +188,7 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
         case .security:   return "lock.shield"
         case .connection: return "network"
         case .datasources: return "tablecells"
+        case .memory:     return "brain"
         case .advanced:   return "wrench.and.screwdriver"
         }
     }
@@ -292,6 +295,7 @@ public struct SettingsView: View {
             case .security: securitySection
             case .connection: connectionSection
             case .datasources: DataSourcesSection()
+            case .memory: MemorySection()
             case .advanced: advancedSection
             }
         }

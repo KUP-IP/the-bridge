@@ -263,7 +263,8 @@ public actor MemoryStore {
         scope: String,
         entity: String? = nil,
         type: MemoryEntry.EntryType = .fact,
-        source: String
+        source: String,
+        ttlSeconds: TimeInterval? = nil
     ) throws -> MemoryEntry {
         try ensureOpen()
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -271,8 +272,12 @@ public actor MemoryStore {
         guard !scope.trimmingCharacters(in: .whitespaces).isEmpty else {
             throw MemoryStoreError.invalidArgument("scope is empty")
         }
+        if let ttl = ttlSeconds, ttl <= 0 {
+            throw MemoryStoreError.invalidArgument("ttlSeconds must be positive")
+        }
         let hash = Self.contentHash(text)
         let now = Date()
+        let expiresAt: Date? = ttlSeconds.map { now.addingTimeInterval($0) }
 
         // Dedup is SCOPED to (scope, entity): identical text about a different
         // entity/scope is a distinct memory, not a duplicate.
@@ -294,7 +299,8 @@ public actor MemoryStore {
                 scope: scope, entity: entity, text: text, type: type,
                 pinned: dup.pinned, useCount: dup.useCount + 1,
                 createdAt: now, lastUsedAt: now, source: source,
-                contentHash: hash, supersedesId: dup.id
+                contentHash: hash, supersedesId: dup.id,
+                expiresAt: expiresAt
             )
             try insertRow(fresh)
             try tombstone(id: dup.id, at: now)   // soft-retire the stale text
@@ -305,7 +311,7 @@ public actor MemoryStore {
         let entry = MemoryEntry(
             scope: scope, entity: entity, text: text, type: type,
             pinned: false, useCount: 0, createdAt: now, lastUsedAt: now,
-            source: source, contentHash: hash
+            source: source, contentHash: hash, expiresAt: expiresAt
         )
         try insertRow(entry)
         return entry
@@ -490,22 +496,39 @@ public actor MemoryStore {
         try ensureOpen()
         var referenceDemoted = 0
         var expiredTombstoned = 0
-        let all = try liveEntries(scope: nil, entity: nil)
-        for entry in all where !entry.pinned {
-            if let exp = entry.expiresAt, exp <= now {
+
+        // Pass 1: tombstone rows whose explicit TTL has elapsed.
+        // These are already excluded from liveEntries, so query all rows directly.
+        let pastExpired = try expiredEntries(before: now)
+        for entry in pastExpired where !entry.pinned {
+            try tombstone(id: entry.id, at: now)
+            expiredTombstoned += 1
+        }
+
+        // Pass 2: demote stale reference entries (still in the live set).
+        let live = try liveEntries(scope: nil, entity: nil)
+        for entry in live where !entry.pinned && entry.type == .reference {
+            let age = now.timeIntervalSince(entry.lastUsedAt)
+            if age >= Self.referenceStaleSeconds {
                 try tombstone(id: entry.id, at: now)
-                expiredTombstoned += 1
-                continue
-            }
-            if entry.type == .reference {
-                let age = now.timeIntervalSince(entry.lastUsedAt)
-                if age >= Self.referenceStaleSeconds {
-                    try tombstone(id: entry.id, at: now)
-                    referenceDemoted += 1
-                }
+                referenceDemoted += 1
             }
         }
+
         return ConsolidationReport(referenceDemoted: referenceDemoted, expiredTombstoned: expiredTombstoned)
+    }
+
+    /// Returns rows with a past explicit `expiresAt` that have NOT yet been re-tombstoned
+    /// (i.e., their expiresAt is strictly before `before` but not at now — these were set by
+    /// the TTL path, not by an explicit tombstone call which sets expiresAt = now).
+    /// We use a half-open window: expiresAt < before — so already-tombstoned rows
+    /// (expiresAt = now) are excluded on subsequent sweeps.
+    private func expiredEntries(before: Date) throws -> [MemoryEntry] {
+        let sql = "SELECT \(Self.columns) FROM memory WHERE expiresAt IS NOT NULL AND expiresAt < ? ORDER BY lastUsedAt DESC;"
+        let rows = try queryRows(sql) { stmt in
+            sqlite3_bind_double(stmt, 1, before.timeIntervalSince1970)
+        }
+        return rows.compactMap(Self.entryFromRow)
     }
 
     /// ~90 days without use: `reference` entries are soft-tombstoned on consolidation.

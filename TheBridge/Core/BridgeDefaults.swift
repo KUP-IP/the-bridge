@@ -100,6 +100,14 @@ public enum BridgeDefaults {
         UserDefaults.standard.bool(forKey: memoryHandshakeAutoInject)
     }
 
+    /// Wave 2 (PKT-977 Q1): per-client memory auto-inject overrides. Data
+    /// (JSON-encoded `[String /* clientName */ : Bool /* override */]`).
+    /// When a per-client entry is present, it overrides the global
+    /// `memoryHandshakeAutoInject` flag for that specific client. ABSENT or
+    /// empty map ⇒ no per-client override (global flag governs). Written/read
+    /// by `MemoryAutoInjectClientStore`.
+    public static let memoryAutoInjectClientOverrides = "com.notionbridge.memory.autoInjectClientOverrides"
+
     // MARK: - Commands Palette (cmd-ux)
 
     /// Master on/off for the Commands palette (global-hotkey command box).

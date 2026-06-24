@@ -1424,10 +1424,15 @@ set -euo pipefail
 # proven WIRED, not only seam-reachable). The origin-decision logic
 # (isRemoteTunnelRequest, the legacy-route loopback-only 403, the loopback /mcp
 # split) is byte-unchanged. Measured integrated green 2242 → 2250.
-FLOOR="${BRIDGE_TEST_FLOOR:-2268}"
 # PKT-1010 (2026-06-24): Packet C activation + onboarding UX polish. +18 OnboardingTokenValidator
 # tests (trim + validate: ntn_/secret_ prefix, short token, whitespace-only, trimmed clean, etc.).
 # Measured integrated green 2250 → 2268.
+# PKT-977 Wave 2 (2026-06-24): Q1 MemoryAutoInjectClientStore tests (+3),
+# asyncComposition tests (+2), Q2 TTL tests (+3), consolidation sweep TTL test (+1),
+# handler TTL test (+1), Q4 SettingsSection Memory case tests (+4 across
+# WSHMenuBarTests/BridgeAutomationModuleTests/SettingsSectionsLGTests),
+# Q2 expiredEntries sweep path fix. Batch-merged onto PKT-1010: 2268 + 12 = 2280.
+FLOOR="${BRIDGE_TEST_FLOOR:-2280}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

@@ -968,11 +968,14 @@ public actor SSEServer {
         )
 
         let appVersion = AppVersion.resolved
-        // SSOT: the Streamable-HTTP session's `initialize.instructions` now
-        // comes from StandingOrdersDelivery — byte-identical to the stdio
-        // (ServerManager) path and the legacy SSE path, and the same
-        // composition that backs the bridge:// resources.
-        let composition = StandingOrdersDelivery.composition(clientName: clientName)
+        // SSOT + PKT-977 Wave 2 Q1: the Streamable-HTTP session's
+        // `initialize.instructions` comes from StandingOrdersDelivery.
+        // `asyncComposition` is used here: when the operator has enabled
+        // memory auto-inject (global flag or per-client override), the
+        // salient memory slice is appended token-capped. When the flag is
+        // OFF (the default), `asyncComposition` returns the same bytes as
+        // the sync path, so behaviour is byte-identical for existing sessions.
+        let composition = await StandingOrdersDelivery.asyncComposition(clientName: clientName)
         let composedInstructions = composition.instructionsMarkdown
         // W2 telemetry: record the handshake we composed + shipped (tokens +
         // content hash) for this session. Off-actor-safe via the nonisolated
@@ -1157,12 +1160,12 @@ public actor SSEServer {
             }
 
             let legacyVersion = AppVersion.resolved
-            // SSOT: legacy initialize instructions come from
-            // StandingOrdersDelivery — byte-identical to the stdio
-            // (ServerManager) and Streamable-HTTP paths, and the same
-            // composition that backs the bridge:// resources. The
-            // best-effort store-read fallback lives inside the SSOT.
-            let composition = StandingOrdersDelivery.composition()
+            // SSOT + PKT-977 Wave 2 Q1: legacy initialize uses asyncComposition
+            // so memory auto-inject (when enabled) also reaches legacy SSE clients.
+            // When the flag is OFF (default), asyncComposition is byte-identical to
+            // the sync path — no behaviour change for existing sessions.
+            let legacyClientName = sessionID.flatMap { legacy.clientName(sessionID: $0) }
+            let composition = await StandingOrdersDelivery.asyncComposition(clientName: legacyClientName)
             let composedInstructions = composition.instructionsMarkdown
             // W2 telemetry: record the handshake we composed + shipped, same as
             // the Streamable-HTTP path (both transports emit identically). The
@@ -1170,7 +1173,7 @@ public actor SSEServer {
             if let sessionID {
                 DeliveryLog.shared.recordHandshakeDelivered(
                     sessionID: sessionID,
-                    clientName: legacy.clientName(sessionID: sessionID),
+                    clientName: legacyClientName,
                     tokenCount: composition.tokenCount,
                     contentHash: composition.contentHash
                 )

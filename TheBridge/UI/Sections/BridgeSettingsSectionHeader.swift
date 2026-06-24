@@ -159,6 +159,13 @@ public enum BridgeSettingsHeaderPreset {
                 systemImage: BridgeSectionIcon.systemImage(for: .datasources),
                 tint: NotionPalette.blue
             )
+        case .memory:
+            return Spec(
+                title: "Memory",
+                subtitle: "Salient memories the agent has stored — inspect, pin, and forget entries.",
+                systemImage: BridgeSectionIcon.systemImage(for: .memory),
+                tint: NotionPalette.pink
+            )
         case .advanced:
             return Spec(
                 title: "Advanced",
