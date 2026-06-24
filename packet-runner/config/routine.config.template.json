@@ -1,0 +1,108 @@
+{
+  "_about": "Packet Runner routine configuration TEMPLATE (PRD §8.5A). One version-controlled config per routine. Copy to routine.config.json and replace every <PLACEHOLDER>. Secret VALUES never live here — only safe aliases (PRD §8.9). Preflight fails closed before any packet mutation when this config is missing, inconsistent, points at an inaccessible project/repo/brief/qualification/evidence destination, allows overlapping runs, or uses contract/schema versions outside the supported range (PRD §8.5A configuration validation).",
+  "_source_of_truth": "_refs/PRD-v1.0.md §8.5A; companion logic in controller/CONTROLLER_SPEC.md",
+
+  "version": "<ROUTINE_CONFIG_VERSION e.g. 1.0.0>",
+
+  "provider": {
+    "_note": "PRD §8.5A + FR-9. The provider must satisfy all nine capabilities; selection evidence is recorded under provider_capability_results below. Do NOT build a generalized adapter framework for v1.",
+    "name": "<PROVIDER_NAME e.g. claude-code | cursor | codex>",
+    "workspace_alias": "<PROVIDER_WORKSPACE_OR_ACCOUNT_ALIAS — safe alias, never a secret>",
+    "self_pause_action": {
+      "_note": "Machine-callable self-pause/disable action OR a deterministic provider-native fail-closed latch, scoped to THIS routine only (PRD §8.5A, §8.13). Packet Runner may pause/disable within an incident boundary but may NEVER re-enable itself.",
+      "kind": "<machine_callable_pause | fail_closed_latch>",
+      "reference": "<PROVIDER_PAUSE_ACTION_REF_OR_ALIAS>"
+    }
+  },
+
+  "routine_id": "<ROUTINE_ID>",
+
+  "timezone": "America/Chicago",
+  "_timezone_note": "PRD §8.5A: America/Chicago for the initial routine unless Isaiah explicitly changes it. Used for Execution Window evaluation when a window embeds no timezone (§8.1).",
+
+  "schedule": null,
+  "_schedule_note": "INTENTIONALLY null. PRD §8.5A + FR-8: schedule is an operator-supplied provider-native schedule, and NO unattended run is enabled until this value is reviewed. UNATTENDED RUNS STAY DISABLED until reviewed AND until the §8.20 20-cycle production-qualification gate passes with explicit operator sign-off. Until then, execution is manual Run-Now only, under the same provider non-overlap guard. Replace null with the reviewed provider-native cron/recurrence ONLY after qualification + authorization.",
+  "schedule_fields_when_enabled": {
+    "_note": "Reference shape only — NOT active while \"schedule\": null. Populate the live \"schedule\" field above (provider-native) after review. Missed runs are NOT backfilled (FR-8). Time zone / daylight-saving / manual-run behavior remain provider-native.",
+    "cron_or_recurrence": "<PROVIDER_NATIVE_SCHEDULE_EXPRESSION>",
+    "missed_run_behavior": "no-backfill"
+  },
+
+  "project_id": "<NOTION_PROJECT_PAGE_ID — the PROJECT relation target scoping the QUEUE query (PRD §6.2, FR-2)>",
+
+  "repository": {
+    "_note": "PRD §8.5A, §8.21. Never modify the canonical default branch directly in unattended v1; use a provider-isolated clone/branch/worktree and a packet branch named packet/<PKT-ID>-<short-slug>.",
+    "owner": "<REPO_OWNER>",
+    "name": "<REPO_NAME>",
+    "default_branch": "<CANONICAL_DEFAULT_BRANCH e.g. main>",
+    "isolation_mode": "<isolated_clone | worktree | branch>"
+  },
+
+  "brief_page_id": "389cbb58-889e-8165-b407-e5e6f0bd45b3",
+  "_brief_page_note": "Created 2026-06-23 ('Packet Runner Brief — v1 Pilot', under the PRD page) per PRD §8.6. Single canonical latest-brief page; preflight fails visibly if unresolvable/un-updatable. Operator may relocate/redesignate for the real pilot project.",
+  "qualification_evidence_page_id": "389cbb58-889e-8184-b8da-fb72881782d6",
+  "_qualification_evidence_page_note": "Created 2026-06-23 ('Packet Runner Qualification — v1 Pilot', under the PRD page) per PRD §8.20. Required only while the qualification pilot is active.",
+  "durable_evidence_destination": {
+    "_note": "PRD §8.5A + §8.18. Stable Notion page/file area OR repository evidence path for redacted incident exports and portable review artifacts. MUST NOT be an ephemeral local directory.",
+    "kind": "<notion_page | notion_file_area | repo_path>",
+    "locator": "<STABLE_NOTION_PAGE_ID_OR_REPO_EVIDENCE_PATH>"
+  },
+
+  "max_packets_per_cycle": 1,
+  "_max_packets_note": "PRD §8.5A + §6.6: pilot is exactly 1 packet per cycle. Increasing this is a persistent change requiring review (§8.13) and may expand only one dimension at a time after qualification (§8.20).",
+
+  "cycle_timeout_seconds": "<INT — MUST be shorter than the schedule interval (PRD §8.5A)>",
+  "packet_timeout_seconds": "<INT — MUST be shorter than the 14400s (4h) stale-FOCUS threshold (PRD §8.5A, §8.14)>",
+
+  "maintenance_max_items": 10,
+  "maintenance_time_budget_seconds": 120,
+  "_maintenance_note": "PRD §8.5A + §8.17. Bounded cleanup/archival runs AFTER packet reconciliation and BEFORE the brief; it starts no mission work so it does not count against max_packets_per_cycle, but must stay time-bounded.",
+
+  "model": {
+    "_note": "PRD §8.5A, FR-18, §8.13. Session-local model choice is allowed only within this allowlist; changing the default or allowlist is a persistent change requiring review.",
+    "default": "<DEFAULT_MODEL_ID>",
+    "allowlist": ["<APPROVED_MODEL_ID_1>", "<APPROVED_MODEL_ID_2>"]
+  },
+
+  "allowed_execution_modes": ["fresh-worker", "inline"],
+  "_execution_modes_note": "PRD §6 + FR-9: fresh executor worker preferred; inline executor fallback. Both must be approved for the controller to switch between them session-locally (§8.13).",
+
+  "connections": {
+    "_note": "PRD §8.5A + §8.9. Core tool/MCP connections and SAFE credential aliases only — never secret values. Least-privilege (FR-13). Aliases such as github:primary, notion:primary, STRIPE_API_KEY are referenced; values stay in native secret stores.",
+    "core_tools": ["<MCP_OR_TOOL_CONNECTION_1>", "<MCP_OR_TOOL_CONNECTION_2>"],
+    "credential_aliases": ["<github:primary>", "<notion:primary>"]
+  },
+
+  "authorized_identities": {
+    "_note": "PRD §8.5A + §8.10 + §8.13. Reviewer/operator identities and who holds provider pause/re-enable authority. Re-enablement of a paused routine is an explicit operator decision; the routine may never re-enable itself.",
+    "reviewers": ["<REVIEWER_IDENTITY_1>"],
+    "operators": ["<OPERATOR_IDENTITY_1 e.g. Isaiah>"],
+    "provider_pause_authority": ["<IDENTITY_WITH_PAUSE_REENABLE_AUTHORITY>"]
+  },
+
+  "provider_capability_results": {
+    "_note": "PRD §8.5A provider-selection rule + FR-9. Record VERIFIED evidence per capability. Every capability except session_export is REQUIRED; session_export may be 'fallback' using the §8.18 compact-bundle path. Fail closed: any unverified capability cell blocks rollout (PROGRAM_PLAN honest gate map). Preflight P9–P12 re-asserts these live.",
+    "non_overlap_enforcement": "<verified | BLOCKED: requires real provider integration testing>",
+    "repository_isolation": "<verified | BLOCKED: requires real provider integration testing>",
+    "worker_or_inline_execution": "<verified | BLOCKED: requires real provider integration testing>",
+    "registry_and_mcp_access": "<verified | BLOCKED: requires real provider integration testing>",
+    "native_execution_reference": "<verified | BLOCKED: requires real provider integration testing>",
+    "failure_signaling": "<verified | BLOCKED: requires real provider integration testing>",
+    "routine_pause_or_fail_closed_latch": "<verified | BLOCKED: requires real provider integration testing>",
+    "completion_notification_with_brief_link": "<verified | BLOCKED: requires real provider integration testing>",
+    "session_export": "<verified | fallback (§8.18 compact bundle) | BLOCKED: requires real provider integration testing>"
+  },
+
+  "contract_versions": {
+    "_note": "PRD §8.5A. Preflight rejects any version outside the supported range (also enforced at dispatch per §8.4).",
+    "prd": "v1.0",
+    "executor": "8.1.0-packet-runner",
+    "orchestrator": "7.1.0",
+    "close_agent": "3.2.0",
+    "registry_schema": "packet-registry-v1",
+    "receipt_contract": "packet-runner-receipt-v1"
+  },
+
+  "qualification_pilot_active": false,
+  "_qualification_note": "PRD §8.20. Set true only during the scheduled 20-cycle qualification pilot; while true, every cycle appends a qualification-evidence row after brief+notification results are known. A missing/unverifiable row makes the cycle non-qualifying and breaks the streak even when cycle health is HEALTHY. Production-qualified status requires 20 consecutive clean cycles + operator sign-off; scheduling stays OFF until then."
+}
