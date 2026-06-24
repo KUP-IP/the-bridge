@@ -412,6 +412,20 @@ public actor SSEServer {
             print("[SSE] Legacy SSE:      GET /sse + POST /messages")
             print("[SSE] Health:          GET /health")
 
+            // Packet E Wave 3 (fail-loud): the connector OAuth gate is live
+            // ONLY when streamableHTTP is active — and `connectorAuth` is
+            // built iff `transportRouter.isActive(.streamableHTTP)` (see
+            // ServerManager.setup), so `connectorAuth != nil` is that signal
+            // here without reaching into ServerManager. If the build is also
+            // misconfigured (resolved issuer is still the fail-closed
+            // placeholder), the PRM route now refuses (503) instead of
+            // advertising `auth.example.invalid`; emit ONE loud line so an
+            // operator sees why remote sign-in will not work.
+            if connectorAuth != nil, ProtectedResourceMetadataProvider.isMisconfigured() {
+                print("[SSE] ⚠️ remote access misconfigured: serving no authorization server "
+                    + "until BRIDGE_OAUTH_ISSUER / config / baked identity is set")
+            }
+
             Task { await sessionCleanupLoop() }
 
             try await channel.closeFuture.get()
@@ -1535,6 +1549,15 @@ private final class SSEHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
     private let jobsCallbackHandler: @Sendable (String) async -> Data  // PKT-340: POST /jobs/{id}/run
     private let onClientDisconnected: @Sendable (String) async -> Void  // PKT-366 F13
 
+    /// Packet E Wave 3 (test seam ONLY): when non-nil, the PRM serving path
+    /// uses this in place of `ProtectedResourceMetadataProvider.prmServingDecision()`,
+    /// so the serving-path test can drive both the configured (200) and
+    /// misconfigured (503) branches hermetically without mutating the process
+    /// environment or `ConfigManager`. nil in every production code path (the
+    /// `start()` bootstrap never sets it) ⇒ live behaviour is unchanged.
+    private let prmDecisionForTesting:
+        (@Sendable () -> ProtectedResourceMetadataProvider.PRMServingDecision)?
+
     private struct PendingRequest {
         var head: HTTPRequestHead
         var bodyBuffer: ByteBuffer
@@ -1550,7 +1573,9 @@ private final class SSEHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
         httpRequestHandler: @escaping @Sendable (HTTPRequest) async -> HTTPResponse,
         healthHandler: @escaping @Sendable () async -> Data,
         jobsCallbackHandler: @escaping @Sendable (String) async -> Data = { _ in Data() },
-        onClientDisconnected: @escaping @Sendable (String) async -> Void = { _ in }
+        onClientDisconnected: @escaping @Sendable (String) async -> Void = { _ in },
+        prmDecisionForTesting:
+            (@Sendable () -> ProtectedResourceMetadataProvider.PRMServingDecision)? = nil
     ) {
         self.legacyBridge = legacyBridge
         self.endpoint = endpoint
@@ -1559,6 +1584,7 @@ private final class SSEHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
         self.healthHandler = healthHandler
         self.jobsCallbackHandler = jobsCallbackHandler
         self.onClientDisconnected = onClientDisconnected
+        self.prmDecisionForTesting = prmDecisionForTesting
     }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
@@ -1606,7 +1632,10 @@ private final class SSEHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
         context.fireChannelInactive()
     }
 
-    private func processRequest(head: HTTPRequestHead, body: Data?, context: ChannelHandlerContext) async {
+    // `fileprivate` (was `private`) ONLY so the same-file public test seam
+    // `SSEServer.runHTTPHandlerForTesting` can invoke the UNMODIFIED dispatch;
+    // still unreachable outside this file. The body is byte-unchanged.
+    fileprivate func processRequest(head: HTTPRequestHead, body: Data?, context: ChannelHandlerContext) async {
         let fullURI = head.uri
         let path = fullURI.split(separator: "?").first.map(String.init) ?? fullURI
         let startTime = CFAbsoluteTimeGetCurrent()
@@ -1638,9 +1667,32 @@ private final class SSEHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
             // (BRIDGE_OAUTH_ISSUER) and defaults to a documented
             // placeholder — there is no live authorization server in
             // this slice.
-            let prmData = ProtectedResourceMetadataProvider.jsonBody()
-            logAccess(method: "GET", path: path, sessionID: nil, status: 200, start: startTime)
-            await writeJSONResponse(data: prmData, version: head.version, context: context)
+            //
+            // Packet E Wave 3 (fail-loud): when the build is misconfigured —
+            // the resolved issuer is still the `auth.example.invalid`
+            // placeholder (no env / config / baked identity) — do NOT serve a
+            // 200 advertising that placeholder authorization server. A client
+            // would be pushed into a dead OAuth discovery against a
+            // non-resolvable host. Return 503 with a short error that
+            // advertises NO `authorization_servers` instead. When configured,
+            // `.serve(body)` carries exactly `jsonBody()` → the 200 PRM is
+            // byte-identical to the pre-Wave-3 behaviour.
+            //
+            // `prmDecisionForTesting` is nil in every production path, so the
+            // live decision is always the global `prmServingDecision()`; it is
+            // set ONLY by the hermetic serving-path test seam.
+            switch (prmDecisionForTesting?() ?? ProtectedResourceMetadataProvider.prmServingDecision()) {
+            case .serve(let prmData):
+                logAccess(method: "GET", path: path, sessionID: nil, status: 200, start: startTime)
+                await writeJSONResponse(data: prmData, version: head.version, context: context)
+            case .refuseMisconfigured:
+                logAccess(method: "GET", path: path, sessionID: nil, status: 503, start: startTime)
+                await writeResponse(
+                    .error(statusCode: 503, .internalError(
+                        ProtectedResourceMetadataProvider.misconfiguredPRMErrorMessage)),
+                    version: head.version,
+                    context: context)
+            }
             return
 
         case .legacySSE:
@@ -1898,5 +1950,52 @@ private final class SSEHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
                 ctx.writeAndFlush(self.wrapOutboundOut(.end(nil)), promise: nil)
             }
         }
+    }
+}
+
+// MARK: - Public test seam (Packet E Wave 3 / audit #1 + #2)
+//
+// `SSEHTTPHandler` and its `processRequest` are file-private, and the test
+// target imports `TheBridgeLib` WITHOUT `@testable` (custom executable harness),
+// so it can only reach PUBLIC API. To prove the REAL outbound behaviour of the
+// live NIO route classification + origin gate (rather than re-asserting the
+// predicate in isolation), this narrow public seam runs the UNMODIFIED
+// `processRequest` against a caller-supplied `Channel`.
+//
+// The caller-supplied channel keeps `NIOEmbedded` (an `EmbeddedChannel` is a
+// test-only construct) OUT of the production library's dependency graph — the
+// test builds the `EmbeddedChannel`, hands it in as the NIOCore `Channel`
+// protocol, then drains the outbound parts itself. Nothing here touches the
+// origin-decision logic (route classify, `isRemoteTunnelRequest`, the
+// legacy-route loopback-only 403, the loopback `/mcp` split): those run exactly
+// as in production.
+extension SSEServer {
+    /// Run ONE decoded request end-to-end through the live
+    /// `SSEHTTPHandler.processRequest`, writing the outbound response parts to
+    /// `channel`. The caller (test) supplies the channel and reads the outbound
+    /// parts back. `prmDecisionForTesting` is the only injectable seam (used by
+    /// the PRM serving-path test to drive both the configured-200 and the
+    /// misconfigured-503 branches hermetically); every other input flows through
+    /// the unmodified route + gate code.
+    public static func runHTTPHandlerForTesting(
+        on channel: Channel,
+        head: HTTPRequestHead,
+        body: Data? = nil,
+        prmDecisionForTesting:
+            (@Sendable () -> ProtectedResourceMetadataProvider.PRMServingDecision)? = nil
+    ) async throws {
+        let handler = SSEHTTPHandler(
+            legacyBridge: LegacySSEBridge(),
+            endpoint: "/mcp",
+            rpcHandler: { _, _ in nil },
+            httpRequestHandler: { _ in .ok() },
+            healthHandler: { Data("{}".utf8) },
+            jobsCallbackHandler: { _ in Data() },
+            onClientDisconnected: { _ in },
+            prmDecisionForTesting: prmDecisionForTesting
+        )
+        try await channel.pipeline.addHandler(handler).get()
+        let context = try await channel.pipeline.context(handler: handler).get()
+        await handler.processRequest(head: head, body: body, context: context)
     }
 }

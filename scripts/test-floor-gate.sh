@@ -1412,7 +1412,19 @@ set -euo pipefail
 # still leads a group, so a recycled pid yields ESRCH→already_terminated instead
 # of hitting an unrelated process (covered by the #6 group-kill case). Measured
 # integrated green 2227 → 2242.
-FLOOR="${BRIDGE_TEST_FLOOR:-2242}"
+# Security-audit remediation — auth surface REVIEW-FIRST #1/#2 (PRJCT-2754 ·
+# 2026-06-23): Packet E Wave 3 fail-loud PRM gate + legacy /sse,/messages 403
+# E2E. +8 tests in RemoteOAuthOriginGatingTests (5 legacy-route E2E driving the
+# UNMODIFIED SSEHTTPHandler.processRequest through an EmbeddedChannel: tunnel
+# GET /sse & POST /messages → OUTBOUND 403 loopback-only, their loopback twins
+# → served (200 SSE head / 202 accept), + a /health-stays-tunnel-reachable
+# non-regression; 3 PRM serving-path E2E: misconfigured ⇒ 503 with NO
+# placeholder authorization_servers, a configured identity ⇒ normal 200 PRM,
+# and the default decision tracks the live prmServingDecision so the gate is
+# proven WIRED, not only seam-reachable). The origin-decision logic
+# (isRemoteTunnelRequest, the legacy-route loopback-only 403, the loopback /mcp
+# split) is byte-unchanged. Measured integrated green 2242 → 2250.
+FLOOR="${BRIDGE_TEST_FLOOR:-2250}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
