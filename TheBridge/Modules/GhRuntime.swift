@@ -170,11 +170,25 @@ public actor GhRuntime {
                 let started = Date()
                 do {
                     try p.run()
+                    // Drain stdout and stderr concurrently to prevent pipe-buffer
+                    // deadlock when output exceeds ~64 KB (same fix as GitRuntime.spawn).
+                    let outBox = _GhPipeDataBox()
+                    let errBox = _GhPipeDataBox()
+                    let ioGroup = DispatchGroup()
+                    ioGroup.enter()
+                    DispatchQueue.global(qos: .utility).async {
+                        outBox.data = outPipe.fileHandleForReading.readDataToEndOfFile()
+                        ioGroup.leave()
+                    }
+                    ioGroup.enter()
+                    DispatchQueue.global(qos: .utility).async {
+                        errBox.data = errPipe.fileHandleForReading.readDataToEndOfFile()
+                        ioGroup.leave()
+                    }
                     p.waitUntilExit()
-                    let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-                    let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-                    let out = String(data: outData, encoding: .utf8) ?? ""
-                    let err = String(data: errData, encoding: .utf8) ?? ""
+                    ioGroup.wait()
+                    let out = String(data: outBox.data, encoding: .utf8) ?? ""
+                    let err = String(data: errBox.data, encoding: .utf8) ?? ""
                     let dur = Date().timeIntervalSince(started) * 1000.0
                     cont.resume(returning: GhInvocationResult(
                         exitCode: p.terminationStatus,
@@ -227,4 +241,8 @@ public actor GhRuntime {
         }
         return String(text[range]).trimmingCharacters(in: CharacterSet(charactersIn: ".,;)\n"))
     }
+}
+
+private final class _GhPipeDataBox: @unchecked Sendable {
+    var data = Data()
 }
