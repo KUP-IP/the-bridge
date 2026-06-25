@@ -173,11 +173,28 @@ public actor GitRuntime {
                 let started = Date()
                 do {
                     try p.run()
+                    // Drain stdout and stderr concurrently with the running process.
+                    // Sequential waitUntilExit() → readDataToEndOfFile() deadlocks when
+                    // output exceeds the pipe buffer (~64 KB): the child blocks on write,
+                    // the parent waits for exit, and neither can proceed. Concurrent
+                    // reads consume the pipe as the child writes, so the buffer never fills.
+                    let outBox = _PipeDataBox()
+                    let errBox = _PipeDataBox()
+                    let ioGroup = DispatchGroup()
+                    ioGroup.enter()
+                    DispatchQueue.global(qos: .utility).async {
+                        outBox.data = outPipe.fileHandleForReading.readDataToEndOfFile()
+                        ioGroup.leave()
+                    }
+                    ioGroup.enter()
+                    DispatchQueue.global(qos: .utility).async {
+                        errBox.data = errPipe.fileHandleForReading.readDataToEndOfFile()
+                        ioGroup.leave()
+                    }
                     p.waitUntilExit()
-                    let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-                    let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-                    let out = String(data: outData, encoding: .utf8) ?? ""
-                    let err = String(data: errData, encoding: .utf8) ?? ""
+                    ioGroup.wait()
+                    let out = String(data: outBox.data, encoding: .utf8) ?? ""
+                    let err = String(data: errBox.data, encoding: .utf8) ?? ""
                     let dur = Date().timeIntervalSince(started) * 1000.0
                     cont.resume(returning: GitInvocationResult(
                         exitCode: p.terminationStatus, stdout: out, stderr: err, durationMs: dur))
@@ -658,4 +675,11 @@ extension GitRuntime {
         }
         return out
     }
+}
+
+// Mutable data box used by spawn() to collect pipe output across @Sendable closures.
+// @unchecked Sendable is safe here: each instance is written by exactly one thread
+// before group.wait() hands ownership back to the caller.
+private final class _PipeDataBox: @unchecked Sendable {
+    var data = Data()
 }
