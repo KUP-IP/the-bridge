@@ -193,7 +193,9 @@ public enum BridgeConstants {
     ///   state under bg-process/<ts-uuid>.{log,done,pid}; bg_run returns
     ///   immediately, bg_poll reports running/exited/terminated, bg_kill
     ///   SIGTERMs/SIGKILLs a running job). 172 + 3 = 175.
-    public static let staticFeatureModuleToolCount = 175
+    ///   Packet Runner v1 (FR-1/§8.3): + registry_hydrate (packet-registry-v1
+    ///   one-hop envelope). 175 + 1 = 176.
+    public static let staticFeatureModuleToolCount = 176
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

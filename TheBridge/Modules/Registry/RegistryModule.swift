@@ -108,6 +108,7 @@ public enum RegistryModule {
         await router.register(makeUpdate())
         await router.register(makeDelete())
         await router.register(makePossess())
+        await router.register(makeHydrate())
     }
 
     // MARK: - registry_entities
@@ -414,6 +415,35 @@ public enum RegistryModule {
                 let reader = RegistryReader(gateway: gateway())
                 let body = try await reader.body(entity: entity, pageId: id)
                 return .object(["entity": .string(key), "id": .string(id), "body": .string(body)])
+            })
+    }
+
+    // MARK: - registry_hydrate (packet-registry-v1 envelope — FR-1 / §8.3)
+
+    public static func makeHydrate() -> ToolRegistration {
+        ToolRegistration(
+            name: "registry_hydrate", module: moduleName, tier: .open,
+            description: "Hydrate one entity row into the packet-registry-v1 envelope (PRD FR-1/§8.3): primary properties + page body + curated ONE-HOP relation projections (project/skills/blockedBy/blocking/event) + provenance + unresolved-relation warnings. Read-only, one hop only — a relation's body is NOT loaded (use registry_possess for a deeper body). A missing/inaccessible relation is omitted + warned, never guessed.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "entity": .object(["type": .string("string"), "description": .string("Entity key (e.g. ‘packet’).")]),
+                    "id": .object(["type": .string("string"), "description": .string("Notion page id of the primary row.")]),
+                    "forceRefresh": .object(["type": .string("boolean"), "description": .string("Bypass the cache for the primary read.")]),
+                ]),
+                "required": .array([.string("entity"), .string("id")]),
+            ]),
+            handler: { args in
+                guard case .object(let a) = args, let key = string(a, "entity"), let id = string(a, "id") else {
+                    throw ToolRouterError.invalidArguments(toolName: "registry_hydrate", reason: "missing ‘entity’ or ‘id’")
+                }
+                let config = await loadConfig()
+                let entity = try requireEntity(key, in: config, tool: "registry_hydrate")
+                var force = false
+                if case .bool(let b)? = a["forceRefresh"] { force = b }
+                let reader = RegistryReader(gateway: gateway())
+                let envelope = try await reader.hydrate(entity: entity, pageId: id, forceRefresh: force)
+                return envelope.asValue()
             })
     }
 }

@@ -253,6 +253,8 @@ public enum ToolAnnotationCatalog {
         "registry_update": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         "registry_delete": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: true, openWorld: true),
         "registry_possess": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
+        // packet-registry-v1 hydration (FR-1/§8.3): read-only one-hop fetch.
+        "registry_hydrate": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         "notion_block_delete": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         // Sprint A · mcp-builder #1: notion_block_read removed
         // (PKT-738 v2.2 deprecation cycle complete).

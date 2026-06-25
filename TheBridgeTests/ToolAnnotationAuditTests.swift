@@ -151,6 +151,39 @@ func runToolAnnotationAuditTests() async {
                    "notion_datasource_delete annotation must be destructive + requiresConfirmation; got \(String(describing: ann))")
     }
 
+    // Regression guard for the 2026-06 delete-tool security hardening
+    // (commits 1e85bb6 / 28c46ca): job_delete removes a scheduled LaunchAgent
+    // job; skill_delete removes a skill — both irreversible. Like
+    // notion_datasource_delete above, the mirror-invariant test only checks
+    // annotation == (tier==.request||nap); these pin the INTENDED posture so a
+    // future edit that drops neverAutoApprove (and flips the annotation to keep
+    // the mirror green) is still caught.
+    await test("job_delete is human-gated + non-auto-approvable + destructive (sec hardening)") {
+        guard let reg = regs.first(where: { $0.name == "job_delete" }) else {
+            throw TestError.assertion("job_delete must be registered")
+        }
+        try expect(reg.tier == .request,
+                   "job_delete tier must be .request; got \(reg.tier.rawValue)")
+        try expect(reg.neverAutoApprove == true,
+                   "job_delete must be neverAutoApprove (irreversible scheduled-job delete)")
+        let ann = ToolAnnotationCatalog.annotations(for: "job_delete")
+        try expect(ann?.destructiveHint == true && ann?.requiresConfirmation == true,
+                   "job_delete annotation must be destructive + requiresConfirmation; got \(String(describing: ann))")
+    }
+
+    await test("skill_delete is human-gated + non-auto-approvable + destructive (sec hardening)") {
+        guard let reg = regs.first(where: { $0.name == "skill_delete" }) else {
+            throw TestError.assertion("skill_delete must be registered")
+        }
+        try expect(reg.tier == .request,
+                   "skill_delete tier must be .request; got \(reg.tier.rawValue)")
+        try expect(reg.neverAutoApprove == true,
+                   "skill_delete must be neverAutoApprove (irreversible skill delete)")
+        let ann = ToolAnnotationCatalog.annotations(for: "skill_delete")
+        try expect(ann?.destructiveHint == true && ann?.requiresConfirmation == true,
+                   "skill_delete annotation must be destructive + requiresConfirmation; got \(String(describing: ann))")
+    }
+
     await test("MCP projection drops requiresConfirmation, keeps the 4 hint fields") {
         // Sprint A · mcp-builder Top-15 #13: projection now carries
         // idempotentHint as well. requiresConfirmation stays Bridge-internal.

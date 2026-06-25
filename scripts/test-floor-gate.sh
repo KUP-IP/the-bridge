@@ -1460,7 +1460,15 @@ set -euo pipefail
 # constant, successURL placeholder, cancelURL HTTPS, default/custom channel,
 # whitespace/newline-trimmed priceID+paymentLinkURL.
 # Batch-merged onto PKT-1007: 2311 + 62 = 2373.
-FLOOR="${BRIDGE_TEST_FLOOR:-2373}"
+# Packet Runner v1 registry_hydrate (2026-06-24, batch-merged onto PKT-1014 T2): +10 RegistryHydrationTests
+# + RegistryModuleTests 10->11 — packet-registry-v1 one-hop envelope (FR-1/§8.3): envelope shape,
+# missing/inaccessible relations, offline cache, one-hop guard, explicit-deeper-body, body-gate,
+# status fail-closed, module tool path, unknown-entity. Measured integrated green 2373 -> 2383 (make test: 2383 passed / 0 failed).
+# Tool-surface test coverage (2026-06-25): +30 behavioral tests for the 9 Jobs management tools
+# (job_get/list/delete/history/templates/update/duplicate/export/import in JobsModuleTests) + memory_export/
+# import handler round-trip (MemoryModuleTests) + 2 pinned-intent security guards (job_delete/skill_delete
+# tier/neverAutoApprove/annotation, mirroring notion_datasource_delete). Measured integrated green 2383 -> 2415.
+FLOOR="${BRIDGE_TEST_FLOOR:-2415}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
