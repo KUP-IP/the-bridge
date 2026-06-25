@@ -1487,9 +1487,10 @@ set -euo pipefail
 # + RegistryModuleTests 10->11 — packet-registry-v1 one-hop envelope (FR-1/§8.3). Main green 2373 -> 2383.
 # Tool-surface test coverage (2026-06-25): +30 behavioral tests (9 Jobs mgmt tools + memory export/import
 # round-trip + 2 pinned-intent guards). Main green 2383 -> 2415.
-# MERGE main → Memory Hub branch (2026-06-25): integrated green = 2508 (branch) + main net-new; FLOOR set to
-# the post-merge measured count below (raise only by measured net-new; never lower).
-FLOOR="${BRIDGE_TEST_FLOOR:-2508}"
+# MERGE main → Memory Hub branch (2026-06-25): integrated green re-measured = 2550 (2508 branch + 42 main
+# net-new: registry_hydrate +10/+1 + tool-surface +30, + Version staticFeatureModuleToolCount 186→187 for
+# registry_hydrate). make test 2550 passed / 0 failed. Raise only by measured net-new; never lower.
+FLOOR="${BRIDGE_TEST_FLOOR:-2550}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
