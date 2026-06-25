@@ -136,7 +136,12 @@ public enum VoiceMemoProcessor {
                     intentKind: VoiceMemoIntentKind.review.rawValue,
                     confidence: 0,
                     reason: "transcription failed: \(error.localizedDescription)",
-                    transcriptExcerpt: ""
+                    transcriptExcerpt: "",
+                    intentId: VoiceMemoIntentIdentity.intentId(
+                        memoId: recording.id, kind: VoiceMemoIntentKind.review.rawValue,
+                        entityKey: nil, entityHint: nil, title: recording.title, fields: [:]
+                    ),
+                    provenance: "transcription-error"
                 ))
                 reviewQueued += 1
             }
@@ -222,18 +227,25 @@ public enum VoiceMemoProcessor {
                 continue
             }
 
-            if intent.confidence < options.minConfidence {
+            // Auto-execute only when the lane-specific threshold + global floor pass
+            // (PKT-MEM-106 0c locked thresholds: reminder 0.90 / registry 0.86 / agent 0.86 /
+            // memory_keep 0.90 / global 0.80) AND the operator's minConfidence. Otherwise queue review.
+            let laneAuto = MemoryHubCommitGuardrails.autoDecision(kind: intent.kind, confidence: intent.confidence)
+            if !laneAuto.isAuto || intent.confidence < options.minConfidence {
+                let reviewReason: String
+                if case .manual(let why) = laneAuto { reviewReason = why }
+                else { reviewReason = "confidence \(intent.confidence) below min \(options.minConfidence)" }
                 outcomes.append(VoiceMemoIntentOutcome(
                     kind: intent.kind,
                     status: .review,
-                    detail: "confidence \(intent.confidence) below min \(options.minConfidence)"
+                    detail: reviewReason
                 ))
                 if !options.dryRun {
                     queueReview(
                         recording: recording,
                         intent: intent,
                         plan: plan,
-                        reason: "confidence \(intent.confidence) below min \(options.minConfidence)",
+                        reason: reviewReason,
                         reviewQueued: &reviewQueued
                     )
                     reviewQueuedForMemo = true
@@ -277,7 +289,9 @@ public enum VoiceMemoProcessor {
 
         let hasExecuted = outcomes.contains { $0.status == .executed }
         if !options.dryRun, hasExecuted, !reviewQueuedForMemo {
-            try VoiceMemoProcessedStore.markProcessed(id: recording.id)
+            // Processed-gate (PKT-MEM-106 0a): even past the in-run flag, mark only when
+            // NO pending review remains for this memo in the store (sibling lanes / prior runs).
+            try VoiceMemoProcessedGate.markProcessedIfClear(memoId: recording.id)
         }
 
         return VoiceMemoReceipt(memoId: recording.id, title: plan.generatedTitle, outcomes: outcomes)
@@ -311,7 +325,7 @@ public enum VoiceMemoProcessor {
         return "reminders_create: \(title)"
     }
 
-    static func executeAgentMemory(_ intent: VoiceMemoIntent, plan: VoiceMemoPlan, transcript: String, router: ToolRouter) async throws -> String {
+    public static func executeAgentMemory(_ intent: VoiceMemoIntent, plan: VoiceMemoPlan, transcript: String, router: ToolRouter) async throws -> String {
         let scope = intent.fields["scope"] ?? "global"
         var text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty {
@@ -340,11 +354,18 @@ public enum VoiceMemoProcessor {
         return "registry_create entity=\(entityKey) id=\(pageId) + transcript appended"
     }
 
-    static func executeRegistryUpdate(_ intent: VoiceMemoIntent, router: ToolRouter) async throws -> String {
+    public static func executeRegistryUpdate(_ intent: VoiceMemoIntent, explicitRowId: String? = nil, router: ToolRouter) async throws -> String {
         guard let entityKey = intent.entityKey else {
             throw VoiceMemoError.invalidIntent("registry update missing entity key")
         }
-        let rowId = try await resolveRegistryRowId(entityKey: entityKey, hint: intent.entityHint, router: router)
+        // An explicit rowId (operator / agent / picker selection) wins over the free-text
+        // entityHint match (PKT-MEM-106 0a rowId threading); otherwise resolve by hint.
+        let rowId: String
+        if let explicitRowId, !explicitRowId.isEmpty {
+            rowId = explicitRowId
+        } else {
+            rowId = try await resolveRegistryRowId(entityKey: entityKey, hint: intent.entityHint, router: router)
+        }
         let merged = try await mergeAppendRegistryFields(
             entityKey: entityKey,
             rowId: rowId,
@@ -360,7 +381,7 @@ public enum VoiceMemoProcessor {
         return "registry_update entity=\(entityKey) id=\(rowId) (append)"
     }
 
-    static func mergeAppendRegistryFields(
+    public static func mergeAppendRegistryFields(
         entityKey: String,
         rowId: String,
         proposed: [String: String],
@@ -387,7 +408,7 @@ public enum VoiceMemoProcessor {
         return merged
     }
 
-    static func resolveRegistryRowId(entityKey: String, hint: String?, router: ToolRouter) async throws -> String {
+    public static func resolveRegistryRowId(entityKey: String, hint: String?, router: ToolRouter) async throws -> String {
         let list = try await router.dispatch(toolName: "registry_list", arguments: .object([
             "entity": .string(entityKey),
             "limit": .int(100),
@@ -397,24 +418,37 @@ public enum VoiceMemoProcessor {
             throw VoiceMemoError.registryMatchFailed(entityKey, hint)
         }
         let normalizedHint = hint?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        for row in rows {
+        let pairs: [(id: String, title: String)] = rows.compactMap { row in
             guard case .object(let rowObj) = row,
                   case .string(let id)? = rowObj["id"],
-                  case .string(let title)? = rowObj["title"] else { continue }
-            if let hint = normalizedHint, !hint.isEmpty {
-                let t = title.lowercased()
-                if t.contains(hint) || hint.contains(t) { return id }
-            }
+                  case .string(let title)? = rowObj["title"] else { return nil }
+            return (id, title)
         }
+
+        // Containment match — collect ALL candidates; ≥2 distinct rows ⇒ ambiguous.
+        // PKT-MEM-106 0a: do not silently auto-pick the first of several matches; an
+        // ambiguous hint must route to a manual / picker decision, never a wrong-row write.
+        if let hint = normalizedHint, !hint.isEmpty {
+            var matches: [String] = []
+            for (id, title) in pairs {
+                let t = title.lowercased()
+                if t.contains(hint) || hint.contains(t) { matches.append(id) }
+            }
+            let distinct = Set(matches)
+            if distinct.count == 1, let only = matches.first { return only }
+            if distinct.count >= 2 { throw VoiceMemoError.registryAmbiguous(entityKey, hint, distinct.count) }
+        }
+
+        // Regex fallback — same ambiguity rule.
         if let hint = normalizedHint,
            let regex = try? NSRegularExpression(pattern: NSRegularExpression.escapedPattern(for: hint), options: .caseInsensitive) {
-            for row in rows {
-                guard case .object(let rowObj) = row,
-                      case .string(let id)? = rowObj["id"],
-                      case .string(let title)? = rowObj["title"],
-                      regex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)) != nil else { continue }
-                return id
+            var matches: [String] = []
+            for (id, title) in pairs where regex.firstMatch(in: title, range: NSRange(title.startIndex..., in: title)) != nil {
+                matches.append(id)
             }
+            let distinct = Set(matches)
+            if distinct.count == 1, let only = matches.first { return only }
+            if distinct.count >= 2 { throw VoiceMemoError.registryAmbiguous(entityKey, hint, distinct.count) }
         }
         throw VoiceMemoError.registryMatchFailed(entityKey, hint)
     }
@@ -442,7 +476,12 @@ public enum VoiceMemoProcessor {
                 intentKind: VoiceMemoIntentKind.review.rawValue,
                 confidence: 0,
                 reason: reason,
-                transcriptExcerpt: ""
+                transcriptExcerpt: "",
+                intentId: VoiceMemoIntentIdentity.intentId(
+                    memoId: recording.id, kind: VoiceMemoIntentKind.review.rawValue,
+                    entityKey: nil, entityHint: nil, title: recording.title, fields: [:]
+                ),
+                provenance: "no-transcript"
             ))
             reviewQueued += 1
         }
@@ -535,7 +574,12 @@ public enum VoiceMemoProcessor {
             intentKind: intent.kind.rawValue,
             confidence: intent.confidence,
             reason: reason,
-            transcriptExcerpt: String((recording.transcript ?? plan.summary).prefix(500))
+            transcriptExcerpt: String((recording.transcript ?? plan.summary).prefix(500)),
+            intentId: VoiceMemoIntentIdentity.intentId(memoId: recording.id, intent: intent),
+            entityKey: intent.entityKey,
+            entityHint: intent.entityHint,
+            destinationFields: intent.fields.isEmpty ? nil : intent.fields,
+            provenance: "election"
         ))
         reviewQueued += 1
     }
@@ -642,16 +686,57 @@ public enum VoiceMemoProcessor {
         if let entityKey = stringArg(obj, "entityKey") { intent.entityKey = entityKey }
         if let hint = stringArg(obj, "entityHint") { intent.entityHint = hint }
         if let title = stringArg(obj, "title") { intent.title = title }
+        if let due = stringArg(obj, "due") { intent.dueISO8601 = due }
         if case .object(let fieldObj)? = obj["fields"] {
             intent.fields = fieldObj.compactMapValues { if case .string(let s) = $0 { return s }; return nil }
         }
-        let detail = try await execute(intent: intent, plan: plan, transcript: transcript, router: router)
-        try VoiceMemoProcessedStore.markProcessed(id: recording.id)
+        let explicitRowId = stringArg(obj, "rowId")
+
+        // Execute the lane. registry_update threads an explicit rowId straight to the
+        // writer (rowId wins over entityHint — PKT-MEM-106 0a). An ambiguous/unresolved
+        // registry target surfaces as a manual outcome WITHOUT writing or marking processed.
+        let detail: String
+        do {
+            if kind == .registryUpdate {
+                detail = try await executeRegistryUpdate(intent, explicitRowId: explicitRowId, router: router)
+            } else {
+                detail = try await execute(intent: intent, plan: plan, transcript: transcript, router: router)
+            }
+        } catch let error as VoiceMemoError {
+            if case .registryAmbiguous = error {
+                return .object([
+                    "ok": .bool(false),
+                    "needsManual": .bool(true),
+                    "memoId": .string(recording.id),
+                    "intentKind": .string(kind.rawValue),
+                    "detail": .string(error.localizedDescription),
+                    "markedProcessed": .bool(false),
+                ])
+            }
+            throw error
+        }
+
+        // Processed-gate (PKT-MEM-106 0a): resolve the pending review entry this commit
+        // satisfies — the one whose intentId matches this intent, plus any generic
+        // "needs review" / agent-defer placeholder for the memo — THEN mark processed only
+        // when no pending sibling review remains. A multi-lane memo is processed only after
+        // its last lane commits (the M5/M8 contract).
+        let committedIntentId = VoiceMemoIntentIdentity.intentId(memoId: recording.id, intent: intent)
+        for entry in VoiceMemoReviewStore.load().entries
+        where entry.memoId == recording.id && entry.status == .pending {
+            let matchesIntent = entry.effectiveIntentId() == committedIntentId
+            let isPlaceholder = entry.intentKind == VoiceMemoIntentKind.review.rawValue
+            if matchesIntent || isPlaceholder {
+                try? VoiceMemoReviewStore.resolve(id: entry.id)
+            }
+        }
+        let markedProcessed = try VoiceMemoProcessedGate.markProcessedIfClear(memoId: recording.id)
         return .object([
             "ok": .bool(true),
             "memoId": .string(recording.id),
             "intentKind": .string(kind.rawValue),
             "detail": .string(detail),
+            "markedProcessed": .bool(markedProcessed),
         ])
     }
 
@@ -724,12 +809,15 @@ public enum VoiceMemoProcessor {
 public enum VoiceMemoError: Error, LocalizedError {
     case invalidIntent(String)
     case registryMatchFailed(String, String?)
+    case registryAmbiguous(String, String?, Int)
 
     public var errorDescription: String? {
         switch self {
         case .invalidIntent(let msg): return msg
         case .registryMatchFailed(let entity, let hint):
             return "no registry row matched entity=\(entity) hint=\(hint ?? "nil")"
+        case .registryAmbiguous(let entity, let hint, let count):
+            return "ambiguous registry target entity=\(entity) hint=\(hint ?? "nil") matched \(count) rows — select a rowId"
         }
     }
 }

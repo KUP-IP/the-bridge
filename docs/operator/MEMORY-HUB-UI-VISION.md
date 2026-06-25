@@ -5,11 +5,11 @@
 
 ## Tab model
 
-1. **Process** (default) — unprocessed memo list + 4-step pipeline drawer (Transcribe → Understand → Plan → Execute)
+1. **Process** (default) — triage cockpit with memo list, intent table, detail/commit inspector, and activity strip
 2. **Inbox** — review queue dispositions (existing)
-3. **Notion** — registry Memory rows (read)
-4. **Agent** — SQLite recall list
-5. **Processing** — curator mode + transcription ladder toggles
+3. **Notion** — registry Memory rows with open, refresh, and dry-run selected backfill controls
+4. **Agent** — SQLite recall list with filters, soft forget, and pin toggle only
+5. **Processing** — curator mode, transcription ladder toggles, and OpenAI-compatible provider key status
 
 ## Shipped (U1 + U6)
 
@@ -17,13 +17,13 @@
 - `MemoryProcessingTab` — curator mode picker + ladder toggles
 - Deep-link anchors: `process`, `processing`
 
-## Deferred (U2–U5, U7)
+## Pre-Phase-0 gaps (superseded into PKT-MEM-106 0b/0c)
 
-- Registry target picker on Process preview
-- Agent tab forget/pin buttons
-- Notion CRUD/backfill from pane
-- Activity strip + notification deep-link to Process tab
-- Cloud API key fields in Processing tab
+- Inline registry entity/row picker on Process preview with live rows, cached fallback, and stale badge.
+- Agent tab soft forget + pin toggle only; no text editing or hard delete.
+- Notion tab open/refresh plus dry-run selected backfill only; no full row CRUD.
+- Activity strip plus precise notification suppression when app active on Memory/Process; background review/error alerts deep-link to the relevant Memory surface.
+- OpenAI-compatible provider key/status fields in Processing tab, with API keys stored in Keychain only.
 
 ## Process cockpit contract
 
@@ -36,17 +36,17 @@ Process is the default triage surface, not a preview-only page.
 - Commit one approved intent at a time via `voice_memo_commit`.
 - Preserve suppressed lanes as distinct review items, including multiple `registry_update` lanes from one memo.
 - Show registry entity/row picker inline when there are multiple registry intents or ambiguous row hints; source rows from live `registry_list` with cached fallback and stale badge after 24h.
-- Mark a memo processed only when no pending review entry remains for that memo.
+- Mark a memo processed only after a successful execute/commit or explicit handled disposition and when no pending review entry remains for that memo.
 - Show activity/latency feedback for long preview/commit runs so the operator can distinguish transcribe, understand, plan, and execute work.
-- Back the activity strip with a local Memory Hub activity log, not transient view state. Store activity as append-only JSONL at `~/Library/Application Support/TheBridge/memory-hub/activity.jsonl` with bounded retention: 500 events or 30 days, whichever comes first. Activity rows are structured receipt envelopes with event id, memo/intent ids, phase/action/status/provenance, actor, detail, full SHA-256 receipt hash, and schema version. Display the first 12 receipt-hash characters in UI/live evidence. Do not store full transcripts in activity; use transcript hashes and short excerpts only.
-- Render fast heuristic preview first, local auto-enhancement second, and cloud enhancement only after explicit operator action; label provenance and enhancement state. Timeout policy: heuristic immediate, local enhancement 8s soft timeout, manual cloud enhancement 20s timeout.
-- Store preview/enhancement results as versioned plan snapshots and badge added, changed, or demoted/superseded intent fields before commit. Retain heuristic, latest enhanced, and committed snapshot per memo. Enhancement may add/change/demote, but may not silently remove heuristic intents.
+- Back the activity strip with a local Memory Hub activity log, not transient view state. Store activity as append-only JSONL at `~/Library/Application Support/TheBridge/memory-hub/activity.jsonl` with bounded retention: 500 events or 30 days, whichever comes first. Activity rows are structured receipt envelopes with event id, memo/intent ids, phase/action/status/provenance, actor, detail, full SHA-256 receipt hash, and schema version. Display the first 12 receipt-hash characters in UI/live evidence. Do not store full transcripts in activity; use transcript hashes and short excerpts only. If corrupt JSONL lines are encountered, skip them, preserve the original file, and record a repair activity.
+- Render fast heuristic preview first, local auto-enhancement second, and cloud enhancement only after explicit operator action; label provenance and enhancement state. Timeout policy: heuristic immediate, local enhancement 8s soft timeout, manual cloud enhancement 20s timeout. Cloud failure records activity, keeps the latest valid heuristic/local plan, and does not queue a review item.
+- Store preview/enhancement results as versioned plan snapshots at `~/Library/Application Support/TheBridge/memory-hub/plan-snapshots/<memoId>.json` and badge added, changed, or demoted/superseded intent fields before commit. Retain heuristic, latest enhanced, and committed snapshot per memo; prune on snapshot write plus launch sweep. Enhancement may add/change/demote, but may not silently remove heuristic intents.
 - Keep unresolved lanes visible in Process and mirrored to Inbox until resolved, dismissed, or marked handled.
 - Use deterministic `intentId` + `memoId` grouping so multiple same-kind lanes stay distinct. `intentId` format is `intent_v1_` plus 20 hex chars from SHA-256 over canonical JSON with sorted keys, trimmed strings, normalized whitespace, and lowercase enum fields.
 - Legacy review entries without `intentId` derive one on read from available legacy fields plus `createdAt`/reason fallback, mark `legacyDerived`, and are rewritten only when touched.
 - Auto-execute only when confidence passes lane-specific thresholds, the global floor, and target resolution is unambiguous; otherwise require operator commit. Defaults: global `0.80`; reminder `0.90`; registry `0.86`; agent `0.86`; memory_keep `0.90`.
-- Block duplicate writes by default using `memoId + intentId + destination key`; explicit force requires a selected reason, supports an optional note, and is recorded in activity.
-- Registry protected text fields (`brief`, `objective`, `summary`, `description`) are append-only. Non-protected property updates require explicit before/after diff preview before commit.
+- Block duplicate writes by default using `memoId + intentId + destination key`; explicit force requires a selected reason from `{new_context, correction, operator_confirmed, live_test}`, supports an optional note, and is recorded in activity.
+- Registry protected text fields (`brief`, `objective`, `summary`, `description`) are append-only. Non-protected property updates require explicit before/after per-field diff with individually selectable fields before commit. Diff display shows a human-readable old/new summary with expandable raw JSON. All selected fields validate before any write; validation failure leaves the intent uncommitted and review-visible.
 - Suppress notifications only when the app is active and Memory/Process is selected; background notifications are limited to queued review entries and routing/transcript errors.
 
 ## Accessibility identifiers
@@ -54,12 +54,13 @@ Process is the default triage surface, not a preview-only page.
 - Cockpit zones: `memoryProcess.memoList`, `memoryProcess.intentTable`, `memoryProcess.detailInspector`, `memoryProcess.activityStrip`.
 - Rows: `memoryProcess.memoRow.<memoId>`, `memoryProcess.intentRow.<intentId>`, `memoryProcess.registryRow.<entity>.<rowId>`.
 - Commands: `memoryProcess.commit.<intentId>`, `memoryProcess.primaryOverride.<intentId>`.
+- Test contract: identifiers stay stable across filtering, sorting, and relaunch; tests assert AX IDs rather than display text.
 
 ## Secondary tab contracts
 
 - Agent tab: scope/type filters, soft forget via `memory_forget`, and pin toggle only. No text editing or hard delete.
 - Notion tab: open in Notion, refresh rows, and backfill missing Memory rows only. Backfill is dry-run preview first, then selected apply. No full row CRUD.
-- Processing tab: generic cloud provider key slots plus secure save/update/delete for provider keys. Keys are stored in Keychain only; Phase 0 enables OpenAI-compatible manual enhancement first. No provider admin, billing, model catalog, or usage dashboard.
+- Processing tab: generic cloud provider key slots plus secure save/update/delete for provider keys. API keys are stored in Keychain only; non-secret provider config is stored in `~/Library/Application Support/TheBridge/memory-hub/providers.json`. Phase 0 enables one OpenAI-compatible manual enhancement path with API key, base URL, model name, and enabled toggle. Base URL defaults to `https://api.openai.com/v1`; model name is blank until operator-entered. Save validates syntax only; network/model validation happens only when manual cloud enhancement runs. No provider admin, billing, model catalog, or usage dashboard.
 - Registry picker cache: one JSON cache per entity under `~/Library/Application Support/TheBridge/memory-hub/registry-cache/` with TTL metadata and stale/error labels.
 
 ## Readiness reflow
@@ -73,16 +74,16 @@ Trust + Process cockpit blockers come before datetime/cloud polish:
 5. Append-only bounded JSONL activity log in the Memory Hub support directory, privacy-limited structured receipt envelope, activity strip, and long-running preview status.
 6. Agent soft forget + pin.
 7. Notion open + refresh + backfill.
-8. Progressive preview: heuristic first, local auto, cloud manual, timeout behavior, versioned diff snapshots, snapshot retention, no silent heuristic-intent removal.
+8. Progressive preview: heuristic first, local auto, cloud manual, timeout/failure behavior, versioned diff snapshots, snapshot retention/pruning, no silent heuristic-intent removal.
 9. Deterministic per-intent identity and Process/Inbox mirroring for unresolved lanes.
-10. Commit guardrails for concrete confidence thresholds, ambiguity, stale fallback, duplicates, and append-only protected registry fields.
-11. Processing generic provider key slots with OpenAI-compatible manual enhancement first.
+10. Commit guardrails for concrete confidence thresholds, ambiguity, stale fallback, duplicates, append-only protected registry fields, and all-selected-fields validation.
+11. Processing generic provider key slots with OpenAI-compatible manual enhancement first; default base URL only, model required.
 12. Legacy review migration by derive-on-read, `legacyDerived`, and rewrite-on-touch only.
 13. Notification suppression only when app active and Memory/Process selected, plus background review/error notifications.
 14. Stable AX identifiers for zones, rows, registry picker rows, commit, and primary override.
-15. Focused net-new tests for election, review identity, canonical 20-hex `intentId`, processed gate, `rowId` commit, activity receipts/full-vs-display hash, duplicate force reason, legacy migration, enhancement demotion/no-silent-removal, precise notification suppression, and AX IDs.
+15. Focused net-new tests for election, review identity, canonical 20-hex `intentId`, processed gate, `rowId` commit, activity receipts/full-vs-display hash, activity corruption handling, duplicate force reason, cloud failure semantics, provider config storage/defaults/validation timing, registry diff display/validation failure, snapshot pruning, legacy migration, enhancement demotion/no-silent-removal, precise notification suppression, and AX IDs.
 16. One Phase 0 integration packet for the coupled trust + cockpit unblock.
 
 ## Live test gate
 
-Fix Phase 0 blockers before running M1/M5/M8 as pass/fail live tests. Any earlier live recording is REVIEW evidence only if the operator explicitly accepts that scope. Live evidence uses activity-log receipt references plus a markdown PASS/PARTIAL/FAIL grade table.
+Fix Phase 0 blockers before running M1/M5/M8 as pass/fail live tests. Re-test order is locked as **M1 -> M5 -> M8**. Any earlier live recording is REVIEW evidence only if the operator explicitly accepts that scope. Live evidence uses activity-log receipt references plus `docs/operator/live-evidence/PKT-MEM-113-M1-M5-M8.md`, with one table row per case: case, build, memo id, grade, receipt refs, cleanup status, notes.

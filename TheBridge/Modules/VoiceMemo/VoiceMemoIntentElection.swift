@@ -30,11 +30,16 @@ public enum VoiceMemoIntentElection {
         return ([primary] + reviews, suppressed)
     }
 
+    // Lane-priority-FIRST election (PKT-MEM-106 0a / SPEC §0.1): the elected primary
+    // is chosen by lane priority (`reminder` > `agent_memory` > `registry_update` >
+    // `memory_keep`); confidence only breaks ties WITHIN the same lane. Before 0a this
+    // compared confidence before priority, which let a high-confidence registry lane
+    // outrank a reminder — contradicting the M1/M5/M8 contracts.
     private static func isLowerPriority(_ a: VoiceMemoIntent, _ b: VoiceMemoIntent) -> Bool {
-        if a.confidence != b.confidence { return a.confidence < b.confidence }
         let pa = lanePriority[a.kind] ?? 0
         let pb = lanePriority[b.kind] ?? 0
         if pa != pb { return pa < pb }
+        if a.confidence != b.confidence { return a.confidence < b.confidence }
         return false
     }
 }

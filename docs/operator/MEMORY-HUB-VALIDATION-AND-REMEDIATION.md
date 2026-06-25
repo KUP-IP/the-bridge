@@ -3,7 +3,7 @@
 **Packet:** [PKT-MEM-106 — Phase 0 (Trust + Process Cockpit Integration)](./packets/PKT-MEM-106-phase0-trust-cockpit.md)
 **Branch:** `feat/memory-hub-voice-curator` (one Phase 0 integration packet, sliced 0a → 0b → 0c)
 **Spec SSOT:** `MEMORY-HUB-EXECUTION-SPEC.md` §0.1 (decision ledger) · §2 (LOCKED contracts) · §7 (18-item Wave-3 reflow) · §9 (gates)
-**Baseline floor:** `scripts/test-floor-gate.sh` `FLOOR=2303` — rises only by net-new green with a dated provenance comment
+**Phase-0 floor baseline:** locked reflow baseline **2303**; if the live `scripts/test-floor-gate.sh` `FLOOR=` is already higher, keep that higher floor and raise only by measured net-new green with a dated provenance comment.
 **Re-test order (operator-locked Decision 5):** **M1 → M5 → M8**
 
 This document has two parts:
@@ -11,7 +11,7 @@ This document has two parts:
 - **PART A — Validation test plan** (`§A0`–`§A2`): the per-slice net-new automated tests that gate each slice's floor bump, plus the live M1/M5/M8 re-test plan.
 - **PART B — Remediation plan** (`§B0`–`§B10` + STOP-conditions): how the executor diagnoses and recovers from each failure mode, with STOP / CONTINUE / BLOCKED severity.
 
-> **Doc-reconciliation note (applied throughout):** (a) SPEC §0.1 is the decision SSOT; SPEC §8 and MANIFEST ~line 55 REFERENCE it. (b) SPEC §0 "Test floor baseline 2270" is **stale → 2303**; this plan's math starts at 2303. (c) PKT-MEM-112/113 predate the 06-25 reflow — **Phase 0 (PKT-MEM-106) precedes A–E and supersedes the B/D/E UI items** (registry picker, activity strip, cloud-key UI, Agent forget/pin). (d) Version drift: targets the **v3.8.2-built / v3.8.3-shipping** binary line (live-suite wording), not "v3.9.x".
+> **Doc-reconciliation note (applied throughout):** (a) SPEC §0.1 is the decision SSOT; SPEC §8 and MANIFEST ~line 55 REFERENCE it. (b) SPEC §0 "Test floor baseline 2270" is **stale → 2303** as the locked Phase-0 baseline; never lower a live script floor that already exceeds it. (c) PKT-MEM-112/113 predate the 06-25 reflow — **Phase 0 (PKT-MEM-106) precedes A–E and supersedes the B/D/E UI items** (registry picker, activity strip, cloud-key UI, Agent forget/pin). (d) Version drift: targets the **v3.8.2-built / v3.8.3-shipping** binary line (live-suite wording), not "v3.9.x".
 
 ---
 
@@ -56,17 +56,17 @@ This document has two parts:
 
 ### A0.3 Floor math — PROJECTED ONLY (re-measure per slice)
 
-> **These numbers are PROJECTIONS for planning, not gates.** Each slice's PR must (a) re-measure the actual integrated green count, (b) set `FLOOR=` to that measured value, (c) add the dated provenance comment, (d) keep `make test` / `make test-floor` green. **Never bake 2330/2350/2383 (or any projection) as a fixed floor.** The packet's `+N` placeholders are the source of truth; the floor moves up only, by measured net-new. Live multi-intent runs (Part A §A2) are operator evidence, NOT floor contributors.
+> **These numbers are PROJECTIONS for planning, not gates.** Each slice's PR must (a) re-measure the actual integrated green count, (b) set `FLOOR=` to the measured live count when it exceeds the entry floor, (c) add the dated provenance comment, (d) keep `make test` / `make test-floor` green. **Never bake any projection as a fixed floor and never lower the live script floor to the 2303 baseline.** The packet's `+N` placeholders are the source of truth; the floor moves up only, by measured net-new. Live multi-intent runs (Part A §A2) are operator evidence, NOT floor contributors.
 
 | Slice | Net-new automated tests (PROJECTED) | Running floor (PROJECTED) |
 |---|---|---|
-| Baseline (shipped) | — | **2303** |
+| Phase-0 baseline (locked docs) | — | **2303** |
 | **0a** Trust + identity core | **+25** | ~**2328** |
-| **0b** Process cockpit + activity | **+25** | ~**2353** |
-| **0c** Preview + guardrails + tabs | **+33** | ~**2386** |
-| **Phase 0 total** | **+83** | ~**2386** |
+| **0b** Process cockpit + activity | **+26** | ~**2354** |
+| **0c** Preview + guardrails + tabs | **+41** | ~**2395** |
+| **Phase 0 total** | **+92** | ~**2395** |
 
-Counts are per-`await test(...)` block (the harness's green unit). Re-measure and set `FLOOR=` to the real integrated count at each merge.
+Counts are per listed `await test(...)` block (the harness's green unit), but the actual merge gate is the measured integrated count. If this branch has already landed one or more slices and `scripts/test-floor-gate.sh` is above the projected running floor, keep the current higher floor and raise from there.
 
 ---
 
@@ -139,7 +139,7 @@ Counts are per-`await test(...)` block (the harness's green unit). Re-measure an
 | `activity_retention_30dayCap_whicheverSmaller` | Events older than 30 days pruned even under 500 count; "whichever comes first" honored (boundary cases at 500 and 30d). | Activity retention (age) |
 | `activity_file_path_underMemoryHub` | Activity persists to `~/Library/Application Support/TheBridge/memory-hub/activity.jsonl` (path resolved via `BridgePaths`, `overrideHomeForTesting`). | Activity/cache file location |
 
-**0b PROJECTED: +25 net-new** (24 prior + 1 picker-rowId test moved in from the 0a/0b split). Re-measure and set `FLOOR=` to actual.
+**0b PROJECTED: +26 net-new** (current row-list projection; includes the picker-rowId test moved in from the 0a/0b split). Re-measure and set `FLOOR=` to actual.
 
 ---
 
@@ -152,11 +152,13 @@ Counts are per-`await test(...)` block (the harness's green unit). Re-measure an
 | `preview_cloudManualOnly_notAutoTriggered` | Cloud enhancement never runs without an explicit operator trigger flag (auto path leaves provenance ≤ local). | Progressive preview (cloud manual) |
 | `preview_localTimeout_8s_keepsLatestValid` | Local enhancement exceeding 8s soft timeout ⇒ pipeline keeps latest valid (heuristic/local) plan and records `timeout` status in activity. | Local 8s timeout |
 | `preview_cloudTimeout_20s_keepsLatestValid` | Manual cloud enhancement exceeding 20s ⇒ falls back to latest valid plan + `timeout` activity status. | Cloud 20s timeout |
+| `preview_cloudFailure_keepsLatestValid_noReviewQueued` | Manual cloud enhancement failure records activity, keeps latest valid heuristic/local plan, and does not queue a review item. | Cloud failure semantics |
 | `snapshot_versioned_addedChangedRemovedBadges` | Diff between two snapshots yields per-field badges: added / changed / removed(=demoted/superseded). | Versioned snapshots + diff badges |
 | `snapshot_noSilentRemoval_demoteOrSupersedeOnly` | An intent present in heuristic but absent from an enhanced plan is marked demoted/superseded and stays visible — never silently dropped. | No-silent-removal |
 | `snapshot_enhancementChangesLane_returnsToUncommitted` | If enhancement changes a previously-approved lane's fields, that lane reverts to uncommitted review state. | Preview commit-state contract |
 | `snapshot_retention_keepsHeuristicLatestEnhancedCommitted` | After multiple enhancements, exactly the heuristic, latest-enhanced, and committed snapshots remain; intermediates pruned. | Snapshot retention |
 | `snapshot_storage_perMemoJsonPath` | Snapshots persist to `memory-hub/plan-snapshots/<memoId>.json` (operator decision #2 — inspectable/prunable). | Snapshot storage (decision #2) |
+| `snapshot_prunesOnWriteAndLaunchSweep` | Snapshot pruning runs during snapshot writes and launch/wake sweep, preserving heuristic/latest-enhanced/committed only. | Snapshot pruning trigger |
 | `gate_globalFloor_080_blocksBelow` | Any lane below global `0.80` ⇒ not auto-eligible (requires operator commit). | Lane threshold gates (global) |
 | `gate_reminder_090_threshold` | `reminder@0.89` ⇒ manual; `@0.90` ⇒ auto-eligible (boundary). | Lane threshold gates (reminder) |
 | `gate_registry_086_threshold` | `registry_update@0.85` ⇒ manual; `@0.86` ⇒ auto-eligible. | Lane threshold gates (registry) |
@@ -170,10 +172,16 @@ Counts are per-`await test(...)` block (the harness's green unit). Re-measure an
 | `dup_forceReason_invalidValueRejected` | A reason outside the enum (e.g. `"because"`) ⇒ rejected. | Duplicate force-reason enum |
 | `dup_forceReason_optionalNoteRecordedInActivity` | Force commit with valid reason + optional note ⇒ allowed; activity event records reason + note. | Duplicate force note (decision #1) |
 | `nonProtected_perFieldDiff_computesBeforeAfter` | Non-protected property update produces a before/after diff record (old/new) per field; protected fields excluded from the overwrite set. | Non-protected per-field diff (model, 0c) |
+| `nonProtected_diffDisplay_summaryAndRawJson` | Diff presentation includes a human-readable old/new summary and expandable raw before/after JSON. | Registry diff display |
 | `nonProtected_diffSelectsOnlyChosenFields` | Given 3 non-protected field changes, applying a selected subset writes only chosen fields; unselected unchanged. | Non-protected per-field diff (selectable, 0c) |
+| `nonProtected_diffValidationFailure_writesNothingKeepsReview` | If any selected non-protected field fails validation, no selected field writes and the intent remains uncommitted + review-visible. | Registry diff failure mode |
 | `processing_providerStatus_configuredVsMissing` | Processing tab reports `configured`/`missing` from Keychain presence only (never the key value). | Keychain provider status |
 | `processing_providerSaveDelete_keychainRoundTrip` | Save then delete an OpenAI-compatible provider key ⇒ status flips missing→configured→missing; no plaintext leak in any returned value. | Keychain save/delete |
 | `processing_openAICompatibleFields_apiKeyBaseUrlModelEnabled` | Provider slot exposes API key + base URL + model name + enabled toggle (decision #3); base URL/model persist (non-secret), key in Keychain. | OpenAI-compatible provider fields (decision #3) |
+| `processing_providerConfig_nonSecretProvidersJson_keychainKey` | Base URL/model/enabled persist in `memory-hub/providers.json`; API key persists only in Keychain and never in JSON. | Provider config storage |
+| `processing_providerDefaults_baseUrlOnly_modelRequired` | New provider slot defaults base URL to `https://api.openai.com/v1`, leaves model blank, and blocks cloud enhancement until model is entered. | Provider defaults |
+| `processing_providerValidation_syntaxOnSave_networkOnEnhance` | Save validates URL/model syntax only and performs no network call; manual cloud enhancement performs network/model validation. | Provider validation timing |
+| `activity_corruptJsonl_skipsPreservesRepairs` | Activity loader skips corrupt JSONL lines, preserves the original file, and records a repair activity with skipped count/error offset. | Activity corruption handling |
 | `agent_softForget_tombstonesNotHardDelete` | Agent forget calls `memory_forget` (soft tombstone); row not hard-deleted; no text-edit API exposed. | Agent soft-forget only |
 | `agent_pinToggle_setsAndClears` | Pin toggle sets/clears pinned state; no content mutation path present. | Agent pin only |
 | `notion_backfill_dryRunFirst_thenSelectedApply` | Backfill computes a dry-run plan (proposed rows/actions) and only applies the operator-selected subset; refresh + open present, full CRUD absent. | Notion open/refresh/dry-run backfill |
@@ -181,19 +189,20 @@ Counts are per-`await test(...)` block (the harness's green unit). Re-measure an
 | `notify_backgroundReviewError_deliversWithDeepLink` | App inactive OR non-Process surface ⇒ queued-review/error notification delivers and deep-links to the relevant Memory surface/filter. | Background review/error notifications |
 | `notify_gate_truthTable_activationAndAnchor` | Truth table over {active, inactive} × {Process selected, other} ⇒ suppress only the single active+Process cell. | Notification suppression precision |
 
-**0c PROJECTED: +33 net-new** (31 prior + 2 non-protected per-field diff tests moved in from 0a). Re-measure and set `FLOOR=` to actual.
+**0c PROJECTED: +41 net-new** (current row-list projection; includes cloud failure, snapshot pruning, provider config/defaults/validation, activity repair, registry diff display, and validation-failure coverage). Re-measure and set `FLOOR=` to actual.
 
-> **Phase 0 floor closeout: PROJECTED ~2386** (2303 + 83). Re-measure per slice; set `FLOOR=` to the actual green count; never raise except by net-new and never bake the projection as a fixed gate.
+> **Phase 0 floor closeout: PROJECTED ~2395** (2303 + 92, only as baseline math). Re-measure per slice; set `FLOOR=` to the actual green count when it exceeds the entry floor; never raise except by net-new, never lower an already-higher live floor, and never bake the projection as a fixed gate.
 
 ---
 
 ## §A2. LIVE multi-intent re-test plan (M1 → M5 → M8)
 
 **Driver doc:** `MEMORY-HUB-LIVE-MULTI-INTENT-SUITE.md`.
-**Gate:** Live pass/fail is **blocked until 0a + 0b land** (SPEC §0.1 "Live test gate" + §7). 0c hardens guardrails but M1/M5/M8 election + identity + processed-gate + per-intent commit + activity evidence depend on 0a+0b. Earlier recordings are REVIEW-only evidence unless the operator explicitly accepts that scope.
+**Gate:** Live pass/fail is **blocked until the Phase 0 build is installed and relaunched**. 0a+0b are the hard minimum for M1/M5/M8 election + identity + processed-gate + per-intent commit + activity evidence, but canonical closeout uses the full Phase 0 build because M8 also exercises 0c duplicate/force guardrails. Earlier recordings are REVIEW-only evidence unless the operator explicitly accepts that scope.
+**Smoke build/relaunch command:** `make test` → `make app` → `make install-copy` (or signing-backed `make install`) → `open -a "The Bridge"`; then confirm `tools_list` exposes `voice_memo_get`, `voice_memo_commit`, `memory_forget`, and any new tool before M1.
 **Order (operator decision #5):** **M1 → M5 → M8** — simple trust path before registry-heavy.
-**Protocol:** one memo per signal (`M1 done`), single-memo `voice_memo_get` → dry-run → execute / `voice_memo_commit`; never batch the backlog. Confirm pending count with `voice_memo_review_list` after each.
-**Evidence format (SPEC §0.1 "Live evidence format"):** activity-log receipt references (`memory-hub/activity.jsonl`, display first-12 of `receiptHash`) **plus** the PASS/PARTIAL/FAIL markdown grade table.
+**Protocol:** one memo per signal (`M1 done`), single-memo `voice_memo_get` → dry-run → execute / `voice_memo_commit`; never call `voice_memo_process mode:batch` or batch the backlog. Confirm pending count with `voice_memo_review_list` after each.
+**Evidence format (SPEC §0.1 "Live evidence format"):** activity-log receipt references (`memory-hub/activity.jsonl`, display first-12 of `receiptHash`) **plus** the PASS/PARTIAL/FAIL markdown grade table at `docs/operator/live-evidence/PKT-MEM-113-M1-M5-M8.md`. Template columns: case, build, memo id, grade, receipt refs, cleanup status, notes.
 **Test-receipt hygiene:** any forced duplicate commit performed during the live suite uses force reason `live_test`, so audit/cleanup can filter test-originated receipts from genuine operator forces in the shared `activity.jsonl`.
 
 ### Trust invariants that MUST hold on every live case (SPEC §2, suite §Trust invariants)
@@ -234,13 +243,15 @@ Counts are per-`await test(...)` block (the harness's green unit). Re-measure an
 - **Invariants checked:** election, same-kind distinctness, append-only, processed gate, duplicate block-by-default + force-reason (decision #1).
 - **Receipt evidence:** 1× `execute/executed` (reminder) + ≤4× distinct-`intentId` `review` events + per-commit appends; one `status=blocked` duplicate event and (if forced) a follow-up event carrying the reason enum + note. Live-test forces use reason `live_test`.
 
-### Live grade table template (to fill at run closeout)
+### Live grade artifact template (fixed columns at `docs/operator/live-evidence/PKT-MEM-113-M1-M5-M8.md`)
 
-| Case | Primary lane (expected → actual) | Suppressed count (exp → act, distinct ids?) | Append-only OK | Processed gate OK | Duplicate guard OK (M8) | Grade | Receipt refs (first-12 hashes) |
-|---|---|---|---|---|---|---|---|
-| M1 | reminder → … | 3 → … (distinct?) | … | … | n/a | PASS/PARTIAL/FAIL | … |
-| M5 | one registry → … | 2 → … (distinct?) | … | … | n/a | PASS/PARTIAL/FAIL | … |
-| M8 | reminder → … | ≤4 → … (distinct?) | … | … | … | PASS/PARTIAL/FAIL | … |
+Use the locked artifact columns below. Put primary/suppressed counts, append-only proof, processed-gate proof, and duplicate-guard notes inside `Notes`; do not replace the fixed columns with a different grading table.
+
+| Case | Build | Memo ID | Grade | Receipt refs (first-12 hashes) | Cleanup status | Notes |
+|---|---|---|---|---|---|---|
+| M1 | v3.8.3 / commit … | … | PASS/PARTIAL/FAIL | … | pending/done/partial | primary reminder; 3 suppressed distinct; append-only + processed gate evidence |
+| M5 | v3.8.3 / commit … | … | PASS/PARTIAL/FAIL | … | pending/done/partial | one registry primary; 2 suppressed distinct; picker/rowId append proof |
+| M8 | v3.8.3 / commit … | … | PASS/PARTIAL/FAIL | … | pending/done/partial | reminder primary; ≤4 suppressed distinct; duplicate block/force proof |
 
 ### Live → slice unblock map (summary)
 
@@ -252,7 +263,7 @@ Counts are per-`await test(...)` block (the harness's green unit). Re-measure an
 
 ### Post-live cleanup (suite §Session cleanup)
 
-`reminders_delete` test reminders · revert/remove appended test notes on Jacob/DST-8/Bridge v4/Event block · `registry_delete` any test Memory rows · `memory_forget` test agent memories · `voice_memo_review_dismiss` stale inbox entries · reset Curator mode to **Auto**. Filter `activity.jsonl` test receipts by force reason `live_test` where applicable.
+`reminders_delete` test reminders · revert/remove appended test notes on Jacob/DST-8/Bridge v4/Event block using the safest available path (protected append-only fields must not be silently overwritten; use an additive cleanup/reversal note or approved manual cleanup if needed) · `registry_delete` any test Memory rows · `memory_forget` test agent memories · `voice_memo_review_dismiss` stale inbox entries · reset Curator mode to **Auto**. Filter `activity.jsonl` test receipts by force reason `live_test` where applicable, and record cleanup status in the grade artifact.
 
 ---
 
@@ -267,8 +278,8 @@ Counts are per-`await test(...)` block (the harness's green unit). Re-measure an
 | # | Detection / symptom | Likely cause | Remediation action | Owner | STOP / CONTINUE |
 |---|---|---|---|---|---|
 | P-1 | `make test` red at HEAD before 0a starts | Pre-existing breakage on branch; baseline not green | Do not layer Phase 0 on a red baseline — bisect to the failing commit, restore green, record green count | executor | **STOP** until baseline green |
-| P-2 | Floor gate (`scripts/test-floor-gate.sh`) green count < 2303 at entry | Branch drifted / tests deleted since v3.8.2 | Reconcile; never lower FLOOR without recorded reason | executor | **STOP** |
-| P-3 | `tools_list` after relaunch missing `voice_memo_get`/`voice_memo_commit`/`memory_forget` | App not relaunched, or `bridge-env` LaunchAgent didn't inject env (`connectorAuth` nil) | `make install-copy` → `open -a "The Bridge"`; if env missing, reload `solutions.kup.bridge-env` LaunchAgent | operator | **STOP** live testing (unit work may continue) |
+| P-2 | Floor gate green count < current `scripts/test-floor-gate.sh` `FLOOR=` (or <2303 on an old branch) | Branch drifted / tests deleted since the entry floor | Reconcile; restore green; never lower `FLOOR` to the 2303 baseline or a projection without a recorded reason | executor | **STOP** |
+| P-3 | `tools_list` after app smoke missing `voice_memo_get`/`voice_memo_commit`/`memory_forget` or a new required tool | App not rebuilt/relaunched, or `bridge-env` LaunchAgent didn't inject env (`connectorAuth` nil) | Run `make test` → `make app` → `make install-copy` (or signing-backed `make install`) → `open -a "The Bridge"`; if env missing, reload `solutions.kup.bridge-env` LaunchAgent | operator | **STOP** live testing (unit work may continue) |
 | P-4 | Doc inconsistencies still live (ledger triplicated; floor "2270"; version "v3.9.x"; 112/113 predate reflow) | Reconciliation deferred | Land the doc reconciliation FIRST (see §B10) so executors read one SSOT | executor | CONTINUE (but fix before live grading) |
 
 ## §B1. Per-slice unit-test failures
@@ -399,7 +410,7 @@ M8 = 5+ intents (reminder 5pm + session + project + contact + memory_keep + agen
 | Detection / symptom | Cause | Remediation action | Owner | STOP / CONTINUE |
 |---|---|---|---|---|
 | Decision ledger conflicts between SPEC §0.1, SPEC §8, MANIFEST ~L55 | Triplicated source of truth | Make **SPEC §0.1 the SSOT**; SPEC §8 + MANIFEST L55 become explicit REFERENCES to §0.1 (no independent restatement) | executor | CONTINUE (fix before grading) |
-| SPEC §0 "Test floor baseline 2270" | Stale | Update to **2303** | executor | CONTINUE |
+| SPEC §0 "Test floor baseline 2270" | Stale | Update to **2303** as the locked Phase-0 baseline; never lower a live `scripts/test-floor-gate.sh` value that already exceeds it | executor | CONTINUE |
 | PKT-MEM-112/113 imply A–E is next | Predate 06-25 reflow | Annotate: **Phase 0 (PKT-MEM-106) precedes A–E and SUPERSEDES B/D/E UI items** (registry picker, activity strip, cloud-key UI, Agent forget/pin) | executor | CONTINUE |
 | Version drift: SPEC "v3.9.x" vs suite "v3.8.2+/v3.8.3" | Unaligned headers | Align to shipped reality (v3.8.2 installed; next published install = v3.8.3 per versioning rule) | executor | CONTINUE |
 | Five new operator-locked decisions not folded into §0.1 | New locks (force-reason enum, snapshot path, OpenAI-compat fields, per-field diff apply, M1→M5→M8 order) | Fold all five into §0.1 (and reference, not duplicate, elsewhere) | executor | CONTINUE |
@@ -411,7 +422,7 @@ M8 = 5+ intents (reminder 5pm + session + project + contact + memory_keep + agen
 The executor stops the slice/sprint and escalates to operator REVIEW — rather than self-continuing — when **any** of the following holds:
 
 1. **Any trust-invariant breach (§B6):** registry overwrite of a protected field, truncated agent memory, processed-with-pending, wrong-target registry write, or a full transcript leaked into `activity.jsonl`. → **BLOCKED** until fixed + regression test + floor bump; do not merge, do not advance M1→M5→M8.
-2. **Baseline not green / floor below 2303 at entry (§B0):** never build Phase 0 on a red or under-floored baseline.
+2. **Baseline not green / floor below entry floor (§B0):** never build Phase 0 on a red or under-floored baseline; 2303 is the locked minimum baseline, not permission to lower a newer script floor.
 3. **Floor would regress or rise without net-new tests (§B1, §B9):** FLOOR moves up only, by measured net-new green, with dated provenance. Lowering it (or padding it) is a hard stop.
 4. **Processed-gate not aligned across all `markProcessed` callsites (§B1 0a, §B6):** the three tools AND every resolver/processor callsite must consult the shared predicate before any live grading.
 5. **Election mis-pick that produced an auto-write to the wrong target (§B3):** as opposed to the *accepted* reminder-vs-registry tension (§B5), which is remediated by override/picker, not a stop. A genuine wrong-lane **auto-write** halts.
@@ -421,11 +432,11 @@ The executor stops the slice/sprint and escalates to operator REVIEW — rather 
 9. **Duplicate-write escape (§B4, §B8b):** a re-run/force produced a second Notion row or reminder without the reason-enum gate.
 10. **Stale registry target auto-committed without forcing manual commit (§B7):** stale fallback must force manual commit; an auto-write to a stale row halts.
 11. **Running M1/M5/M8 as pass/fail before Phase 0 blockers are fixed (SPEC §0.1 live gate):** pre-fix runs are REVIEW-only evidence by explicit operator acceptance; recording them as PASS/FAIL is a stop.
-12. **Re-test order violated:** must be **M1 → M5 → M8** (Decision 5). A FAIL/BLOCKED at an earlier rung halts before the next (do not run M5 if M1 trust failed; do not run M8 if M5 registry path failed). M6 is NOT a gated rung (optional extended regression only).
+12. **Re-test order or single-memo protocol violated:** must be **M1 → M5 → M8** (Decision 5), one memo per signal, never `voice_memo_process mode:batch` or batch-process the backlog. A FAIL/BLOCKED at an earlier rung halts before the next (do not run M5 if M1 trust failed; do not run M8 if M5 registry path failed). M6 is NOT a gated rung (optional extended regression only).
 13. **Live MCP surface unavailable (§B0 P-3):** app not relaunched or `bridge-env` not injected (`connectorAuth` nil) — halt live testing (unit work may continue) and have the operator relaunch / reload the LaunchAgent.
 14. **Scope creep beyond Phase 0:** if a fix requires a new Settings section (forbidden — Memory exists), a new MCP tool without a `ToolAnnotationCatalog` entry, or new Memory controls without a `SettingsUIValidationHarness` entry → stop and re-scope.
 
-**Resume protocol after any stop:** land the fix + net-new regression test → raise FLOOR with dated provenance → re-run the affected live case in M1→M5→M8 order → record activity-log receipt (full SHA-256, display first 12) + a PASS/PARTIAL/FAIL markdown grade row before continuing.
+**Resume protocol after any stop:** land the fix + net-new regression test → keep or raise `FLOOR` with dated provenance (never lower to baseline/projection) → re-run the affected live case in M1→M5→M8 order → record activity-log receipt (full SHA-256, display first 12) + a PASS/PARTIAL/FAIL markdown grade row in `docs/operator/live-evidence/PKT-MEM-113-M1-M5-M8.md` before continuing.
 
 ---
 
@@ -436,5 +447,5 @@ The executor stops the slice/sprint and escalates to operator REVIEW — rather 
 - `/Users/keepup/Developer/the-bridge/docs/operator/MEMORY-HUB-UI-VISION.md` (cockpit contract)
 - `/Users/keepup/Developer/the-bridge/docs/operator/MEMORY-HUB-LIVE-MULTI-INTENT-SUITE.md` (M1–M10, trust invariants, M2/M5/M9 election-tension notes)
 - `/Users/keepup/Developer/the-bridge/docs/operator/packets/PKT-MEM-105-trust-integrity.md` (sacred invariants)
-- `/Users/keepup/Developer/the-bridge/scripts/test-floor-gate.sh` (`FLOOR=2303`)
+- `/Users/keepup/Developer/the-bridge/scripts/test-floor-gate.sh` (live `FLOOR=`; locked Phase-0 baseline was 2303, but the script may already be higher after landed slices)
 - Grounded code surfaces: `TheBridge/Modules/VoiceMemo/VoiceMemoIntentElection.swift` (`isLowerPriority` confidence-first → 0a priority-first) · `VoiceMemoReviewStore.swift` (`enqueue` dedupes `memoId+intentKind` → 0a `intentId`) · `VoiceMemoReviewResolver.swift` (~8 `markProcessed` sites) · `VoiceMemoProcessor.swift` (~280/649) · `VoiceMemoModule.swift` (`voice_memo_commit` accepts `intentKind/entityKey/entityHint/rowId/fields`)

@@ -98,12 +98,14 @@ public enum VoiceMemoReviewResolver {
 
         switch action {
         case .markHandled:
-            try VoiceMemoProcessedStore.markProcessed(id: entry.memoId)
             try VoiceMemoReviewStore.resolve(id: reviewId)
+            let markedProcessed = try VoiceMemoProcessedGate.markProcessedIfClear(memoId: entry.memoId)
             return ResolveResult(
                 action: action.rawValue,
-                detail: "marked processed without external write",
-                markedProcessed: true,
+                detail: markedProcessed
+                    ? "marked processed without external write"
+                    : "resolved; memo still has pending sibling review(s)",
+                markedProcessed: markedProcessed,
                 resolved: true
             )
 
@@ -132,12 +134,12 @@ public enum VoiceMemoReviewResolver {
             if !fields.isEmpty { intent.fields = fields }
             if let entityKey { intent.entityKey = entityKey }
             let detail = try await VoiceMemoProcessor.executeMemoryKeep(intent, plan: plan, transcript: transcript, router: router)
-            try VoiceMemoProcessedStore.markProcessed(id: entry.memoId)
             try VoiceMemoReviewStore.resolve(id: reviewId)
+            let markedProcessed = try VoiceMemoProcessedGate.markProcessedIfClear(memoId: entry.memoId)
             return ResolveResult(
                 action: action.rawValue,
                 detail: detail,
-                markedProcessed: true,
+                markedProcessed: markedProcessed,
                 resolved: true
             )
 
@@ -154,12 +156,12 @@ public enum VoiceMemoReviewResolver {
             if let reminderTitle { intent.title = reminderTitle }
             if let reminderDue { intent.dueISO8601 = reminderDue }
             let detail = try await VoiceMemoProcessor.executeReminder(intent, router: router)
-            try VoiceMemoProcessedStore.markProcessed(id: entry.memoId)
             try VoiceMemoReviewStore.resolve(id: reviewId)
+            let markedProcessed = try VoiceMemoProcessedGate.markProcessedIfClear(memoId: entry.memoId)
             return ResolveResult(
                 action: action.rawValue,
                 detail: detail,
-                markedProcessed: true,
+                markedProcessed: markedProcessed,
                 resolved: true
             )
 
@@ -169,12 +171,12 @@ public enum VoiceMemoReviewResolver {
                 ?? VoiceMemoIntent(kind: .agentMemory, confidence: 1.0, title: entry.memoTitle, body: plan.summary)
             if !fields.isEmpty { intent.fields = fields }
             let detail = try await VoiceMemoProcessor.executeAgentMemory(intent, plan: plan, transcript: transcript, router: router)
-            try VoiceMemoProcessedStore.markProcessed(id: entry.memoId)
             try VoiceMemoReviewStore.resolve(id: reviewId)
+            let markedProcessed = try VoiceMemoProcessedGate.markProcessedIfClear(memoId: entry.memoId)
             return ResolveResult(
                 action: action.rawValue,
                 detail: detail,
-                markedProcessed: true,
+                markedProcessed: markedProcessed,
                 resolved: true
             )
 
@@ -199,29 +201,35 @@ public enum VoiceMemoReviewResolver {
             if !fields.isEmpty { intent.fields = fields }
             if let entityHint { intent.entityHint = entityHint }
             if let rowId {
-                let updateFields = intent.fields.mapValues { Value.string($0) }
+                // Append-only on the explicit-rowId path too (PKT-MEM-106 0a closes the
+                // latent breach where this path bypassed the protected-field merge and
+                // could overwrite brief/objective/summary/description).
+                let merged = try await VoiceMemoProcessor.mergeAppendRegistryFields(
+                    entityKey: entity, rowId: rowId, proposed: intent.fields, router: router
+                )
+                let updateFields = merged.mapValues { Value.string($0) }
                 _ = try await router.dispatch(toolName: "registry_update", arguments: .object([
                     "entity": .string(entity),
                     "id": .string(rowId),
                     "fields": .object(updateFields),
                 ]))
-                let detail = "registry_update entity=\(entity) id=\(rowId)"
-                try VoiceMemoProcessedStore.markProcessed(id: entry.memoId)
+                let detail = "registry_update entity=\(entity) id=\(rowId) (append)"
                 try VoiceMemoReviewStore.resolve(id: reviewId)
+                let markedProcessed = try VoiceMemoProcessedGate.markProcessedIfClear(memoId: entry.memoId)
                 return ResolveResult(
                     action: action.rawValue,
                     detail: detail,
-                    markedProcessed: true,
+                    markedProcessed: markedProcessed,
                     resolved: true
                 )
             }
             let detail = try await VoiceMemoProcessor.executeRegistryUpdate(intent, router: router)
-            try VoiceMemoProcessedStore.markProcessed(id: entry.memoId)
             try VoiceMemoReviewStore.resolve(id: reviewId)
+            let markedProcessed = try VoiceMemoProcessedGate.markProcessedIfClear(memoId: entry.memoId)
             return ResolveResult(
                 action: action.rawValue,
                 detail: detail,
-                markedProcessed: true,
+                markedProcessed: markedProcessed,
                 resolved: true
             )
         }
@@ -301,9 +309,8 @@ public enum VoiceMemoReviewResolver {
         var markedProcessed = false
         var resolved = false
         if executedAny {
-            try VoiceMemoProcessedStore.markProcessed(id: entry.memoId)
             try VoiceMemoReviewStore.resolve(id: reviewId)
-            markedProcessed = true
+            markedProcessed = try VoiceMemoProcessedGate.markProcessedIfClear(memoId: entry.memoId)
             resolved = true
         }
 

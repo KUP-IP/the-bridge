@@ -202,16 +202,9 @@ public enum BridgeAXID {
         public static let agentScopeFilter = id("agent.filter.scope")
         /// Agent type filter menu.
         public static let agentTypeFilter  = id("agent.filter.type")
-        /// Process tab memo list.
-        public static let processList      = id("process.list")
-        /// Process tab preview pane.
-        public static let processPreview   = id("process.preview")
-        /// Process pipeline step bar.
-        public static let processPipeline  = id("process.pipeline")
-        /// Process dry-run button.
-        public static let processDryRun    = id("process.dryRun")
-        /// Process execute button.
-        public static let processExecute   = id("process.execute")
+        // Pre-cockpit Process ids (process.list/preview/pipeline/dryRun/execute) were removed:
+        // the PKT-MEM-106 0b cockpit replaced them with the `Process.*` nested enum below, and
+        // they were orphaned (no view/test/manifest references).
         /// Processing settings pane.
         public static let processingPane   = id("processing.pane")
         /// Curator mode picker.
@@ -219,6 +212,27 @@ public enum BridgeAXID {
         public static let processingApple  = id("processing.apple")
         public static let processingParakeet = id("processing.parakeet")
         public static let processingOllama = id("processing.ollama")
+        // PKT-MEM-106 0c — OpenAI-compatible provider key controls.
+        public static let processingProviderSave   = id("processing.provider.save")
+        public static let processingProviderStatus = id("processing.provider.status")
+
+        // ── PKT-MEM-106 0b Process cockpit AX contract ──────────────────
+        // Stable per-zone/row/command identifiers keyed by memoId/intentId. Uses the
+        // codebase `bridge.settings.memory.process.*` convention (the well-formedness
+        // invariant, SettingsAXIdentifierTests.swift:190) — the packet's `memoryProcess.*`
+        // shorthand maps to the `process.*` control slug here. Stable across filter/sort/relaunch.
+        public enum Process {
+            private static func id(_ slug: String) -> String { BridgeAXID.control(.memory, slug) }
+            public static let memoList         = id("process.memoList")
+            public static let intentTable      = id("process.intentTable")
+            public static let detailInspector  = id("process.detailInspector")
+            public static let activityStrip    = id("process.activityStrip")
+            public static func memoRow(_ memoId: String) -> String { id("process.memoRow.\(memoId)") }
+            public static func intentRow(_ intentId: String) -> String { id("process.intentRow.\(intentId)") }
+            public static func registryRow(entity: String, rowId: String) -> String { id("process.registryRow.\(entity).\(rowId)") }
+            public static func commit(_ intentId: String) -> String { id("process.commit.\(intentId)") }
+            public static func primaryOverride(_ intentId: String) -> String { id("process.primaryOverride.\(intentId)") }
+        }
     }
 }
 

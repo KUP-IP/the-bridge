@@ -1463,7 +1463,26 @@ set -euo pipefail
 # fixes +2, Wave 2 Parakeet/Qwen +9, PKT-MEM-102 MemorySettingsTests +6+8, PKT-MEM-103 TTL +5+3,
 # PKT-MEM-105/106 trust+live-regression +10+1 = ~53 additive tests rebased onto batch-merge base.
 # Conservative floor held at 2373; raise to measured count after CI confirms the integrated green.
-FLOOR="${BRIDGE_TEST_FLOOR:-2373}"
+# PKT-MEM-106 0a trust+identity (2026-06-25): +25 VoiceMemoHubTrustTests — canonical intent_v1_ 20-hex
+# generator, lane-priority-first election, processed-gate predicate routed through ALL markProcessed
+# callsites (resolve-then-gate), distinct same-kind suppressed lanes (enqueue rekeyed to intentId),
+# legacy derive-on-read + rewrite-on-touch, rowId-param threading + ambiguity→manual, append-only
+# protected fields (incl. the resolver explicit-rowId path). Measured integrated green 2426 → 2451.
+# PKT-MEM-106 0b cockpit+activity (2026-06-25): +23 MemoryHubCockpitTests — activity-log receipt envelope
+# (full SHA-256 / first-12 display, 500/30d retention, no transcripts, corrupt-line skip+preserve+repair),
+# per-entity registry picker cache (24h stale boundary, last-good fallback), three-zone cockpit core
+# (one-primary election display + override re-election, per-intent commit args, picker rowId threading,
+# Process↔Inbox mirror over the same pending entries), well-formed cockpit AX IDs. Measured green 2451 → 2474.
+# PKT-MEM-106 0b review fix (+2): cockpit duplicate-lane dedup → exactly one primary (two-primaries breach
+# caught by adversarial review); commitArguments threads dueISO8601; + short-transcript privacy redaction.
+# PKT-MEM-106 0c preview+guardrails+tabs (2026-06-25): +31 MemoryHubGuardrailTests — lane thresholds
+# (0.80/0.90/0.86/0.86/0.90, WIRED into VoiceMemoProcessor auto-execute), duplicate-key + force-reason enum
+# {new_context,correction,operator_confirmed,live_test}, non-protected per-field diff (validate-all-or-nothing,
+# protected append-only re-derived, summary+raw JSON non-trapping), versioned plan snapshots
+# (heuristic/latest-enhanced/committed retention, no-silent-removal demote, launch sweep), OpenAI-compatible
+# provider (providers.json non-secret + Keychain key + Processing UI), progressive-preview policy (8s/20s
+# timeouts, cloud-failure keeps-latest-no-review), notification gate, activity corrupt-line repair. Measured 2474 → 2508.
+FLOOR="${BRIDGE_TEST_FLOOR:-2508}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

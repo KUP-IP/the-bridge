@@ -1,4 +1,4 @@
-# Memory Hub — Wave 1 Dispatch Manifest
+# Memory Hub — Dispatch Manifest
 
 **Orchestrator:** orchestrator v7.0.0  
 **Dispatched:** 2026-06-24  
@@ -50,13 +50,15 @@
 
 **Parent packet:** [PKT-MEM-112](./packets/PKT-MEM-112-wave3-deferred-closeout.md)
 
-**Active execution packet (QUEUE):** [PKT-MEM-113](./packets/PKT-MEM-113-multi-intent-live-cycle.md) — multi-intent live testing + Wave 3 dev cycle · REVIEW-FIRST · Priority 85
+**Active execution packet (READY NEXT):** [PKT-MEM-106](./packets/PKT-MEM-106-phase0-trust-cockpit.md) — Phase 0 trust + Process cockpit integration. [PKT-MEM-113](./packets/PKT-MEM-113-multi-intent-live-cycle.md) remains the gated live-test/evidence path after Phase 0 blockers are fixed.
 
-**Choice-to-contract reflow (2026-06-25):** Trust + Process cockpit blockers precede datetime/cloud polish, packaged as **Phase 0 = PKT-MEM-106** (sliced 0a trust+identity core · 0b Process cockpit + activity · 0c preview + guardrails + tabs). **All locked decisions live in [MEMORY-HUB-EXECUTION-SPEC.md §0.1 Decision ledger](./MEMORY-HUB-EXECUTION-SPEC.md#01-decision-ledger-2026-06-25) (SSOT)** — this manifest no longer restates them. Phase 0 precedes the older A–E phases and supersedes their B/D/E UI items (registry picker, activity strip, cloud-key UI, Agent forget/pin).
+**Choice-to-contract reflow (2026-06-25):** Trust + Process cockpit blockers precede datetime/cloud polish, packaged as **Phase 0 = PKT-MEM-106** (sliced 0a trust+identity core · 0b Process cockpit + activity · 0c preview + guardrails + tabs). **All locked decisions live in [MEMORY-HUB-EXECUTION-SPEC.md §0.1 Decision ledger](./MEMORY-HUB-EXECUTION-SPEC.md#01-decision-ledger-2026-06-25) (SSOT)** — this manifest references rather than restates them. Process is the default triage cockpit; Inbox is the exception queue. Phase 0 precedes the older A–E phases and supersedes their B/D/E UI items (registry picker, activity strip, cloud-key UI, Agent forget/pin).
+
+**Contract status (2026-06-25):** Phase 0 feature/design decisions are closed for execution. New survey work applies only to residual post-Phase-0 lanes unless implementation evidence reveals a trust-invariant conflict.
 
 | Phase | Packet | Branch (planned) | Status |
 |---|---|---|---|
-| 0 | **[PKT-MEM-106](./packets/PKT-MEM-106-phase0-trust-cockpit.md)** — Trust + Process cockpit (precedes A–E; supersedes B/D/E UI) | `feat/memory-hub-voice-curator` | **READY NEXT** — one integration packet, sliced **0a** trust+identity core · **0b** Process cockpit + activity · **0c** preview + guardrails + tabs. Full DoD + per-slice net-new tests in the packet and in [MEMORY-HUB-VALIDATION-AND-REMEDIATION.md](./MEMORY-HUB-VALIDATION-AND-REMEDIATION.md). Locked decisions are SSOT in [SPEC §0.1](./MEMORY-HUB-EXECUTION-SPEC.md#01-decision-ledger-2026-06-25). Floor rises from **2303** only by net-new; 0a lands first (unblocks live M5/M8). |
+| 0 | **[PKT-MEM-106](./packets/PKT-MEM-106-phase0-trust-cockpit.md)** — Trust + Process cockpit (precedes A–E; supersedes B/D/E UI) | `feat/memory-hub-voice-curator` | **READY NEXT** — one integration packet, sliced **0a** trust+identity core · **0b** Process cockpit + activity · **0c** preview + guardrails + tabs. Full DoD + per-slice net-new tests in the packet and in [MEMORY-HUB-VALIDATION-AND-REMEDIATION.md](./MEMORY-HUB-VALIDATION-AND-REMEDIATION.md). Locked decisions are SSOT in [SPEC §0.1](./MEMORY-HUB-EXECUTION-SPEC.md#01-decision-ledger-2026-06-25). Floor rises from **2303** only by net-new; 0a lands first (unblocks live M5/M8). PKT-MEM-105 trust invariants remain hard gates: exactly one primary auto-executes, suppressed lanes stay distinct in review, protected registry fields append only, processed waits for no pending review, and agent memory stores the full transcript. |
 | A | PKT-MEM-107 datetime/calendar | `feat/pkt-mem-107-datetime` | **QUEUED** |
 | B | PKT-MEM-108 UI closeout | `feat/pkt-mem-108-ui` | **QUEUED** — UI items (registry picker, Agent forget/pin) **superseded by PKT-MEM-106 0b/0c**; residual = Inbox→Process deep link |
 | C | PKT-MEM-109 spec v1.1 | `feat/pkt-mem-109-spec` | **QUEUED** (parallel with A) |
@@ -65,7 +67,7 @@
 
 ### GOAL_CONDITION (Wave 3)
 
-**112:** Close all sprint deferrals; live regression green in locked order **M1 → M5 → M8**; floor **≥2303** (PKT-MEM-105 baseline) maintained and raised per phase by net-new tests only; Process tab supports operator preview + commit path. Phase 0 = PKT-MEM-106 lands first (see Wave-3 table).
+**112:** Close all sprint deferrals; live regression green in locked order **M1 → M5 → M8** using single-memo processing only, never backlog/batch processing, with durable grade artifact `docs/operator/live-evidence/PKT-MEM-113-M1-M5-M8.md` (columns: case, build, memo id, grade, receipt refs, cleanup status, notes); floor **≥2303** (PKT-MEM-105 baseline) maintained and raised per phase by net-new tests only; Process tab is the default triage cockpit and supports operator preview + per-intent commit. Phase 0 = PKT-MEM-106 lands first (see Wave-3 table); A–E remain queued until their own verified work lands.
 
 ### Shipped baseline (Wave 2.5 on `feat/memory-hub-voice-curator`)
 

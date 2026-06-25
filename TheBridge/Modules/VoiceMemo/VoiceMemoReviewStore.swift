@@ -24,6 +24,16 @@ public struct VoiceMemoReviewEntry: Codable, Sendable, Equatable, Identifiable {
     public var statusChangedAt: String?
     public var status: Status
 
+    // PKT-MEM-106 0a — per-intent identity + target metadata. Optional + defaulted so
+    // legacy review.json entries (pre-0a, without these keys) decode cleanly; `intentId`
+    // is nil for legacy entries until they are touched (resolved / dismissed / committed).
+    public var intentId: String?
+    public var entityKey: String?
+    public var entityHint: String?
+    public var rowId: String?
+    public var destinationFields: [String: String]?
+    public var provenance: String?
+
     public init(
         id: String = UUID().uuidString,
         memoId: String,
@@ -35,7 +45,13 @@ public struct VoiceMemoReviewEntry: Codable, Sendable, Equatable, Identifiable {
         transcriptExcerpt: String,
         queuedAt: String = ISO8601DateFormatter().string(from: Date()),
         statusChangedAt: String? = nil,
-        status: Status = .pending
+        status: Status = .pending,
+        intentId: String? = nil,
+        entityKey: String? = nil,
+        entityHint: String? = nil,
+        rowId: String? = nil,
+        destinationFields: [String: String]? = nil,
+        provenance: String? = nil
     ) {
         self.id = id
         self.memoId = memoId
@@ -48,6 +64,12 @@ public struct VoiceMemoReviewEntry: Codable, Sendable, Equatable, Identifiable {
         self.queuedAt = queuedAt
         self.statusChangedAt = statusChangedAt
         self.status = status
+        self.intentId = intentId
+        self.entityKey = entityKey
+        self.entityHint = entityHint
+        self.rowId = rowId
+        self.destinationFields = destinationFields
+        self.provenance = provenance
     }
 
     /// Anchor for TTL age — `statusChangedAt` when present, else `queuedAt`.
@@ -55,6 +77,31 @@ public struct VoiceMemoReviewEntry: Codable, Sendable, Equatable, Identifiable {
         let iso = statusChangedAt ?? queuedAt
         return ISO8601DateFormatter().date(from: iso)
     }
+
+    /// Stable per-intent id: the stored `intentId` when present, else derived on read
+    /// from available canonical fields (PKT-MEM-106 0a legacy derive-on-read). When the
+    /// canonical target fields are incomplete (legacy entries), falls back to a hash that
+    /// folds `queuedAt` + `reason` so the derived id is deterministic across repeated reads.
+    public func effectiveIntentId() -> String {
+        if let intentId, !intentId.isEmpty { return intentId }
+        let fields = destinationFields ?? [:]
+        let hasCanonicalTarget = (entityKey?.isEmpty == false)
+            || (entityHint?.isEmpty == false)
+            || !fields.isEmpty
+        if hasCanonicalTarget {
+            return VoiceMemoIntentIdentity.intentId(
+                memoId: memoId, kind: intentKind, entityKey: entityKey,
+                entityHint: entityHint, title: memoTitle, fields: fields
+            )
+        }
+        return VoiceMemoIntentIdentity.intentId(
+            memoId: memoId, kind: intentKind, entityKey: nil, entityHint: nil,
+            title: memoTitle, fields: ["queuedAt": queuedAt, "reason": reason]
+        )
+    }
+
+    /// True when this entry carries no stored `intentId` (the id is derived on read).
+    public var isLegacyDerived: Bool { (intentId ?? "").isEmpty }
 }
 
 public struct VoiceMemoReviewManifest: Codable, Sendable, Equatable {
@@ -106,10 +153,22 @@ public enum VoiceMemoReviewStore {
     @discardableResult
     public static func enqueue(_ entry: VoiceMemoReviewEntry) throws -> VoiceMemoReviewEntry {
         var manifest = load()
-        manifest.entries.removeAll { $0.memoId == entry.memoId && $0.intentKind == entry.intentKind && $0.status == .pending }
+        // Dedupe by per-intent identity (PKT-MEM-106 0a), NOT memoId+intentKind: two
+        // same-kind lanes from one memo (distinct targets) have distinct intentIds and
+        // must both persist (M5/M8). Re-enqueueing the same intentId replaces (idempotent).
+        let newIntentId = entry.effectiveIntentId()
+        manifest.entries.removeAll { $0.effectiveIntentId() == newIntentId && $0.status == .pending }
         manifest.entries.insert(entry, at: 0)
         try save(manifest)
         return entry
+    }
+
+    /// Persist the derived `intentId` onto an entry the first time it is touched
+    /// (rewrite-on-touch — PKT-MEM-106 0a legacy migration; reads never rewrite).
+    private static func materializeIntentId(_ entry: inout VoiceMemoReviewEntry) {
+        if (entry.intentId ?? "").isEmpty {
+            entry.intentId = entry.effectiveIntentId()
+        }
     }
 
     public static func pendingEntries() -> [VoiceMemoReviewEntry] {
@@ -122,6 +181,7 @@ public enum VoiceMemoReviewStore {
         guard let idx = manifest.entries.firstIndex(where: { $0.id == id }) else { return false }
         manifest.entries[idx].status = .dismissed
         manifest.entries[idx].statusChangedAt = ISO8601DateFormatter().string(from: date)
+        materializeIntentId(&manifest.entries[idx])
         try save(manifest)
         return true
     }
@@ -132,6 +192,7 @@ public enum VoiceMemoReviewStore {
         guard let idx = manifest.entries.firstIndex(where: { $0.id == id && $0.status == .pending }) else { return false }
         manifest.entries[idx].status = .resolved
         manifest.entries[idx].statusChangedAt = ISO8601DateFormatter().string(from: date)
+        materializeIntentId(&manifest.entries[idx])
         try save(manifest)
         return true
     }
@@ -186,6 +247,11 @@ public enum VoiceMemoReviewStore {
             "queuedAt": .string(entry.queuedAt),
             "statusChangedAt": entry.statusChangedAt.map { .string($0) } ?? .null,
             "status": .string(entry.status.rawValue),
+            "intentId": .string(entry.effectiveIntentId()),
+            "legacyDerived": .bool(entry.isLegacyDerived),
+            "entityKey": entry.entityKey.map { .string($0) } ?? .null,
+            "entityHint": entry.entityHint.map { .string($0) } ?? .null,
+            "rowId": entry.rowId.map { .string($0) } ?? .null,
         ])
     }
 }
