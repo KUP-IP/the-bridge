@@ -99,6 +99,30 @@ public enum SettingsUIValidationHarness {
                     BridgeAXID.Connection.clientsList,
                     BridgeAXID.Connection.toggleRemote,
                 ])
+            case .memory:
+                ids.append(contentsOf: [
+                    BridgeAXID.Memory.tabBar,
+                    BridgeAXID.Memory.tab("process"),
+                    BridgeAXID.Memory.tab("inbox"),
+                    BridgeAXID.Memory.tab("notion"),
+                    BridgeAXID.Memory.tab("agent"),
+                    BridgeAXID.Memory.tab("processing"),
+                    // PKT-MEM-106 0b Process cockpit zones (replace the pre-cockpit
+                    // process.list / process.preview surfaces).
+                    BridgeAXID.Memory.Process.memoList,
+                    BridgeAXID.Memory.Process.intentTable,
+                    BridgeAXID.Memory.Process.detailInspector,
+                    BridgeAXID.Memory.Process.activityStrip,
+                    BridgeAXID.Memory.processingPane,
+                    BridgeAXID.Memory.processingProviderSave,
+                    BridgeAXID.Memory.processingProviderStatus,
+                    BridgeAXID.Memory.inboxList,
+                    BridgeAXID.Memory.dismiss,
+                    BridgeAXID.Memory.notionList,
+                    BridgeAXID.Memory.agentList,
+                    BridgeAXID.Memory.agentScopeFilter,
+                    BridgeAXID.Memory.agentTypeFilter,
+                ])
             case .datasources:
                 // Match the control slugs DataSourcesSection actually emits.
                 ids.append(contentsOf: [
@@ -106,13 +130,11 @@ public enum SettingsUIValidationHarness {
                     BridgeAXID.control(.datasources, "clearCache"),
                     BridgeAXID.control(.datasources, "proposal.confirm"),
                 ])
-            case .memory:
-                // PKT-977 Wave 2 Q4: Memory inspector section.
-                ids.append(contentsOf: [
-                    BridgeAXID.control(.memory, "settings.autoInject"),
-                    BridgeAXID.control(.memory, "entries.refresh"),
-                    BridgeAXID.control(.memory, "entries.scopeFilter"),
-                ])
+            // NB: a former duplicate `.memory` switch arm (PKT-977 Memory-inspector ids
+            // settings.autoInject / entries.refresh / entries.scopeFilter) was dead code —
+            // unreachable after the first `.memory` arm, and those ids are no longer set by
+            // any live view (grep-verified). Removed to keep the manifest↔view lock honest;
+            // the single `.memory` arm above carries every rendered Memory id.
             case .advanced:
                 ids.append(contentsOf: [
                     BridgeAXID.Advanced.checkUpdates,

@@ -188,13 +188,15 @@ public enum SystemModule {
             name: "notify",
             module: moduleName,
             tier: .open,
-            description: "Display a macOS user notification (title + body + optional sound). Non-blocking.",
+            description: "Display a macOS user notification (title + body + optional sound). Non-blocking. Optional openSettingsSection/openSettingsAnchor deep-link Memory/Inbox (or any Settings section) when the banner is tapped.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "title": .object(["type": .string("string"), "description": .string("Notification title")]),
                     "body": .object(["type": .string("string"), "description": .string("Notification body text")]),
-                    "sound": .object(["type": .string("string"), "description": .string("Optional sound name (e.g., 'Glass', 'Basso', 'Ping')")])
+                    "sound": .object(["type": .string("string"), "description": .string("Optional sound name (e.g., 'Glass', 'Basso', 'Ping')")]),
+                    "openSettingsSection": .object(["type": .string("string"), "description": .string("When set, tapping the notification opens this Settings section (e.g. Memory).")]),
+                    "openSettingsAnchor": .object(["type": .string("string"), "description": .string("Optional sub-anchor within the section (e.g. inbox, notion, agent).")]),
                 ]),
                 "required": .array([.string("title"), .string("body")])
             ]),
@@ -209,9 +211,23 @@ public enum SystemModule {
                     if case .string(let s) = args["sound"] { return s }
                     return nil
                 }()
+                let settingsSection: String? = {
+                    if case .string(let s) = args["openSettingsSection"], !s.isEmpty { return s }
+                    return nil
+                }()
+                let settingsAnchor: String? = {
+                    if case .string(let s) = args["openSettingsAnchor"], !s.isEmpty { return s }
+                    return nil
+                }()
 
                 do {
-                    try await sendLocalNotification(title: title, body: body, soundName: soundName)
+                    try await sendLocalNotification(
+                        title: title,
+                        body: body,
+                        soundName: soundName,
+                        settingsSection: settingsSection,
+                        settingsAnchor: settingsAnchor
+                    )
                     return .object([
                         "sent": .bool(true),
                         "title": .string(title),
@@ -254,7 +270,13 @@ public enum SystemModule {
         }
     }
 
-    private static func sendLocalNotification(title: String, body: String, soundName: String?) async throws {
+    private static func sendLocalNotification(
+        title: String,
+        body: String,
+        soundName: String?,
+        settingsSection: String? = nil,
+        settingsAnchor: String? = nil
+    ) async throws {
         // Standalone test executables crash on UNUserNotificationCenter.currentNotificationCenter
         // outside an .app bundle. Fallback keeps tests stable while production app uses native API.
         if Bundle.main.bundleURL.pathExtension != "app" {
@@ -301,6 +323,12 @@ public enum SystemModule {
         content.body = body
         if soundName != nil {
             content.sound = .default
+        }
+        if let settingsSection {
+            content.userInfo = BridgeNotificationDeepLink.userInfo(
+                section: settingsSection,
+                anchor: settingsAnchor
+            )
         }
 
         let request = UNNotificationRequest(

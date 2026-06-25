@@ -98,6 +98,8 @@ public struct AdvancedSection: View {
         self.screenOutputDir = screenOutputDir
     }
 
+    @ObservedObject private var nav = SettingsNavigation.shared
+
     /// Transient "copied" flash, keyed by the copied row's value so the
     /// check-mark lands on the row the user actually clicked.
     @State private var copiedKey: String? = nil
@@ -130,13 +132,22 @@ public struct AdvancedSection: View {
     private let keyColumnWidth: CGFloat = 130
 
     public var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: cardGap) {
-                metaStrip
-                systemCard
-                maintenanceCard
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: cardGap) {
+                    metaStrip
+                    systemCard
+                    LocalModelsSection()
+                    maintenanceCard
+                }
+                .padding(paneInset)
             }
-            .padding(paneInset)
+            .onChange(of: nav.anchor) { _, newAnchor in
+                scrollToAnchor(newAnchor, proxy: proxy)
+            }
+            .onAppear {
+                scrollToAnchor(nav.anchor, proxy: proxy)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
@@ -202,6 +213,25 @@ public struct AdvancedSection: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(factoryResetConfirmationMessage)
+        }
+    }
+
+    // MARK: - Deep-link anchor scroll (local-models)
+
+    private func scrollToAnchor(_ raw: String?, proxy: ScrollViewProxy) {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !raw.isEmpty else { return }
+        let norm = raw
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+        let target: String? = switch norm {
+        case "localmodels", "localmodel", "ollama", "models": "local-models"
+        default: nil
+        }
+        guard let target else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            withAnimation { proxy.scrollTo(target, anchor: .top) }
         }
     }
 

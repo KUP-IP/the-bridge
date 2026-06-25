@@ -1039,6 +1039,7 @@ public actor JobsManager {
             // reconcile so a fresh install's first 06:00 slot is itself eligible
             // for missed-occurrence recovery.
             await seedRunningReportJobIfNeeded()
+            await seedVoiceMemoCuratorJobIfNeeded()
             // PKT-381: REAL missed-occurrence handling replaces the old dead scan
             // (`_ = listAll(.active)` that discarded its result). Reconcile every
             // active job's missed occurrences (last-success → now) into the
@@ -1288,17 +1289,23 @@ public actor JobsManager {
 
     // MARK: Callback dispatch (SSE /jobs/{id}/run)
 
-    public func runCallback(jobId: String, router: ToolRouter) async throws -> Value {
+    public func runCallback(jobId: String, router: ToolRouter, allowPaused: Bool = false) async throws -> Value {
         try await ensureOpen()
         self.router = router
         guard let job = try await JobStore.shared.fetch(id: jobId) else {
             throw JobsModuleError.jobNotFound(jobId)
         }
-        guard job.status == .active else {
+        if job.status == .paused && !allowPaused {
             let rec = ExecutionRecord(id: nil, jobId: jobId, startedAt: Date(), completedAt: Date(),
-                                      status: .skipped, results: nil, errorMessage: "job paused")
+                                      status: .skipped, results: nil, errorMessage: "paused")
             _ = try await JobStore.shared.insertExecution(rec)
             return .object(["skipped": .string("paused")])
+        }
+        guard job.status == .active || job.status == .paused else {
+            let rec = ExecutionRecord(id: nil, jobId: jobId, startedAt: Date(), completedAt: Date(),
+                                      status: .skipped, results: nil, errorMessage: "job not runnable (status=\(job.status.rawValue))")
+            _ = try await JobStore.shared.insertExecution(rec)
+            return .object(["skipped": .string(job.status.rawValue)])
         }
         if job.skipOnBattery && ProcessInfo.processInfo.isLowPowerModeEnabled {
             let rec = ExecutionRecord(id: nil, jobId: jobId, startedAt: Date(), completedAt: Date(),

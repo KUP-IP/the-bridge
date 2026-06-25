@@ -193,9 +193,20 @@ public enum BridgeConstants {
     ///   state under bg-process/<ts-uuid>.{log,done,pid}; bg_run returns
     ///   immediately, bg_poll reports running/exited/terminated, bg_kill
     ///   SIGTERMs/SIGKILLs a running job). 172 + 3 = 175.
-    ///   Packet Runner v1 (FR-1/§8.3): + registry_hydrate (packet-registry-v1
-    ///   one-hop envelope). 175 + 1 = 176.
-    public static let staticFeatureModuleToolCount = 176
+    /// Voice Memos curator (2026-06-24): +2 (voice_memo_list + voice_memo_process).
+    /// 175 + 2 = 177.
+    /// Local Ollama (2026-06-24): +2 (ollama_health + ollama_list_models).
+    /// 177 + 2 = 179.
+    /// Voice Memos review (2026-06-24): +2 (voice_memo_review_list + voice_memo_review_dismiss).
+    /// 179 + 2 = 181.
+    /// Voice Memos review resolve (2026-06-24): +2 (voice_memo_review_resolve + voice_memo_transcript_refresh).
+    /// 181 + 2 = 183.
+    /// Memory Hub trust (2026-06-24): +1 memory_forget; +2 voice_memo_get + voice_memo_commit.
+    /// 183 + 3 = 186.
+    /// Packet Runner v1 (FR-1/§8.3, merged from main 2026-06-25): + registry_hydrate
+    ///   (packet-registry-v1 one-hop envelope). 186 + 1 = 187.
+    ///   (PKT-MEM-106 Phase 0 added internal types only — no new MCP tools.)
+    public static let staticFeatureModuleToolCount = 187
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.
@@ -221,5 +232,7 @@ public enum BridgeConstants {
     ///   git/gh/file_edit/code_search/http_fetch. 29 − 3 = 26.
     /// Data-Source Registry (2026-06-17): + registry family = 27.
     /// Tool-Dev (PRJCT-2754): + bgprocess family (bg_run/bg_poll/bg_kill) = 28.
-    public static let staticFeatureModuleFamilyCount = 28
+    /// Voice Memos curator (2026-06-24): + voice family = 29.
+    /// Local Ollama (2026-06-24): + ollama family = 30.
+    public static let staticFeatureModuleFamilyCount = 30
 }

@@ -1,287 +1,481 @@
-// MemorySection.swift — Settings → Memory inspector (PKT-977 Wave 2 · Q4)
-// TheBridge · UI · Sections
+// MemorySection.swift — Settings → Memory pane (PKT-MEM-102 + PKT-MEM-111).
 //
-// Read-only memory inspector: shows live memory entries from MemoryStore with
-// pin/forget actions (soft-tombstone consistent with the tool path). No CRUD
-// authoring in this wave — entries are added/updated via the `memory_remember`
-// tool. The auto-inject toggle (Q1) is also surfaced here.
-//
-// Decision Q4: read-only inspector, own nav section, pin/forget only,
-// soft-tombstone consistent with tools, auto-inject toggle. Full CRUD authoring
-// deferred.
-//
-// All color comes from adaptive BridgeTokens (no hardcoded Color.white/black).
+// Tabs: Process · Inbox · Notion · Agent · Processing (model settings).
 
 import SwiftUI
+import AppKit
 
-// MARK: - MemoryEntryRow model (UI snapshot)
-
-private struct MemoryRow: Identifiable, Equatable {
-    let id: String
-    let scope: String
-    let entity: String?
-    let text: String
-    let type: String
-    let pinned: Bool
-    let useCount: Int
-    let source: String
-    let createdAt: Date
-    let lastUsedAt: Date
+extension Notification.Name {
+    /// Posted when the voice-memo review queue mutates (dismiss, enqueue, …).
+    static let voiceMemoReviewDidChange = Notification.Name("com.notionbridge.voiceMemoReviewDidChange")
 }
 
-private extension MemoryEntry {
-    var row: MemoryRow {
-        MemoryRow(
-            id: id, scope: scope, entity: entity, text: text,
-            type: type.rawValue, pinned: pinned, useCount: useCount,
-            source: source, createdAt: createdAt, lastUsedAt: lastUsedAt
-        )
+/// Sidebar badge counter — shared so BridgeSectionNav can show pending count.
+@MainActor
+@Observable
+public final class MemoryReviewBadgeCounter {
+    public static let shared = MemoryReviewBadgeCounter()
+    public private(set) var pendingCount: Int = 0
+
+    public func refresh() {
+        pendingCount = VoiceMemoReviewStore.load().pendingCount
+    }
+
+    private init() {
+        refresh()
     }
 }
 
-// MARK: - MemorySection
-
 public struct MemorySection: View {
+    let anchor: String?
 
-    @State private var rows: [MemoryRow] = []
-    @State private var isLoading = true
-    @State private var errorMessage: String?
-    @State private var forgetTarget: MemoryRow?
-    @State private var showForgetConfirmation = false
-    @State private var filterScope: String = ""
+    @ObservedObject private var nav = SettingsNavigation.shared
+    @State private var selection: Tab
+    @State private var entries: [VoiceMemoReviewEntry] = []
+    @State private var expandedIds: Set<String> = []
+    @State private var actionMessage: String?
+    @State private var resolvingIds: Set<String> = []
+    @State private var inboxFilter: InboxFilter = .all
 
-    // Q1: global auto-inject toggle (OFF by default)
-    @AppStorage(BridgeDefaults.memoryHandshakeAutoInject)
-    private var autoInjectEnabled: Bool = false
+    public enum Tab: String, Hashable, CaseIterable, Sendable {
+        case process, inbox, notion, agent, processing
 
-    public init() {}
+        var label: String {
+            switch self {
+            case .process: return "Process"
+            case .inbox: return "Inbox"
+            case .notion: return "Notion"
+            case .agent: return "Agent"
+            case .processing: return "Processing"
+            }
+        }
+    }
+
+    /// Inbox status filter — matches notification deep-link intent (PKT-MEM-104 follow-up).
+    public enum InboxFilter: String, CaseIterable, Sendable {
+        case all, noTranscript, routingFailed, lowConfidence
+
+        var label: String {
+            switch self {
+            case .all: return "All"
+            case .noTranscript: return "No transcript"
+            case .routingFailed: return "Routing failed"
+            case .lowConfidence: return "Low confidence"
+            }
+        }
+    }
+
+    public init(anchor: String? = nil) {
+        self.anchor = anchor
+        self._selection = State(initialValue: MemorySection.tab(for: anchor) ?? .process)
+    }
 
     public var body: some View {
+        VStack(spacing: 0) {
+            headerCard
+                .padding(.horizontal, BridgeTokens.Space.paneH)
+                .padding(.top, BridgeTokens.Space.cardGap)
+            tabBar
+                .padding(.horizontal, BridgeTokens.Space.paneH)
+                .padding(.top, 12)
+                .padding(.bottom, 12)
+
+            Divider().background(BridgeTokens.hairlineFaint)
+
+            tabBody
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Color.clear)
+        .onAppear { reloadEntries() }
+        .onChange(of: anchor) { _, newAnchor in
+            if let t = MemorySection.tab(for: newAnchor) { selection = t }
+        }
+        .onChange(of: nav.anchor) { _, newAnchor in
+            if let t = MemorySection.tab(for: newAnchor) { selection = t }
+        }
+    }
+
+    // MARK: - Header
+
+    private var headerCard: some View {
+        BridgeGlassCard(cornerRadius: BridgeTokens.Radius.card, padding: 14) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(NotionPalette.purple.opacity(0.20))
+                        .frame(width: 44, height: 44)
+                    Image(systemName: "brain.head.profile")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(NotionPalette.purple.opacity(0.85))
+                }
+                .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Memory")
+                        .font(BridgeTokens.Typeface.hero)
+                        .foregroundStyle(BridgeTokens.fg1)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("Voice capture triage, Notion Memory rows, and agent recall.")
+                        .font(BridgeTokens.Typeface.meta)
+                        .foregroundStyle(BridgeTokens.fg3)
+                }
+                Spacer(minLength: 8)
+                if selection == .inbox, !entries.isEmpty {
+                    BridgeBadge("\(entries.count) pending", tone: .warn, showsDot: true)
+                }
+            }
+        }
+    }
+
+    // MARK: - Tabs
+
+    private var tabBar: some View {
+        HStack(spacing: 0) {
+            ForEach(Tab.allCases, id: \.self) { tab in
+                tabButton(tab)
+            }
+        }
+        .padding(2)
+        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Memory section tabs")
+        .accessibilityIdentifier(BridgeAXID.Memory.tabBar)
+    }
+
+    private func tabButton(_ tab: Tab) -> some View {
+        let on = selection == tab
+        return Button {
+            withAnimation(.easeInOut(duration: 0.16)) { selection = tab }
+        } label: {
+            Text(tab.label)
+                .font(.system(size: 12.5, weight: on ? .semibold : .regular))
+                .foregroundStyle(on ? BridgeTokens.fg1 : BridgeTokens.fg3)
+                .padding(.horizontal, 16).padding(.vertical, 6)
+                .frame(minHeight: 28)
+                .background {
+                    if on {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(BridgeTokens.accent.opacity(0.18))
+                            .overlay(RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(BridgeTokens.accent.opacity(0.45), lineWidth: 0.5))
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? [.isSelected] : [])
+        .accessibilityIdentifier(BridgeAXID.Memory.tab(tab.rawValue))
+    }
+
+    @ViewBuilder
+    private var tabBody: some View {
+        switch selection {
+        case .process: MemoryProcessTab()
+        case .inbox: inboxTab
+        case .notion: MemoryNotionTab()
+        case .agent: MemoryAgentTab()
+        case .processing: MemoryProcessingTab()
+        }
+    }
+
+    // MARK: - Inbox
+
+    private var filteredEntries: [VoiceMemoReviewEntry] {
+        entries.filter { entry in
+            switch inboxFilter {
+            case .all: return true
+            case .noTranscript: return statusLabel(for: entry) == "No transcript"
+            case .routingFailed: return statusLabel(for: entry) == "Routing failed"
+            case .lowConfidence: return statusLabel(for: entry) == "Low confidence"
+            }
+        }
+    }
+
+    private var inboxTab: some View {
         ScrollView {
-            VStack(spacing: BridgeTokens.Space.cardGap) {
-                settingsCard
-                if isLoading {
-                    loadingCard
-                } else if rows.isEmpty {
-                    emptyCard
+            VStack(alignment: .leading, spacing: BridgeTokens.Space.cardGap) {
+                inboxFilterBar
+                if let actionMessage {
+                    Text(actionMessage)
+                        .font(BridgeTokens.Typeface.sub)
+                        .foregroundStyle(BridgeTokens.fg3)
+                }
+                if filteredEntries.isEmpty {
+                    emptyInbox
                 } else {
-                    entriesCard
+                    ForEach(filteredEntries) { entry in
+                        inboxRow(entry)
+                    }
                 }
             }
             .padding(.horizontal, BridgeTokens.Space.paneH)
-            .padding(.vertical, BridgeTokens.Space.paneH)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.clear)
-        .task { await load() }
-        .confirmationDialog(
-            "Forget this memory?",
-            isPresented: $showForgetConfirmation,
-            presenting: forgetTarget
-        ) { target in
-            Button("Forget", role: .destructive) {
-                Task { await forget(id: target.id) }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: { target in
-            Text("\"\(String(target.text.prefix(80)))\" will be soft-tombstoned and excluded from recall. The row is preserved for audit.")
-        }
-    }
-
-    // MARK: - Cards
-
-    private var settingsCard: some View {
-        BridgeGlassCard {
-            VStack(alignment: .leading, spacing: BridgeTokens.Space.s2) {
-                BridgeCardLabel("Settings")
-                    .accessibilityIdentifier("\(BridgeAXID.root).memory.settings.label")
-
-                Toggle(isOn: $autoInjectEnabled) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Auto-inject memory at handshake")
-                            .font(BridgeTokens.Typeface.body)
-                            .foregroundStyle(BridgeTokens.fg2)
-                        Text("When enabled, the salient memory slice is appended to initialize.instructions for connecting MCP clients. Default OFF — memory stays opt-in via bridge://memory.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(BridgeTokens.fg4)
-                    }
-                }
-                .toggleStyle(.switch)
-                .accessibilityIdentifier("\(BridgeAXID.root).memory.settings.autoInject")
-            }
-        }
-    }
-
-    private var loadingCard: some View {
-        BridgeGlassCard {
-            HStack {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .scaleEffect(0.75)
-                Text("Loading memories…")
-                    .font(.system(size: 13))
-                    .foregroundStyle(BridgeTokens.fg4)
-            }
-        }
-    }
-
-    private var emptyCard: some View {
-        BridgeGlassCard {
-            VStack(spacing: BridgeTokens.Space.s3) {
-                Image(systemName: "brain")
-                    .font(.system(size: 28))
-                    .foregroundStyle(BridgeTokens.fg4)
-                Text("No memories stored yet.")
-                    .font(BridgeTokens.Typeface.body)
-                    .foregroundStyle(BridgeTokens.fg4)
-                Text("Use memory_remember from any MCP client to start building the shared memory store.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(BridgeTokens.fg4)
-                    .multilineTextAlignment(.center)
-            }
-            .frame(maxWidth: .infinity)
-        }
-    }
-
-    private var entriesCard: some View {
-        BridgeGlassCard {
-            VStack(alignment: .leading, spacing: BridgeTokens.Space.s2) {
-                HStack {
-                    BridgeCardLabel("Memories (\(displayedRows.count))")
-                    Spacer()
-                    Button(action: { Task { await load() } }) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 12))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(BridgeTokens.fg4)
-                    .accessibilityIdentifier("\(BridgeAXID.root).memory.entries.refresh")
-                }
-
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 11))
-                        .foregroundStyle(BridgeTokens.fg4)
-                    TextField("Filter by scope", text: $filterScope)
-                        .font(.system(size: 12))
-                        .textFieldStyle(.plain)
-                        .accessibilityIdentifier("\(BridgeAXID.root).memory.entries.scopeFilter")
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(BridgeTokens.wellFill)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-
-                Divider()
-
-                ForEach(displayedRows) { row in
-                    entryRow(row)
-                    if row.id != displayedRows.last?.id {
-                        Divider()
-                    }
-                }
-            }
-        }
-    }
-
-    private func entryRow(_ row: MemoryRow) -> some View {
-        HStack(alignment: .top, spacing: BridgeTokens.Space.s2) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 5) {
-                    if row.pinned {
-                        Image(systemName: "pin.fill")
-                            .font(.system(size: 9))
-                            .foregroundStyle(BridgeTokens.accent)
-                    }
-                    Text(row.scope + (row.entity.map { " · \($0)" } ?? ""))
-                        .font(.system(size: 11))
-                        .foregroundStyle(BridgeTokens.fg4)
-                    BridgeBadge(row.type, tone: .neutral)
-                    if row.useCount > 0 {
-                        Text("used \(row.useCount)×")
-                            .font(.system(size: 11))
-                            .foregroundStyle(BridgeTokens.fg4)
-                    }
-                }
-                Text(row.text)
-                    .font(BridgeTokens.Typeface.body)
-                    .foregroundStyle(BridgeTokens.fg2)
-                    .lineLimit(4)
-                    .fixedSize(horizontal: false, vertical: true)
-                if !row.source.isEmpty {
-                    Text("via \(row.source)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(BridgeTokens.fg4)
-                }
-            }
+            .padding(.vertical, BridgeTokens.Space.cardGap)
             .frame(maxWidth: .infinity, alignment: .leading)
-
-            VStack(spacing: 6) {
-                Button(action: { Task { await togglePin(row) } }) {
-                    Image(systemName: row.pinned ? "pin.slash" : "pin")
-                        .font(.system(size: 12))
-                        .foregroundStyle(row.pinned ? BridgeTokens.accent : BridgeTokens.fg4)
-                }
-                .buttonStyle(.plain)
-                .help(row.pinned ? "Unpin" : "Pin to top of recall")
-                .accessibilityIdentifier("\(BridgeAXID.root).memory.entries.\(row.id).pin")
-
-                Button(action: {
-                    forgetTarget = row
-                    showForgetConfirmation = true
-                }) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 12))
-                        .foregroundStyle(BridgeTokens.fg4)
-                }
-                .buttonStyle(.plain)
-                .help("Forget (soft-tombstone)")
-                .accessibilityIdentifier("\(BridgeAXID.root).memory.entries.\(row.id).forget")
-            }
         }
-        .accessibilityIdentifier("\(BridgeAXID.root).memory.entries.\(row.id)")
+        .accessibilityIdentifier(BridgeAXID.Memory.inboxList)
     }
 
-    // MARK: - Filtered rows
-
-    private var displayedRows: [MemoryRow] {
-        let scope = filterScope.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if scope.isEmpty { return rows }
-        return rows.filter {
-            $0.scope.lowercased().contains(scope) ||
-            ($0.entity?.lowercased().contains(scope) ?? false)
+    private var inboxFilterBar: some View {
+        HStack(spacing: 6) {
+            ForEach(InboxFilter.allCases, id: \.self) { filter in
+                let on = inboxFilter == filter
+                Button {
+                    withAnimation(.easeInOut(duration: 0.14)) { inboxFilter = filter }
+                } label: {
+                    Text(filter.label)
+                        .font(.system(size: 11.5, weight: on ? .semibold : .regular))
+                        .foregroundStyle(on ? BridgeTokens.fg1 : BridgeTokens.fg3)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background {
+                            if on {
+                                Capsule().fill(BridgeTokens.accent.opacity(0.16))
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier(BridgeAXID.Memory.inboxFilterBar + ".\(filter.rawValue)")
+            }
         }
+        .accessibilityIdentifier(BridgeAXID.Memory.inboxFilterBar)
+    }
+
+    private var emptyInbox: some View {
+        BridgeGlassCard {
+            VStack(alignment: .leading, spacing: 8) {
+                BridgeCardLabel("Inbox empty")
+                Text("Voice memos that need triage appear here — routing failures, low confidence, or missing transcripts.")
+                    .font(BridgeTokens.Typeface.sub)
+                    .foregroundStyle(BridgeTokens.fg4)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func inboxRow(_ entry: VoiceMemoReviewEntry) -> some View {
+        let expanded = expandedIds.contains(entry.id)
+        return BridgeGlassCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(entry.memoTitle)
+                        .font(BridgeTokens.Typeface.name)
+                        .foregroundStyle(BridgeTokens.fg1)
+                        .lineLimit(2)
+                    Spacer(minLength: 8)
+                    BridgeBadge(transcriptSourceLabel(for: entry), tone: transcriptSourceTone(for: entry))
+                    BridgeBadge(statusLabel(for: entry), tone: statusTone(for: entry), showsDot: true)
+                }
+                HStack(spacing: 12) {
+                    if let date = formattedQueuedDate(entry.queuedAt) {
+                        Text(date)
+                            .font(BridgeTokens.Typeface.meta)
+                            .foregroundStyle(BridgeTokens.fg4)
+                    }
+                    Text("\(entry.intentKind) · \(Int(entry.confidence * 100))%")
+                        .font(BridgeTokens.Typeface.meta)
+                        .foregroundStyle(BridgeTokens.fg4)
+                }
+                Text(entry.reason)
+                    .font(BridgeTokens.Typeface.sub)
+                    .foregroundStyle(BridgeTokens.fg3)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if expanded, !entry.transcriptExcerpt.isEmpty {
+                    Text(entry.transcriptExcerpt)
+                        .font(BridgeTokens.Typeface.mono)
+                        .foregroundStyle(BridgeTokens.fg2)
+                        .textSelection(.enabled)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(BridgeTokens.wellFill, in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BridgeTokens.hairlineFaint, lineWidth: 0.5))
+                }
+
+                HStack(spacing: 8) {
+                    if !entry.transcriptExcerpt.isEmpty {
+                        BridgeButton(expanded ? "Hide transcript" : "Show transcript", variant: .link) {
+                            toggleExpanded(entry.id)
+                        }
+                    }
+                    if let path = entry.memoPath, !path.isEmpty {
+                        BridgeButton("Reveal in Finder", systemImage: "folder") {
+                            revealInFinder(path: path)
+                        }
+                        .accessibilityIdentifier(BridgeAXID.Memory.revealInFinder)
+                    }
+                    Spacer(minLength: 0)
+                    BridgeButton("Add reminder", variant: .link) {
+                        resolveEntry(entry, action: .reminder)
+                    }
+                    .accessibilityIdentifier(BridgeAXID.Memory.addReminder)
+                    BridgeButton("Agent should know", variant: .link) {
+                        resolveEntry(entry, action: .agentRemember)
+                    }
+                    .accessibilityIdentifier(BridgeAXID.Memory.agentRemember)
+                    BridgeButton("Retry routing", variant: .link) {
+                        resolveEntry(entry, action: .retryRouting)
+                    }
+                    .accessibilityIdentifier(BridgeAXID.Memory.retryRouting)
+                    BridgeButton("Mark handled", variant: .link) {
+                        resolveEntry(entry, action: .markHandled)
+                    }
+                    .accessibilityIdentifier(BridgeAXID.Memory.markHandled)
+                    BridgeButton("File as Memory", variant: .link) {
+                        resolveEntry(entry, action: .memoryKeep)
+                    }
+                    .accessibilityIdentifier(BridgeAXID.Memory.fileAsMemory)
+                    BridgeButton("Dismiss", variant: .default) {
+                        dismissEntry(entry)
+                    }
+                    .accessibilityIdentifier(BridgeAXID.Memory.dismiss)
+                }
+            }
+        }
+        .accessibilityIdentifier(BridgeAXID.Memory.inboxRow)
     }
 
     // MARK: - Actions
 
-    private func load() async {
-        isLoading = true
-        errorMessage = nil
-        do {
-            let entries = try await MemoryStore.shared.list()
-            rows = entries.map(\.row)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-        isLoading = false
+    private func reloadEntries() {
+        entries = VoiceMemoReviewStore.pendingEntries()
+        MemoryReviewBadgeCounter.shared.refresh()
     }
 
-    private func togglePin(_ row: MemoryRow) async {
+    private func dismissEntry(_ entry: VoiceMemoReviewEntry) {
         do {
-            try await MemoryStore.shared.pin(id: row.id, !row.pinned)
-            await load()
+            guard try VoiceMemoReviewStore.dismiss(id: entry.id) else {
+                actionMessage = "Entry not found."
+                return
+            }
+            actionMessage = nil
+            reloadEntries()
+            NotificationCenter.default.post(name: .voiceMemoReviewDidChange, object: nil)
         } catch {
-            errorMessage = error.localizedDescription
+            actionMessage = "Dismiss failed: \(error.localizedDescription)"
         }
     }
 
-    private func forget(id: String) async {
-        do {
-            try await MemoryStore.shared.forget(id: id)
-            await load()
-        } catch {
-            errorMessage = error.localizedDescription
+    private func resolveEntry(_ entry: VoiceMemoReviewEntry, action: VoiceMemoReviewAction) {
+        guard !resolvingIds.contains(entry.id) else { return }
+        resolvingIds.insert(entry.id)
+        Task {
+            defer {
+                Task { @MainActor in resolvingIds.remove(entry.id) }
+            }
+            guard let router = await JobsManager.shared.router_() else {
+                await MainActor.run { actionMessage = "MCP server not ready — try again shortly." }
+                return
+            }
+            do {
+                let result = try await VoiceMemoReviewResolver.resolve(
+                    reviewId: entry.id,
+                    action: action,
+                    router: router
+                )
+                await MainActor.run {
+                    if let warning = result.warning {
+                        actionMessage = warning
+                    } else {
+                        actionMessage = result.detail
+                    }
+                    reloadEntries()
+                    NotificationCenter.default.post(name: .voiceMemoReviewDidChange, object: nil)
+                }
+            } catch {
+                await MainActor.run {
+                    actionMessage = "Resolve failed: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func toggleExpanded(_ id: String) {
+        if expandedIds.contains(id) {
+            expandedIds.remove(id)
+        } else {
+            expandedIds.insert(id)
+        }
+    }
+
+    private func revealInFinder(path: String) {
+        let url = URL(fileURLWithPath: path)
+        let dir = url.deletingLastPathComponent().path
+        NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: dir)
+    }
+
+    // MARK: - Labels
+
+    private func transcriptSourceLabel(for entry: VoiceMemoReviewEntry) -> String {
+        guard let path = entry.memoPath else { return "Missing" }
+        let audio = URL(fileURLWithPath: path)
+        switch VoiceMemoDiscovery.detectTranscriptSource(for: audio) {
+        case .apple: return "Apple"
+        case .parakeet: return "Parakeet"
+        case .sidecar: return "Sidecar"
+        case .none:
+            return entry.transcriptExcerpt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "Missing" : "Sidecar"
+        }
+    }
+
+    private func transcriptSourceTone(for entry: VoiceMemoReviewEntry) -> BridgeBadge.Tone {
+        transcriptSourceLabel(for: entry) == "Missing" ? .warn : .info
+    }
+
+    private func statusLabel(for entry: VoiceMemoReviewEntry) -> String {
+        let reason = entry.reason.lowercased()
+        if reason.contains("no transcript") || reason.contains("missing transcript") {
+            return "No transcript"
+        }
+        if reason.contains("routing") || reason.contains("classify") {
+            return "Routing failed"
+        }
+        if entry.confidence < 0.65 {
+            return "Low confidence"
+        }
+        return "Transcribed"
+    }
+
+    private func statusTone(for entry: VoiceMemoReviewEntry) -> BridgeBadge.Tone {
+        switch statusLabel(for: entry) {
+        case "No transcript": return .bad
+        case "Routing failed": return .warn
+        case "Low confidence": return .warn
+        default: return .ok
+        }
+    }
+
+    private func formattedQueuedDate(_ iso: String) -> String? {
+        guard let date = ISO8601DateFormatter().date(from: iso) else { return nil }
+        let fmt = DateFormatter()
+        fmt.dateStyle = .medium
+        fmt.timeStyle = .short
+        return fmt.string(from: date)
+    }
+
+    // MARK: - Deep-link anchor → tab
+
+    public static func tab(for anchor: String?) -> Tab? {
+        guard let raw = anchor?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: ""),
+            !raw.isEmpty else { return nil }
+        switch raw {
+        case "process", "curator", "pipeline":
+            return .process
+        case "inbox", "review", "voicememos", "voicememo", "voice":
+            return .inbox
+        case "notion", "registry":
+            return .notion
+        case "agent", "sqlite", "remember":
+            return .agent
+        case "processing", "models", "routing":
+            return .processing
+        default:
+            return nil
         }
     }
 }

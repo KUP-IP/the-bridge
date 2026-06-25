@@ -371,6 +371,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // PKT-340 V2-SCHEDULER: Bootstrap JobsManager (opens SQLite, scans missed executions)
         Task {
             await JobsManager.shared.bootstrap()
+            await VoiceMemoReviewLifecycle.sweepIfNeeded(router: await JobsManager.shared.router_())
         }
 
         // PKT-341: Install signal handlers for crash breadcrumbs
@@ -520,6 +521,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             // wake-run; this is the durable catch-up that also covers slots
             // launchd dropped. Idempotent — deduped against job_executions.
             Task.detached { await JobsManager.shared.onWakeOrHeartbeatOnline() }
+            Task.detached {
+                await VoiceMemoReviewLifecycle.sweepIfNeeded(router: await JobsManager.shared.router_())
+            }
         }
     }
 

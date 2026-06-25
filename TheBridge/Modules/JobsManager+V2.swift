@@ -37,7 +37,7 @@ extension JobsManager {
         guard let router = self.router_() else {
             throw JobsModuleError.launchAgentFailure("router unavailable — JobsManager.bootstrap(router:) must be called at app startup before job_run")
         }
-        return try await runCallback(jobId: id, router: router)
+        return try await runCallback(jobId: id, router: router, allowPaused: true)
     }
 
     // MARK: job_update

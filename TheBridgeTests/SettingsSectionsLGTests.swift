@@ -41,7 +41,7 @@ func runSettingsSectionsLGTests() async {
     await test("PKT-A: header preset targetSections is all sections") {
         let ids = BridgeSettingsHeaderPreset.targetSections.map(\.rawValue)
         try expect(ids == ["Standing Orders", "Skills", "Jobs", "Tools",
-                           "Security", "Connection", "Data Sources", "Memory", "Advanced"],
+                           "Security", "Connection", "Memory", "Data Sources", "Advanced"],
                    "targetSections drift: \(ids)")
         try expect(BridgeSettingsHeaderPreset.targetSections.count == SettingsSection.allCases.count,
                    "every section must adopt the shared header")
@@ -85,7 +85,8 @@ func runSettingsSectionsLGTests() async {
                 return String(describing: type(of: header))
             }
         }
-        try expect(names.count == 9, "expected 9 headers, got \(names.count)")
+        try expect(names.count == SettingsSection.allCases.count,
+                   "expected \(SettingsSection.allCases.count) headers, got \(names.count)")
         for name in names {
             try expect(name.hasPrefix("BridgeSettingsSectionHeader<"),
                        "non-shared header type: \(name)")
@@ -198,13 +199,15 @@ func runSettingsSectionsLGTests() async {
     }
 
     // 11. Locked SF Symbols per section (pinned for visual contract).
-    await test("PKT-A: BridgeSectionIcon SF Symbols locked for the 7 sections") {
+    await test("PKT-A: BridgeSectionIcon SF Symbols locked for all sections") {
         try expect(BridgeSectionIcon.systemImage(for: .orders) == "command")
         try expect(BridgeSectionIcon.systemImage(for: .skills) == "sparkles")
         try expect(BridgeSectionIcon.systemImage(for: .jobs) == "clock.badge.checkmark")
         try expect(BridgeSectionIcon.systemImage(for: .tools) == "hammer")
         try expect(BridgeSectionIcon.systemImage(for: .security) == "lock.shield")
         try expect(BridgeSectionIcon.systemImage(for: .connection) == "network")
+        try expect(BridgeSectionIcon.systemImage(for: .memory) == "brain.head.profile")
+        try expect(BridgeSectionIcon.systemImage(for: .datasources) == "tablecells")
         try expect(BridgeSectionIcon.systemImage(for: .advanced) == "wrench.and.screwdriver")
     }
 

@@ -119,10 +119,17 @@ public enum BridgeSettingsAutomation {
             return (.connection, "local")           // retired → Connection/Local
         case "remoteaccess", "remote", "cloud":
             return (.connection, "remote")          // retired → Connection/Remote
+        // Memory (voice memo inbox + Notion Memory + agent recall)
+        case "memory", "memories":
+            return (.memory, nil)
+        case "voicememos", "voicememo", "review":
+            return (.memory, "inbox")               // legacy Advanced anchor → Memory/Inbox
         // Singular shorthands for surviving sections
         case "skill":                  return (.skills, nil)
         case "tool":                   return (.tools, nil)
         case "job":                    return (.jobs, nil)
+        case "advanced", "localmodels", "localmodel", "ollama":
+            return (.advanced, "local-models")
         case "settings", "preferences": return nil  // ambiguous: not a section
         default:                       return nil
         }
@@ -163,12 +170,16 @@ public enum BridgeSettingsAutomation {
         // when the window is already open.
         SettingsNavigation.shared.go(section, anchor: anchor)
 
+        guard let app = NSApp else {
+            return false
+        }
+
         // Open the host when none is up yet. Reach the AppDelegate via the
         // identity-correct `AppDelegate.shared` FIRST (the @NSApplicationDelegate-
         // Adaptor-safe path), falling back to the historic cast only if shared
         // isn't published yet. This is what actually opens the window under the
         // adaptor — the bare cast could miss and leave it closed.
-        let alreadyOpen = NSApp.windows.contains { isSettingsWindow($0) }
+        let alreadyOpen = app.windows.contains { isSettingsWindow($0) }
         if !alreadyOpen, let delegate = liveAppDelegate() {
             delegate.openSettings(section: section)
         }
@@ -176,7 +187,7 @@ public enum BridgeSettingsAutomation {
         // Authoritative host-presence: does a real Settings NSWindow now exist?
         // This — not the delegate cast — is what determines success, so a deep
         // link to an open window no longer reports a false "no host" note.
-        return NSApp.windows.contains { isSettingsWindow($0) }
+        return app.windows.contains { isSettingsWindow($0) }
     }
 
     /// Identity-correct handle to the live AppDelegate. Prefers the
@@ -296,6 +307,10 @@ public enum BridgeAutomationModule {
                     "anchor": .object([
                         "type": .string("string"),
                         "description": .string("Optional sub-section anchor (e.g. a credential row slug) passed through to the section.")
+                    ]),
+                    "focus": .object([
+                        "type": .string("boolean"),
+                        "description": .string("When true (default), raise the Settings window after navigation so screen_capture can read it. Pair with bridge_focus_settings when false.")
                     ])
                 ]),
                 "required": .array([.string("section")])
@@ -330,6 +345,12 @@ public enum BridgeAutomationModule {
                     "windowOpened": .bool(windowDriven)
                 ]
                 if let anchor { result["anchor"] = .string(anchor) }
+                let shouldFocus = boolParam(params, "focus", default: true)
+                if shouldFocus {
+                    let focusOutcome = await BridgeSettingsAutomation.focusSettings(openIfNeeded: true)
+                    result["focused"] = .bool(focusOutcome.windowFound)
+                    result["activated"] = .bool(focusOutcome.activated)
+                }
                 if !windowDriven {
                     // No Settings NSWindow host present (headless/test) — the
                     // selection model is still updated, but nothing to show.

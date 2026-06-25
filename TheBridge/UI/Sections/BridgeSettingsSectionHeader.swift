@@ -152,6 +152,13 @@ public enum BridgeSettingsHeaderPreset {
                 systemImage: BridgeSectionIcon.systemImage(for: .connection),
                 tint: NotionPalette.green
             )
+        case .memory:
+            return Spec(
+                title: "Memory",
+                subtitle: "Voice capture triage, Notion Memory rows, and agent recall.",
+                systemImage: "brain.head.profile",
+                tint: NotionPalette.purple
+            )
         case .datasources:
             return Spec(
                 title: "Data Sources",

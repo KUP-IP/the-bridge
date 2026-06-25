@@ -160,6 +160,80 @@ public enum BridgeAXID {
         /// "Factory Reset" destructive button.
         public static let factoryReset  = id("factory.reset")
     }
+
+    // ── Memory section control slugs (enum case `.memory`) ─────────────
+    public enum Memory {
+        private static func id(_ slug: String) -> String { BridgeAXID.control(.memory, slug) }
+        /// Tab bar container.
+        public static let tabBar        = id("tab.bar")
+        /// Inbox tab button.
+        public static func tab(_ name: String) -> String { id("tab.\(name)") }
+        /// Voice memo review list container.
+        public static let inboxList     = id("inbox.list")
+        /// A single inbox row (shared id).
+        public static let inboxRow      = id("inbox.row")
+        /// Dismiss control on an inbox row.
+        public static let dismiss       = id("inbox.dismiss")
+        /// Reveal in Finder control.
+        public static let revealInFinder = id("inbox.reveal")
+        /// File as Memory disposition.
+        public static let fileAsMemory   = id("inbox.fileAsMemory")
+        /// Retry routing disposition.
+        public static let retryRouting   = id("inbox.retryRouting")
+        /// Mark handled disposition.
+        public static let markHandled    = id("inbox.markHandled")
+        /// Add reminder disposition.
+        public static let addReminder    = id("inbox.addReminder")
+        /// Agent should know disposition.
+        public static let agentRemember  = id("inbox.agentRemember")
+        /// Inbox filter chip bar.
+        public static let inboxFilterBar = id("inbox.filterBar")
+        /// Notion tab list container.
+        public static let notionList     = id("notion.list")
+        /// A Notion Memory row.
+        public static let notionRow      = id("notion.row")
+        /// Open-in-Notion control.
+        public static let notionOpen     = id("notion.open")
+        /// Agent tab list container.
+        public static let agentList      = id("agent.list")
+        /// An agent memory row.
+        public static let agentRow       = id("agent.row")
+        /// Agent scope filter menu.
+        public static let agentScopeFilter = id("agent.filter.scope")
+        /// Agent type filter menu.
+        public static let agentTypeFilter  = id("agent.filter.type")
+        // Pre-cockpit Process ids (process.list/preview/pipeline/dryRun/execute) were removed:
+        // the PKT-MEM-106 0b cockpit replaced them with the `Process.*` nested enum below, and
+        // they were orphaned (no view/test/manifest references).
+        /// Processing settings pane.
+        public static let processingPane   = id("processing.pane")
+        /// Curator mode picker.
+        public static let processingMode   = id("processing.mode")
+        public static let processingApple  = id("processing.apple")
+        public static let processingParakeet = id("processing.parakeet")
+        public static let processingOllama = id("processing.ollama")
+        // PKT-MEM-106 0c — OpenAI-compatible provider key controls.
+        public static let processingProviderSave   = id("processing.provider.save")
+        public static let processingProviderStatus = id("processing.provider.status")
+
+        // ── PKT-MEM-106 0b Process cockpit AX contract ──────────────────
+        // Stable per-zone/row/command identifiers keyed by memoId/intentId. Uses the
+        // codebase `bridge.settings.memory.process.*` convention (the well-formedness
+        // invariant, SettingsAXIdentifierTests.swift:190) — the packet's `memoryProcess.*`
+        // shorthand maps to the `process.*` control slug here. Stable across filter/sort/relaunch.
+        public enum Process {
+            private static func id(_ slug: String) -> String { BridgeAXID.control(.memory, slug) }
+            public static let memoList         = id("process.memoList")
+            public static let intentTable      = id("process.intentTable")
+            public static let detailInspector  = id("process.detailInspector")
+            public static let activityStrip    = id("process.activityStrip")
+            public static func memoRow(_ memoId: String) -> String { id("process.memoRow.\(memoId)") }
+            public static func intentRow(_ intentId: String) -> String { id("process.intentRow.\(intentId)") }
+            public static func registryRow(entity: String, rowId: String) -> String { id("process.registryRow.\(entity).\(rowId)") }
+            public static func commit(_ intentId: String) -> String { id("process.commit.\(intentId)") }
+            public static func primaryOverride(_ intentId: String) -> String { id("process.primaryOverride.\(intentId)") }
+        }
+    }
 }
 
 // MARK: - The stage (the window surface: solid canvas + carbon-fibre weave)
@@ -311,6 +385,8 @@ struct BridgeIconShape: Shape {
 /// keeping `nav.section` as the single selection source (deep-link safe).
 public struct BridgeSectionNav: View {
     @Binding public var selection: SettingsSection
+    @State private var reviewBadgeCount: Int = MemoryReviewBadgeCounter.shared.pendingCount
+
     public init(selection: Binding<SettingsSection>) { self._selection = selection }
 
     public var body: some View {
@@ -319,6 +395,7 @@ public struct BridgeSectionNav: View {
                 BridgeSectionNavItem(
                     section: section,
                     isSelected: section == selection,
+                    badgeCount: section == .memory ? reviewBadgeCount : 0,
                     action: { selection = section }
                 )
             }
@@ -347,6 +424,15 @@ public struct BridgeSectionNav: View {
         .onMoveCommand { direction in
             moveSelection(direction)
         }
+        .onAppear { refreshReviewBadge() }
+        .onReceive(NotificationCenter.default.publisher(for: .voiceMemoReviewDidChange)) { _ in
+            refreshReviewBadge()
+        }
+    }
+
+    private func refreshReviewBadge() {
+        MemoryReviewBadgeCounter.shared.refresh()
+        reviewBadgeCount = MemoryReviewBadgeCounter.shared.pendingCount
     }
 
     private func moveSelection(_ direction: MoveCommandDirection) {
@@ -368,6 +454,7 @@ public struct BridgeSectionNav: View {
 struct BridgeSectionNavItem: View {
     let section: SettingsSection
     let isSelected: Bool
+    var badgeCount: Int = 0
     let action: () -> Void
     @State private var hovering = false
 
@@ -388,6 +475,16 @@ struct BridgeSectionNavItem: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(textColor)
                     .lineLimit(1)
+                if badgeCount > 0 {
+                    Text("\(badgeCount)")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(BridgeTokens.fg1)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(BridgeTokens.warnText.opacity(0.22), in: Capsule())
+                        .overlay(Capsule().strokeBorder(BridgeTokens.warnText.opacity(0.45), lineWidth: 0.5))
+                        .accessibilityLabel("\(badgeCount) pending review")
+                }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 9)   // `.bw-nav` padding: 0 9px

@@ -126,6 +126,9 @@ public struct DataSourcesSection: View {
             VStack(alignment: .leading, spacing: 11) {
                 entityHead(entity, progress: progress)
                 entityMeta(entity)
+                if entity.key == "memory" {
+                    memoryPaneCrossLink
+                }
                 entityActions(entity)
                 if let proposal = vm.proposal, proposal.entityKey == entity.key {
                     proposalPanel(proposal)
@@ -162,6 +165,25 @@ public struct DataSourcesSection: View {
             boundMeta(entity)
         } else {
             unboundBindRow(entity)
+        }
+    }
+
+    /// One-line cross-link from the Memory registry entity to the Memory settings pane.
+    private var memoryPaneCrossLink: some View {
+        HStack(spacing: 4) {
+            Text("Capture inbox and agent recall live on")
+                .font(BridgeTokens.Typeface.meta)
+                .foregroundStyle(BridgeTokens.fg4)
+            Button {
+                SettingsNavigation.shared.go(.memory, anchor: "inbox")
+            } label: {
+                Text("Memory")
+                    .font(BridgeTokens.Typeface.meta.weight(.medium))
+                    .foregroundStyle(BridgeTokens.accentLink)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open Memory settings pane")
+            .accessibilityIdentifier(ax("memory.crosslink"))
         }
     }
 
