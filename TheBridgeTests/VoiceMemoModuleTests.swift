@@ -488,6 +488,15 @@ func runVoiceMemoModuleTests() async {
         let audio = dir.appendingPathComponent("refresh.m4a")
         try makeTsrpM4AFixture(transcript: "Refresh ladder transcript text.").write(to: audio)
 
+        // Mock Parakeet so the live FluidAudio/Neural-Engine path is never loaded.
+        // The fixture Apple transcript is short (< 80-char suspicious threshold) so
+        // the ladder would otherwise fall through to the live ASR engine, which
+        // hangs the process at exit in CI (CoreML Neural-Engine threads don't release
+        // cleanly from a static singleton). Throw .disabled → Apple fallback wins.
+        let priorTranscribe = VoiceMemoTranscriber.transcribeFile
+        VoiceMemoTranscriber.transcribeFile = { _ in throw VoiceMemoTranscriber.TranscriberError.disabled }
+        defer { VoiceMemoTranscriber.transcribeFile = priorTranscribe }
+
         let router = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
         await VoiceMemoModule.register(on: router)
         let result = try await router.dispatch(toolName: "voice_memo_transcript_refresh", arguments: .object([
