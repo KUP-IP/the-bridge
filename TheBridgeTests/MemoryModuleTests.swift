@@ -27,12 +27,16 @@ import TheBridgeLib
 /// A fresh MemoryStore over a unique temp file. Caller is responsible for
 /// nothing — the OS reclaims the temp dir, and `cleanup` removes the file +
 /// WAL/SHM siblings so a re-run never collides.
+// PKT-1007: tests here exercise FTS5/salience behavior, not dense-vector recall.
+// Using a StubMemoryEmbedder keeps the dense arm deterministic and prevents the
+// live NLContextualEmbedder from pulling semantically-unrelated entries into the
+// fused result set (which would change the FTS-count assertions in these tests).
 private func makeTempStore() -> (store: MemoryStore, url: URL) {
     let dir = FileManager.default.temporaryDirectory
         .appendingPathComponent("bridge-memory-tests", isDirectory: true)
         .appendingPathComponent(UUID().uuidString, isDirectory: true)
     let url = dir.appendingPathComponent("memory.sqlite")
-    return (MemoryStore(path: url), url)
+    return (MemoryStore(path: url, embedder: StubMemoryEmbedder()), url)
 }
 
 private func cleanup(_ url: URL) {
@@ -102,8 +106,14 @@ func runMemoryModuleTests() async {
         _ = try await store.remember(text: "Coffee order is oat flat white",
                                      scope: "people", source: "t")
         let hits = try await store.recall(query: "deploy pipeline")
-        try expect(hits.count == 1, "expected exactly 1 FTS hit, got \(hits.count)")
-        try expect(hits.first?.text.contains("GitHub Actions") == true)
+        // PKT-1007: the hybrid recall (FTS + dense RRF) may surface additional
+        // entries; the key invariant is that the deploy-pipeline entry is returned
+        // and is ranked FIRST (it has the strongest FTS + dense signal for this
+        // query). The strict count=1 guard is relaxed to ≥1 to allow the dense
+        // arm to optionally surface near-related entries.
+        try expect(!hits.isEmpty, "recall must return at least 1 result for 'deploy pipeline'")
+        try expect(hits.first?.text.contains("GitHub Actions") == true,
+                   "deploy-pipeline entry must be ranked first (strongest FTS match)")
     }
 
     await test("MemoryStore: recall ranks decision-type above reference-type at equal freshness") {
@@ -393,5 +403,165 @@ func runMemoryModuleTests() async {
             clientName: "cursor-vscode"
         )
         try expect(memObjField(kept, "source") == .string("explicit"), "explicit source must win")
+    }
+
+    // MARK: - Wave 2: Q2 explicit TTL
+
+    await test("MemoryStore.remember: positive ttlSeconds sets expiresAt") {
+        let (store, url) = makeTempStore()
+        defer { Task { await store.close(); cleanup(url) } }
+        let ttl: TimeInterval = 3600   // 1 hour
+        let entry = try await store.remember(
+            text: "short-lived fact", scope: "global", source: "t", ttlSeconds: ttl
+        )
+        try expect(entry.expiresAt != nil, "positive TTL must set expiresAt")
+        let expectedExp = entry.createdAt.addingTimeInterval(ttl)
+        // Allow a few seconds of clock drift in tests.
+        let diff = abs(entry.expiresAt!.timeIntervalSince(expectedExp))
+        try expect(diff < 5, "expiresAt should be ~createdAt + ttl, diff=\(diff)")
+    }
+
+    await test("MemoryStore.remember: nil ttlSeconds leaves expiresAt nil (indefinite)") {
+        let (store, url) = makeTempStore()
+        defer { Task { await store.close(); cleanup(url) } }
+        let entry = try await store.remember(
+            text: "indefinite fact", scope: "global", source: "t", ttlSeconds: nil
+        )
+        try expect(entry.expiresAt == nil, "nil TTL must leave expiresAt nil")
+    }
+
+    await test("MemoryStore.remember: non-positive ttlSeconds is rejected") {
+        let (store, url) = makeTempStore()
+        defer { Task { await store.close(); cleanup(url) } }
+        do {
+            _ = try await store.remember(
+                text: "bad ttl", scope: "global", source: "t", ttlSeconds: -60
+            )
+            throw TestError.assertion("expected invalidArgument for negative TTL")
+        } catch let e as MemoryStoreError {
+            if case .invalidArgument = e { /* ok */ } else {
+                throw TestError.assertion("expected invalidArgument, got \(e)")
+            }
+        }
+    }
+
+    await test("MemoryStore: consolidationSweep tombstones rows whose explicit expiresAt has passed") {
+        let (store, url) = makeTempStore()
+        defer { Task { await store.close(); cleanup(url) } }
+        // Insert a fact with an already-past expiresAt (via importJSON seam).
+        let expiredDate = Date().addingTimeInterval(-3600)
+        let expired = MemoryEntry(
+            scope: "global", text: "expired ttl entry", type: .fact,
+            source: "t", contentHash: "expired-ttl-hash", expiresAt: expiredDate
+        )
+        let envelope = MemoryStore.ExportEnvelope(entries: [expired])
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let json = String(data: try encoder.encode(envelope), encoding: .utf8)!
+        _ = try await store.importJSON(json)
+        let report = try await store.consolidationSweep(now: Date())
+        try expect(report.expiredTombstoned == 1, "past expiresAt must be tombstoned, got \(report.expiredTombstoned)")
+        let live = try await store.list(scope: "global")
+        try expect(!live.contains { $0.contentHash == "expired-ttl-hash" },
+                   "tombstoned entry must not appear in list")
+    }
+
+    await test("memory_remember handler accepts ttlSeconds and passes it to store") {
+        let (store, url) = makeTempStore()
+        defer { Task { await store.close(); cleanup(url) } }
+        let router = await makeMemoryRouter(store)
+        let ttl: Double = 7200  // 2 hours
+        let result = try await callMemoryHandler(router, "memory_remember", .object([
+            "text": .string("ttl test fact"),
+            "scope": .string("global"),
+            "ttlSeconds": .double(ttl)
+        ]))
+        // The tool returns the stored entry — verify id is present.
+        try expect(memObjField(result, "id") != nil, "remember with TTL must return id")
+        // Verify the entry in the store has expiresAt set.
+        if let idVal = memObjField(result, "id"), case .string(let id) = idVal {
+            let entry = try await store.get(id: id)
+            try expect(entry?.expiresAt != nil, "entry stored via handler must have expiresAt when ttlSeconds provided")
+        }
+    }
+
+    // MARK: - Wave 2: Q1 MemoryAutoInjectClientStore
+
+    await test("MemoryAutoInjectClientStore: set + get per-client override") {
+        let defaults = UserDefaults(suiteName: "test-memory-inject-\(UUID().uuidString)")!
+        let store = MemoryAutoInjectClientStore(defaults: defaults)
+        defer { store.resetForTesting() }
+
+        try expect(store.override(forClient: "claude-code") == nil,
+                   "no override on fresh store")
+        store.setOverride(true, forClient: "claude-code")
+        try expect(store.override(forClient: "claude-code") == true,
+                   "should return true after setting")
+        store.setOverride(false, forClient: "claude-code")
+        try expect(store.override(forClient: "claude-code") == false,
+                   "should return false after update")
+    }
+
+    await test("MemoryAutoInjectClientStore: case-insensitive lookup") {
+        let defaults = UserDefaults(suiteName: "test-memory-inject-ci-\(UUID().uuidString)")!
+        let store = MemoryAutoInjectClientStore(defaults: defaults)
+        defer { store.resetForTesting() }
+
+        store.setOverride(true, forClient: "Claude-Code")
+        try expect(store.override(forClient: "claude-code") == true,
+                   "lookup must be case-insensitive")
+        try expect(store.override(forClient: "CLAUDE-CODE") == true,
+                   "lookup must be case-insensitive for uppercase")
+    }
+
+    await test("MemoryAutoInjectClientStore: nil override clears the entry") {
+        let defaults = UserDefaults(suiteName: "test-memory-inject-nil-\(UUID().uuidString)")!
+        let store = MemoryAutoInjectClientStore(defaults: defaults)
+        defer { store.resetForTesting() }
+
+        store.setOverride(true, forClient: "chatgpt")
+        store.setOverride(nil, forClient: "chatgpt")
+        try expect(store.override(forClient: "chatgpt") == nil,
+                   "nil override must remove the entry")
+    }
+
+    await test("MemoryAutoInjectClientStore: allOverrides enumerates all entries") {
+        let defaults = UserDefaults(suiteName: "test-memory-inject-all-\(UUID().uuidString)")!
+        let store = MemoryAutoInjectClientStore(defaults: defaults)
+        defer { store.resetForTesting() }
+
+        store.setOverride(true, forClient: "cursor")
+        store.setOverride(false, forClient: "raycast")
+        let all = store.allOverrides()
+        try expect(all.count == 2, "should have 2 overrides, got \(all.count)")
+        try expect(all["cursor"] == true)
+        try expect(all["raycast"] == false)
+    }
+
+    // MARK: - Wave 2: Q1 asyncComposition (handshake auto-inject, flag OFF by default)
+
+    await test("StandingOrdersDelivery.asyncComposition: default OFF is byte-identical to sync") {
+        // The global flag is UserDefaults.standard — in tests (hermetic temp
+        // config env) it should be absent/false. asyncComposition must be
+        // identical to the sync path when the flag is not set.
+        let sync = StandingOrdersDelivery.composition(clientName: nil)
+        let async_ = await StandingOrdersDelivery.asyncComposition(clientName: nil)
+        try expect(sync.instructionsMarkdown == async_.instructionsMarkdown,
+                   "async composition must match sync when auto-inject is OFF")
+        try expect(sync.contentHash == async_.contentHash,
+                   "content hashes must match when auto-inject is OFF")
+    }
+
+    await test("StandingOrdersDelivery: memoryHandshakeTokenBudget is ~500 tokens (2000 chars)") {
+        try expect(StandingOrdersDelivery.memoryHandshakeTokenBudget == 2_000,
+                   "token budget must be 2000 chars (~500 tokens)")
+    }
+
+    await test("MemoryAutoInjectClientStore: resetForTesting clears all overrides") {
+        let defaults = UserDefaults(suiteName: "test-memory-inject-reset-\(UUID().uuidString)")!
+        let store = MemoryAutoInjectClientStore(defaults: defaults)
+        store.setOverride(true, forClient: "foo")
+        store.resetForTesting()
+        try expect(store.allOverrides().isEmpty, "resetForTesting must clear all overrides")
     }
 }

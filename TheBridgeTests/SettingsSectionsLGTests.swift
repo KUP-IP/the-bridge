@@ -41,7 +41,7 @@ func runSettingsSectionsLGTests() async {
     await test("PKT-A: header preset targetSections is all sections") {
         let ids = BridgeSettingsHeaderPreset.targetSections.map(\.rawValue)
         try expect(ids == ["Standing Orders", "Skills", "Jobs", "Tools",
-                           "Security", "Connection", "Data Sources", "Advanced"],
+                           "Security", "Connection", "Data Sources", "Memory", "Advanced"],
                    "targetSections drift: \(ids)")
         try expect(BridgeSettingsHeaderPreset.targetSections.count == SettingsSection.allCases.count,
                    "every section must adopt the shared header")
@@ -85,7 +85,7 @@ func runSettingsSectionsLGTests() async {
                 return String(describing: type(of: header))
             }
         }
-        try expect(names.count == 8, "expected 8 headers, got \(names.count)")
+        try expect(names.count == 9, "expected 9 headers, got \(names.count)")
         for name in names {
             try expect(name.hasPrefix("BridgeSettingsSectionHeader<"),
                        "non-shared header type: \(name)")

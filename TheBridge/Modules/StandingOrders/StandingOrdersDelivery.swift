@@ -223,15 +223,9 @@ public enum StandingOrdersDelivery {
             instructions += "\n\n---\n\n" + overlay
         }
 
-        // TODO(memory/handshake-inject): a flag-gated option could append the
-        // memory slice (`BridgeResources.memoryMarkdown()` /
-        // `MemoryStore.shared.handshakeSlice`) to these composed `instructions`
-        // so connecting agents receive recent salient memory at handshake
-        // WITHOUT an explicit `bridge://memory` read. Deliberately NOT done
-        // here: (1) it is a UX decision pending operator input, and (2)
-        // `composition` is sync and must stay byte-deterministic, whereas the
-        // memory read is an async actor call. This wave ships the READABLE
-        // resource only — the memory surface is opt-in via `resources/read`.
+        // Note: memory auto-inject (Q1) is wired in `asyncComposition(clientName:)`.
+        // The sync path stays byte-deterministic and is used by the legacy SSE path
+        // and by callers that cannot await. Auto-inject consumers call the async variant.
 
         return Composition(
             instructionsMarkdown: instructions,
@@ -239,6 +233,72 @@ public enum StandingOrdersDelivery {
             tokenCount: estimateTokens(instructions),
             contentHash: sha256Hex(instructions)
         )
+    }
+
+    /// PKT-977 Wave 2 (Q1): async variant that optionally appends the salient
+    /// memory slice to `instructions` when the operator has enabled auto-inject.
+    ///
+    /// Decision Q1: opt-in, default OFF. The global flag
+    /// (`BridgeDefaults.memoryHandshakeAutoInjectEffective`) gates the feature;
+    /// the per-client flag (`BridgeDefaults.memoryAutoInjectClientOverride`) can
+    /// force it on/off for a specific client name, overriding the global.
+    ///
+    /// Token cap: `memoryHandshakeTokenBudget` tokens (chars/4 estimate). The
+    /// memory slice is truncated by the `handshakeSlice(limit:)` salience order —
+    /// highest-salience entries are included first; the rest are dropped when the
+    /// cap would be exceeded.
+    ///
+    /// Best-effort: a store read failure logs and omits the slice (degrades
+    /// gracefully — the base composition is still delivered).
+    public static func asyncComposition(clientName: String? = nil) async -> Composition {
+        let base = composition(clientName: clientName)
+
+        // Resolve auto-inject flag: per-client override wins over global.
+        let shouldInject: Bool = {
+            if let name = clientName,
+               let override = MemoryAutoInjectClientStore.shared.override(forClient: name) {
+                return override
+            }
+            return BridgeDefaults.memoryHandshakeAutoInjectEffective
+        }()
+
+        guard shouldInject else { return base }
+
+        // Append the memory slice, token-capped.
+        let memorySlice = await buildTokenCappedMemorySlice(
+            budget: Self.memoryHandshakeTokenBudget
+        )
+        guard !memorySlice.isEmpty, memorySlice != "No memories stored yet." else { return base }
+
+        let injected = base.instructionsMarkdown + "\n\n---\n\n## Memory\n\n" + memorySlice
+        return Composition(
+            instructionsMarkdown: injected,
+            routingIndexMarkdown: base.routingIndexMarkdown,
+            tokenCount: estimateTokens(injected),
+            contentHash: sha256Hex(injected)
+        )
+    }
+
+    /// Token budget for the injected memory slice (chars / 4). ~500 tokens.
+    public static let memoryHandshakeTokenBudget = 2_000   // chars → ~500 tokens
+
+    /// Build the memory markdown capped to `budget` chars. Reads
+    /// `handshakeSlice` and renders via `renderMemoryMarkdown`, then truncates
+    /// to fit. Best-effort: returns empty string on any store failure.
+    private static func buildTokenCappedMemorySlice(budget: Int) async -> String {
+        do {
+            let entries = try await MemoryStore.shared.handshakeSlice(limit: 20)
+            let full = renderMemoryMarkdown(entries)
+            if full.count <= budget { return full }
+            // Truncate at the last newline boundary within budget.
+            let prefix = String(full.prefix(budget))
+            if let lastNewline = prefix.lastIndex(of: "\n") {
+                return String(prefix[prefix.startIndex..<lastNewline]) + "\n…(truncated)"
+            }
+            return String(prefix) + "…"
+        } catch {
+            return ""
+        }
     }
 
     // MARK: - Helpers
@@ -382,6 +442,78 @@ public final class ClientOverlayStore: @unchecked Sendable {
     }
 
     /// Test/diagnostic reset — clears every overlay.
+    public func resetForTesting() {
+        defaults.removeObject(forKey: defaultsKey)
+    }
+}
+
+// MARK: - MemoryAutoInjectClientStore (PKT-977 Wave 2 · Q1)
+
+/// Per-client memory auto-inject overrides. Each entry overrides the global
+/// `BridgeDefaults.memoryHandshakeAutoInject` flag for a specific client.
+/// When no per-client entry is set (the default), the global flag governs.
+///
+/// Storage: one JSON dict in `UserDefaults` under
+/// `BridgeDefaults.memoryAutoInjectClientOverrides`. Lookup is
+/// case-insensitive on the client name (normalized to lowercased+trimmed).
+///
+/// `@unchecked Sendable`: the only state is the process-global
+/// `UserDefaults.standard` (itself thread-safe). Mirrors `ClientOverlayStore`.
+public final class MemoryAutoInjectClientStore: @unchecked Sendable {
+    public static let shared = MemoryAutoInjectClientStore()
+
+    private let defaultsKey = BridgeDefaults.memoryAutoInjectClientOverrides
+    private let defaults: UserDefaults
+
+    public init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    private func normalizedKey(_ clientName: String) -> String {
+        clientName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private func readAll() -> [String: Bool] {
+        guard let data = defaults.data(forKey: defaultsKey),
+              let map = try? JSONDecoder().decode([String: Bool].self, from: data) else {
+            return [:]
+        }
+        return map
+    }
+
+    private func writeAll(_ map: [String: Bool]) {
+        guard let data = try? JSONEncoder().encode(map) else { return }
+        defaults.set(data, forKey: defaultsKey)
+    }
+
+    /// The per-client override for `clientName`, or nil when none is set.
+    /// nil means "use the global flag". Case-insensitive on the client name.
+    public func override(forClient clientName: String) -> Bool? {
+        let k = normalizedKey(clientName)
+        guard !k.isEmpty else { return nil }
+        return readAll()[k]
+    }
+
+    /// All overrides. EMPTY DICT on a fresh install.
+    public func allOverrides() -> [String: Bool] {
+        readAll()
+    }
+
+    /// Set (or, with nil, clear) the override for `clientName`.
+    /// A nil value removes the entry so the global flag governs again.
+    public func setOverride(_ override: Bool?, forClient clientName: String) {
+        let k = normalizedKey(clientName)
+        guard !k.isEmpty else { return }
+        var map = readAll()
+        if let override {
+            map[k] = override
+        } else {
+            map.removeValue(forKey: k)
+        }
+        writeAll(map)
+    }
+
+    /// Test/diagnostic reset — clears all per-client overrides.
     public func resetForTesting() {
         defaults.removeObject(forKey: defaultsKey)
     }

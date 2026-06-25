@@ -53,7 +53,8 @@ public enum MemoryModule {
                     "scope": .object(["type": .string("string"), "description": .string("Partition: people | project | mac | time | skill | global | … (default: global)")]),
                     "entity": .object(["type": .string("string"), "description": .string("Optional sub-key within the scope (e.g. a person id, project slug)")]),
                     "type": .object(["type": .string("string"), "description": .string("fact | preference | decision | reference (default: fact)")]),
-                    "source": .object(["type": .string("string"), "description": .string("Writing agent/client label (optional; defaults to the calling client)")])
+                    "source": .object(["type": .string("string"), "description": .string("Writing agent/client label (optional; defaults to the calling client)")]),
+                    "ttlSeconds": .object(["type": .string("number"), "description": .string("Optional explicit TTL in seconds. After this duration, the entry is soft-tombstoned by the consolidation sweep. Omit for indefinite retention (default). Negative values are rejected.")])
                 ]),
                 "required": .array([.string("text")])
             ]),
@@ -80,8 +81,14 @@ public enum MemoryModule {
                 let entity = stringArg(obj, "entity")
                 let type = MemoryEntry.EntryType(rawValue: stringArg(obj, "type") ?? "fact") ?? .fact
                 let source = stringArg(obj, "source") ?? defaultSource
+                let ttlSeconds: TimeInterval? = {
+                    if case .double(let d)? = obj["ttlSeconds"] { return d }
+                    if case .int(let i)? = obj["ttlSeconds"] { return TimeInterval(i) }
+                    return nil
+                }()
                 let entry = try await store.remember(
-                    text: text, scope: scope, entity: entity, type: type, source: source
+                    text: text, scope: scope, entity: entity, type: type,
+                    source: source, ttlSeconds: ttlSeconds
                 )
                 return entryValue(entry)
             }

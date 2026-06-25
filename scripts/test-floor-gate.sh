@@ -1424,11 +1424,47 @@ set -euo pipefail
 # proven WIRED, not only seam-reachable). The origin-decision logic
 # (isRemoteTunnelRequest, the legacy-route loopback-only 403, the loopback /mcp
 # split) is byte-unchanged. Measured integrated green 2242 → 2250.
-# Packet Runner v1 (2026-06-23): +10 RegistryHydrationTests — packet-registry-v1
-# one-hop envelope (FR-1/§8.3): envelope shape, missing/inaccessible relations,
-# offline cache, one-hop guard, explicit-deeper-body, body-gate, status fail-closed,
-# module tool path, unknown-entity. Measured integrated green 2250 → 2260.
-FLOOR="${BRIDGE_TEST_FLOOR:-2260}"
+# PKT-1010 (2026-06-24): Packet C activation + onboarding UX polish. +18 OnboardingTokenValidator
+# tests (trim + validate: ntn_/secret_ prefix, short token, whitespace-only, trimmed clean, etc.).
+# Measured integrated green 2250 → 2268.
+# PKT-977 Wave 2 (2026-06-24): Q1 MemoryAutoInjectClientStore tests (+3),
+# asyncComposition tests (+2), Q2 TTL tests (+3), consolidation sweep TTL test (+1),
+# handler TTL test (+1), Q4 SettingsSection Memory case tests (+4 across
+# WSHMenuBarTests/BridgeAutomationModuleTests/SettingsSectionsLGTests),
+# Q2 expiredEntries sweep path fix. Batch-merged onto PKT-1010: 2268 + 12 = 2280.
+# PKT-1007 (2026-06-24): Semantic Recall dense-vector arm (NLContextualEmbedding)
+# + Reciprocal-Rank-Fusion (RRF). +31 new tests: StubMemoryEmbedder (5),
+# MemoryEmbeddingIndex (5), ReciprocaLRankFusion/RRF (5), MemoryStore recall E2E
+# with stub embedder (7), NLContextualEmbedder unit + live asset tests (9).
+# MemoryModuleTests FTS-recall assertion relaxed (count=1→≥1) to allow hybrid
+# recall semantics; "deploy pipeline" FTS match still ranks first via RRF+bias.
+# Batch-merged onto PKT-977: 2280 + 31 = 2311.
+# PKT-1014 T2 (2026-06-24): comprehensive coverage sweep — payment, licensing, UI
+# behavior, edge/error envelopes. Added PaymentLicenseT2Tests.swift (62 tests):
+# Stripe A-section (13): zero-amount/missing-idempotency-key/empty+nil API-key
+# guard, retrievePaymentIntent parse, parseStripeError direct coverage for all
+# status codes (401/403/500/insufficient_funds), formURLEncoded determinism,
+# createCheckoutSession missing-url + no-idempotency-key branches,
+# amountExceedsCeiling description. License B-section (14): trial 1-second-before-
+# boundary, grandfathered-wins-over-token, acknowledgeTrialExpired idempotency,
+# verify rejects empty/multi-dot tokens, payload validate rejects empty-id/empty-sub/
+# iat=0, 'grandfather' kind accepted, base64url 0+3-byte+char-substitution round-
+# trips, LicenseState Codable, bundled() fail-closed. Revocation C-section (7):
+# min/max/over-max id boundaries, whitespace-id rejection, Codable round-trip,
+# unknown-status graceful nil, checkedAt preservation. UIState D-section (7):
+# trial(0) passthrough, Equatable same/different, nil-exp licensed+licenseExpired,
+# canPasteActivate all status kinds, lastError for licenseExpired. Status E-section
+# (10): isLicensedOrGrandfathered for all 5 cases, pillLabel for licensed/expired/
+# trial-0, isActive exhaustive. CardHost F-section (3): initial 30-day state, empty
+# pasteField, activate no-op on empty field. Checkout G-section (8): product
+# constant, successURL placeholder, cancelURL HTTPS, default/custom channel,
+# whitespace/newline-trimmed priceID+paymentLinkURL.
+# Batch-merged onto PKT-1007: 2311 + 62 = 2373.
+# Packet Runner v1 registry_hydrate (2026-06-24, batch-merged onto PKT-1014 T2): +10 RegistryHydrationTests
+# + RegistryModuleTests 10->11 — packet-registry-v1 one-hop envelope (FR-1/§8.3): envelope shape,
+# missing/inaccessible relations, offline cache, one-hop guard, explicit-deeper-body, body-gate,
+# status fail-closed, module tool path, unknown-entity. Measured integrated green 2373 -> 2383 (make test: 2383 passed / 0 failed).
+FLOOR="${BRIDGE_TEST_FLOOR:-2383}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

@@ -106,6 +106,13 @@ public enum SettingsUIValidationHarness {
                     BridgeAXID.control(.datasources, "clearCache"),
                     BridgeAXID.control(.datasources, "proposal.confirm"),
                 ])
+            case .memory:
+                // PKT-977 Wave 2 Q4: Memory inspector section.
+                ids.append(contentsOf: [
+                    BridgeAXID.control(.memory, "settings.autoInject"),
+                    BridgeAXID.control(.memory, "entries.refresh"),
+                    BridgeAXID.control(.memory, "entries.scopeFilter"),
+                ])
             case .advanced:
                 ids.append(contentsOf: [
                     BridgeAXID.Advanced.checkUpdates,

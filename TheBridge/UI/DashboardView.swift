@@ -186,8 +186,10 @@ public struct DashboardView: View {
     }
 
     /// `.db-ico` — the 30pt rounded app-icon tile (raised control glass with the
-    /// bridge mark; the design uses the real app icon, here the SF bridge glyph
-    /// on the glass tile so it adapts to both themes).
+    /// real Bridge mark). `MenuBarIcon` is template-rendered so it tints with the
+    /// adaptive foreground (carbon↔titanium); a valid SF glyph is the headless
+    /// fallback. (The prior `bridge.fill` SF Symbol does not exist, so the tile
+    /// rendered empty — this restores the mark.)
     private var appIconTile: some View {
         RoundedRectangle(cornerRadius: 9, style: .continuous)
             .fill(BridgeTokens.glassControl)
@@ -195,12 +197,37 @@ public struct DashboardView: View {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
             .frame(width: 30, height: 30)
-            .overlay(
-                Image(systemName: "bridge.fill")
-                    .font(.system(size: 16, weight: .regular))
-                    .foregroundStyle(BridgeTokens.fg1))
+            .overlay(bridgeMark)
             .bridgeBevel(BridgeTokens.bevelControl, radius: 9)
     }
+
+    /// The Bridge brand mark for the header tile — the bundled `MenuBarIcon`
+    /// (the same mark shown in the menu bar), template-tinted to `fg1` so it reads
+    /// on both carbon and titanium. Falls back to an SF connection glyph headlessly.
+    @ViewBuilder
+    private var bridgeMark: some View {
+        if let mark = Self.bridgeMarkImage {
+            Image(nsImage: mark)
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 17, height: 17)
+                .foregroundStyle(BridgeTokens.fg1)
+        } else {
+            Image(systemName: "network")
+                .font(.system(size: 15, weight: .regular))
+                .foregroundStyle(BridgeTokens.fg1)
+        }
+    }
+
+    /// `MenuBarIcon` lives in the executable's resource bundle; load it once via
+    /// `Bundle.main` (NEVER the trapping `Bundle.module`), `NSImage(named:)` as the
+    /// fallback. Mirrors `CommandBridge.bridgeMarkImage` (the proven loader).
+    private static let bridgeMarkImage: NSImage? = {
+        let img = Bundle.main.image(forResource: "MenuBarIcon") ?? NSImage(named: "MenuBarIcon")
+        img?.isTemplate = true
+        return img
+    }()
 
     private var versionLine: String {
         if buildNumber.isEmpty {
@@ -523,12 +550,12 @@ public struct DashboardView: View {
         // `.db-foot` — two full-width buttons, gap 7, padding 12/10/13. Restart
         // is the default glass control; Quit carries the danger tone.
         HStack(spacing: 7) {
-            BridgeButton("Restart Bridge", variant: .default) {
+            BridgeButton("Restart Bridge", systemImage: "arrow.clockwise", variant: .default) {
                 NSApp.restartBridge()
             }
             .frame(maxWidth: .infinity)
 
-            BridgeButton("Quit", variant: .danger) {
+            BridgeButton("Quit", systemImage: "power", variant: .danger) {
                 NSApp.terminate(nil)
             }
             .frame(maxWidth: .infinity)

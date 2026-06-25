@@ -486,7 +486,7 @@ private struct BridgeButtonChrome: ViewModifier {
                 .padding(.horizontal, 13)
                 .background(fillView(shape))
                 .overlay(shape.strokeBorder(border, lineWidth: 0.5))
-                .modifier(BevelIf(apply: variant == .default, bevel: BridgeTokens.bevelControl, radius: BridgeTokens.Radius.control))
+                .modifier(BevelIf(apply: variant == .default || variant == .danger, bevel: BridgeTokens.bevelControl, radius: BridgeTokens.Radius.control))
                 .overlay(
                     // focus ring (`--focus`: 0 0 0 3px) — a halo stroke outside the edge.
                     shape.strokeBorder(BridgeTokens.focusRing, lineWidth: focused ? BridgeTokens.focusRingWidth : 0)
@@ -518,8 +518,12 @@ private struct BridgeButtonChrome: ViewModifier {
             shape.fill(BridgeTokens.glassControl)
                 .overlay(shape.fill(BridgeTokens.fg1.opacity(hovering ? 0.08 : 0)))
         case .danger:
-            // Red-tinted fill: rgba(255,90,90,.14) → .22 on hover.
-            shape.fill(Color(red: 1.0, green: 0.353, blue: 0.353).opacity(hovering ? 0.22 : 0.14))
+            // Red-tinted LIQUID GLASS: the neutral control glass carries the depth
+            // (bevel + sheen), a red wash sets the danger tone (brightening on
+            // hover). Matches `.default`'s material so a Restart/Quit pair reads as
+            // one set of controls instead of glass-vs-flat.
+            shape.fill(BridgeTokens.glassControl)
+                .overlay(shape.fill(Color(red: 1.0, green: 0.353, blue: 0.353).opacity(hovering ? 0.26 : 0.16)))
         case .link:
             shape.fill(.clear)
         }
@@ -529,7 +533,7 @@ private struct BridgeButtonChrome: ViewModifier {
         switch variant {
         case .primary: return Color(red: 0.588, green: 0.706, blue: 0.902).opacity(0.40) // rgba(150,180,230,.4)
         case .default: return BridgeTokens.hairlineStrong
-        case .danger:  return Color(red: 1.0, green: 0.353, blue: 0.353).opacity(0.28)   // rgba(255,90,90,.28)
+        case .danger:  return Color(red: 1.0, green: 0.353, blue: 0.353).opacity(0.34)   // red-tinted glass edge
         case .link:    return .clear
         }
     }
@@ -687,6 +691,7 @@ public enum BridgeSectionIcon {
         case .security:   return "lock.shield"
         case .connection: return "network"
         case .datasources: return "tablecells"
+        case .memory:     return "brain"
         case .advanced:   return "wrench.and.screwdriver"
         }
     }

@@ -4,7 +4,8 @@
 
 The committed defaults are all **fail-closed** (empty license key → no activation; empty OAuth identity → placeholder AS that now *fails loud*), so nothing ships insecure if a step is skipped — it just won't activate/connect until configured.
 
-## At a glance (ordered; 1–3 gate the release build, 7 triggers it)
+## At a glance (ordered; **0 blocks everything**, 1–3 gate the release build, 7 triggers it)
+0. **Apple Developer legal agreement signed** — notarization (and the published build) fails until then
 1. Licensing keypair + CI secret
 2. Stripe live price + Payment Link + fulfillment + `STRIPE_PAYMENT_LINK`
 3. Remote-Access: 5 OAuth/WorkOS CI secrets → on-device PRM proof → retire env agent
@@ -14,6 +15,15 @@ The committed defaults are all **fail-closed** (empty license key → no activat
 7. Version bump → push the `v4.0.0` tag (the release trigger)
 
 ---
+
+## 0 · Apple Developer legal agreement — notarization prerequisite ⚠️ (blocks the release)
+**Discovered 2026-06-24** running `make install`: code-signing succeeds, but the Apple notary service rejects the upload —
+> HTTP 403 — "A required agreement is missing or has expired. … Ensure your team has signed the necessary legal agreements and that they are not expired."
+
+Notarization is REQUIRED for the published DMG (gate 7 · `release.yml` → `notarize`), so this blocks the v4 release **ahead of everything below**. It is an Apple-account action, not a code change.
+- [ ] As the **Account Holder**, sign in at [developer.apple.com/account](https://developer.apple.com/account) **and** App Store Connect; accept any pending agreements (updated **Apple Developer Program License Agreement**, **Paid Apps Agreement**, etc.).
+- [ ] Confirm a clean notarize: re-run `make install` (or `xcrun notarytool submit … --keychain-profile "notarytool-profile" --wait`) → no 403.
+- [ ] Until then, `make install-copy` (signed, no notarize) deploys to *this* Mac for local use — but the build is **not distributable / auto-updatable** without notarization.
 
 ## 1 · Licensing (Packet B) — first-sale activation
 - [ ] Generate the **prod Ed25519 keypair** under your custody: `swift run license-cli keygen` (details: `docs/operator/license-ops-runbook.md`). **The private key NEVER enters the repo** — store it in your password manager / secure store.
