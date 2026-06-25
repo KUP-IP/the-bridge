@@ -1460,9 +1460,9 @@ set -euo pipefail
 # constant, successURL placeholder, cancelURL HTTPS, default/custom channel,
 # whitespace/newline-trimmed priceID+paymentLinkURL. Batch-merged onto PKT-1007: 2311 + 62 = 2373.
 # Memory-Hub (2026-06-25): Voice Memos curator Wave 1 +6, Wave 1.5+Ollama +4, idempotency/dismiss
-# fixes +2, Wave 2 Parakeet/Qwen +9, PKT-MEM-102 MemorySettingsTests +6+8, PKT-MEM-103 TTL +5+3
-# = ~42 additive tests rebased onto batch-merge base. Conservative floor held at 2373;
-# raise to measured count after CI confirms the integrated green.
+# fixes +2, Wave 2 Parakeet/Qwen +9, PKT-MEM-102 MemorySettingsTests +6+8, PKT-MEM-103 TTL +5+3,
+# PKT-MEM-105/106 trust+live-regression +10+1 = ~53 additive tests rebased onto batch-merge base.
+# Conservative floor held at 2373; raise to measured count after CI confirms the integrated green.
 FLOOR="${BRIDGE_TEST_FLOOR:-2373}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.

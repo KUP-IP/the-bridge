@@ -182,6 +182,9 @@ public enum BridgeDefaults {
     /// Ollama model for one-sentence Memory summaries (Relevant:). Falls back to routing model.
     public static let ollamaSummarizationModel = "com.notionbridge.ollama.summarizationModel"
 
+    /// Voice memo curator Understand routing: auto | heuristics | local | agent | cloud.
+    public static let voiceMemoCuratorMode = "com.notionbridge.voiceMemo.curatorMode"
+
     /// Suggested default routing model (M1 16 GB — Gemma4 12B).
     public static let ollamaRoutingModelDefault = "gemma4:12b"
 

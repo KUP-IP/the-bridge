@@ -285,12 +285,32 @@ func runMemoryModuleTests() async {
 
     // MARK: - Module registration + tiering
 
-    await test("MemoryModule registers exactly 4 tools") {
+    await test("MemoryModule registers exactly 5 tools") {
         let (store, url) = makeTempStore()
         defer { Task { await store.close(); cleanup(url) } }
         let router = await makeMemoryRouter(store)
         let tools = await router.registrations(forModule: "memory")
-        try expect(tools.count == 4, "expected 4 memory tools, got \(tools.count)")
+        try expect(tools.count == 5, "expected 5 memory tools, got \(tools.count)")
+    }
+
+    await test("memory_forget soft-tombstones an entry") {
+        let (store, url) = makeTempStore()
+        defer { Task { await store.close(); cleanup(url) } }
+        let router = await makeMemoryRouter(store)
+        let stored = try await callMemoryHandler(router, "memory_remember", .object([
+            "text": .string("ephemeral test fact"),
+            "scope": .string("global"),
+        ]))
+        guard case .string(let id)? = memObjField(stored, "id") else {
+            try expect(false, "missing id")
+            return
+        }
+        _ = try await callMemoryHandler(router, "memory_forget", .object(["id": .string(id)]))
+        let recalled = try await callMemoryHandler(router, "memory_recall", .object([
+            "query": .string("ephemeral test"),
+            "scope": .string("global"),
+        ]))
+        try expect(memObjField(recalled, "count") == .int(0), "forgotten entry excluded from recall")
     }
 
     await test("memory tiering: remember=.notify (write), recall=.open (read-only)") {

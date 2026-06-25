@@ -42,8 +42,34 @@
 - [ ] 102: Memory Inbox shows pending entry — **operator smoke** (REVIEW-FIRST)
 - [ ] 102: `bridge_settings_navigate(section: Memory)` works — **operator smoke**
 - [x] 102: test floor **2284** (+14 tests)
-- [ ] Merge integration branch → main (single commit or PR; WIP still unstaged: Ollama, docs, 104 notifier files)
+- [x] Merge integration branch → PR [#57](https://github.com/KUP-IP/the-bridge/pull/57) (`feat/memory-hub-voice-curator`)
+- [ ] Operator smoke after `open -a "The Bridge"` (MCP still on pre-restart server until relaunch)
 - [x] Wave 2 complete — floor **2292**
+
+## Wave 3 — DISPATCHED (2026-06-24, deferred closeout)
+
+**Parent packet:** [PKT-MEM-112](./packets/PKT-MEM-112-wave3-deferred-closeout.md)
+
+**Active execution packet (QUEUE):** [PKT-MEM-113](./packets/PKT-MEM-113-multi-intent-live-cycle.md) — multi-intent live testing + Wave 3 dev cycle · REVIEW-FIRST · Priority 85
+
+| Phase | Packet | Branch (planned) | Status |
+|---|---|---|---|
+| A | PKT-MEM-107 datetime/calendar | `feat/pkt-mem-107-datetime` | **QUEUED** |
+| B | PKT-MEM-108 UI closeout | `feat/pkt-mem-108-ui` | **QUEUED** |
+| C | PKT-MEM-109 spec v1.1 | `feat/pkt-mem-109-spec` | **QUEUED** (parallel with A) |
+| D | PKT-MEM-110b cloud curator | `feat/pkt-mem-110b-cloud` | **QUEUED** |
+| E | PKT-MEM-111b Process polish | `feat/pkt-mem-111b-polish` | **QUEUED** (after B+D) |
+
+### GOAL_CONDITION (Wave 3)
+
+**112:** Close all sprint deferrals; 8-case live regression green; floor **≥2303** maintained and raised per phase; Process tab supports operator preview + commit path.
+
+### Shipped baseline (Wave 2.5 on `feat/memory-hub-voice-curator`)
+
+- PKT-MEM-105 trust integrity ✓ · floor **2303**
+- PKT-MEM-110a curator foundation (`voice_memo_get` / `voice_memo_commit`) ✓
+- PKT-MEM-111 U1+U6 Process + Processing tabs ✓
+- `make install` notarized to `/Applications/The Bridge.app` (2026-06-24)
 
 ## Telemetry
 

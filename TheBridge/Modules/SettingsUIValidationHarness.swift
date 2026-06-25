@@ -102,9 +102,14 @@ public enum SettingsUIValidationHarness {
             case .memory:
                 ids.append(contentsOf: [
                     BridgeAXID.Memory.tabBar,
+                    BridgeAXID.Memory.tab("process"),
                     BridgeAXID.Memory.tab("inbox"),
                     BridgeAXID.Memory.tab("notion"),
                     BridgeAXID.Memory.tab("agent"),
+                    BridgeAXID.Memory.tab("processing"),
+                    BridgeAXID.Memory.processList,
+                    BridgeAXID.Memory.processPreview,
+                    BridgeAXID.Memory.processingPane,
                     BridgeAXID.Memory.inboxList,
                     BridgeAXID.Memory.dismiss,
                     BridgeAXID.Memory.notionList,

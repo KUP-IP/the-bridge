@@ -691,6 +691,7 @@ await runPasteboardHistoryModuleTests() // PKT-765 (v2.2 · 3.3.1)
 await runJobsModuleTests()
 await runSchedulerResilienceTests()  // PKT-381: durable backlog + reconciler + serial drain + first job
 await runVoiceMemoModuleTests()        // Voice Memos curator: registry-centric router + 9am job
+await runVoiceMemoLiveRegressionTests() // PKT-MEM-105/106 live fixture regression
 await runMemorySettingsTests()         // PKT-MEM-102: Memory Settings section + Inbox UI
 await runOllamaModuleTests()           // Local Ollama client + module (Wave 2a)
 await runGhModuleTests()

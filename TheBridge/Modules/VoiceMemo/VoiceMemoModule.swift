@@ -14,6 +14,8 @@ public enum VoiceMemoModule {
         await router.register(makeReviewDismiss())
         await router.register(makeReviewResolve(on: router))
         await router.register(makeTranscriptRefresh())
+        await router.register(makeGet(on: router))
+        await router.register(makeCommit(on: router))
     }
 
     private static func makeList(on router: ToolRouter) -> ToolRegistration {
@@ -289,6 +291,82 @@ public enum VoiceMemoModule {
                 relatedTools: ["voice_memo_process", "voice_memo_review_resolve", "voice_memo_list"]
             ),
             handler: { args in try await VoiceMemoReviewResolver.refreshTranscript(args: args) }
+        )
+    }
+
+    private static func makeGet(on router: ToolRouter) -> ToolRegistration {
+        ToolRegistration(
+            name: "voice_memo_get",
+            module: moduleName,
+            tier: .open,
+            description: "Load one voice memo: transcript, parsed plan, and intent preview (read-only; no writes). Use before voice_memo_commit in agent-deferred mode.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "memoId": .object([
+                        "type": .string("string"),
+                        "description": .string("Stable memo id or absolute path."),
+                    ]),
+                ]),
+                "required": .array([.string("memoId")]),
+            ]),
+            metadata: ToolMetadata(
+                title: "Voice Memo Get",
+                whenToUse: ["preview routing plan before commit", "agent-deferred curator Understand step"],
+                whenNotToUse: ["batch auto-execute — use voice_memo_process"],
+                relatedTools: ["voice_memo_commit", "voice_memo_process", "voice_memo_list"]
+            ),
+            handler: { args in try await VoiceMemoProcessor.get(args: args, router: router) }
+        )
+    }
+
+    private static func makeCommit(on router: ToolRouter) -> ToolRegistration {
+        ToolRegistration(
+            name: "voice_memo_commit",
+            module: moduleName,
+            tier: .notify,
+            description: "Execute one approved intent for a voice memo (agent or operator commit after voice_memo_get). Marks processed when the write succeeds and no review is queued.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "memoId": .object([
+                        "type": .string("string"),
+                        "description": .string("Stable memo id or path."),
+                    ]),
+                    "intentKind": .object([
+                        "type": .string("string"),
+                        "description": .string("reminder | memory_keep | agent_memory | registry_update"),
+                    ]),
+                    "entityKey": .object([
+                        "type": .string("string"),
+                        "description": .string("Registry entity for registry_update / memory_keep override."),
+                    ]),
+                    "entityHint": .object([
+                        "type": .string("string"),
+                        "description": .string("Row title hint for registry_update."),
+                    ]),
+                    "rowId": .object([
+                        "type": .string("string"),
+                        "description": .string("Registry row id when hint matching is insufficient."),
+                    ]),
+                    "fields": .object([
+                        "type": .string("object"),
+                        "description": .string("Field map override for registry lanes."),
+                    ]),
+                    "title": .object([
+                        "type": .string("string"),
+                        "description": .string("Reminder title override."),
+                    ]),
+                ]),
+                "required": .array([.string("memoId"), .string("intentKind")]),
+            ]),
+            metadata: ToolMetadata(
+                title: "Voice Memo Commit",
+                whenToUse: ["connected MCP agent approves and executes one lane", "operator confirms Process tab preview"],
+                whenNotToUse: ["unreviewed batch — use voice_memo_process"],
+                relatedTools: ["voice_memo_get", "voice_memo_process", "registry_update", "memory_remember"]
+            ),
+            handler: { args in try await VoiceMemoProcessor.commit(args: args, router: router) }
         )
     }
 }

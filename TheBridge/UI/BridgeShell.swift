@@ -202,6 +202,23 @@ public enum BridgeAXID {
         public static let agentScopeFilter = id("agent.filter.scope")
         /// Agent type filter menu.
         public static let agentTypeFilter  = id("agent.filter.type")
+        /// Process tab memo list.
+        public static let processList      = id("process.list")
+        /// Process tab preview pane.
+        public static let processPreview   = id("process.preview")
+        /// Process pipeline step bar.
+        public static let processPipeline  = id("process.pipeline")
+        /// Process dry-run button.
+        public static let processDryRun    = id("process.dryRun")
+        /// Process execute button.
+        public static let processExecute   = id("process.execute")
+        /// Processing settings pane.
+        public static let processingPane   = id("processing.pane")
+        /// Curator mode picker.
+        public static let processingMode   = id("processing.mode")
+        public static let processingApple  = id("processing.apple")
+        public static let processingParakeet = id("processing.parakeet")
+        public static let processingOllama = id("processing.ollama")
     }
 }
 

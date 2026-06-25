@@ -11,6 +11,7 @@ public enum VoiceMemoSummarizer {
         guard !trimmed.isEmpty else { return fallbackTitle }
 
         guard BridgeDefaults.voiceMemoOllamaRoutingEffective,
+              VoiceMemoCuratorRouter.shouldUseLocalOllama(),
               let model = BridgeDefaults.ollamaSummarizationModelEffective else {
             return VoiceMemoParser.firstSentencePublic(in: trimmed, maxLen: 280)
         }

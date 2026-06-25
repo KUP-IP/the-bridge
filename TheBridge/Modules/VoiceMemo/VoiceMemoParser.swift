@@ -15,7 +15,7 @@ public enum VoiceMemoParser {
         fallbackTitle: String,
         recordingPath: String? = nil
     ) -> VoiceMemoPlan {
-        let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = normalizeTranscript(transcript.trimmingCharacters(in: .whitespacesAndNewlines))
         let lower = text.lowercased()
 
         let skipMemoryKeep =
@@ -70,22 +70,34 @@ public enum VoiceMemoParser {
             intents.append(hint)
         }
 
-        if let packet = extractPacketID(from: text) {
+        if let sessionHint = extractSessionHint(from: text, lower: lower) {
             intents.append(VoiceMemoIntent(
                 kind: .registryUpdate,
-                confidence: 0.93,
+                confidence: sessionHint.uppercased().hasPrefix("PKT") ? 0.93 : 0.88,
                 entityKey: "session",
-                entityHint: packet,
-                title: packet,
+                entityHint: sessionHint,
+                title: sessionHint,
                 body: summary,
                 fields: ["objective": appendLog(summary, actions: actions)]
+            ))
+        }
+
+        if let blockHint = extractBlockHint(from: text, lower: lower) {
+            intents.append(VoiceMemoIntent(
+                kind: .registryUpdate,
+                confidence: 0.87,
+                entityKey: "block",
+                entityHint: blockHint,
+                title: blockHint,
+                body: summary,
+                fields: ["description": appendLog(summary, actions: actions)]
             ))
         }
 
         if let projectHint = extractProjectHint(from: lower) {
             intents.append(VoiceMemoIntent(
                 kind: .registryUpdate,
-                confidence: 0.82,
+                confidence: 0.86,
                 entityKey: "project",
                 entityHint: projectHint,
                 title: projectHint,
@@ -119,6 +131,7 @@ public enum VoiceMemoParser {
         recordingPath: String? = nil
     ) async -> VoiceMemoPlan {
         guard BridgeDefaults.voiceMemoOllamaRoutingEffective,
+              VoiceMemoCuratorRouter.shouldUseLocalOllama(),
               let model = BridgeDefaults.ollamaRoutingModelEffective else {
             return parse(transcript: transcript, fallbackTitle: fallbackTitle, recordingPath: recordingPath)
         }
@@ -166,7 +179,11 @@ public enum VoiceMemoParser {
 
     private static func entityHints(from text: String, kind: VoiceMemoIntentKind, entityKey: String) -> [VoiceMemoIntent] {
         let lower = text.lowercased()
-        guard lower.contains("log that") || lower.contains("update ") || lower.contains("talked to") || lower.contains("called ") else {
+        guard lower.contains("log that")
+            || lower.contains("talked to")
+            || lower.contains("called ")
+            || (lower.contains("update ") && (lower.contains("'s") || lower.contains(" contact")))
+        else {
             return []
         }
         var names: [String] = []
@@ -197,6 +214,42 @@ public enum VoiceMemoParser {
         }
     }
 
+    private static func extractSessionHint(from text: String, lower: String) -> String? {
+        if let regex = try? NSRegularExpression(pattern: #"\b(DST|DS)-(\d+)\b"#, options: .caseInsensitive),
+           let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+           let r1 = Range(match.range(at: 1), in: text),
+           let r2 = Range(match.range(at: 2), in: text) {
+            return "\(text[r1].uppercased())-\(text[r2])"
+        }
+        if let packet = extractPacketID(from: text) { return packet }
+        if lower.contains("update session") || lower.contains("session update") {
+            if let regex = try? NSRegularExpression(pattern: #"session\s+(DST|DS)-(\d+)"#, options: .caseInsensitive),
+               let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+               let r1 = Range(match.range(at: 1), in: text),
+               let r2 = Range(match.range(at: 2), in: text) {
+                return "\(text[r1].uppercased())-\(text[r2])"
+            }
+        }
+        return nil
+    }
+
+    private static func extractBlockHint(from text: String, lower: String) -> String? {
+        guard lower.contains("update block") || lower.contains("block ") else { return nil }
+        let patterns = [
+            #"update block\s+(.{3,60}?)(?:\.\s|\.\s*remind|\.\s*with|\.$)"#,
+            #"block\s+(.{8,60}?)(?:\.\s|\.\s*remind|\.\s*with pass phrase|\.$)"#,
+        ]
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+               let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+               let range = Range(match.range(at: 1), in: text) {
+                let hint = String(text[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if hint.count >= 3 { return hint }
+            }
+        }
+        return nil
+    }
+
     private static func extractPacketID(from text: String) -> String? {
         guard let regex = try? NSRegularExpression(pattern: #"PKT-\d+"#, options: .caseInsensitive) else { return nil }
         guard let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
@@ -216,12 +269,48 @@ public enum VoiceMemoParser {
     }
 
     private static func reminderTitle(from text: String) -> String? {
-        if let regex = try? NSRegularExpression(pattern: #"remind me (?:to |that )?(.{5,80})"#, options: .caseInsensitive),
+        if let regex = try? NSRegularExpression(
+            pattern: #"block\s+(.{8,80}?)(?:\.\s|\.\s*remind|\.\s*with pass phrase|\.$)"#,
+            options: .caseInsensitive
+        ),
+           let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+           let range = Range(match.range(at: 1), in: text) {
+            let title = String(text[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !title.isEmpty { return title }
+        }
+        if let regex = try? NSRegularExpression(
+            pattern: #"remind me (?:to |that )?(.{5,80}?)(?:\.\s|\.\s*with pass phrase|\.\s*pass phrase|$)"#,
+            options: .caseInsensitive
+        ),
            let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
            let range = Range(match.range(at: 1), in: text) {
             return String(text[range]).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return firstSentence(in: text, maxLen: 80)
+    }
+
+    /// ASR homophone normalization before phrase matching.
+    public static func normalizeTranscript(_ text: String) -> String {
+        var t = text
+        let pairs: [(String, String)] = [
+            ("blog that", "log that"),
+            ("blog this", "log this"),
+            ("blog my", "log my"),
+        ]
+        for (from, to) in pairs {
+            t = t.replacingOccurrences(of: from, with: to, options: .caseInsensitive)
+        }
+        return t
+    }
+
+    /// Append voice-memo content to an existing registry text field (never overwrite).
+    public static func appendVoiceMemoLog(existing: String?, newContent: String) -> String {
+        let stamp = ISO8601DateFormatter().string(from: Date()).prefix(10)
+        let block = "— Voice memo \(stamp):\n\(newContent.trimmingCharacters(in: .whitespacesAndNewlines))"
+        guard let existing = existing?.trimmingCharacters(in: .whitespacesAndNewlines), !existing.isEmpty else {
+            return block
+        }
+        return existing + "\n\n" + block
     }
 
     private static func generatedTitle(from text: String, fallback: String) -> String {

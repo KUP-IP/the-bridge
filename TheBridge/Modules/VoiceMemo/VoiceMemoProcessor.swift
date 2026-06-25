@@ -147,17 +147,62 @@ public enum VoiceMemoProcessor {
             )
         }
 
-        let llmSummary = await VoiceMemoSummarizer.summarize(transcript: transcript, fallbackTitle: recording.title)
+        let llmSummary: String
         var plan = await VoiceMemoParser.parseWithOptionalOllama(
             transcript: transcript,
             fallbackTitle: recording.title,
             recordingPath: recording.path
         )
+        let needsLLMSummary = plan.intents.contains { $0.kind == .memoryKeep }
+            && VoiceMemoCuratorRouter.shouldSummarizeForMemoryKeep()
+        if needsLLMSummary {
+            llmSummary = await VoiceMemoSummarizer.summarize(transcript: transcript, fallbackTitle: recording.title)
+        } else {
+            llmSummary = VoiceMemoParser.firstSentencePublic(in: transcript, maxLen: 280)
+        }
         plan = applySummary(to: plan, summary: llmSummary, transcript: transcript, recordingPath: recording.path)
+
+        if VoiceMemoCuratorRouter.deferExecuteToAgent() {
+            if !options.dryRun {
+                queueReview(
+                    recording: recording,
+                    intent: VoiceMemoIntent(kind: .review, confidence: 0.5, title: plan.generatedTitle, body: plan.summary),
+                    plan: plan,
+                    reason: "curator mode agent — transcribed; awaiting connected agent commit",
+                    reviewQueued: &reviewQueued
+                )
+            }
+            return VoiceMemoReceipt(
+                memoId: recording.id,
+                title: plan.generatedTitle,
+                skippedReason: "deferred to connected MCP agent"
+            )
+        }
+
+        let election = VoiceMemoIntentElection.split(plan.intents)
         var outcomes: [VoiceMemoIntentOutcome] = []
         var executedAny = false
+        var reviewQueuedForMemo = false
 
-        for intent in plan.intents {
+        for suppressed in election.suppressed {
+            outcomes.append(VoiceMemoIntentOutcome(
+                kind: suppressed.kind,
+                status: .review,
+                detail: "secondary intent suppressed — primary lane elected"
+            ))
+            if !options.dryRun {
+                queueReview(
+                    recording: recording,
+                    intent: suppressed,
+                    plan: plan,
+                    reason: "secondary intent suppressed — primary lane elected",
+                    reviewQueued: &reviewQueued
+                )
+                reviewQueuedForMemo = true
+            }
+        }
+
+        for intent in election.execute {
             if intent.kind == .review {
                 outcomes.append(VoiceMemoIntentOutcome(
                     kind: intent.kind,
@@ -172,6 +217,7 @@ public enum VoiceMemoProcessor {
                         reason: "parser could not classify — manual review",
                         reviewQueued: &reviewQueued
                     )
+                    reviewQueuedForMemo = true
                 }
                 continue
             }
@@ -190,6 +236,7 @@ public enum VoiceMemoProcessor {
                         reason: "confidence \(intent.confidence) below min \(options.minConfidence)",
                         reviewQueued: &reviewQueued
                     )
+                    reviewQueuedForMemo = true
                 }
                 continue
             }
@@ -223,11 +270,13 @@ public enum VoiceMemoProcessor {
                         reason: error.localizedDescription,
                         reviewQueued: &reviewQueued
                     )
+                    reviewQueuedForMemo = true
                 }
             }
         }
 
-        if !options.dryRun, executedAny, outcomes.contains(where: { $0.status == .executed }) {
+        let hasExecuted = outcomes.contains { $0.status == .executed }
+        if !options.dryRun, hasExecuted, !reviewQueuedForMemo {
             try VoiceMemoProcessedStore.markProcessed(id: recording.id)
         }
 
@@ -243,7 +292,7 @@ public enum VoiceMemoProcessor {
         case .memoryKeep:
             return try await executeMemoryKeep(intent, plan: plan, transcript: transcript, router: router)
         case .agentMemory:
-            return try await executeAgentMemory(intent, plan: plan, router: router)
+            return try await executeAgentMemory(intent, plan: plan, transcript: transcript, router: router)
         case .registryUpdate:
             return try await executeRegistryUpdate(intent, router: router)
         case .review:
@@ -262,16 +311,19 @@ public enum VoiceMemoProcessor {
         return "reminders_create: \(title)"
     }
 
-    static func executeAgentMemory(_ intent: VoiceMemoIntent, plan: VoiceMemoPlan, router: ToolRouter) async throws -> String {
+    static func executeAgentMemory(_ intent: VoiceMemoIntent, plan: VoiceMemoPlan, transcript: String, router: ToolRouter) async throws -> String {
         let scope = intent.fields["scope"] ?? "global"
-        let text = [plan.summary, plan.actions.joined(separator: "; ")].filter { !$0.isEmpty }.joined(separator: "\n")
+        var text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty {
+            text = [plan.summary, plan.actions.joined(separator: "; ")].filter { !$0.isEmpty }.joined(separator: "\n")
+        }
         _ = try await router.dispatch(toolName: "memory_remember", arguments: .object([
             "text": .string(text),
             "scope": .string(scope),
             "source": .string("voice-memo"),
             "type": .string("reference"),
         ]))
-        return "memory_remember scope=\(scope)"
+        return "memory_remember scope=\(scope) (\(text.count) chars)"
     }
 
     static func executeMemoryKeep(_ intent: VoiceMemoIntent, plan: VoiceMemoPlan, transcript: String, router: ToolRouter) async throws -> String {
@@ -293,13 +345,46 @@ public enum VoiceMemoProcessor {
             throw VoiceMemoError.invalidIntent("registry update missing entity key")
         }
         let rowId = try await resolveRegistryRowId(entityKey: entityKey, hint: intent.entityHint, router: router)
-        let fields = intent.fields.mapValues { Value.string($0) }
+        let merged = try await mergeAppendRegistryFields(
+            entityKey: entityKey,
+            rowId: rowId,
+            proposed: intent.fields,
+            router: router
+        )
+        let fields = merged.mapValues { Value.string($0) }
         _ = try await router.dispatch(toolName: "registry_update", arguments: .object([
             "entity": .string(entityKey),
             "id": .string(rowId),
             "fields": .object(fields),
         ]))
-        return "registry_update entity=\(entityKey) id=\(rowId)"
+        return "registry_update entity=\(entityKey) id=\(rowId) (append)"
+    }
+
+    static func mergeAppendRegistryFields(
+        entityKey: String,
+        rowId: String,
+        proposed: [String: String],
+        router: ToolRouter
+    ) async throws -> [String: String] {
+        let appendKeys: Set<String> = ["brief", "objective", "summary", "description"]
+        guard proposed.keys.contains(where: appendKeys.contains) else { return proposed }
+
+        let getResult = try await router.dispatch(toolName: "registry_get", arguments: .object([
+            "entity": .string(entityKey),
+            "id": .string(rowId),
+        ]))
+        guard case .object(let envelope) = getResult,
+              case .object(let props) = envelope["properties"] else {
+            return proposed
+        }
+
+        var merged = proposed
+        for (key, newValue) in proposed where appendKeys.contains(key) {
+            var existing = ""
+            if case .string(let s)? = props[key] { existing = s }
+            merged[key] = VoiceMemoParser.appendVoiceMemoLog(existing: existing, newContent: newValue)
+        }
+        return merged
     }
 
     static func resolveRegistryRowId(entityKey: String, hint: String?, router: ToolRouter) async throws -> String {
@@ -517,6 +602,122 @@ public enum VoiceMemoProcessor {
     private static func stringArg(_ obj: [String: Value], _ key: String) -> String? {
         if case .string(let s)? = obj[key] { return s }
         return nil
+    }
+
+    // MARK: - Get / Commit (PKT-MEM-110)
+
+    public static func get(args: Value, router: ToolRouter) async throws -> Value {
+        let options = options(from: args)
+        guard let memoId = options.memoId ?? stringArg(fromValue: args, "memoId") else {
+            throw VoiceMemoError.invalidIntent("missing memoId")
+        }
+        let recordings = VoiceMemoDiscovery.listRecordings(roots: options.recordingRoots, transcriptLoader: options.transcriptLoader)
+        guard let recording = recordings.first(where: { $0.id == memoId || $0.path == memoId }) else {
+            throw VoiceMemoError.invalidIntent("memo not found: \(memoId)")
+        }
+        let (transcript, plan) = try await buildPlan(for: recording, options: options)
+        return .object([
+            "memo": memoValue(recording, transcript: transcript),
+            "plan": planValue(plan),
+            "curatorMode": .string(VoiceMemoCuratorRouter.effectiveMode().rawValue),
+            "processed": .bool(VoiceMemoProcessedStore.isProcessed(id: recording.id)),
+        ])
+    }
+
+    public static func commit(args: Value, router: ToolRouter) async throws -> Value {
+        guard case .object(let obj) = args,
+              case .string(let memoId)? = obj["memoId"],
+              case .string(let kindRaw)? = obj["intentKind"],
+              let kind = VoiceMemoIntentKind(rawValue: kindRaw) else {
+            throw VoiceMemoError.invalidIntent("missing memoId or intentKind")
+        }
+        var options = options(from: args)
+        options.memoId = memoId
+        let recordings = VoiceMemoDiscovery.listRecordings(roots: options.recordingRoots, transcriptLoader: options.transcriptLoader)
+        guard let recording = recordings.first(where: { $0.id == memoId || $0.path == memoId }) else {
+            throw VoiceMemoError.invalidIntent("memo not found: \(memoId)")
+        }
+        let (transcript, plan) = try await buildPlan(for: recording, options: options)
+        var intent = plan.intents.first { $0.kind == kind } ?? VoiceMemoIntent(kind: kind, confidence: 1.0)
+        if let entityKey = stringArg(obj, "entityKey") { intent.entityKey = entityKey }
+        if let hint = stringArg(obj, "entityHint") { intent.entityHint = hint }
+        if let title = stringArg(obj, "title") { intent.title = title }
+        if case .object(let fieldObj)? = obj["fields"] {
+            intent.fields = fieldObj.compactMapValues { if case .string(let s) = $0 { return s }; return nil }
+        }
+        let detail = try await execute(intent: intent, plan: plan, transcript: transcript, router: router)
+        try VoiceMemoProcessedStore.markProcessed(id: recording.id)
+        return .object([
+            "ok": .bool(true),
+            "memoId": .string(recording.id),
+            "intentKind": .string(kind.rawValue),
+            "detail": .string(detail),
+        ])
+    }
+
+    static func buildPlan(for recording: VoiceMemoRecording, options: Options) async throws -> (transcript: String, plan: VoiceMemoPlan) {
+        let audioURL = URL(fileURLWithPath: recording.path, isDirectory: false)
+        let resolved = try await VoiceMemoDiscovery.resolveTranscript(for: audioURL)
+        guard let transcript = resolved.text else {
+            throw VoiceMemoError.invalidIntent("no transcript for memo")
+        }
+        var plan = await VoiceMemoParser.parseWithOptionalOllama(
+            transcript: transcript,
+            fallbackTitle: recording.title,
+            recordingPath: recording.path
+        )
+        let needsLLM = plan.intents.contains { $0.kind == .memoryKeep }
+            && VoiceMemoCuratorRouter.shouldSummarizeForMemoryKeep()
+        let summary: String
+        if needsLLM {
+            summary = await VoiceMemoSummarizer.summarize(transcript: transcript, fallbackTitle: recording.title)
+        } else {
+            summary = VoiceMemoParser.firstSentencePublic(in: transcript, maxLen: 280)
+        }
+        plan = applySummary(to: plan, summary: summary, transcript: transcript, recordingPath: recording.path)
+        return (transcript, plan)
+    }
+
+    static func memoValue(_ recording: VoiceMemoRecording, transcript: String) -> Value {
+        .object([
+            "id": .string(recording.id),
+            "title": .string(recording.title),
+            "path": .string(recording.path),
+            "recordedAt": .string(ISO8601DateFormatter().string(from: recording.recordedAt)),
+            "transcriptSource": .string(recording.transcriptSource.rawValue),
+            "transcript": .string(transcript),
+            "processed": .bool(VoiceMemoProcessedStore.isProcessed(id: recording.id)),
+        ])
+    }
+
+    static func planValue(_ plan: VoiceMemoPlan) -> Value {
+        .object([
+            "generatedTitle": .string(plan.generatedTitle),
+            "skipMemoryKeep": .bool(plan.skipMemoryKeep),
+            "summary": .string(plan.summary),
+            "actions": .array(plan.actions.map { .string($0) }),
+            "intents": .array(plan.intents.map(intentValue)),
+        ])
+    }
+
+    static func intentValue(_ intent: VoiceMemoIntent) -> Value {
+        var obj: [String: Value] = [
+            "kind": .string(intent.kind.rawValue),
+            "confidence": .double(intent.confidence),
+        ]
+        if let entityKey = intent.entityKey { obj["entityKey"] = .string(entityKey) }
+        if let hint = intent.entityHint { obj["entityHint"] = .string(hint) }
+        if let title = intent.title { obj["title"] = .string(title) }
+        if let body = intent.body { obj["body"] = .string(body) }
+        if !intent.fields.isEmpty {
+            obj["fields"] = .object(intent.fields.mapValues { .string($0) })
+        }
+        return .object(obj)
+    }
+
+    private static func stringArg(fromValue args: Value, _ key: String) -> String? {
+        guard case .object(let obj) = args else { return nil }
+        return stringArg(obj, key)
     }
 }
 

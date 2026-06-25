@@ -201,7 +201,9 @@ public enum BridgeConstants {
     /// 179 + 2 = 181.
     /// Voice Memos review resolve (2026-06-24): +2 (voice_memo_review_resolve + voice_memo_transcript_refresh).
     /// 181 + 2 = 183.
-    public static let staticFeatureModuleToolCount = 183
+    /// Memory Hub trust (2026-06-24): +1 memory_forget; +2 voice_memo_get + voice_memo_commit.
+    /// 183 + 3 = 186.
+    public static let staticFeatureModuleToolCount = 186
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

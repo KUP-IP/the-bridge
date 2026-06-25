@@ -8,14 +8,16 @@ import TheBridgeLib
 func runVoiceMemoModuleTests() async {
     print("\n🎙️ Voice Memos curator — module + parser + job")
 
-    await test("VoiceMemoModule registers 6 tools with expected tiers") {
+    await test("VoiceMemoModule registers 8 tools with expected tiers") {
         let router = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
         await VoiceMemoModule.register(on: router)
         let tools = await router.registrations(forModule: "voice")
-        try expect(tools.count == 6, "expected 6 voice tools, got \(tools.count)")
+        try expect(tools.count == 8, "expected 8 voice tools, got \(tools.count)")
         let byName = Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0) })
         try expect(byName["voice_memo_list"]?.tier == .open, "list must be open")
         try expect(byName["voice_memo_process"]?.tier == .notify, "process must be notify")
+        try expect(byName["voice_memo_get"]?.tier == .open, "get must be open")
+        try expect(byName["voice_memo_commit"]?.tier == .notify, "commit must be notify")
         try expect(byName["voice_memo_review_list"]?.tier == .open, "review list must be open")
         try expect(byName["voice_memo_review_dismiss"]?.tier == .notify, "review dismiss must be notify")
         try expect(byName["voice_memo_review_resolve"]?.tier == .notify, "review resolve must be notify")

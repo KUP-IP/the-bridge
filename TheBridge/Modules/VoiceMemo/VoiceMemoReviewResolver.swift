@@ -164,11 +164,11 @@ public enum VoiceMemoReviewResolver {
             )
 
         case .agentRemember:
-            let (_, plan) = try await loadTranscriptAndPlan(for: entry)
+            let (transcript, plan) = try await loadTranscriptAndPlan(for: entry)
             var intent = plan.intents.first(where: { $0.kind == .agentMemory })
                 ?? VoiceMemoIntent(kind: .agentMemory, confidence: 1.0, title: entry.memoTitle, body: plan.summary)
             if !fields.isEmpty { intent.fields = fields }
-            let detail = try await VoiceMemoProcessor.executeAgentMemory(intent, plan: plan, router: router)
+            let detail = try await VoiceMemoProcessor.executeAgentMemory(intent, plan: plan, transcript: transcript, router: router)
             try VoiceMemoProcessedStore.markProcessed(id: entry.memoId)
             try VoiceMemoReviewStore.resolve(id: reviewId)
             return ResolveResult(

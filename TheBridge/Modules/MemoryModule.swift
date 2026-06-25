@@ -203,6 +203,35 @@ public enum MemoryModule {
                 ])
             }
         ))
+
+        // MARK: 5. memory_forget — notify (soft tombstone, reversible via export only)
+        await router.register(ToolRegistration(
+            name: "memory_forget",
+            module: moduleName,
+            tier: .notify,
+            description: "Soft-delete one agent memory by id (sets expiresAt tombstone; excluded from recall/list). Local-only; does not remove Notion rows.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "id": .object(["type": .string("string"), "description": .string("Memory entry id from memory_recall or memory_export")])
+                ]),
+                "required": .array([.string("id")])
+            ]),
+            metadata: ToolMetadata(
+                title: "Memory Forget",
+                whenToUse: ["remove a stale or mistaken agent memory after verification"],
+                whenNotToUse: ["Notion Memory registry rows (use registry_delete)", "bulk wipe (use memory_export then selective cleanup)"],
+                relatedTools: ["memory_recall", "memory_remember", "memory_export"]
+            ),
+            handler: { arguments in
+                guard case .object(let obj) = arguments,
+                      case .string(let id)? = obj["id"], !id.isEmpty else {
+                    throw ToolRouterError.invalidArguments(toolName: "memory_forget", reason: "missing 'id'")
+                }
+                try await store.forget(id: id)
+                return .object(["ok": .bool(true), "id": .string(id), "forgotten": .bool(true)])
+            }
+        ))
     }
 
     // MARK: - Client source threading (Wave 2 · Q3)

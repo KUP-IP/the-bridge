@@ -1,9 +1,6 @@
-// MemorySection.swift — Settings → Memory pane (PKT-MEM-102).
+// MemorySection.swift — Settings → Memory pane (PKT-MEM-102 + PKT-MEM-111).
 //
-// Three tabs: Inbox (voice memo review queue) · Notion (registry rows) · Agent (SQLite).
-// Inbox lists pending entries from VoiceMemoReviewStore with transcript preview,
-// source badge, Reveal in Finder, and dismiss. Full disposition actions land in
-// PKT-MEM-103; Notion/Agent tabs wired in PKT-MEM-104.
+// Tabs: Process · Inbox · Notion · Agent · Processing (model settings).
 
 import SwiftUI
 import AppKit
@@ -41,13 +38,15 @@ public struct MemorySection: View {
     @State private var inboxFilter: InboxFilter = .all
 
     public enum Tab: String, Hashable, CaseIterable, Sendable {
-        case inbox, notion, agent
+        case process, inbox, notion, agent, processing
 
         var label: String {
             switch self {
+            case .process: return "Process"
             case .inbox: return "Inbox"
             case .notion: return "Notion"
             case .agent: return "Agent"
+            case .processing: return "Processing"
             }
         }
     }
@@ -68,7 +67,7 @@ public struct MemorySection: View {
 
     public init(anchor: String? = nil) {
         self.anchor = anchor
-        self._selection = State(initialValue: MemorySection.tab(for: anchor) ?? .inbox)
+        self._selection = State(initialValue: MemorySection.tab(for: anchor) ?? .process)
     }
 
     public var body: some View {
@@ -172,9 +171,11 @@ public struct MemorySection: View {
     @ViewBuilder
     private var tabBody: some View {
         switch selection {
+        case .process: MemoryProcessTab()
         case .inbox: inboxTab
         case .notion: MemoryNotionTab()
         case .agent: MemoryAgentTab()
+        case .processing: MemoryProcessingTab()
         }
     }
 
@@ -463,12 +464,16 @@ public struct MemorySection: View {
             .replacingOccurrences(of: "-", with: ""),
             !raw.isEmpty else { return nil }
         switch raw {
+        case "process", "curator", "pipeline":
+            return .process
         case "inbox", "review", "voicememos", "voicememo", "voice":
             return .inbox
         case "notion", "registry":
             return .notion
         case "agent", "sqlite", "remember":
             return .agent
+        case "processing", "models", "routing":
+            return .processing
         default:
             return nil
         }
