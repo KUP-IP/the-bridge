@@ -25,15 +25,23 @@ Close every item deferred from the approved Memory Hub sprint: automation lanes 
 
 ## Scope
 
+> **Phase 0 supersession (2026-06-25 reflow):** A trust + Process-cockpit integration packet,
+> **PKT-MEM-106** (sliced 0a trust+identity core · 0b Process cockpit + activity · 0c preview +
+> guardrails + tabs), **precedes** all four phases below and **supersedes their B/D/E UI items**:
+> PKT-MEM-108's registry picker + Agent forget/pin (→ PKT-MEM-106 0b/0c), PKT-MEM-110b's cloud
+> API-key UI (→ Processing Keychain provider in 0c), and PKT-MEM-111b's activity strip +
+> preview→commit (→ 0b). The phase rows below retain only their **residual** scope after PKT-MEM-106.
+> Locked decisions are SSOT in [MEMORY-HUB-EXECUTION-SPEC.md §0.1](../MEMORY-HUB-EXECUTION-SPEC.md#01-decision-ledger-2026-06-25).
+
 ### IN (four phases — critical path below)
 
 | Phase | Packet ID | Deliverable |
 |-------|-----------|-------------|
 | **A** | PKT-MEM-107 | Datetime NLP in parser; optional `due` on reminders; calendar lane stub → `calendar_create` when date+time resolved |
-| **B** | PKT-MEM-108 | Process tab registry target picker; Agent tab forget/pin; Notion tab row actions (open + soft refresh); Inbox → Process deep link |
+| **B** | PKT-MEM-108 | Process tab registry target picker *(→ superseded by PKT-MEM-106 0b)*; Agent tab forget/pin *(→ PKT-MEM-106 0c)*; Notion tab row actions (open + soft refresh) *(→ PKT-MEM-106 0c)*; **residual:** Inbox → Process deep link |
 | **C** | PKT-MEM-109 | `MEMORY-HUB-EXECUTION-SPEC.md` v1.1 (§0 truth sync, floor, tool count); live regression harness wired in CI floor comment; notification copy audit |
-| **D** | PKT-MEM-110b | `CloudCuratorClient` (Anthropic/OpenAI via Keychain); Processing tab API key fields; agent-deferred 9am job notify copy |
-| **E** | PKT-MEM-111b | Activity strip on Process; preview → `voice_memo_commit` button; cloud settings UX polish (U2–U5, U7) |
+| **D** | PKT-MEM-110b | `CloudCuratorClient` (Anthropic/OpenAI via Keychain); Processing tab API key fields *(→ superseded by PKT-MEM-106 0c Keychain provider: key/baseURL/model/enabled)*; **residual:** classify-transcript path + agent-deferred 9am job notify copy |
+| **E** | PKT-MEM-111b | Activity strip on Process *(→ superseded by PKT-MEM-106 0b)*; preview → `voice_memo_commit` button *(→ PKT-MEM-106 0b per-intent commit)*; **residual:** remaining U2–U5/U7 cloud settings UX polish |
 
 ### OUT
 
@@ -104,6 +112,10 @@ PKT-MEM-105 ✓ (merged)
 ## QA Checklist (operator live — same 8 cases as 2026-06-24 suite)
 
 See also: **[MEMORY-HUB-LIVE-MULTI-INTENT-SUITE.md](../MEMORY-HUB-LIVE-MULTI-INTENT-SUITE.md)** (M1–M10, multi-request per memo).
+
+> **Phase 0 live re-test order (locked 2026-06-25):** run **M1 → M5 → M8** — simple trust path
+> (M1) before registry-heavy multi-lane cases (M5, then M8). Do not run any of M1/M5/M8 as
+> pass/fail until PKT-MEM-106 (Phase 0) is green; defer M5/M8 until M1 passes clean.
 
 | ID | Scenario | Pass criteria |
 |----|----------|---------------|

@@ -1,7 +1,7 @@
 # Memory Hub — Validated Execution Spec (v1.1 draft)
 
-**Status:** Contract reflow locked 2026-06-25; implementation updates pending
-**Project:** The Bridge v3.9.x vertical — Voice capture → triage → three memory surfaces  
+**Status:** Contract reflow locked 2026-06-25; Phase 0 (PKT-MEM-106) packaged for dispatch
+**Project:** The Bridge v3.8.3 vertical — Voice capture → triage → three memory surfaces  
 **SSOT for:** executor sub-agents · Settings UX · transcription ladder · review dispositions
 
 ---
@@ -27,6 +27,7 @@ Locked by operator + Codex choice-to-contract review after code/UI/UX pass.
 | Unresolved lane home | **Stay visible in Process and mirrored to Inbox**. | Keeps Process as the action source while preserving exception visibility. | Pending lanes remain grouped under the memo and also appear in Inbox filters. |
 | Backfill safety | **Dry-run preview, then selected apply**. | Avoids accidental Notion churn and respects bulk-write caution. | Backfill UI shows planned rows/actions before selected execution. |
 | Live test gate | **Fix Phase 0 blockers before M5/M8 live**. | Avoids noisy false failures from known trust/UX gaps. | Run M1 if useful; defer registry-heavy M5/M8 until Phase 0 blockers are fixed or explicitly accepted as REVIEW evidence. |
+| Phase 0 live re-test order | **M1 → M5 → M8** (simple trust path before registry-heavy cases). | Validates the deterministic-ID / processed-gate / election core (M1) before the registry-picker-heavy multi-lane cases (M5, then M8). | Live closeout runs M1 first, then M5, then M8; M5/M8 stay deferred until M1 passes clean and Phase 0 blockers are fixed. |
 | Activity log storage | **Append-only JSONL with bounded retention**. | Maximizes inspectability and trust while keeping implementation small. | Store preview/commit/test receipts in a capped JSONL file; do not use UserDefaults for evidence. |
 | Enhancement provider policy | **Heuristic first, local auto, cloud manual**. | Keeps preview responsive and privacy-safe while allowing higher-quality operator-triggered enhancement. | Local Ollama may enhance automatically; cloud enhancement requires explicit operator action. |
 | Commit guardrails | **Auto-eligible only above threshold; ambiguous/low confidence requires operator commit**. | Preserves trust while keeping clean primary lanes fast. | Confidence/ambiguity gates determine auto-execute vs manual commit. |
@@ -49,9 +50,9 @@ Locked by operator + Codex choice-to-contract review after code/UI/UX pass.
 | Phase 0 test shape | **Focused net-new tests: election, review identity, processed gate, rowId commit, activity receipts, AX IDs**. | Tests map directly to trust blockers and raise the floor honestly. | Add targeted tests and raise `test-floor` only by net-new coverage. |
 | Legacy review migration | **Derive `intentId` on read; rewrite only when touched**. | Preserves existing pending review entries without launch-time churn. | Add compatibility shim in review loading/resolution; avoid one-time destructive migration. |
 | Activity/cache file location | **`Application Support/TheBridge/memory-hub/`**. | Keeps Memory Hub receipts and caches scoped, inspectable, and separate from voice memo transcripts. | Store `activity.jsonl` and `registry-cache/<entity>.json` under the Memory Hub support directory. |
-| Registry update write mode | **Append-only for protected text fields; explicit diff for non-protected property updates**. | Preserves PKT-MEM-105 trust invariants while allowing safe metadata cleanup. | `brief`, `objective`, `summary`, and `description` never overwrite; non-protected updates require diff preview. |
+| Registry update write mode | **Append-only for protected text fields; per-field diff with individually selectable non-protected updates**. | Preserves PKT-MEM-105 trust invariants while allowing safe, granular metadata cleanup. | `brief`, `objective`, `summary`, and `description` never overwrite (append-only); non-protected updates show a per-field before/after diff and the operator selects which fields to apply. Protected fields are never offered as selectable overwrites. |
 | Notification behavior | **No notification while Process is active; background notifications only for queued review/errors**. | Keeps live triage quiet while preserving recovery when the operator is elsewhere. | Suppress active Process notifications and deep-link background alerts to the relevant Memory surface/filter. |
-| Cloud provider scope | **Generic provider slots; enable OpenAI-compatible manual enhancement first**. | Leaves room for later providers without testing multiple cloud clients in Phase 0. | Implement provider abstraction and one OpenAI-compatible manual enhancement path; defer Anthropic/native multi-provider behavior. |
+| Cloud provider scope | **Generic provider slots; enable one OpenAI-compatible manual enhancement path first**. OpenAI-compatible provider fields = **API key + base URL + model name + enabled toggle**. | Leaves room for later providers without testing multiple cloud clients in Phase 0; explicit fields make any OpenAI-compatible endpoint configurable. | Implement provider abstraction with the four-field config (key/baseURL/model/enabled); defer Anthropic/native multi-provider behavior. Keys live in Keychain (see Cloud key UX row); base URL/model/enabled are non-secret config. |
 | Intent ID format | **`intent_v1_` + truncated SHA-256 of canonical fields**. | Stable, compact, and versionable across dry-run/preview/enhancement. | Use one canonical generator for processor, review store, Process UI, activity receipts, and tests. |
 | Legacy fallback hash | **Use available legacy fields plus `createdAt`/reason fallback; mark `legacyDerived`**. | Maintains deterministic identity without launch-time migration. | Legacy-derived intents are visible in receipts/debug detail and remain rewrite-on-touch only. |
 | Enhancement authority | **Enhancement may add/change/demote, but not silently remove heuristic intents**. | Prevents lost lanes while still allowing better plans. | Removed-by-enhancement intents stay visible as demoted/superseded until operator commits or dismisses. |
@@ -60,8 +61,9 @@ Locked by operator + Codex choice-to-contract review after code/UI/UX pass.
 | Hash length | **20 hex chars after `intent_v1_`**. | Compact, readable, and enough collision margin for local memo scale. | Intent IDs look like `intent_v1_<20hex>`. |
 | Canonicalization | **Canonical JSON with sorted keys, trimmed strings, normalized whitespace, lowercase enum fields**. | Deterministic and testable across dry-runs and enhancement passes. | Hash inputs are generated from canonical JSON, not ad hoc joined strings. |
 | Snapshot retention | **Keep heuristic, latest enhanced, and committed snapshot per memo**. | Preserves useful diff evidence without unbounded local clutter. | Snapshot storage prunes intermediate enhanced drafts after latest/commit is retained. |
+| Snapshot storage | **Per-memo JSON at `memory-hub/plan-snapshots/<memoId>.json`**. | Inspectable and prunable on disk, parallel to the registry-cache layout. | Plan/enhancement snapshots persist as one JSON file per memo under the Memory Hub support directory; pruning follows the snapshot-retention rule (heuristic + latest enhanced + committed). |
 | Receipt hash display | **Store full SHA-256, display first 12 chars**. | Maintains audit strength while keeping UI/live evidence readable. | Activity events store full `receiptHash`; UI and markdown tables may reference the first 12 chars. |
-| Duplicate force reason | **Required reason picker + optional note**. | Produces structured audit evidence without forcing free text every time. | Force duplicate flow cannot commit until a reason enum is selected; note remains optional. |
+| Duplicate force reason | **Required reason picker (fixed enum) + optional free-text note**. Enum = `{new_context, correction, operator_confirmed, live_test}`. | Produces structured, filterable audit evidence without forcing free text every time. | Force duplicate flow cannot commit until one of the four enum values is selected; the free-text note is optional and stored in the activity receipt alongside the enum. |
 
 ---
 
@@ -79,7 +81,7 @@ Locked by operator + Codex choice-to-contract review after code/UI/UX pass.
 | Review entries expire | **FALSE** | `VoiceMemoReviewStore` — pending forever until dismiss. |
 | Processed = transcribed | **FALSE** | `VoiceMemoProcessedStore` marks only after an executed/handled memo has **no pending review entries for that memo**. |
 | Tool docs match Wave 2 | **FALSE (stale)** | `voice_memo_process` metadata still says "transcript must exist as .txt sidecar in Wave 1". |
-| Test floor baseline | **2270** | `scripts/test-floor-gate.sh` FLOOR=2270; must raise only with net-new tests. |
+| Test floor baseline | **2303** | `scripts/test-floor-gate.sh` FLOOR=2303 (PKT-MEM-105 shipped baseline); must raise only with net-new tests. |
 
 ---
 
@@ -168,17 +170,17 @@ Preview is progressive:
 3. Cloud enhancement is manual only: the operator must explicitly choose it from the UI.
 4. The UI labels provenance and stale/enhancing states clearly.
 5. Operator can commit only the currently displayed approved intent; if enhancement changes an intent, the changed lane returns to uncommitted review state.
-6. Preview/enhancement results are stored as versioned plan snapshots; the UI badges added, changed, or removed intent fields before commit.
+6. Preview/enhancement results are stored as versioned plan snapshots in a per-memo JSON file at `~/Library/Application Support/TheBridge/memory-hub/plan-snapshots/<memoId>.json` (inspectable and prunable); the UI badges added, changed, or removed intent fields before commit.
 7. Timeout policy: heuristic renders immediately; local enhancement gets an 8s soft timeout; manual cloud enhancement gets a 20s timeout. Timeouts keep the latest valid plan and record timeout status in activity.
 8. Enhancement may add new intents, change fields, or demote/supersede heuristic intents, but it may not silently remove a heuristic intent. Any removal candidate remains visible as demoted/superseded until the operator commits, dismisses, or marks handled.
-9. Snapshot retention keeps the heuristic snapshot, latest enhanced snapshot, and committed snapshot per memo. Intermediate enhanced snapshots may be pruned after a newer enhanced or committed snapshot exists.
+9. Snapshot retention keeps the heuristic snapshot, latest enhanced snapshot, and committed snapshot per memo in `plan-snapshots/<memoId>.json`. Intermediate enhanced snapshots may be pruned from that file after a newer enhanced or committed snapshot exists.
 
 ### Processing cloud key contract (LOCKED)
 
 - Processing tab shows provider configured/missing status for supported cloud enhancement providers.
 - Provider keys are stored in Keychain only.
 - UI supports save/update and delete for each provider key.
-- Phase 0 uses generic provider slots but only enables an OpenAI-compatible manual enhancement path.
+- Phase 0 uses generic provider slots but only enables an OpenAI-compatible manual enhancement path. The OpenAI-compatible provider exposes four fields: **API key** (Keychain-stored), **base URL**, **model name**, and an **enabled** toggle. Base URL, model name, and the toggle are non-secret config; only the API key is held in Keychain.
 - No full provider administration, billing, model catalog, or usage dashboard in Phase 0.
 
 ### Commit guardrails (LOCKED)
@@ -188,7 +190,7 @@ Preview is progressive:
 - Low-confidence, ambiguous, duplicate, or stale-fallback lanes require operator commit.
 - Duplicate writes are blocked by default across reminders, registry updates, memory_keep, and agent_memory.
 - Duplicate detection key: `memoId + intentId + destination key`, where destination key is the target system plus the minimum stable target/field/value identity.
-- Force duplicate writes require a selected reason from a reason picker and are recorded in the activity log; operator note is optional.
+- Force duplicate writes require a selected reason from a fixed enum `{new_context, correction, operator_confirmed, live_test}` and are recorded in the activity log; an optional free-text note may accompany the enum.
 
 ### Accessibility identifier contract (LOCKED)
 
@@ -200,7 +202,7 @@ Preview is progressive:
 ### Registry write mode (LOCKED)
 
 - Protected registry text fields are append-only: `brief`, `objective`, `summary`, `description`.
-- Non-protected property updates may be committed only from an explicit before/after diff preview.
+- Non-protected property updates may be committed only from an explicit per-field before/after diff preview; the operator selects which non-protected fields to apply. Protected fields (`brief`, `objective`, `summary`, `description`) are never offered as selectable overwrites.
 - Ambiguous field mappings, stale registry cache targets, or missing selected rows force manual commit.
 - No Phase 0 path may silently overwrite a protected registry field.
 
@@ -338,9 +340,13 @@ Implement via launch/on-wake sweep (reuse `JobsReconciler` pattern), not LaunchA
 | **PKT-MEM-103** | Standard | Review resolve tools + TTL sweep + disposition wiring |
 | **PKT-MEM-104** | Standard | Notification/deep-link + Agent/Notion tabs + AX harness |
 
-### Wave 3 (reflowed 2026-06-25)
+### Wave 3 (reflowed 2026-06-25) — Phase 0 = PKT-MEM-106
 
-Before datetime/cloud polish, close the trust + Process cockpit blockers found during review:
+Before datetime/cloud polish, close the trust + Process cockpit blockers found during review.
+Phase 0 (packet **PKT-MEM-106**) **precedes** the older A–E phases (PKT-MEM-107/108/109/110b/111b)
+and **supersedes** their B/D/E UI items (registry picker, activity strip, cloud-key UI, Agent
+forget/pin). The 18 items below are PKT-MEM-106's scope, sliced into 0a (trust+identity core),
+0b (Process cockpit + activity), and 0c (preview + guardrails + tabs):
 
 1. Preserve distinct suppressed review lanes, including multiple `registry_update` intents from one memo.
 2. Align processed marking across `voice_memo_process`, `voice_memo_commit`, and `voice_memo_review_resolve`.
@@ -361,68 +367,17 @@ Before datetime/cloud polish, close the trust + Process cockpit blockers found d
 17. Execute Phase 0 as one integration packet so review identity, processed gate, election, cockpit UI, activity, cloud key status, notifications, and guardrails are validated together.
 18. Add focused net-new tests for election, review identity, 20-hex canonical `intentId`, processed gate, `rowId` commit, activity receipts/full-hash-plus-display-hash, duplicate force reason, legacy review migration, enhancement demotion/no-silent-removal, precise notification suppression, and AX IDs.
 
-Do not run M1/M5/M8 live tests as pass/fail evidence until Phase 0 blockers are fixed. Earlier operator recordings may be used only as REVIEW evidence if explicitly accepted. Then continue PKT-MEM-107 datetime/calendar, PKT-MEM-108 UI closeout, PKT-MEM-109 spec refresh, PKT-MEM-110b cloud curator, and PKT-MEM-111b Process polish.
+Do not run M1/M5/M8 live tests as pass/fail evidence until Phase 0 (PKT-MEM-106) blockers are fixed. When Phase 0 is green, run the live suite in the locked order **M1 → M5 → M8** (simple trust path before registry-heavy cases): M1 first, and defer M5 then M8 until M1 passes clean. Earlier operator recordings may be used only as REVIEW evidence if explicitly accepted. Then continue PKT-MEM-107 datetime/calendar, PKT-MEM-108 UI closeout, PKT-MEM-109 spec refresh, PKT-MEM-110b cloud curator, and PKT-MEM-111b Process polish.
 
 ---
 
-## 8. Material decisions (pre-resolved — do not re-litigate in packets)
+## 8. Material decisions (pre-resolved)
 
-| Decision | Resolution |
-|---|---|
-| Memory vs Data Sources merge | **Separate section**; DS stays schema/registry |
-| Apple-first transcription | **Yes**, with Parakeet fallback + manual re-transcribe |
-| Default routing model | `gemma4:12b` (M1 16GB) — already seeded in `BridgeDefaults` |
-| Review UI review class | **REVIEW-FIRST** — operator approves disposition UX in Settings |
-| Min macOS | macOS 26+ (project baseline); Apple tsrp requires Voice Memos 15+ behavior |
-| Memory default tab | **Process**; Inbox is exception queue |
-| Election rule | **Lane priority first**, then confidence |
-| Processed gate | **No pending review entries for that memo** before `processed.json` |
-| Registry ambiguity | **Inline picker** before registry commit when multiple/ambiguous |
-| Process layout | **Split cockpit**: memo list + intent table + detail/commit inspector |
-| Activity source | **Local Memory Hub activity log** |
-| Registry picker source | **Live registry rows with cached fallback** |
-| Agent controls | **Soft forget + pin only** |
-| Notion scope | **Open + refresh + backfill only** |
-| Preview latency | **Fast heuristic preview first**, then optional enhancement |
-| Review model | **Flat per-intent entries** with stable `intentId` + `memoId` grouping |
-| Unresolved lanes | **Visible in Process and mirrored to Inbox** |
-| Backfill safety | **Dry-run preview, then selected apply** |
-| Live test gate | **Fix Phase 0 blockers before M5/M8 live pass/fail** |
-| Activity log storage | **Append-only JSONL with bounded retention** |
-| Enhancement policy | **Heuristic first, local auto, cloud manual** |
-| Commit guardrails | **Auto only above threshold; ambiguous/low confidence requires operator commit** |
-| Duplicate policy | **Block by default; explicit force with reason** |
-| M1 live timing | **Defer pass/fail until Phase 0 fixed** |
-| Activity retention | **500 events or 30 days, whichever comes first** |
-| Confidence thresholds | **Lane-specific thresholds with global floor** |
-| Registry cache freshness | **Last-good cache; stale badge after 24h** |
-| Phase 0 packaging | **One integration packet** |
-| Live evidence format | **Activity log receipt + markdown grade table** |
-| Threshold values | Global `0.80`; reminder `0.90`; registry `0.86`; agent `0.86`; memory_keep `0.90` |
-| Stable intent ID | Deterministic hash of `memoId + kind + entityKey + entityHint + destination fields + normalized title` |
-| Activity event schema | Structured receipt envelope with event id, memo/intent ids, phase/action/status/provenance, actor, detail, receipt hash, schema version |
-| Enhancement diff UX | Versioned plan snapshots with diff badges |
-| Duplicate detection key | `memoId + intentId + destination key` |
-| Cloud key UX | Keychain-backed provider status plus save/delete in Processing |
-| Enhancement timeouts | Heuristic immediate; local 8s soft timeout; manual cloud 20s timeout |
-| Activity privacy | No full transcript in activity log; transcript hashes plus short excerpts only |
-| Registry cache storage | Separate JSON cache per entity with TTL metadata |
-| Phase 0 test shape | Focused net-new tests for election, review identity, processed gate, `rowId` commit, activity receipts, AX IDs |
-| Legacy review migration | Derive `intentId` on read; rewrite only when touched |
-| Activity/cache file location | `~/Library/Application Support/TheBridge/memory-hub/activity.jsonl` and `registry-cache/<entity>.json` |
-| Registry update write mode | Protected text fields append-only; non-protected updates require explicit diff preview |
-| Notification behavior | Suppress while Process is active; background review/error notifications only |
-| Cloud provider scope | Generic provider slots; OpenAI-compatible manual enhancement first |
-| Intent ID format | `intent_v1_` plus truncated SHA-256 of canonical fields |
-| Legacy fallback hash | Available legacy fields plus `createdAt`/reason fallback; mark `legacyDerived` |
-| Enhancement authority | May add/change/demote; may not silently remove heuristic intents |
-| Process active detection | Suppress only when app active and Memory/Process selected |
-| AX identifier scheme | Stable zone IDs plus row/button IDs suffixed with `memoId`/`intentId` |
-| Hash length | 20 hex chars after `intent_v1_` |
-| Canonicalization | Canonical JSON with sorted keys, trimmed strings, normalized whitespace, lowercase enum fields |
-| Snapshot retention | Keep heuristic, latest enhanced, and committed snapshot per memo |
-| Receipt hash display | Store full SHA-256; display first 12 chars |
-| Duplicate force reason | Required reason picker plus optional note |
+> **SSOT: see §0.1 Decision ledger (2026-06-25).** All material decisions — IA, transcription,
+> election, processed gate, Process cockpit, activity log, preview/enhancement, guardrails,
+> thresholds, intent identity, registry write mode, cloud provider, notifications, AX scheme,
+> and Phase 0 packaging — are locked there with their rationale and execution impact. Do not
+> re-litigate in packets. This section intentionally holds no duplicate table; §0.1 is authoritative.
 
 ---
 

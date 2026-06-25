@@ -3,7 +3,7 @@
 **Version:** 1.0  
 **Date:** 2026-06-24  
 **Parent:** [PKT-MEM-112](./packets/PKT-MEM-112-wave3-deferred-closeout.md)  
-**Prerequisite:** `/Applications/The Bridge.app` v3.8.2+, single-memo processing only (never batch 238 backlog)
+**Prerequisite:** `/Applications/The Bridge.app` **v3.8.3** (Phase 0 / PKT-MEM-106 build), single-memo processing only (never batch 238 backlog)
 
 ---
 
