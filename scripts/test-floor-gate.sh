@@ -1482,6 +1482,13 @@ set -euo pipefail
 # (heuristic/latest-enhanced/committed retention, no-silent-removal demote, launch sweep), OpenAI-compatible
 # provider (providers.json non-secret + Keychain key + Processing UI), progressive-preview policy (8s/20s
 # timeouts, cloud-failure keeps-latest-no-review), notification gate, activity corrupt-line repair. Measured 2474 → 2508.
+# --- Merged from main (2026-06-25): Packet Runner / tool-surface provenance ---
+# Packet Runner v1 registry_hydrate (2026-06-24, batch-merged onto PKT-1014 T2): +10 RegistryHydrationTests
+# + RegistryModuleTests 10->11 — packet-registry-v1 one-hop envelope (FR-1/§8.3). Main green 2373 -> 2383.
+# Tool-surface test coverage (2026-06-25): +30 behavioral tests (9 Jobs mgmt tools + memory export/import
+# round-trip + 2 pinned-intent guards). Main green 2383 -> 2415.
+# MERGE main → Memory Hub branch (2026-06-25): integrated green = 2508 (branch) + main net-new; FLOOR set to
+# the post-merge measured count below (raise only by measured net-new; never lower).
 FLOOR="${BRIDGE_TEST_FLOOR:-2508}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.

@@ -1,0 +1,33 @@
+{
+  "_evidence": "AI LOGS data source pre-migration snapshot (rollback baseline)",
+  "_captured": "2026-06-23",
+  "_dataSourceId": "992fd5ac-d938-4be4-95fb-8ef18bd86bba",
+  "_tool": "Bridge notion_datasource_get",
+  "id": "992fd5ac-d938-4be4-95fb-8ef18bd86bba",
+  "name": "Untitled",
+  "schema": [
+    { "id": "BML%3C", "name": "Anticipation Gaps", "type": "rich_text" },
+    { "id": "%3B%3ENT", "name": "Artifacts Created", "type": "rich_text" },
+    { "id": "Nh%5C%3D", "name": "BOTS", "type": "relation" },
+    { "id": "ct%7C%5E", "name": "Concise", "type": "select", "options": ["✅", "⚠️", "❌"] },
+    { "id": "%5ElSN", "name": "Confidence", "type": "number" },
+    { "id": "OY%3FY", "name": "Created Date", "type": "created_time" },
+    { "id": "D%5Dxs", "name": "Duration", "type": "number" },
+    { "id": "u%40AF", "name": "EVENT", "type": "relation" },
+    { "id": "Xc%3CW", "name": "Enhancement Ideas", "type": "rich_text" },
+    { "id": "ixN_", "name": "Faithful", "type": "select", "options": ["✅", "⚠️", "❌"] },
+    { "id": "%5CVjp", "name": "Friction Signals", "type": "rich_text" },
+    { "id": "title", "name": "Log Name", "type": "title" },
+    { "id": "M%3AFp", "name": "Log Type", "type": "select", "options": ["Skill", "Aura", "Session", "Decision", "System", "Event Intelligence", "Evolution Session", "Test", "Packet"] },
+    { "id": "IC%7CU", "name": "Outcome", "type": "select", "options": ["Success", "Partial", "Failure", "Abandoned"] },
+    { "id": "mcK%5D", "name": "PACKET", "type": "relation" },
+    { "id": "Y%5C%3Fa", "name": "Platform", "type": "select", "options": ["Notion", "Claude", "Cursor"] },
+    { "id": "kbj%3E", "name": "Quality", "type": "select", "options": ["✅", "⚠️", "❌"] },
+    { "id": "t%3E_T", "name": "Readable", "type": "select", "options": ["✅", "⚠️", "❌"] },
+    { "id": "POeW", "name": "Reflexion Used", "type": "checkbox" },
+    { "id": "V%40vn", "name": "Routing Chain", "type": "rich_text" },
+    { "id": "%3EScc", "name": "SKILL", "type": "relation" },
+    { "id": "%3Cy%5Cn", "name": "Session Context", "type": "rich_text" },
+    { "id": "_aJD", "name": "User Feedback", "type": "rich_text" }
+  ]
+}

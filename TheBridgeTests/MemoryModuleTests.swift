@@ -389,6 +389,160 @@ func runMemoryModuleTests() async {
         try expect(result.imported == 0 && result.skipped == 1, "duplicate must skip")
     }
 
+    // MARK: - Wave 2: export / import — MODULE HANDLER analogs (name-keyed)
+    // The store layer above is covered; these exercise the registered MCP tool
+    // handlers memory_export / memory_import directly via callMemoryHandler.
+
+    await test("memory_export handler returns the versioned JSON envelope shape") {
+        let (store, url) = makeTempStore()
+        defer { Task { await store.close(); cleanup(url) } }
+        let router = await makeMemoryRouter(store)
+        _ = try await store.remember(text: "backup me", scope: "global", source: "t")
+        let out = try await callMemoryHandler(router, "memory_export", .object([:]))
+        try expect(memObjField(out, "ok") == .bool(true))
+        try expect(memObjField(out, "format") == .string("json"))
+        try expect(memObjField(out, "schemaVersion") == .int(MemoryStore.ExportEnvelope.currentSchemaVersion),
+                   "schemaVersion must match the store's current envelope version")
+        guard case .string(let payload)? = memObjField(out, "payload") else {
+            throw TestError.assertion("export must return a string payload")
+        }
+        try expect(!payload.isEmpty, "export payload must not be empty")
+        try expect(payload.contains("backup me"), "export payload must contain the live memory text")
+    }
+
+    await test("memory_export handler omits soft-tombstoned rows (export is live-only)") {
+        let (store, url) = makeTempStore()
+        defer { Task { await store.close(); cleanup(url) } }
+        let router = await makeMemoryRouter(store)
+        // Token-disjoint texts so the second remember does NOT supersede the
+        // first (Jaccard < 0.72): they share only 'this'/'fact'.
+        let live = try await store.remember(text: "keep this fact", scope: "global", source: "t")
+        _ = live  // referenced to mirror the file's bind-then-use style
+        let gone = try await store.remember(text: "forget this fact", scope: "global", source: "t")
+        try await store.forget(id: gone.id)
+        let out = try await callMemoryHandler(router, "memory_export", .object([:]))
+        guard case .string(let payload)? = memObjField(out, "payload") else {
+            throw TestError.assertion("export must return a string payload")
+        }
+        try expect(payload.contains("keep this fact"), "live row must be exported")
+        try expect(!payload.contains("forget this fact"), "tombstoned row must be excluded from export")
+    }
+
+    await test("memory_export -> memory_import handler round-trip across a fresh store (recall survives)") {
+        let (storeA, urlA) = makeTempStore()
+        defer { Task { await storeA.close(); cleanup(urlA) } }
+        let routerA = await makeMemoryRouter(storeA)
+        let (storeB, urlB) = makeTempStore()
+        defer { Task { await storeB.close(); cleanup(urlB) } }
+        let routerB = await makeMemoryRouter(storeB)
+
+        _ = try await callMemoryHandler(routerA, "memory_remember", .object([
+            "text": .string("project Atlas ships in Q3"),
+            "scope": .string("project"),
+            "entity": .string("atlas"),
+            "type": .string("decision")
+        ]))
+        let exported = try await callMemoryHandler(routerA, "memory_export", .object([:]))
+        guard case .string(let payload)? = memObjField(exported, "payload") else {
+            throw TestError.assertion("export must yield a payload")
+        }
+        let imported = try await callMemoryHandler(routerB, "memory_import", .object([
+            "payload": .string(payload)
+        ]))
+        try expect(memObjField(imported, "ok") == .bool(true))
+        try expect(memObjField(imported, "imported") == .int(1), "one row must import into the fresh store")
+        try expect(memObjField(imported, "skipped") == .int(0))
+        if case .array(let errs)? = memObjField(imported, "errors") {
+            try expect(errs.isEmpty, "clean import has no errors")
+        } else {
+            throw TestError.assertion("errors must be an array")
+        }
+
+        let recalled = try await callMemoryHandler(routerB, "memory_recall", .object([
+            "query": .string("Atlas ships"),
+            "scope": .string("project")
+        ]))
+        try expect(memObjField(recalled, "count") == .int(1),
+                   "imported memory must be recallable in the destination store")
+    }
+
+    await test("memory_import handler rejects missing payload") {
+        let (store, url) = makeTempStore()
+        defer { Task { await store.close(); cleanup(url) } }
+        let router = await makeMemoryRouter(store)
+        do {
+            _ = try await callMemoryHandler(router, "memory_import", .object([:]))
+            throw TestError.assertion("expected an error for missing payload")
+        } catch let e as ToolRouterError {
+            if case .invalidArguments = e { /* ok */ } else {
+                throw TestError.assertion("expected invalidArguments, got \(e)")
+            }
+        }
+    }
+
+    await test("memory_import handler rejects empty payload string") {
+        let (store, url) = makeTempStore()
+        defer { Task { await store.close(); cleanup(url) } }
+        let router = await makeMemoryRouter(store)
+        do {
+            _ = try await callMemoryHandler(router, "memory_import", .object(["payload": .string("")]))
+            throw TestError.assertion("expected an error for empty payload")
+        } catch let e as ToolRouterError {
+            if case .invalidArguments = e { /* ok */ } else {
+                throw TestError.assertion("expected invalidArguments, got \(e)")
+            }
+        }
+    }
+
+    await test("memory_import handler is idempotent on re-import (duplicates skip on second pass)") {
+        let (store, url) = makeTempStore()
+        defer { Task { await store.close(); cleanup(url) } }
+        let router = await makeMemoryRouter(store)
+        _ = try await callMemoryHandler(router, "memory_remember", .object([
+            "text": .string("idempotent fact"),
+            "scope": .string("mac")
+        ]))
+        let exported = try await callMemoryHandler(router, "memory_export", .object([:]))
+        guard case .string(let payload)? = memObjField(exported, "payload") else {
+            throw TestError.assertion("need payload")
+        }
+        let first = try await callMemoryHandler(router, "memory_import", .object(["payload": .string(payload)]))
+        let second = try await callMemoryHandler(router, "memory_import", .object(["payload": .string(payload)]))
+        try expect(memObjField(first, "imported") == .int(0), "re-import of own export must not duplicate")
+        try expect(memObjField(first, "skipped") == .int(1))
+        try expect(memObjField(second, "imported") == .int(0))
+        try expect(memObjField(second, "skipped") == .int(1))
+        let live = try await store.list(scope: "mac")
+        try expect(live.count == 1, "store must still hold exactly one row after two re-imports, got \(live.count)")
+    }
+
+    await test("memory_import handler surfaces a malformed payload as a thrown error") {
+        let (store, url) = makeTempStore()
+        defer { Task { await store.close(); cleanup(url) } }
+        let router = await makeMemoryRouter(store)
+        var threw = false
+        do {
+            _ = try await callMemoryHandler(router, "memory_import", .object([
+                "payload": .string("{ this is not valid json")
+            ]))
+        } catch {
+            threw = true
+        }
+        try expect(threw, "malformed import payload must throw")
+        let live = try await store.list(scope: nil, entity: nil)
+        try expect(live.isEmpty, "a malformed import must not land any rows")
+    }
+
+    await test("memory_export and memory_import are tier .request") {
+        let (store, url) = makeTempStore()
+        defer { Task { await store.close(); cleanup(url) } }
+        let router = await makeMemoryRouter(store)
+        let tools = await router.registrations(forModule: "memory")
+        let byName = Dictionary(tools.map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
+        try expect(byName["memory_export"]?.tier == .request, "export must be .request (local backup seam)")
+        try expect(byName["memory_import"]?.tier == .request, "import must be .request (local restore seam)")
+    }
+
     await test("MemoryStore: consolidationSweep tombstones stale reference rows") {
         let (store, url) = makeTempStore()
         defer { Task { await store.close(); cleanup(url) } }

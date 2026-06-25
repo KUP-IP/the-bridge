@@ -203,7 +203,10 @@ public enum BridgeConstants {
     /// 181 + 2 = 183.
     /// Memory Hub trust (2026-06-24): +1 memory_forget; +2 voice_memo_get + voice_memo_commit.
     /// 183 + 3 = 186.
-    public static let staticFeatureModuleToolCount = 186
+    /// Packet Runner v1 (FR-1/§8.3, merged from main 2026-06-25): + registry_hydrate
+    ///   (packet-registry-v1 one-hop envelope). 186 + 1 = 187.
+    ///   (PKT-MEM-106 Phase 0 added internal types only — no new MCP tools.)
+    public static let staticFeatureModuleToolCount = 187
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

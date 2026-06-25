@@ -635,6 +635,7 @@ await runRegistryDataPathTests()     // Data-Source Registry W2: live data path 
 await runRegistryModuleTests()       // Data-Source Registry W3: MCP tool surface (10 tools: generic CRUD + add/remove_entity + introspect + possess, registration + handler behavior)
 await runDataSourcesViewModelTests() // Data-Source Registry W4: Settings pane scenarios (propose→confirm, TTL, drift, errors) + BE↔FE alignment
 await runRegistryEdgeCaseTests()     // Data-Source Registry: adversarial edge cases (codec chunking, pagination, cache concurrency, config race, writer)
+await runRegistryHydrationTests()    // Packet Runner v1 (FR-1/§8.3): packet-registry-v1 one-hop hydration envelope (primary+body+relations+provenance+warnings)
 await runMessagesModuleTests()
 await runMessagesSuiteAuditTests()   // Messages-suite every-angle-of-attack audit
 await runMailModuleTests()           // PKT-961 (v3.7·H): mail_* Apple Mail module (mock seam; send-guard)
