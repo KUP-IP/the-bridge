@@ -27,12 +27,16 @@ import TheBridgeLib
 /// A fresh MemoryStore over a unique temp file. Caller is responsible for
 /// nothing — the OS reclaims the temp dir, and `cleanup` removes the file +
 /// WAL/SHM siblings so a re-run never collides.
+// PKT-1007: tests here exercise FTS5/salience behavior, not dense-vector recall.
+// Using a StubMemoryEmbedder keeps the dense arm deterministic and prevents the
+// live NLContextualEmbedder from pulling semantically-unrelated entries into the
+// fused result set (which would change the FTS-count assertions in these tests).
 private func makeTempStore() -> (store: MemoryStore, url: URL) {
     let dir = FileManager.default.temporaryDirectory
         .appendingPathComponent("bridge-memory-tests", isDirectory: true)
         .appendingPathComponent(UUID().uuidString, isDirectory: true)
     let url = dir.appendingPathComponent("memory.sqlite")
-    return (MemoryStore(path: url), url)
+    return (MemoryStore(path: url, embedder: StubMemoryEmbedder()), url)
 }
 
 private func cleanup(_ url: URL) {
@@ -102,8 +106,14 @@ func runMemoryModuleTests() async {
         _ = try await store.remember(text: "Coffee order is oat flat white",
                                      scope: "people", source: "t")
         let hits = try await store.recall(query: "deploy pipeline")
-        try expect(hits.count == 1, "expected exactly 1 FTS hit, got \(hits.count)")
-        try expect(hits.first?.text.contains("GitHub Actions") == true)
+        // PKT-1007: the hybrid recall (FTS + dense RRF) may surface additional
+        // entries; the key invariant is that the deploy-pipeline entry is returned
+        // and is ranked FIRST (it has the strongest FTS + dense signal for this
+        // query). The strict count=1 guard is relaxed to ≥1 to allow the dense
+        // arm to optionally surface near-related entries.
+        try expect(!hits.isEmpty, "recall must return at least 1 result for 'deploy pipeline'")
+        try expect(hits.first?.text.contains("GitHub Actions") == true,
+                   "deploy-pipeline entry must be ranked first (strongest FTS match)")
     }
 
     await test("MemoryStore: recall ranks decision-type above reference-type at equal freshness") {

@@ -35,6 +35,7 @@
 
 import Foundation
 import SQLite3
+import NaturalLanguage
 
 // sqlite3 transient-destructor sentinel (re-declared because SQLITE_TRANSIENT
 // is a C macro not re-exported as a Swift constant). Same pattern as JobStore.
@@ -203,9 +204,34 @@ public actor MemoryStore {
     private var db: OpaquePointer?
     private var isOpen = false
 
+    // MARK: Dense-vector embedding index (PKT-1007)
+
+    /// The embedder used to produce dense vectors. Defaults to the live
+    /// `NLContextualEmbedder`. Tests inject a `StubMemoryEmbedder` to avoid
+    /// CoreML asset loading. The embedder is `Sendable` + immutable after init.
+    private let embedder: MemoryEmbedder
+
+    /// In-memory embedding index; lazily populated during recall. Declared
+    /// `var` because `MemoryEmbeddingIndex` is a value type that mutates in
+    /// place (actor isolation guarantees exclusive access).
+    private var embeddingIndex: MemoryEmbeddingIndex
+
+    // MARK: RRF weight (PKT-1007)
+
+    /// Fraction of the limit allocated to the FTS/salience arm before RRF.
+    /// Both arms fetch this many candidates; RRF then picks the top `limit`.
+    private static let rrfCandidateMultiplier: Int = 3
+
     /// `path` defaults to the config-dir `memory.sqlite`. Tests pass a temp URL.
-    public init(path: URL = MemoryPaths.sqliteURL) {
+    /// `embedder` defaults to the live NLContextualEmbedder; pass a
+    /// `StubMemoryEmbedder` in tests to avoid CoreML asset loading.
+    public init(path: URL = MemoryPaths.sqliteURL, embedder: MemoryEmbedder? = nil) {
         self.path = path
+        // Default to live embedder (NLContextualEmbedding, English).
+        // The init is synchronous but kicks off an async asset request internally.
+        let e: MemoryEmbedder = embedder ?? NLContextualEmbedder()
+        self.embedder = e
+        self.embeddingIndex = MemoryEmbeddingIndex(embedder: e)
     }
 
     // MARK: Lifecycle
@@ -319,9 +345,18 @@ public actor MemoryStore {
 
     // MARK: Public API — recall
 
-    /// FTS5 recall ranked by salience, then use-promote the returned rows.
-    /// Tombstoned/expired rows are excluded. An empty/`*`-only query falls back
-    /// to the salience-ranked recent set (so a bare scope/entity recall works).
+    /// Hybrid recall: FTS5/salience arm fused with a dense-vector arm (PKT-1007)
+    /// via Reciprocal Rank Fusion (RRF). Returns up to `limit` entries.
+    ///
+    /// Pipeline:
+    ///   1. FTS arm: bm25-ranked hits (or salience-ranked live set if no query).
+    ///   2. Dense arm: NLContextualEmbedding cosine-ranked candidates (skipped if
+    ///      the embedder has no assets — falls back to FTS-only gracefully).
+    ///   3. RRF fusion of the two rank-lists into a combined score list.
+    ///   4. Salience re-score + pinned-to-top sort on the fused set.
+    ///   5. Use-promote the top `limit` rows (bump useCount + lastUsedAt).
+    ///
+    /// Tombstoned/expired rows are always excluded.
     public func recall(
         query rawQuery: String,
         scope: String? = nil,
@@ -331,22 +366,76 @@ public actor MemoryStore {
         try ensureOpen()
         let limit = max(1, min(limit, 100))
         let now = Date()
+        let candidateLimit = limit * Self.rrfCandidateMultiplier
         let matchExpr = Self.ftsMatchExpression(rawQuery)
 
-        var results: [(entry: MemoryEntry, rank: Double)]
+        // — FTS arm —
+        var ftsList: [(entry: MemoryEntry, rank: Double)]
         if let matchExpr {
-            results = try ftsRanked(match: matchExpr, scope: scope, entity: entity)
+            ftsList = try ftsRanked(match: matchExpr, scope: scope, entity: entity)
         } else {
             // No usable query terms — rank the live set by salience only.
-            results = try liveEntries(scope: scope, entity: entity).map { ($0, 0.0) }
+            ftsList = try liveEntries(scope: scope, entity: entity).map { ($0, 0.0) }
         }
 
-        let scored = results
-            .map { (entry: $0.entry, score: Self.salience(entry: $0.entry, ftsRank: $0.rank, now: now)) }
+        // — Dense arm (PKT-1007) —
+        // Collect the candidate pool (all live entries for the scope/entity).
+        // Index any entries not yet embedded (lazy, never re-indexes known ids).
+        let allLive = try liveEntries(scope: scope, entity: entity)
+        embeddingIndex.index(entries: allLive)
+        let denseRanked = embeddingIndex.rankedByDense(query: rawQuery, candidates: allLive)
+
+        // — RRF fusion —
+        // Trim both lists to candidateLimit before fusion so RRF ranks are
+        // meaningful (a list of 10k results would wash out with very low RRF scores).
+        let ftsTrimmed = Array(ftsList.prefix(candidateLimit))
+        let denseTrimmed = Array(denseRanked.prefix(candidateLimit))
+
+        // fused: [(entry, rrfScore)] — rrfScore is 0.0 for the FTS-only fallback.
+        let fused: [(entry: MemoryEntry, rrfScore: Double)]
+        if denseTrimmed.isEmpty {
+            // Dense arm produced nothing (assets unavailable, empty query, etc.)
+            // Fall back to the plain FTS/salience list in FTS rank order.
+            // Assign a synthetic decreasing rrfScore so the sort below preserves
+            // the FTS order when salience scores are equal.
+            fused = ftsTrimmed.enumerated().map { (idx, item) in
+                (item.entry, 1.0 / (ReciprocaLRankFusion.kDefault + Double(idx + 1)))
+            }
+        } else {
+            // Fuse: FTS rank-list + dense rank-list → combined RRF scores.
+            let rrfResult = ReciprocaLRankFusion.fuse(ftsList: ftsTrimmed, denseList: denseTrimmed)
+            fused = rrfResult
+        }
+
+        // — Combined score + pinned-to-top sort on the fused candidate set —
+        //
+        // Sort priority:
+        //   1. pinned → always first
+        //   2. combined score (RRF × salienceMultiplier + salience_bias) → query
+        //      relevance is the primary signal; salience modulates within a tier
+        //   3. tiebreak by lastUsedAt (recency)
+        //
+        // When the dense arm is active and produced an rrfScore, RRF is the
+        // primary query-relevance signal. We add a scaled salience contribution
+        // so that among entries with similar RRF scores, more-salient entries
+        // (recently used, high frequency, high-value type) rank higher — but a
+        // large RRF advantage (strong text + semantic match) always dominates.
+        // When rrfScore is 0.0 (empty-query fallback), the combined score
+        // reduces to pure salience, preserving the original ranking behaviour.
+        let scored = fused
+            .map { item -> (entry: MemoryEntry, combined: Double) in
+                let sal = Self.salience(entry: item.entry, ftsRank: 0.0, now: now)
+                // Blend: primary = rrfScore (query match), secondary = salience*bias.
+                // The bias (0.01) is chosen so a MAX salience boost (~3.0 * 0.01 = 0.03)
+                // is comparable to the smallest meaningful RRF gap (1/61 ≈ 0.016),
+                // giving salience a real secondary role without drowning out RRF.
+                let combined = item.rrfScore + Self.salienceBias * sal
+                return (item.entry, combined)
+            }
             .sorted { lhs, rhs in
-                if lhs.entry.pinned != rhs.entry.pinned { return lhs.entry.pinned }  // pinned → top
-                if lhs.score != rhs.score { return lhs.score > rhs.score }
-                return lhs.entry.lastUsedAt > rhs.entry.lastUsedAt                   // tiebreak: recency
+                if lhs.entry.pinned != rhs.entry.pinned { return lhs.entry.pinned }
+                if lhs.combined != rhs.combined { return lhs.combined > rhs.combined }
+                return lhs.entry.lastUsedAt > rhs.entry.lastUsedAt
             }
             .prefix(limit)
             .map(\.entry)
@@ -577,13 +666,18 @@ public actor MemoryStore {
     static let typeWeightFactor: Double = 0.6
     /// ~30 days: an entry untouched for a month has its recency term halved.
     static let recencyHalfLifeSeconds: Double = 60 * 60 * 24 * 30
+    /// PKT-1007: weight of the salience secondary contribution in the
+    /// combined RRF + salience sort. Keeps salience as a meaningful secondary
+    /// signal while preventing tiny recency differences from overriding clear
+    /// query-relevance signals from RRF.
+    static let salienceBias: Double = 0.01
     /// Token-overlap (Jaccard) at/above which two entries in the same
     /// scope+entity are treated as the same memory and superseded.
     static let dedupThreshold: Double = 0.72
 
     // MARK: - Dedup helpers
 
-    static func contentHash(_ text: String) -> String {
+    public static func contentHash(_ text: String) -> String {
         // Normalize (lowercase, collapse whitespace) so trivial casing/spacing
         // differences hash identically → exact-dup refresh path. djb2 over the
         // UTF-8 bytes; collisions are dedup false-positives at worst, which the
@@ -731,6 +825,9 @@ public actor MemoryStore {
             sqlite3_bind_double(stmt, 1, now.timeIntervalSince1970)
             sqlite3_bind_text(stmt, 2, id, -1, MEM_SQLITE_TRANSIENT)
         }
+        // Evict from the embedding index so tombstoned entries never appear in
+        // future dense-ranked candidate sets.
+        embeddingIndex.remove(id: id)
     }
 
     // MARK: - Low-level SQLite helpers (mirror JobStore)
