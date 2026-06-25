@@ -237,11 +237,12 @@ public actor ServerManager {
         let appVersion = AppVersion.resolved
 
         // PKT-9 v3.5 (now SSOT): the composed handshake payload (Standing
-        // Orders + routing index) comes from StandingOrdersDelivery so this
-        // path and the SSETransport legacy path serve byte-identical bytes
-        // — the same composition that backs the bridge:// resources. The
-        // best-effort store-read fallback lives inside the SSOT.
-        let composition = StandingOrdersDelivery.composition()
+        // Orders + routing index) comes from StandingOrdersDelivery.
+        // PKT-977 Wave 2 Q1: asyncComposition used here so that when the
+        // operator enables memory auto-inject the stdio client also receives
+        // the salient memory slice at handshake. Default-OFF behaviour is
+        // byte-identical to the sync path.
+        let composition = await StandingOrdersDelivery.asyncComposition(clientName: nil)
         let composedInstructions = composition.instructionsMarkdown
 
         // W2 telemetry: record the handshake we composed + shipped on the
