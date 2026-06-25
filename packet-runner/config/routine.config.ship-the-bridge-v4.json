@@ -1,0 +1,121 @@
+{
+  "_about": "Packet Runner CONCRETE PILOT configuration for the 'Ship The Bridge v4' routine (PRD §8.5A; MASTER_IMPLEMENTATION_SPEC.md v1.1 §3 WU-4). Authored from routine.config.template.json with the WU-4 DECIDED values filled. Every value that must come from the operator remains an explicit '<<OPERATOR: ...>>' placeholder — no IDs, tokens, or secret values are fabricated. Secret VALUES never live here — only safe aliases (PRD §8.9). Preflight fails closed before any packet mutation when this config is missing, inconsistent, points at an inaccessible project/repo/brief/qualification/evidence destination, allows overlapping runs, or uses contract/schema versions outside the supported range (PRD §8.5A configuration validation; CONTROLLER_SPEC.md §2 P1-P14).",
+  "_source_of_truth": "_refs/PRD-v1.0.md §8.5A; MASTER_IMPLEMENTATION_SPEC.md v1.1 §3 WU-4 (decided values) + Decision Ledger D1/D1'/D2/D3/D4/D-assume; companion logic in controller/CONTROLLER_SPEC.md + controller/decisions.py",
+  "_status": "NOT production-qualified. Unattended scheduling stays OFF until Pilot Phase 1 + the live capability tests pass and the §8.20 20-cycle gate + operator sign-off complete (MASTER_IMPLEMENTATION_SPEC.md §0/§5).",
+
+  "version": "<<OPERATOR: routine config semver, e.g. 1.0.0 — set on first commit of this concrete config; dispatch carries it as routineConfigVersion (PRD §8.4)>>",
+
+  "provider": {
+    "_note": "PRD §8.5A + FR-9. Decided per MASTER_IMPLEMENTATION_SPEC.md §3 WU-4 + Decision Ledger D1/D1'. Fully-local app-local Claude Code scheduled agent: ONE synchronous autonomous run = the whole cycle (the keep-os-daily-people-report pattern), failing closed if the Bridge is unreachable. The provider must satisfy all nine capabilities; selection evidence is recorded under provider_capability_results below. Do NOT build a generalized adapter framework for v1.",
+    "name": "Claude Code app-local scheduled agent + Bridge MCP (loopback/connector)",
+    "workspace_alias": "<<OPERATOR: safe alias for the Claude Code account/workspace that owns the scheduled task — never a secret>>",
+    "self_pause_action": {
+      "_note": "Decided per Decision Ledger D1' #7 + decisions.py pause_gate/request_pause/may_reenable. Machine-callable self-pause = 'update_scheduled_task enabled:false' (scheduled-tasks MCP) backed by the controller fail-closed latch 'disabled' flag in durable_evidence_destination (PRD §8.5A, §8.13). Packet Runner may SET disabled within an incident boundary but may NEVER re-enable itself; re-enable is operator-only (may_reenable). Optional belt-and-suspenders: Bridge job_pause.",
+      "kind": "machine_callable_pause",
+      "reference": "update_scheduled_task enabled:false (taskId packet-runner-ship-the-bridge-v4) + controller latch 'disabled' flag"
+    }
+  },
+
+  "routine_id": "packet-runner-ship-the-bridge-v4",
+  "_routine_id_note": "MASTER_IMPLEMENTATION_SPEC.md §3 WU-4: taskId = 'packet-runner-ship-the-bridge-v4'. This is the scheduled-tasks MCP taskId registered by WU-2 (create_scheduled_task). Operator confirms the taskId at registration time.",
+
+  "timezone": "America/Chicago",
+  "_timezone_note": "PRD §8.5A + Decision Ledger D-assume: America/Chicago for the initial routine unless Isaiah explicitly changes it. Used for Execution Window evaluation when a window embeds no timezone (§8.1; decisions.py classify_window).",
+
+  "schedule": null,
+  "_schedule_note": "INTENTIONALLY null (MASTER_IMPLEMENTATION_SPEC.md §3 WU-4 + WU-2 + Decision Ledger D-assume: cron = null, one-shot fire through Phase 1). PRD §8.5A + FR-8: schedule is an operator-supplied provider-native schedule, and NO unattended run is enabled until this value is reviewed. UNATTENDED RUNS STAY DISABLED until reviewed AND until the §8.20 20-cycle production-qualification gate passes with explicit operator sign-off. Until then, execution is manual Run-Now / one-shot 'fireAt' only (WU-5 Phase 1), under the same controller non-overlap latch. Replace null with the reviewed provider-native recurrence (WU-5 Phase 2) ONLY after qualification + authorization.",
+  "schedule_fields_when_enabled": {
+    "_note": "Reference shape only — NOT active while \"schedule\": null. Populate the live \"schedule\" field above (provider-native cron/recurrence in America/Chicago) after Phase-1 live tests pass and operator authorizes Phase 2. Missed runs are NOT backfilled (FR-8). Time zone / daylight-saving / manual-run behavior remain provider-native. App-local caveat (MASTER_IMPLEMENTATION_SPEC.md open-pt #5): the scheduled task fires only while the Claude Code app is open, else on next launch — confirm app-open-overnight or adopt the launchd->headless-claude enhancement before Phase 2.",
+    "cron_or_recurrence": "<<OPERATOR: reviewed provider-native schedule expression (America/Chicago); leave \"schedule\" null until Phase 2 authorized>>",
+    "missed_run_behavior": "no-backfill"
+  },
+
+  "project_id": "<<OPERATOR: Ship The Bridge v4 PROJECT page id — the PROJECT relation target scoping the QUEUE query (PRD §6.2, FR-2; CONTROLLER_SPEC.md P2). NOT the PACKETS data source id (that is canonical: 078e7c9e-e53e-4c83-a893-af64f82b5123)>>",
+  "_project_id_note": "MASTER_IMPLEMENTATION_SPEC.md Decision Ledger D2: pilot on 'Ship The Bridge v4' in the the-bridge repo. registry.queryQueue(project_id) selects Status==QUEUE AND PROJECT==project_id (CONTROLLER_SPEC.md §1 step 2). Preflight P2 fails closed if unresolvable/inaccessible.",
+
+  "repository": {
+    "_note": "PRD §8.5A, §8.21 + MASTER_IMPLEMENTATION_SPEC.md §3 WU-4 + Decision Ledger D2. Never modify the canonical default branch directly in unattended v1; use a provider-isolated worktree and a packet branch named packet/<PKT-ID>-<short-slug> (Capability #2, MASTER_IMPLEMENTATION_SPEC.md §2). Preflight P3 fails closed if isolation cannot be established.",
+    "owner": "KUP-IP",
+    "name": "the-bridge",
+    "default_branch": "main",
+    "isolation_mode": "worktree"
+  },
+
+  "brief_page_id": "389cbb58-889e-8165-b407-e5e6f0bd45b3",
+  "_brief_page_note": "MASTER_IMPLEMENTATION_SPEC.md §3 WU-4. Created 2026-06-23 ('Packet Runner Brief — v1 Pilot', under the PRD page) per PRD §8.6. Single canonical latest-brief page; preflight P4 fails visibly if unresolvable/un-updatable. Operator may relocate/redesignate for the real pilot project. The cycle mirrors the brief summary + this Notion URL to the Bridge Inbox and calls Bridge notify (Decision Ledger D4; WU-3).",
+
+  "qualification_evidence_page_id": "389cbb58-889e-8184-b8da-fb72881782d6",
+  "_qualification_evidence_page_note": "MASTER_IMPLEMENTATION_SPEC.md §3 WU-4. Created 2026-06-23 ('Packet Runner Qualification — v1 Pilot', under the PRD page) per PRD §8.20. Required (preflight P5) only while qualification_pilot_active is true (WU-5 Phase 2). A missing/unverifiable qualification row makes the cycle non-qualifying and breaks the streak (decisions.py / CONTROLLER_SPEC.md §8).",
+
+  "durable_evidence_destination": {
+    "_note": "PRD §8.5A + §8.18 + MASTER_IMPLEMENTATION_SPEC.md §3 WU-4 'Operator inputs still required'. Stable Notion page/file area OR repository evidence path for redacted incident exports and portable review artifacts. MUST NOT be an ephemeral local directory (preflight P6 fails closed otherwise). This SAME store ALSO hosts the controller single-writer latch {holder, acquired_at, expires_at, disabled} that enforces #1 non-overlap and #7 pause (WU-3; decisions.py OverlapLatch/overlap_gate/pause_gate). Set 'latch_location' to the exact Notion property/row/file within this destination that holds the latch.",
+    "kind": "<<OPERATOR: one of notion_page | notion_file_area | repo_path>>",
+    "locator": "<<OPERATOR: stable Notion page id OR repo evidence path for the durable evidence destination — never an ephemeral local dir>>",
+    "latch_location": "<<OPERATOR: exact location of the single-writer control latch within durable_evidence_destination (e.g. a Notion page/row/property or a repo file path) holding {holder, acquired_at, expires_at, disabled} — WU-3 latch store>>"
+  },
+
+  "max_packets_per_cycle": 1,
+  "_max_packets_note": "PRD §8.5A + §6.6 + MASTER_IMPLEMENTATION_SPEC.md §3 WU-4 + Decision Ledger D-assume: pilot is exactly 1 packet per cycle. Increasing this is a persistent change requiring review (§8.13) and may expand only one dimension at a time after qualification (§8.20).",
+
+  "cycle_timeout_seconds": "<<OPERATOR: integer cycle timeout in seconds — MUST be shorter than the schedule interval once a schedule is set (PRD §8.5A; CONTROLLER_SPEC.md P14). Also bounds the latch expires_at = acquired_at + cycle_timeout (decisions.py OverlapLatch). While schedule is null/one-shot, set a sane upper bound for one synchronous run>>",
+  "packet_timeout_seconds": "<<OPERATOR: integer packet timeout in seconds — MUST be shorter than the 14400s (4h) stale-FOCUS threshold (PRD §8.5A, §8.14; CONTROLLER_SPEC.md P14)>>",
+
+  "maintenance_max_items": 10,
+  "maintenance_time_budget_seconds": 120,
+  "_maintenance_note": "PRD §8.5A + §8.17 + MASTER_IMPLEMENTATION_SPEC.md cycle step 6. Bounded cleanup/archival runs AFTER packet reconciliation and BEFORE the brief; it starts no mission work so it does not count against max_packets_per_cycle, but must stay time-bounded (decisions.py maintenance_plan).",
+
+  "model": {
+    "_note": "PRD §8.5A, FR-18, §8.13. Session-local model choice is allowed only within this allowlist; changing the default or allowlist is a persistent change requiring review (decisions.py select_model — never mutates the persisted default). Preflight P8 fails closed if the default is unavailable or outside the allowlist. Provide model ID strings only — no credentials.",
+    "default": "<<OPERATOR: default model id (e.g. an approved claude-* id) for the scheduled agent run>>",
+    "allowlist": ["<<OPERATOR: approved model id #1>>", "<<OPERATOR: approved model id #2 (optional; repeat as needed)>>"]
+  },
+
+  "allowed_execution_modes": ["inline"],
+  "_execution_modes_note": "PRD §6 + FR-9 + MASTER_IMPLEMENTATION_SPEC.md §2 Capability #3 + cycle step 4. D1' makes the cycle a single app-local agent that runs the executor INLINE (one synchronous run = the whole cycle). 'fresh-worker' is intentionally NOT enabled for this fully-local v1 pilot; if the operator later wants the controller to switch session-locally, add 'fresh-worker' here (both modes must be approved per §8.13).",
+
+  "connections": {
+    "_note": "PRD §8.5A + §8.9 + FR-13. Core tool/MCP connections and SAFE credential aliases only — NEVER secret values. Least-privilege. The Bridge is reached via loopback (token-free, PKT-810 R5) when the agent runs on the Mac, connector otherwise (MASTER_IMPLEMENTATION_SPEC.md §2 Capability #4). Aliases below are NAMES ONLY; values stay in native secret stores (Keychain / MCP connection config / repo secret store).",
+    "core_tools": [
+      "Bridge MCP (loopback 127.0.0.1:9700 / connector): registry_hydrate, registry_* (read/update PACKETS), notion_* (read/update brief + AI LOGS + latch), notify, job_pause",
+      "scheduled-tasks MCP: create_scheduled_task, update_scheduled_task, list_scheduled_tasks (scheduler + kill-switch)",
+      "local git + build/test tooling for the the-bridge worktree (non-consequential verification)"
+    ],
+    "credential_aliases": [
+      "<<OPERATOR: safe credential alias for Notion/Bridge access, e.g. notion:primary — name only, never the secret>>",
+      "<<OPERATOR: safe credential alias for the the-bridge git repo, e.g. github:primary — name only, never the secret>>"
+    ]
+  },
+
+  "authorized_identities": {
+    "_note": "PRD §8.5A + §8.10 + §8.13 + MASTER_IMPLEMENTATION_SPEC.md §3 WU-4 'Operator inputs still required'. Reviewer/operator identities and who holds provider pause/re-enable authority. Re-enablement of a paused routine is an explicit operator decision; the routine may NEVER re-enable itself (decisions.py may_reenable).",
+    "reviewers": ["<<OPERATOR: reviewer identity #1 (Notion person / handle authorized to issue PACKET DECISION approvals)>>"],
+    "operators": ["<<OPERATOR: operator identity (e.g. Isaiah) — packet author, final authority, scheduling controller>>"],
+    "provider_pause_authority": ["<<OPERATOR: identity holding pause/re-enable authority for taskId packet-runner-ship-the-bridge-v4 (e.g. Isaiah)>>"]
+  },
+
+  "provider_capability_results": {
+    "_note": "PRD §8.5A provider-selection rule + FR-9. Record VERIFIED evidence per capability. Every capability except session_export is REQUIRED; session_export uses the §8.18 compact-bundle fallback (MASTER_IMPLEMENTATION_SPEC.md §2 Capability #9). FAIL CLOSED: any unverified capability cell blocks rollout. Per PROVIDER_DECISION_PROPOSAL.md + MASTER_IMPLEMENTATION_SPEC.md §4, the MECHANISM for every cell is decided (#1 controller latch, #2 worktree, #3 inline, #4 Bridge loopback, #5 scheduled-task run record, #6 abort-and-report, #7 enabled:false+latch, #8 notify/Inbox one-hop), but LIVE verification is pending Pilot Phase 1 (WU-5 #1/#7/#8 live experiments + pre-pilot evidence). These cells therefore stay BLOCKED until those live tests pass; CONTROLLER_SPEC.md P9-P12 re-asserts them live at preflight. Do NOT mark 'verified' before the Phase-1 live experiments.",
+    "non_overlap_enforcement": "BLOCKED: requires real provider integration testing — controller latch built + unit-tested (T99); live coincident-run experiment pending (WU-5 Phase 1 #1)",
+    "repository_isolation": "BLOCKED: requires real provider integration testing — worktree pattern decided (the-bridge); live per-packet branch/worktree isolation verification pending (WU-5 Phase 1)",
+    "worker_or_inline_execution": "BLOCKED: requires real provider integration testing — inline execution decided (single app-local agent run); live end-to-end inline executor run pending (WU-1 DoD / WU-5 Phase 1)",
+    "registry_and_mcp_access": "BLOCKED: requires real provider integration testing — Bridge reachability live-confirmed (bridge_status online; daily task writes Notion via Bridge), but full Packet Runner registry_hydrate/registry_* path within a scheduled run pending live verification (WU-5 Phase 1)",
+    "native_execution_reference": "BLOCKED: requires real provider integration testing — reference decided = the scheduled-task run record (lastRunAt + task run output/transcript); live capture in a real run pending (WU-5 Phase 1)",
+    "failure_signaling": "BLOCKED: requires real provider integration testing — agent abort-and-report + latch state + lastRunAt decided; live fail-closed-on-Bridge-down behavior pending (WU-5 Phase 1 / WU-1 DoD)",
+    "routine_pause_or_fail_closed_latch": "BLOCKED: requires real provider integration testing — update_scheduled_task enabled:false + latch 'disabled' flag built + unit-tested (T57/T58); live pause-confirm (next run aborts) pending (WU-5 Phase 1 #7)",
+    "completion_notification_with_brief_link": "BLOCKED: requires real provider integration testing — Bridge notify + Inbox one-hop mechanism decided and §8.6 sign-off GIVEN (Decision Ledger D4 / PROVIDER_DECISION_PROPOSAL.md); live one-hop-to-brief delivery confirmation pending (WU-5 Phase 1 #8)",
+    "session_export": "fallback (§8.18 compact bundle) — provider session export not relied upon; the §8.18 compact incident bundle in AI LOGS (durable_evidence_destination) is the configured preservation path (MASTER_IMPLEMENTATION_SPEC.md §2 Capability #9; CONTROLLER_SPEC.md P12 satisfied via fallback)"
+  },
+
+  "contract_versions": {
+    "_note": "PRD §8.5A + MASTER_IMPLEMENTATION_SPEC.md §3 WU-4 decided values. Preflight P1 rejects any version outside the supported range (also enforced at dispatch per §8.4).",
+    "prd": "v1.0",
+    "executor": "8.1.0-packet-runner",
+    "orchestrator": "7.1.0",
+    "close_agent": "3.2.0",
+    "registry_schema": "packet-registry-v1",
+    "receipt_contract": "packet-runner-receipt-v1"
+  },
+
+  "qualification_pilot_active": false,
+  "_qualification_note": "PRD §8.20 + MASTER_IMPLEMENTATION_SPEC.md WU-5. Set true ONLY during the scheduled 20-cycle qualification pilot (Phase 2). While true, every cycle appends a qualification-evidence row to qualification_evidence_page_id after brief+notification results are known; a missing/unverifiable row makes the cycle non-qualifying and breaks the streak even when cycle health is HEALTHY (CONTROLLER_SPEC.md §8; decisions.py). Production-qualified status requires 20 consecutive clean cycles (>=10 executed, >=1 real BLOCKED, >=1 real REVIEW, verified delayed cleanup) + operator sign-off; scheduling stays OFF until then. Stays false through Phase 1 one-shot fires."
+}

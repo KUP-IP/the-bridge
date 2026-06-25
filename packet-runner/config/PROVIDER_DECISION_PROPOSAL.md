@@ -3,6 +3,20 @@
 **Date:** 2026-06-24 · **Author:** implementation agent · **Decision owner:** Isaiah (operator).
 Synthesizes the three BLOCKING capability findings (#1 non-overlap, #7 pause, #8 completion notification) into a recommended provider decision + the exact remaining operator inputs. Grounded in doc research (`evidence/INTEGRATION_NON_OVERLAP.md`, the §8 capability research) + the implemented controller latches. **Scheduling stays disabled until this decision is made and the live checks pass.**
 
+---
+
+## ✅ DECISION LOCKED — 2026-06-24 (operator: Isaiah, via choice-to-contract)
+
+**Chosen: a fourth path — fully-local Packet Runner (app-local Claude Code scheduled agent + Bridge MCP).** Full + authoritative mechanism: [`../MASTER_IMPLEMENTATION_SPEC.md`](../MASTER_IMPLEMENTATION_SPEC.md) v1.1. This **supersedes** the A/B/C fork below (kept as the decision trail). **Refinement note (D1′, 2026-06-24):** the 2026-06-24 reachability spike refined the original "Bridge job → *cloud* executor" hybrid to **fully local** — the proven `keep-os-daily-people-report` pattern (one synchronous agent run = the whole cycle, fail-closed if the Bridge is down). Rationale: even a cloud routine needs the Mac online for its `registry_hydrate`/`notify` Bridge calls, so cloud bought little; local is provable today + drops the async split. The capability bullets below describe the original hybrid framing — see the master spec for the current local mechanism (#1 latch · #7 `enabled:false` · #8 `notify`/Inbox).
+
+- **#1 non-overlap** → Bridge job **single-flight** (`JobsReconciler` serial drain) + the controller latch. Native.
+- **#7 pause** → **`job_pause`** (+ `all:true` kill-switch), machine-callable, + the latch `disabled` flag. Native.
+- **#8 notification** → the cloud routine's final step calls Bridge **`notify`** (native macOS notification) + mirrors the brief to the **Bridge Inbox**. **Schema-verified caveat (2026-06-24):** `notify` carries **no** arbitrary click-through URL — only a deep-link to a Bridge Settings section — so the Notion brief sits in the body text / Inbox = **one hop away**. This is **Option A's "brief-URL-first-line" reading realized on a native Bridge surface**. It is NOT custom Slack/email infra. **✅ §8.6 SIGN-OFF GIVEN 2026-06-24 (Option 1):** operator ratified that, in the split hybrid, the Bridge is the notifying "provider" and a native notification reaching the brief in one hop (Inbox mirror + body URL) satisfies §8.6's intent. Option-3 PRD/T38 wording fix deferred to the next revision.
+
+**Net:** Hybrid resolves #1/#7 natively and gives #8 a *native* notification (which cloud-only Claude Code lacked entirely); the #8 §8.6 sign-off is **GIVEN (Option 1, 2026-06-24)** — the Bridge-notify one-hop convention, ratified rather than a provider switch. **Cursor (Option B) is no longer needed** unless you reject the one-hop reading. Pilot target = **Ship The Bridge v4**; pilot risk = **operator hand-picks each packet**.
+
+---
+
 ## TL;DR
 Two of the three blocking gaps are **resolved by controller-side fail-closed latches** the PRD explicitly permits (§8.5A), implemented + unit-tested. The third — **#8 native completion notification — is the real decision**, because §8.6 forbids the obvious workaround (custom Slack/email). Recommendation: **try to keep Claude Code (already-connected) by resolving #8 via a 10-minute live check + a light §8.6 interpretation you sign off on; fall back to Cursor only if that fails.**
 
