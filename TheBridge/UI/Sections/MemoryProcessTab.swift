@@ -66,6 +66,7 @@ struct MemoryProcessTab: View {
             }
             .padding(BridgeTokens.Space.paneH)
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier(BridgeAXID.Memory.Process.memoList)
     }
 
@@ -117,6 +118,7 @@ struct MemoryProcessTab: View {
             }
             .padding(BridgeTokens.Space.paneH)
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier(BridgeAXID.Memory.Process.intentTable)
     }
 
@@ -184,6 +186,7 @@ struct MemoryProcessTab: View {
             .padding(BridgeTokens.Space.paneH)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier(BridgeAXID.Memory.Process.detailInspector)
     }
 
@@ -297,6 +300,7 @@ struct MemoryProcessTab: View {
             .padding(.horizontal, BridgeTokens.Space.paneH)
             .padding(.vertical, 8)
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier(BridgeAXID.Memory.Process.activityStrip)
     }
 
