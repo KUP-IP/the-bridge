@@ -79,12 +79,18 @@ func runMemoryHubMemoTitleTests() async {
     await test("name_timestampStem_isDefault") {
         try expect(MemoryHubMemoTitler.isDefaultName("20260624 203010"), "digit-stem ⇒ default")
         try expect(MemoryHubMemoTitler.isDefaultName("2026-06-24 20:30:10"), "iso-ish ⇒ default")
+        // Real on-device Apple/import auto-name: timestamp + hex id suffix (the dominant shape —
+        // on-device smoke caught these leaking through as raw titles when only digits were checked).
+        try expect(MemoryHubMemoTitler.isDefaultName("20260624 162727 760C66A8"), "stamp + hex id ⇒ default")
+        try expect(MemoryHubMemoTitler.isDefaultName("20260301 115611 14CA8AA1"), "stamp + hex id ⇒ default")
         try expect(MemoryHubMemoTitler.isDefaultName("New Recording 3"), "Apple placeholder ⇒ default")
         try expect(MemoryHubMemoTitler.isDefaultName("   "), "blank ⇒ default")
     }
     await test("name_realName_isNotDefault") {
         try expect(!MemoryHubMemoTitler.isDefaultName("Bridge RT1"), "user name ⇒ honored")
         try expect(!MemoryHubMemoTitler.isDefaultName("Jacob sync notes"), "user name ⇒ honored")
+        // A user-given name that merely begins with a date must NOT be eaten by the stamp rule.
+        try expect(!MemoryHubMemoTitler.isDefaultName("20260624 standup with Bob"), "date prefix + words ⇒ real name")
     }
 
     // MARK: Tier-1 intent-led heuristic

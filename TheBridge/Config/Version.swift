@@ -91,7 +91,10 @@ public enum AppVersion {
     ///   PKT-MEM-114 progressive AI memo titles (intent-led heuristic / Ollama / cloud
     ///   tiers, edited-pinned cache, idle sweep) + standing-orders initialization
     ///   contract. staticFeatureModuleToolCount unchanged (187 — titles add no tools).
-    public static let build = "62"
+    /// v3.8.3: 62 → 63 — on-device smoke fix: isDefaultName now humanizes the real
+    ///   "YYYYMMDD HHMMSS <hexid>" memo filename (the hex suffix was leaking raw ids
+    ///   into the cockpit/Inbox). Marketing unchanged; build-only re-install.
+    public static let build = "63"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }

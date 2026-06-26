@@ -151,11 +151,17 @@ public enum MemoryHubMemoTitler {
     // MARK: Naming
 
     /// A recording filename is a DEFAULT (not a real user name) when it is a timestamp
-    /// (mostly digits/separators) or an "New Recording N" placeholder.
+    /// or a "New Recording N" placeholder. Covers the real Apple/import auto-name forms:
+    /// a bare "YYYYMMDD HHMMSS" stamp AND a stamp + hex/id suffix ("20260624 162727
+    /// 760C66A8") — the hex tail contains letters, so a digits-only test would wrongly
+    /// read it as a user name and leak the raw id into the UI (found in on-device smoke).
     public static func isDefaultName(_ title: String) -> Bool {
         let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if t.isEmpty { return true }
         if t.lowercased().hasPrefix("new recording") { return true }
+        // Leading "YYYYMMDD HHMMSS" stamp, with or without a trailing id chunk.
+        if t.range(of: #"^\d{8}[ T]\d{6}\b"#, options: .regularExpression) != nil { return true }
+        // Fully digit/separator timestamp (e.g. "2026-06-24 20:30:10").
         let allowed = CharacterSet(charactersIn: "0123456789 :.-/")
         let onlyDigitsAndSeps = t.unicodeScalars.allSatisfy { allowed.contains($0) }
         if onlyDigitsAndSeps, t.filter(\.isNumber).count >= 6 { return true }
