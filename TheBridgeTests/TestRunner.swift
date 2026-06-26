@@ -258,6 +258,7 @@ struct TheBridgeTestRunner {
         await runVoiceMemoHubTrustTests() // PKT-MEM-106 0a: trust + identity core (run early — flake-avoidance)
         await runMemoryHubCockpitTests()  // PKT-MEM-106 0b: run early alongside 0a (same flake-avoidance)
         await runMemoryHubGuardrailTests() // PKT-MEM-106 0c: preview + guardrails + tabs (run early)
+        await runMemoryHubMemoTitleTests() // PKT-MEM-114 P1: progressive AI memo titles (run early)
         // ============================================================
         // MARK: - SecurityGate Tests (v3: 3-tier model)
         // ============================================================
