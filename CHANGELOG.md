@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — Standing orders v7.0.2
+
+- **Standing orders v7.0.2** — pruned the stale inline `## Routing keepers` catalog (~80 lines duplicating `skills_routing_list` + `dispatchContract`). Added `## Bridge handshake stack` (manifest / doctrine / roster / dispatch contract / init receipt layers) and a slim `## Routing` pointer to the live roster. Replaced numeric confidence gates with consequence-governed escalation (§4). Bridge version in §7 now directs agents to query `bridge_status` instead of a static number. Bundled `Resources/standing-orders/orders.md` seeds fresh installs via `seedIfEmpty`; `write(_:doctrineVersion:)` supports explicit version bumps.
+
 ## v3.8.5 — Sparkle staged-update triage (PKT-932)
 
 - **Sparkle resilience (PKT-932)** — fix a fragile `as!` delegate cast in Settings → Advanced that could trap during staged Sparkle updates; add operator triage doc (`docs/bridge/sparkle-triage.md`). No new MCP tools; test-floor unchanged (2667). Ships the PKT-932 fix merged post-v3.8.4 tag during release integration.

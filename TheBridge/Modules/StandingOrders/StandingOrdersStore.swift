@@ -169,9 +169,17 @@ public final class StandingOrdersStore: @unchecked Sendable {
 
     // MARK: - Lifecycle
 
-    /// First-run: if no orders file exists, seed it with the given template
-    /// (or `cautious` by default). Idempotent — does nothing if the file
-    /// is already present.
+    /// Bundled handshake doctrine shipped in `Resources/standing-orders/orders.md`.
+    /// Fresh installs seed from this asset when present; legacy templates remain
+    /// as the fallback for tests and non-bundled contexts.
+    public struct BundledSeed: Equatable, Sendable {
+        public let markdown: String
+        public let doctrineVersion: String
+    }
+
+    /// First-run: if no orders file exists, seed from the bundled v7 doctrine
+    /// when available, else the given template (`cautious` by default).
+    /// Idempotent — does nothing if the file is already present.
     public func seedIfEmpty(with template: Template = .cautious) throws {
         try ensureDir()
         if FileManager.default.fileExists(atPath: ordersURL.path) {
@@ -179,6 +187,20 @@ public final class StandingOrdersStore: @unchecked Sendable {
             return
         }
         let now = Date()
+        if let bundled = Self.bundledSeed() {
+            try bundled.markdown.write(to: ordersURL, atomically: true, encoding: .utf8)
+            try writeMetadata(
+                updatedAt: now,
+                hash: Self.shortHash(bundled.markdown),
+                version: bundled.doctrineVersion
+            )
+            try writeManifest(
+                updatedAt: now,
+                markdown: bundled.markdown,
+                doctrineVersion: bundled.doctrineVersion
+            )
+            return
+        }
         let version = currentDoctrineVersion()
         try template.body.write(to: ordersURL, atomically: true, encoding: .utf8)
         try writeMetadata(updatedAt: now, hash: Self.shortHash(template.body), version: version)
@@ -345,7 +367,11 @@ public final class StandingOrdersStore: @unchecked Sendable {
     /// Write new markdown. If `expectedHash` is supplied and does not match
     /// the current file's hash, throws `.staleHash` without writing.
     @discardableResult
-    public func write(_ markdown: String, expectedHash: String? = nil) throws -> Snapshot {
+    public func write(
+        _ markdown: String,
+        expectedHash: String? = nil,
+        doctrineVersion: String? = nil
+    ) throws -> Snapshot {
         try ensureDir()
         if let expected = expectedHash {
             let current = try read().hash
@@ -354,12 +380,12 @@ public final class StandingOrdersStore: @unchecked Sendable {
             }
         }
         do {
-            let doctrineVersion = currentDoctrineVersion()
+            let resolvedVersion = doctrineVersion ?? currentDoctrineVersion()
             try markdown.write(to: ordersURL, atomically: true, encoding: .utf8)
             let now = Date()
             let hash = Self.shortHash(markdown)
-            try writeMetadata(updatedAt: now, hash: hash, version: doctrineVersion)
-            try writeManifest(updatedAt: now, markdown: markdown, doctrineVersion: doctrineVersion)
+            try writeMetadata(updatedAt: now, hash: hash, version: resolvedVersion)
+            try writeManifest(updatedAt: now, markdown: markdown, doctrineVersion: resolvedVersion)
             // Standing Orders changed → fan out a resources/updated notification
             // to subscribed MCP sessions. Decoupled, best-effort no-op when no
             // SSE transport is running (stdio-only / tests). The composed
@@ -390,6 +416,52 @@ public final class StandingOrdersStore: @unchecked Sendable {
 
     private func ensureDir() throws {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    }
+
+    /// Load the repo-shipped handshake doctrine from the SPM resource bundle.
+    /// Non-trapping: returns nil when the resource bundle is absent (tests may
+    /// inject via `bundledSeedOverrideForTesting`).
+    public static func bundledSeed() -> BundledSeed? {
+        if let override = bundledSeedOverrideForTesting { return override }
+        guard let url = bundledSeedURL(),
+              let markdown = try? String(contentsOf: url, encoding: .utf8),
+              !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let version = parseDoctrineVersion(from: markdown) else {
+            return nil
+        }
+        return BundledSeed(markdown: markdown, doctrineVersion: version)
+    }
+
+    /// Test seam — set to inject a bundled seed without the SPM resource bundle.
+    public nonisolated(unsafe) static var bundledSeedOverrideForTesting: BundledSeed?
+
+    private static func bundledSeedURL() -> URL? {
+        let candidate = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Resources/TheBridge_TheBridgeLib.bundle")
+            .path
+        let base: URL?
+        if let bundle = Bundle(path: candidate) {
+            base = bundle.resourceURL
+        } else {
+            base = Bundle.main.resourceURL
+        }
+        guard let base else { return nil }
+        let url = base.appendingPathComponent("standing-orders/orders.md")
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    /// Parse `vX.Y.Z` from the amendment-record line in orders.md.
+    static func parseDoctrineVersion(from markdown: String) -> String? {
+        let pattern = #"Amendment record:\*\* (v\d+\.\d+\.\d+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(
+                in: markdown,
+                range: NSRange(markdown.startIndex..., in: markdown)
+              ),
+              let range = Range(match.range(at: 1), in: markdown) else {
+            return nil
+        }
+        return String(markdown[range])
     }
 
     private func currentDoctrineVersion() -> String {

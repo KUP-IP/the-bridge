@@ -81,6 +81,45 @@ func runStandingOrdersTests() async {
         }
     }
 
+    await test("Store: seedIfEmpty prefers bundled doctrine on fresh install") {
+        try await withTempHome { _ in
+            StandingOrdersStore.bundledSeedOverrideForTesting = StandingOrdersStore.BundledSeed(
+                markdown: "# Standing Orders\n\n> **Amendment record:** v7.0.2 (PUBLISHED)\n\n## Routing\n\nlive roster pointer",
+                doctrineVersion: "v7.0.2"
+            )
+            defer { StandingOrdersStore.bundledSeedOverrideForTesting = nil }
+            try StandingOrdersStore.shared.resetForTesting()
+            try StandingOrdersStore.shared.seedIfEmpty(with: .soloDevTerse)
+            let seeded = try StandingOrdersStore.shared.read().markdown
+            try expect(seeded.contains("live roster pointer"))
+            try expect(!seeded.contains("Skip filler"))
+            let report = StandingOrdersStore.shared.initializationReport()
+            try expect(report.doctrineVersion == "v7.0.2")
+            try expect(report.state == .complete)
+        }
+    }
+
+    await test("Store: parseDoctrineVersion reads amendment record") {
+        let md = "> - **Amendment record:** v7.0.2 (PUBLISHED 2026-06-26)"
+        try expect(StandingOrdersStore.parseDoctrineVersion(from: md) == "v7.0.2")
+        try expect(StandingOrdersStore.parseDoctrineVersion(from: "no version here") == nil)
+    }
+
+    await test("Store: write accepts explicit doctrineVersion bump") {
+        try await withTempHome { _ in
+            try StandingOrdersStore.shared.resetForTesting()
+            _ = try StandingOrdersStore.shared.write("# Standing Orders\n\nv1", doctrineVersion: "v7.0.1")
+            let report = StandingOrdersStore.shared.initializationReport()
+            try expect(report.doctrineVersion == "v7.0.1")
+            _ = try StandingOrdersStore.shared.write(
+                "# Standing Orders\n\n> **Amendment record:** v7.0.2\n",
+                doctrineVersion: "v7.0.2"
+            )
+            let bumped = StandingOrdersStore.shared.initializationReport()
+            try expect(bumped.doctrineVersion == "v7.0.2")
+        }
+    }
+
     await test("Store: all 3 templates have non-empty bodies + distinct labels") {
         let templates = StandingOrdersStore.Template.allCases
         try expect(templates.count == 3)
