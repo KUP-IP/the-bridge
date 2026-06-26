@@ -18,7 +18,7 @@ import Foundation
 public enum AppVersion {
     /// Marketing version (CFBundleShortVersionString equivalent).
     /// Format: MAJOR.MINOR.PATCH (Semantic Versioning).
-    public static let marketing = "3.8.3"
+    public static let marketing = "3.8.4"
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
@@ -94,7 +94,13 @@ public enum AppVersion {
     /// v3.8.3: 62 → 63 — on-device smoke fix: isDefaultName now humanizes the real
     ///   "YYYYMMDD HHMMSS <hexid>" memo filename (the hex suffix was leaking raw ids
     ///   into the cockpit/Inbox). Marketing unchanged; build-only re-install.
-    public static let build = "63"
+    /// v3.8.4: 63 → 64 — Voice Curator FRONTIER-FIRST parse provider chain (agent→cloud→
+    ///   local→heuristic, availability-gated graceful degradation + plan provenance) +
+    ///   cloud whole-transcript structured parse (4000-char cap now local-only) + cockpit
+    ///   UX remediation (full scrollable transcript/title, on-select transcribing state,
+    ///   human labels, commit-value preview, provenance badge) + a durable cloud-send
+    ///   activity receipt. staticFeatureModuleToolCount unchanged (187). test-floor 2602 → 2667.
+    public static let build = "64"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }
