@@ -201,6 +201,133 @@ public enum MemoryHubMemoTitler {
         return result.isEmpty ? "Untitled memo" : result
     }
 
+    // MARK: Tier-1 heuristic — snapshot overload (P3a sweep)
+
+    /// Intent-led heuristic built from a persisted `PlanSnapshot` (no transcript re-parse).
+    /// Used by the idle/launch sweep to seed titles cheaply from snapshots already on disk.
+    /// `transcriptHash` is nil (snapshot-derived) so the title stays valid in the list and a
+    /// later on-select pass with the real transcript can upgrade it. Demoted intents are
+    /// excluded from the elected subject + the `+N` count (they are no longer active lanes).
+    public static func heuristicTitle(snapshot: PlanSnapshot, now: Date = Date()) -> MemoTitle {
+        let active = snapshot.intents.filter { !$0.demoted }
+        let plan = planAdapter(intents: active)
+        let executable = plan.intents.filter { $0.kind != .review }
+        let split = VoiceMemoIntentElection.split(plan.intents)
+        let primary = split.execute.first { $0.kind != .review } ?? executable.first
+        let raw = primary.map { subject(for: $0, plan: plan) } ?? plan.generatedTitle
+        return MemoTitle(
+            title: clean(raw),
+            provenance: .heuristic,
+            intentCount: max(executable.count, primary == nil ? 0 : 1),
+            transcriptHash: nil,
+            generatedAt: ISO8601DateFormatter().string(from: now)
+        )
+    }
+
+    /// Lift snapshot intents back into a minimal `VoiceMemoPlan` so the existing
+    /// election + subject logic is reused verbatim (single source of truth for title style).
+    static func planAdapter(intents snapshotIntents: [PlanSnapshotIntent]) -> VoiceMemoPlan {
+        let intents: [VoiceMemoIntent] = snapshotIntents.compactMap { s in
+            guard let kind = VoiceMemoIntentKind(rawValue: s.kind) else { return nil }
+            return VoiceMemoIntent(
+                kind: kind, confidence: s.confidence,
+                entityKey: s.entityKey, entityHint: s.entityHint,
+                title: s.title, fields: s.fields
+            )
+        }
+        return VoiceMemoPlan(generatedTitle: "Memo", skipMemoryKeep: false,
+                             summary: "", actions: [], intents: intents)
+    }
+
+    // MARK: Tier-2 local (Ollama) — AUTO only when Ollama processing is enabled
+
+    /// Pluggable local-LLM seam for a focused ≤8-word intent-led title. The default impl
+    /// calls Ollama; tests inject a stub so the harness never needs a live model.
+    public protocol LocalTitleLLM: Sendable {
+        /// Returns a raw candidate title, or nil on any failure/timeout (caller keeps the heuristic).
+        func titleCandidate(transcript: String, fallbackTitle: String) async -> String?
+    }
+
+    /// Whether Tier-2 local titling may AUTO-run right now: the SAME flag chain the rest of
+    /// the curator uses (`voiceMemoOllamaRoutingEffective` ∧ `shouldUseLocalOllama()` ∧ a model).
+    /// Pure read of the stored flag — no network. The cockpit checks this before kicking the Task.
+    public static func localTitleEnabled() -> Bool {
+        BridgeDefaults.voiceMemoOllamaRoutingEffective
+            && VoiceMemoCuratorRouter.shouldUseLocalOllama()
+            && BridgeDefaults.ollamaSummarizationModelEffective != nil
+    }
+
+    /// Test/override hook for the local-LLM. nil ⇒ the real Ollama-backed summarizer.
+    nonisolated(unsafe) public static var localTitleLLMOverride: LocalTitleLLM?
+
+    /// Run Tier-2 once for a selected memo (call right after the heuristic is cached). When
+    /// local titling is disabled this is a no-op. On a non-empty, distinct candidate it caches
+    /// a `.local` title (edited-pinned via `put()` — never clobbers an `.edited` rename) and
+    /// returns it so the caller can refresh `titleCache[memoId]` on the main actor. Any
+    /// failure/timeout returns nil and leaves the heuristic untouched (no review queued, no throw).
+    @discardableResult
+    public static func enhanceWithLocalTitle(memoId: String, transcript: String,
+                                             fallbackTitle: String,
+                                             now: Date = Date()) async -> MemoTitle? {
+        guard localTitleEnabled() else { return nil }
+        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let llm: LocalTitleLLM = localTitleLLMOverride ?? OllamaLocalTitleLLM()
+        guard let raw = await llm.titleCandidate(transcript: trimmed, fallbackTitle: fallbackTitle) else {
+            return nil
+        }
+        let candidate = clean(raw)
+        // Reject empties + the trivial fallback (clean() never returns ""): keep the heuristic.
+        guard !candidate.isEmpty, candidate != "Untitled memo",
+              candidate.caseInsensitiveCompare(fallbackTitle) != .orderedSame else { return nil }
+
+        let prior = MemoryHubMemoTitleStore.title(for: memoId)
+        let title = MemoTitle(
+            title: candidate,
+            provenance: .local,
+            intentCount: prior?.intentCount ?? 0,
+            transcriptHash: MemoryHubActivityLog.sha256Hex(trimmed),
+            generatedAt: ISO8601DateFormatter().string(from: now)
+        )
+        MemoryHubMemoTitleStore.put(title, memoId: memoId)   // edited-pinned: survives a human rename
+        return MemoryHubMemoTitleStore.title(for: memoId)
+    }
+
+    // MARK: Idle / launch sweep — local-first, throttled, off the main thread
+
+    /// Default per-sweep cap (bounded work; the rest are picked up on the next sweep/select).
+    public static let sweepCap = 25
+
+    /// For each memo that HAS a heuristic `PlanSnapshot` but NO fresh cached title, build the
+    /// heuristic title from the snapshot's intents (cheap — no transcript re-parse) and cache it.
+    /// Edited/local/cloud titles and fresh heuristics are left untouched (edited-pinned `put()`
+    /// also guards `.edited`). Returns the number of titles written. Bounded by `cap`.
+    @discardableResult
+    public static func launchSweep(now: Date = Date(), cap: Int = sweepCap) -> Int {
+        let dir = MemoryHubPlanSnapshotStore.dir
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil) else { return 0 }
+
+        let cache = MemoryHubMemoTitleStore.load()
+        var written = 0
+        for file in files where file.pathExtension == "json" {
+            if written >= cap { break }
+            guard let data = try? Data(contentsOf: file),
+                  let snaps = try? JSONDecoder().decode([PlanSnapshot].self, from: data),
+                  let snapshot = snaps.last(where: { $0.provenance == .heuristic }) ?? snaps.last else { continue }
+            let memoId = snapshot.memoId
+            // Skip when a usable title already exists: any edit, or any non-stale cached title.
+            if let existing = cache[memoId], existing.provenance == .edited || existing.isFresh(forTranscriptHash: nil) {
+                continue
+            }
+            let title = heuristicTitle(snapshot: snapshot, now: now)
+            MemoryHubMemoTitleStore.put(title, memoId: memoId)
+            written += 1
+        }
+        return written
+    }
+
     // MARK: List floor resolution
 
     /// What the memo list should show, resolving named → cached(fresh) → date floor.
@@ -219,5 +346,35 @@ public enum MemoryHubMemoTitler {
         }
         return MemoTitleDisplay(text: humanizedDate(recording.recordedAt, now: now),
                                 provenance: .placeholder, intentCount: 0, isPlaceholder: true)
+    }
+}
+
+/// Default Tier-2 local-title LLM: a focused, ≤8-word intent-led title prompt over Ollama,
+/// bounded by the 0c local soft-timeout. Health-gated; any failure/timeout returns nil so the
+/// caller keeps the heuristic. The enabled-flag check is the caller's responsibility
+/// (`MemoryHubMemoTitler.localTitleEnabled()`); this type only performs the network call.
+public struct OllamaLocalTitleLLM: MemoryHubMemoTitler.LocalTitleLLM {
+    public init() {}
+
+    public func titleCandidate(transcript: String, fallbackTitle: String) async -> String? {
+        guard let model = BridgeDefaults.ollamaSummarizationModelEffective else { return nil }
+        let client = OllamaClient.fromDefaults()
+        guard (try? await client.health()) == true else { return nil }
+
+        let prompt = """
+        Write a short, scannable title for this voice memo: at most 8 words, intent-led \
+        (lead with the main action or subject), Title Case, no trailing punctuation. \
+        Reply with ONLY the title — no quotes, no labels, no JSON.
+        Transcript:
+        \(transcript.prefix(6000))
+        """
+        let timeout = MemoryHubPreview.localTimeoutSeconds
+        guard let raw = try? await client.generate(
+            model: model, prompt: prompt, timeout: timeout,
+            options: .init(numPredict: 32, temperature: 0.2)
+        ) else { return nil }
+
+        let sanitized = VoiceMemoParser.sanitizeTitle(raw, fallback: "")
+        return sanitized.isEmpty ? nil : sanitized
     }
 }

@@ -361,6 +361,18 @@ struct MemoryProcessTab: View {
             let title = MemoryHubMemoTitler.heuristicTitle(plan: parsedPlan, transcript: t)
             MemoryHubMemoTitleStore.put(title, memoId: memo.id)
             titleCache[memo.id] = MemoryHubMemoTitleStore.title(for: memo.id)
+            // PKT-MEM-114 P3a — Tier-2 local upgrade: AUTO only when Ollama processing is
+            // enabled. Non-blocking; on a better title it caches `.local` (edited-pinned) and
+            // refreshes the row on the main actor. Failure/timeout keeps the heuristic silently.
+            if MemoryHubMemoTitler.localTitleEnabled() {
+                let memoId = memo.id
+                Task {
+                    if let upgraded = await MemoryHubMemoTitler.enhanceWithLocalTitle(
+                        memoId: memoId, transcript: t, fallbackTitle: title.title) {
+                        await MainActor.run { titleCache[memoId] = upgraded }
+                    }
+                }
+            }
         } catch {
             statusMessage = error.localizedDescription
         }
