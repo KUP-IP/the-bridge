@@ -749,15 +749,14 @@ func runMemoryModuleTests() async {
             "scope": .string("global"),
             "limit": .int(5)
         ]))
-        guard case .object(let top)? = memObjField(result, "memories"),
-              case .array(let rows) = top,
-              let first = rows.first,
-              case .object(let obj) = first,
-              case .string(let source)? = obj["source"] else {
+        if case .array(let rows)? = memObjField(result, "memories"),
+           let first = rows.first,
+           case .object(let obj) = first,
+           case .string(let source)? = obj["source"] {
+            try expect(source == "cursor", "source must round-trip; got \(source)")
+        } else {
             try expect(false, "recall must return memories with source")
-            return
         }
-        try expect(source == "cursor", "source must round-trip; got \(source)")
     }
 
     await test("MemoryStore pin toggles pinned flag") {
