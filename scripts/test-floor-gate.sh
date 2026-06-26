@@ -1515,7 +1515,14 @@ set -euo pipefail
 # edited-pin preserved). runMemoryHubMemoTitleReviewRemediationTests. 2599 passed / 0 failed.
 # v3.8.3 release (2026-06-26): rebased onto origin/main (standing-orders init contract, afbad0d); combined
 # harness re-measured = 2602 (2599 PKT-MEM-114 branch + 3 init-contract net-new). make test 2602 / 0 failed.
-FLOOR="${BRIDGE_TEST_FLOOR:-2602}"
+# Voice Curator FRONTIER-FIRST W1 (2026-06-26): +19 net-new green — parse provider-chain abstraction +
+# plan provenance/degraded model (runVoiceMemoParseChainTests): providers(for:) chain ORDER per curator mode,
+# .auto frontier-first Cloud→Local→Heuristic winner selection by availability, degraded set IFF an earlier
+# AVAILABLE rung returned nil, heuristic floor always-available/never-nil, provenance stamp, .agent/.heuristics
+# → floor, W1 Cloud stub unavailable+nil, parseWithOptionalOllama shim routes through the chain, ParseProvenance
+# Codable + VoiceMemoPlan default-field lock. Stub providers injected via VoiceMemoParseRouter.providerOverride
+# (no real network/Ollama/agent). make test 2621 / 0 failed.
+FLOOR="${BRIDGE_TEST_FLOOR:-2621}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

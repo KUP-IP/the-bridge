@@ -124,20 +124,43 @@ public enum VoiceMemoParser {
         )
     }
 
-    /// When Ollama routing is enabled and configured, attempt LLM classification; fall back to heuristics.
+    /// FRONTIER-FIRST shim: delegate the Understand step to `VoiceMemoParseRouter`,
+    /// which walks the mode-ordered provider chain (cloud → local → heuristic for
+    /// `.auto`) and stamps `plan.provenance`. Retained so existing callers
+    /// (`VoiceMemoProcessor.processOne`, `VoiceMemoReviewResolver`) keep compiling;
+    /// the local-Ollama body now lives in `LocalParseProvider` via `ollamaParse`.
     public static func parseWithOptionalOllama(
         transcript: String,
         fallbackTitle: String,
         recordingPath: String? = nil
     ) async -> VoiceMemoPlan {
+        await VoiceMemoParseRouter.parse(
+            transcript: transcript,
+            fallbackTitle: fallbackTitle,
+            recordingPath: recordingPath
+        )
+    }
+
+    /// The local-Ollama Understand arm, extracted verbatim from the old
+    /// `parseWithOptionalOllama`. Returns nil (NOT the heuristic fallback) on a
+    /// missing model / unhealthy daemon / generation or JSON-parse failure — the
+    /// chain router decides the fallback. The returned plan is stamped `.local`.
+    /// The gate (`voiceMemoOllamaRoutingEffective ∧ shouldUseLocalOllama ∧ model`)
+    /// is checked by `LocalParseProvider.isAvailable()`, but re-asserted here so a
+    /// direct call is still safe.
+    public static func ollamaParse(
+        transcript: String,
+        fallbackTitle: String,
+        recordingPath: String? = nil
+    ) async -> VoiceMemoPlan? {
         guard BridgeDefaults.voiceMemoOllamaRoutingEffective,
               VoiceMemoCuratorRouter.shouldUseLocalOllama(),
               let model = BridgeDefaults.ollamaRoutingModelEffective else {
-            return parse(transcript: transcript, fallbackTitle: fallbackTitle, recordingPath: recordingPath)
+            return nil
         }
         let client = OllamaClient.fromDefaults()
         guard (try? await client.health()) == true else {
-            return parse(transcript: transcript, fallbackTitle: fallbackTitle, recordingPath: recordingPath)
+            return nil
         }
         let prompt = """
         Classify this voice memo transcript into routing lanes. Reply with ONLY JSON:
@@ -147,9 +170,10 @@ public enum VoiceMemoParser {
         """
         let genOptions = OllamaClient.GenerateOptions(numPredict: 512, temperature: 0.2, think: false)
         guard let raw = try? await client.generate(model: model, prompt: prompt, options: genOptions),
-              let plan = parseOllamaJSON(raw, transcript: transcript, fallbackTitle: fallbackTitle, recordingPath: recordingPath) else {
-            return parse(transcript: transcript, fallbackTitle: fallbackTitle, recordingPath: recordingPath)
+              var plan = parseOllamaJSON(raw, transcript: transcript, fallbackTitle: fallbackTitle, recordingPath: recordingPath) else {
+            return nil
         }
+        plan.provenance = .local
         return plan
     }
 

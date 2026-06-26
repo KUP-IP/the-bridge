@@ -746,7 +746,10 @@ public enum VoiceMemoProcessor {
         guard let transcript = resolved.text else {
             throw VoiceMemoError.invalidIntent("no transcript for memo")
         }
-        var plan = await VoiceMemoParser.parseWithOptionalOllama(
+        // FRONTIER-FIRST Understand: walk the curator-mode provider chain
+        // (cloud → local → heuristic for .auto), stamping plan.provenance /
+        // .degraded. The summary step + everything downstream is unchanged.
+        var plan = await VoiceMemoParseRouter.parse(
             transcript: transcript,
             fallbackTitle: recording.title,
             recordingPath: recording.path

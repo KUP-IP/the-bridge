@@ -85,6 +85,17 @@ public struct VoiceMemoIntent: Sendable, Equatable {
     }
 }
 
+/// Which arm of the FRONTIER-FIRST Understand chain produced a plan's intents.
+/// `agent` is reserved for out-of-process commits by the connected MCP agent;
+/// `cloud` is the frontier API rung; `local` is the in-a-pinch Ollama LLM; and
+/// `heuristic` is the deterministic guaranteed floor (`VoiceMemoParser.parse`).
+public enum ParseProvenance: String, Codable, Sendable {
+    case agent
+    case cloud
+    case local
+    case heuristic
+}
+
 /// Parser output for one memo.
 public struct VoiceMemoPlan: Sendable, Equatable {
     public var generatedTitle: String
@@ -92,19 +103,28 @@ public struct VoiceMemoPlan: Sendable, Equatable {
     public var summary: String
     public var actions: [String]
     public var intents: [VoiceMemoIntent]
+    /// Which Understand-chain arm produced `intents` (FRONTIER-FIRST provenance).
+    public var provenance: ParseProvenance
+    /// True when a higher-preference rung was available by config but returned
+    /// nil at runtime, so the chain fell through to a lower rung (graceful degrade).
+    public var degraded: Bool
 
     public init(
         generatedTitle: String,
         skipMemoryKeep: Bool,
         summary: String,
         actions: [String],
-        intents: [VoiceMemoIntent]
+        intents: [VoiceMemoIntent],
+        provenance: ParseProvenance = .heuristic,
+        degraded: Bool = false
     ) {
         self.generatedTitle = generatedTitle
         self.skipMemoryKeep = skipMemoryKeep
         self.summary = summary
         self.actions = actions
         self.intents = intents
+        self.provenance = provenance
+        self.degraded = degraded
     }
 }
 
