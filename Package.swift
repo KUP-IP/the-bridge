@@ -50,7 +50,10 @@ let package = Package(
             // layout verbatim so `Bundle.module` exposes
             // `skills/<name>/SKILL.md` 1:1 — SPM does not try to
             // "compile" the .md files.
-            resources: [.copy("Resources/skills")]
+            resources: [
+                .copy("Resources/skills"),
+                .copy("Resources/standing-orders"),
+            ]
         ),
         .executableTarget(
             name: "TheBridge",

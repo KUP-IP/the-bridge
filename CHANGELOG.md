@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased — Standing orders v7.0.2
+
+- **Standing orders v7.0.2** — pruned the stale inline `## Routing keepers` catalog (~80 lines duplicating `skills_routing_list` + `dispatchContract`). Added `## Bridge handshake stack` (manifest / doctrine / roster / dispatch contract / init receipt layers) and a slim `## Routing` pointer to the live roster. Replaced numeric confidence gates with consequence-governed escalation (§4). Bridge version in §7 now directs agents to query `bridge_status` instead of a static number. Bundled `Resources/standing-orders/orders.md` seeds fresh installs via `seedIfEmpty`; `write(_:doctrineVersion:)` supports explicit version bumps.
+
 ## v3.9.0 — Unified Memory Wave 3 (surfacing + governance) — PKT-MEM-115 — 2026-06-26
 
 - **Handshake memory inject** — Settings toggle (global OFF default); per-client overrides with Cursor launch-seeded ON; stdio `clientName` pass-through for per-client inject resolution.
