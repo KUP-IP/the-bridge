@@ -1,5 +1,9 @@
 # Changelog
 
+## v3.8.5 — Sparkle staged-update triage (PKT-932)
+
+- **Sparkle resilience (PKT-932)** — fix a fragile `as!` delegate cast in Settings → Advanced that could trap during staged Sparkle updates; add operator triage doc (`docs/bridge/sparkle-triage.md`). No new MCP tools; test-floor unchanged (2667). Ships the PKT-932 fix merged post-v3.8.4 tag during release integration.
+
 ## v3.8.4 — Voice Curator: frontier-first parse provider chain + cockpit UX
 
 - **Frontier-first Understand chain** — the Voice Curator's intent-parsing step is now a provider chain (`VoiceMemoParseRouter`) walked frontier-first: in `.auto` it tries **cloud → local → heuristic**, picking the first available rung and degrading gracefully (offline / no key / quota / missing model fall through, marked `degraded`). The connected MCP agent (zero marginal cost) and the cloud API are preferred; local Ollama / deterministic heuristics are the in-a-pinch fallback. Every plan carries `provenance` {agent|cloud|local|heuristic}.

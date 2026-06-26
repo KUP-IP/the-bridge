@@ -18,7 +18,7 @@ import Foundation
 public enum AppVersion {
     /// Marketing version (CFBundleShortVersionString equivalent).
     /// Format: MAJOR.MINOR.PATCH (Semantic Versioning).
-    public static let marketing = "3.8.4"
+    public static let marketing = "3.8.5"
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
@@ -100,7 +100,10 @@ public enum AppVersion {
     ///   UX remediation (full scrollable transcript/title, on-select transcribing state,
     ///   human labels, commit-value preview, provenance badge) + a durable cloud-send
     ///   activity receipt. staticFeatureModuleToolCount unchanged (187). test-floor 2602 → 2667.
-    public static let build = "64"
+    /// v3.8.5: 64 → 65 — PKT-932 Sparkle staged-update triage: fix fragile delegate cast in
+    ///   AdvancedSection + operator triage doc (docs/bridge/sparkle-triage.md). Merged post-v3.8.4
+    ///   tag during release integration; no new MCP tools. test-floor unchanged (2667).
+    public static let build = "65"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }
