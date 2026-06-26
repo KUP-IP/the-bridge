@@ -887,6 +887,7 @@ await runCloudAccessWSGTests()
 // memory_* MCP tool registration + tiering + handler round-trip. All against
 // a TEMP DB path (never the real config-dir store, never the shared singleton).
 await runMemoryModuleTests()
+await runMemoryRoutingAppendixTests()
 
 // PKT-1007 Slice 1: Dense-vector recall + RRF fusion. StubMemoryEmbedder
 // (deterministic, no CoreML assets), MemoryEmbeddingIndex (index/rank/evict),

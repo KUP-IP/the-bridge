@@ -375,35 +375,7 @@ public enum StandingOrdersDelivery {
     /// `· used N×` segment omitted when useCount is 0. An empty slice renders a
     /// single one-line notice.
     public static func renderMemoryMarkdown(_ entries: [MemoryEntry]) -> String {
-        guard !entries.isEmpty else { return "No memories stored yet." }
-
-        // Stable scope ordering = first appearance in the (already-ranked)
-        // slice, so the highest-salience scope leads. Pinned-first is preserved
-        // because handshakeSlice emits pinned rows ahead of the rest.
-        var scopeOrder: [String] = []
-        var byScope: [String: [MemoryEntry]] = [:]
-        for e in entries {
-            if byScope[e.scope] == nil { scopeOrder.append(e.scope) }
-            byScope[e.scope, default: []].append(e)
-        }
-
-        var sections: [String] = []
-        for scope in scopeOrder {
-            var lines = ["## \(scope)"]
-            for e in byScope[scope] ?? [] {
-                var row = "- [\(e.type.rawValue)] \(e.text)"
-                if let entity = e.entity?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !entity.isEmpty {
-                    row += " · \(entity)"
-                }
-                if e.useCount > 0 {
-                    row += " · used \(e.useCount)×"
-                }
-                lines.append(row)
-            }
-            sections.append(lines.joined(separator: "\n"))
-        }
-        return sections.joined(separator: "\n\n")
+        MemoryRowFormatter.markdown(entries)
     }
 }
 
@@ -561,5 +533,14 @@ public final class MemoryAutoInjectClientStore: @unchecked Sendable {
     /// Test/diagnostic reset — clears all per-client overrides.
     public func resetForTesting() {
         defaults.removeObject(forKey: defaultsKey)
+    }
+
+    /// PKT-MEM-115 Wave 3: seed Cursor ON when the override map is empty and
+    /// global inject is OFF. Idempotent — does not overwrite operator edits.
+    public static func seedWave3DefaultsIfNeeded() {
+        let store = shared
+        guard store.allOverrides().isEmpty,
+              !BridgeDefaults.memoryHandshakeAutoInjectEffective else { return }
+        store.setOverride(true, forClient: "cursor")
     }
 }

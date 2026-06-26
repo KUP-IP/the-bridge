@@ -581,6 +581,12 @@ public actor MemoryStore {
 
     /// On-launch catch-up: demote-not-delete stale `reference` rows and tombstone
     /// any row whose explicit `expiresAt` is in the past. Pinned rows are never swept.
+    ///
+    /// Lifecycle policy (PKT-MEM-115 / MEMORY-WAVE3-SURFACING-SPEC v2.0):
+    /// `decision` and `preference` rows have no default TTL; `reference` rows unused
+    /// for ~90 days are tombstoned; explicit `ttlSeconds` on remember sets `expiresAt`.
+    /// Passive surfaces (`handshakeSlice`, `bridge://memory`) never use-promote;
+    /// `recall` and `fetch_skill` `scopedMemory` do promote returned rows.
     public func consolidationSweep(now: Date = Date()) throws -> ConsolidationReport {
         try ensureOpen()
         var referenceDemoted = 0

@@ -243,7 +243,7 @@ public actor ServerManager {
         // operator enables memory auto-inject the stdio client also receives
         // the salient memory slice at handshake. Default-OFF behaviour is
         // byte-identical to the sync path.
-        let composition = await StandingOrdersDelivery.asyncComposition(clientName: nil)
+        let composition = await StandingOrdersDelivery.asyncComposition(clientName: "stdio")
         let composedInstructions = composition.instructionsMarkdown
 
         // W2 telemetry: record the handshake we composed + shipped on the

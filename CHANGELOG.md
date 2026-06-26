@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.9.0 — Unified Memory Wave 3 (surfacing + governance) — PKT-MEM-115
+
+- **Handshake memory inject** — Settings toggle (global OFF default); per-client overrides with Cursor launch-seeded ON; stdio `clientName` pass-through for per-client inject resolution.
+- **Memory-rides-routing** — `fetch_skill` returns optional `scopedMemory` appendix (post-cache merge; parent→scope map + intent recall).
+- **Agent memory UI** — pin/forget on Memory → Agent tab; provenance (`source` + date) in inject, recall, and appendix rows via `MemoryRowFormatter`.
+- **Lifecycle unchanged** — `reference` 90-day sweep + explicit TTL only; voice-memo `reference` behavior documented in UI.
+- test-floor 2667 → **2682** (+15 net-new, PKT-MEM-115 Wave 3, 2026-06-26). `staticFeatureModuleToolCount` unchanged (187).
+
 ## v3.8.5 — Sparkle staged-update triage (PKT-932)
 
 - **Sparkle resilience (PKT-932)** — fix a fragile `as!` delegate cast in Settings → Advanced that could trap during staged Sparkle updates; add operator triage doc (`docs/bridge/sparkle-triage.md`). No new MCP tools; test-floor unchanged (2667). Ships the PKT-932 fix merged post-v3.8.4 tag during release integration.
