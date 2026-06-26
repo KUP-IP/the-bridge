@@ -409,6 +409,10 @@ public enum VoiceMemoReviewError: Error, LocalizedError {
 /// Launch + wake TTL sweep (PKT-MEM-103).
 public enum VoiceMemoReviewLifecycle {
     public static func sweepIfNeeded(router: ToolRouter? = nil) async {
+        // PKT-MEM-114 P3a — local-first idle/launch title sweep: seed heuristic titles from
+        // existing plan snapshots (cheap, no transcript re-parse), bounded per sweep. Read-only
+        // over snapshots + the separate title cache; independent of the review TTL sweep below.
+        MemoryHubMemoTitler.launchSweep()
         do {
             let report = try VoiceMemoReviewStore.sweepTTL()
             guard report.autoDismissed > 0 || report.purged > 0 else { return }

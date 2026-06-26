@@ -1495,7 +1495,11 @@ set -euo pipefail
 # PKT-MEM-114 P2 (2026-06-26): +3 net-new green — surface intent-led titles in the cockpit memo list + Inbox
 # (generate-on-select + edited-rename survival + Inbox cache-wins/fallback; same runMemoryHubMemoTitleTests suite).
 # 2574 passed / 0 failed.
-FLOOR="${BRIDGE_TEST_FLOOR:-2574}"
+# PKT-MEM-114 P3a (2026-06-26): +8 net-new green — Tier-2 Ollama titles (enabled-flag gating + .local cache,
+# edited-pin preserved, fallback/empty rejected) + snapshot-derived heuristic + local-first idle sweep
+# (caches from plan snapshots, leaves edited/existing, per-sweep cap; stubbed LLM, runMemoryHubMemoTitleP3aTests).
+# 2582 passed / 0 failed.
+FLOOR="${BRIDGE_TEST_FLOOR:-2582}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

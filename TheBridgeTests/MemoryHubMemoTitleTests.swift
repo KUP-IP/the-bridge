@@ -253,6 +253,10 @@ func runMemoryHubMemoTitleTests() async {
         }
     }
 
+    // MARK: P3a — Tier-2 local (Ollama) gating + edited-pin + idle sweep
+
+    await runMemoryHubMemoTitleP3aTests(cal: cal, now: now)
+
     // MARK: Freshness / invalidation
 
     await test("freshness_hashMatch_andListNilCurrent") {
@@ -262,5 +266,196 @@ func runMemoryHubMemoTitleTests() async {
         try expect(t.isFresh(forTranscriptHash: nil), "list has no transcript ⇒ treat as fresh (rebuilt on select)")
         let named = mtitle("Bridge RT1", .named, "2026-06-25T10:00:00Z", hash: nil)
         try expect(named.isFresh(forTranscriptHash: "anything"), "name titles have no hash ⇒ always fresh")
+    }
+}
+
+// MARK: - P3a: Tier-2 Ollama titles + local-first idle sweep -------------------------------
+
+/// Injected local-title LLM stub — never touches a real Ollama. Returns a canned candidate
+/// (or nil to simulate failure/timeout) and records whether it was invoked.
+private final class StubLocalTitleLLM: MemoryHubMemoTitler.LocalTitleLLM, @unchecked Sendable {
+    let candidate: String?
+    private(set) var called = false
+    init(candidate: String?) { self.candidate = candidate }
+    func titleCandidate(transcript: String, fallbackTitle: String) async -> String? {
+        called = true
+        return candidate
+    }
+}
+
+/// Snapshot + restore the UserDefaults keys the Tier-2 gate reads, so a test can force the
+/// flag ON/OFF deterministically regardless of seeded first-run defaults.
+private func withOllamaTitleFlags<T>(enabled: Bool, _ body: () async throws -> T) async rethrows -> T {
+    let d = UserDefaults.standard
+    let routingKey = BridgeDefaults.voiceMemoOllamaRouting
+    let modeKey = BridgeDefaults.voiceMemoCuratorMode
+    let modelKey = BridgeDefaults.ollamaSummarizationModel
+    let priorRouting = d.object(forKey: routingKey)
+    let priorMode = d.object(forKey: modeKey)
+    let priorModel = d.object(forKey: modelKey)
+    defer {
+        if let priorRouting { d.set(priorRouting, forKey: routingKey) } else { d.removeObject(forKey: routingKey) }
+        if let priorMode { d.set(priorMode, forKey: modeKey) } else { d.removeObject(forKey: modeKey) }
+        if let priorModel { d.set(priorModel, forKey: modelKey) } else { d.removeObject(forKey: modelKey) }
+    }
+    if enabled {
+        d.set(true, forKey: routingKey)
+        d.set(VoiceMemoCuratorMode.auto.rawValue, forKey: modeKey)
+        d.set("gemma4:12b", forKey: modelKey)
+    } else {
+        // `.heuristics` forces shouldUseLocalOllama() == false regardless of the routing flag.
+        d.set(VoiceMemoCuratorMode.heuristics.rawValue, forKey: modeKey)
+    }
+    return try await body()
+}
+
+private func snapIntent(_ id: String, _ kind: String, _ conf: Double,
+                        entityKey: String? = nil, entityHint: String? = nil,
+                        title: String? = nil, fields: [String: String] = [:], demoted: Bool = false) -> PlanSnapshotIntent {
+    PlanSnapshotIntent(intentId: id, kind: kind, confidence: conf, entityKey: entityKey,
+                       entityHint: entityHint, title: title, fields: fields, demoted: demoted)
+}
+
+func runMemoryHubMemoTitleP3aTests(cal: Calendar, now: Date) async {
+    print("\n🏷️  Memory Hub titles — P3a Tier-2 Ollama + idle sweep (PKT-MEM-114)")
+
+    // MARK: Tier-2 gating
+
+    await test("p3a_gate_off_noLocalTitleProduced") {
+        try await withTitleTempHome {
+            try await withOllamaTitleFlags(enabled: false) {
+                try expect(!MemoryHubMemoTitler.localTitleEnabled(), "flag OFF ⇒ gate closed")
+                let stub = StubLocalTitleLLM(candidate: "Should Not Be Used")
+                MemoryHubMemoTitler.localTitleLLMOverride = stub
+                defer { MemoryHubMemoTitler.localTitleLLMOverride = nil }
+                let out = await MemoryHubMemoTitler.enhanceWithLocalTitle(
+                    memoId: "m1", transcript: "remind me to call Jacob", fallbackTitle: "Call Jacob", now: now)
+                try expect(out == nil, "disabled ⇒ no upgrade returned")
+                try expect(!stub.called, "disabled ⇒ the LLM is never even invoked")
+                try expect(MemoryHubMemoTitleStore.title(for: "m1") == nil, "no .local cached when off")
+            }
+        }
+    }
+
+    await test("p3a_gate_on_cachesLocalProvenance") {
+        try await withTitleTempHome {
+            try await withOllamaTitleFlags(enabled: true) {
+                try expect(MemoryHubMemoTitler.localTitleEnabled(), "flag ON + model ⇒ gate open")
+                let stub = StubLocalTitleLLM(candidate: "Ship Bridge v4 Trust Fixes")
+                MemoryHubMemoTitler.localTitleLLMOverride = stub
+                defer { MemoryHubMemoTitler.localTitleLLMOverride = nil }
+                let out = await MemoryHubMemoTitler.enhanceWithLocalTitle(
+                    memoId: "m1", transcript: "we shipped the trust fixes for bridge v4 today",
+                    fallbackTitle: "Bridge v4", now: now)
+                try expect(stub.called, "enabled ⇒ the LLM is invoked")
+                try expect(out?.provenance == .local, "cached as .local provenance: \(String(describing: out))")
+                try expect(out?.title == "Ship Bridge v4 Trust Fixes", "cleaned candidate: \(String(describing: out?.title))")
+                try expect(out?.transcriptHash?.isEmpty == false, "carries a transcript hash for invalidation")
+                try expect(MemoryHubMemoTitleStore.title(for: "m1")?.provenance == .local, "persisted to the cache")
+            }
+        }
+    }
+
+    await test("p3a_localDoesNotOverwriteEdited") {
+        try await withTitleTempHome {
+            try await withOllamaTitleFlags(enabled: true) {
+                // A human rename is pinned: a later Tier-2 .local title must NOT clobber it.
+                MemoryHubMemoTitleStore.put(mtitle("My own title", .edited, "2026-06-25T09:00:00Z"), memoId: "m1")
+                MemoryHubMemoTitler.localTitleLLMOverride = StubLocalTitleLLM(candidate: "Auto Local Guess")
+                defer { MemoryHubMemoTitler.localTitleLLMOverride = nil }
+                _ = await MemoryHubMemoTitler.enhanceWithLocalTitle(
+                    memoId: "m1", transcript: "some transcript", fallbackTitle: "fallback", now: now)
+                let got = MemoryHubMemoTitleStore.title(for: "m1")
+                try expect(got?.title == "My own title" && got?.provenance == .edited,
+                           "edit survives the Tier-2 upgrade: \(String(describing: got))")
+            }
+        }
+    }
+
+    await test("p3a_emptyOrFallbackCandidate_keepsHeuristic") {
+        try await withTitleTempHome {
+            try await withOllamaTitleFlags(enabled: true) {
+                // nil candidate (failure/timeout) ⇒ no write.
+                MemoryHubMemoTitler.localTitleLLMOverride = StubLocalTitleLLM(candidate: nil)
+                let a = await MemoryHubMemoTitler.enhanceWithLocalTitle(
+                    memoId: "m1", transcript: "t", fallbackTitle: "Heuristic Title", now: now)
+                try expect(a == nil && MemoryHubMemoTitleStore.title(for: "m1") == nil, "nil candidate ⇒ no .local")
+                // A candidate identical to the fallback is rejected (no value added).
+                MemoryHubMemoTitler.localTitleLLMOverride = StubLocalTitleLLM(candidate: "Heuristic Title")
+                defer { MemoryHubMemoTitler.localTitleLLMOverride = nil }
+                let b = await MemoryHubMemoTitler.enhanceWithLocalTitle(
+                    memoId: "m1", transcript: "t", fallbackTitle: "Heuristic Title", now: now)
+                try expect(b == nil && MemoryHubMemoTitleStore.title(for: "m1") == nil, "fallback-equal ⇒ no .local")
+            }
+        }
+    }
+
+    // MARK: Snapshot-derived heuristic (sweep input)
+
+    await test("p3a_snapshotHeuristic_intentLed_excludesDemoted") {
+        let snap = PlanSnapshot(memoId: "m1", provenance: .heuristic, version: 1,
+                                createdAt: "2026-06-25T10:00:00Z",
+                                intents: [
+                                    snapIntent("i1", "registry_update", 0.99, entityKey: "project",
+                                               entityHint: "Bridge v4", fields: ["summary": "shipped trust fixes"]),
+                                    snapIntent("i2", "reminder", 0.80, title: "Send Jacob results"),
+                                    snapIntent("i3", "memory_keep", 0.90, title: "prefer adversarial reviews", demoted: true),
+                                ])
+        let t = MemoryHubMemoTitler.heuristicTitle(snapshot: snap, now: now)
+        try expect(t.provenance == .heuristic, "heuristic provenance")
+        try expect(t.title == "Send Jacob results", "lane-priority-first reminder wins: \(t.title)")
+        try expect(t.intentCount == 2, "demoted lane excluded from +N (got \(t.intentCount))")
+        try expect(t.transcriptHash == nil, "snapshot-derived ⇒ no transcript hash (upgradeable on select)")
+    }
+
+    // MARK: Idle sweep
+
+    await test("p3a_sweep_emptyCache_cachesHeuristicFromSnapshot") {
+        try await withTitleTempHome {
+            let snap = PlanSnapshot(memoId: "sweep-1", provenance: .heuristic, version: 1,
+                                    createdAt: "2026-06-25T10:00:00Z",
+                                    intents: [snapIntent("i1", "reminder", 0.95, title: "Email the Q3 report")])
+            _ = try MemoryHubPlanSnapshotStore.append(snap)
+            let n = MemoryHubMemoTitler.launchSweep(now: now)
+            try expect(n == 1, "one memo titled (got \(n))")
+            let got = MemoryHubMemoTitleStore.title(for: "sweep-1")
+            try expect(got?.title == "Email the Q3 report" && got?.provenance == .heuristic,
+                       "sweep cached the snapshot heuristic: \(String(describing: got))")
+        }
+    }
+
+    await test("p3a_sweep_leavesEditedAndExistingTitles") {
+        try await withTitleTempHome {
+            // memo A: a pinned human edit — sweep must leave it.
+            let snapA = PlanSnapshot(memoId: "A", provenance: .heuristic, version: 1, createdAt: "2026-06-25T10:00:00Z",
+                                     intents: [snapIntent("i1", "reminder", 0.95, title: "Auto would say this")])
+            _ = try MemoryHubPlanSnapshotStore.append(snapA)
+            MemoryHubMemoTitleStore.put(mtitle("Human kept this", .edited, "2026-06-25T09:00:00Z"), memoId: "A")
+            // memo B: already has a fresh heuristic title — sweep must not rewrite it.
+            let snapB = PlanSnapshot(memoId: "B", provenance: .heuristic, version: 1, createdAt: "2026-06-25T10:00:00Z",
+                                     intents: [snapIntent("i1", "reminder", 0.95, title: "Snapshot title B")])
+            _ = try MemoryHubPlanSnapshotStore.append(snapB)
+            MemoryHubMemoTitleStore.put(mtitle("Existing local B", .local, "2026-06-25T11:00:00Z", hash: "h"), memoId: "B")
+
+            let n = MemoryHubMemoTitler.launchSweep(now: now)
+            try expect(n == 0, "nothing to do — both already titled (wrote \(n))")
+            try expect(MemoryHubMemoTitleStore.title(for: "A")?.provenance == .edited, "edit preserved")
+            try expect(MemoryHubMemoTitleStore.title(for: "B")?.title == "Existing local B", "existing local preserved")
+        }
+    }
+
+    await test("p3a_sweep_capHolds") {
+        try await withTitleTempHome {
+            for i in 0..<5 {
+                let snap = PlanSnapshot(memoId: "cap-\(i)", provenance: .heuristic, version: 1,
+                                        createdAt: "2026-06-25T10:00:00Z",
+                                        intents: [snapIntent("i1", "reminder", 0.95, title: "Title \(i)")])
+                _ = try MemoryHubPlanSnapshotStore.append(snap)
+            }
+            let n = MemoryHubMemoTitler.launchSweep(now: now, cap: 2)
+            try expect(n == 2, "per-sweep cap holds (wrote \(n))")
+            let titled = (0..<5).filter { MemoryHubMemoTitleStore.title(for: "cap-\($0)") != nil }.count
+            try expect(titled == 2, "exactly cap memos titled this pass (got \(titled))")
+        }
     }
 }
