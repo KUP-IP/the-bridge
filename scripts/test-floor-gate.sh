@@ -1536,7 +1536,13 @@ set -euo pipefail
 # RemoteAccessIdentity.swift — that breaks 4 fail-closed-placeholder assertions (RemoteAccessIdentityTests/
 # RemoteAccessConfigWave2Tests/EnableCloudAccessFlowTests×2); they PASS against the committed placeholder source
 # (this count measured with the placeholder source restored). make test 2639 / 0 failed.
-FLOOR="${BRIDGE_TEST_FLOOR:-2639}"
+# 2026-06-26 (Voice Curator FRONTIER-FIRST W3 — cockpit UX remediation + provenance surfacing): +14 pure-helper
+# tests (runMemoryHubCockpitLabelsTests) — intentKind/intentStatus/transcriptSource human labels (incl.
+# "suppressed"→"Held for review"), provenanceBadge incl. the degraded override, the no-transcript select-status
+# selection + unresolved-transcript message, and the commit-value preview. UI-free (no net/Ollama/audio). Same
+# WorkOS-injection caveat above applies: measured with the committed fail-closed RemoteAccessIdentity.swift
+# restored. make test 2653 / 0 failed. 2639→2653.
+FLOOR="${BRIDGE_TEST_FLOOR:-2653}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

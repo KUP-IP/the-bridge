@@ -20,6 +20,9 @@ struct MemoryProcessTab: View {
     @State private var activity: [MemoryHubActivityEvent] = []
     @State private var statusMessage: String?
     @State private var isLoading = false
+    /// W3 — the spinner label while a preview loads. Distinct for a no-transcript memo
+    /// ("Transcribing on-device…") so an on-device transcription run reads as work, not a hang.
+    @State private var loadingLabel = "Loading preview…"
     /// PKT-MEM-114 P2 — cached intent-led titles (memo-titles.json), read-only over the
     /// parsed plan/election. Loaded with the memo list; refreshed on selection.
     @State private var titleCache: [String: MemoTitle] = [:]
@@ -39,6 +42,15 @@ struct MemoryProcessTab: View {
 
     private var inspectorRow: CockpitIntentRow? {
         rows.first { $0.intentId == selectedIntentId } ?? rows.first { $0.isPrimary } ?? rows.first
+    }
+
+    /// The resolved, full display title for the read-only wrapping Text (W3). Prefers the
+    /// cached title (carries the edited/local/cloud upgrade), else the parsed plan title.
+    private var currentTitleDisplay: String? {
+        if let memoId = selectedId, let cached = titleCache[memoId]?.title, !cached.isEmpty {
+            return cached
+        }
+        return plan?.generatedTitle
     }
 
     var body: some View {
@@ -108,7 +120,7 @@ struct MemoryProcessTab: View {
                             .foregroundStyle(BridgeTokens.accent)
                     }
                 }
-                Text(memo.hasTranscript ? memo.transcriptSource.rawValue : "no transcript")
+                Text(MemoryHubCockpitLabels.transcriptSource(memo.transcriptSource, hasTranscript: memo.hasTranscript))
                     .font(BridgeTokens.Typeface.meta)
                     .foregroundStyle(BridgeTokens.fg4)
             }
@@ -130,7 +142,7 @@ struct MemoryProcessTab: View {
             VStack(alignment: .leading, spacing: 8) {
                 BridgeCardLabel("Intents")
                 if isLoading {
-                    ProgressView("Loading preview…")
+                    ProgressView(loadingLabel)
                 } else if rows.isEmpty {
                     Text(selectedId == nil ? "Select a memo." : "No intents detected.")
                         .font(BridgeTokens.Typeface.sub)
@@ -157,12 +169,12 @@ struct MemoryProcessTab: View {
                     Image(systemName: row.isPrimary ? "star.fill" : "circle")
                         .font(.system(size: 10))
                         .foregroundStyle(row.isPrimary ? BridgeTokens.accent : BridgeTokens.fg4)
-                    BridgeBadge(row.kind.rawValue, tone: row.status == "review" ? .warn : (row.confidence >= 0.85 ? .ok : .warn))
+                    BridgeBadge(MemoryHubCockpitLabels.intentKind(row.kind), tone: row.status == "review" ? .warn : (row.confidence >= 0.85 ? .ok : .warn))
                     Text("\(Int(row.confidence * 100))%")
                         .font(BridgeTokens.Typeface.meta)
                         .foregroundStyle(BridgeTokens.fg4)
                     Spacer()
-                    Text(row.status)
+                    Text(MemoryHubCockpitLabels.intentStatus(row.status))
                         .font(BridgeTokens.Typeface.meta)
                         .foregroundStyle(row.isPrimary ? BridgeTokens.accent : BridgeTokens.fg4)
                 }
@@ -218,11 +230,25 @@ struct MemoryProcessTab: View {
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 8) {
                 BridgeCardLabel("Transcript")
-                Text(transcript.prefix(900).description)
-                    .font(BridgeTokens.Typeface.mono)
-                    .foregroundStyle(BridgeTokens.fg2)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+                // W3 — FULL transcript (the prior `prefix(900)` truncated long memos so the
+                // operator couldn't read them). Its own ScrollView with a bounded maxHeight
+                // keeps the title/commit cards reachable while the entire text is scrollable.
+                if transcript.isEmpty {
+                    Text(MemoryHubCockpitLabels.unresolvedTranscriptMessage())
+                        .font(BridgeTokens.Typeface.sub)
+                        .foregroundStyle(BridgeTokens.fg4)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ScrollView {
+                        Text(transcript)
+                            .font(BridgeTokens.Typeface.mono)
+                            .foregroundStyle(BridgeTokens.fg2)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxHeight: 260)
+                }
             }
         }
     }
@@ -233,6 +259,18 @@ struct MemoryProcessTab: View {
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 10) {
                 BridgeCardLabel("Title")
+                // W3 — read-only WRAPPING display of the FULL generated title (the single-line
+                // rename field below clipped long titles, so the operator couldn't read them).
+                // Wraps up to 3 lines; the rename TextField beneath stays the edit affordance.
+                if let display = currentTitleDisplay, !display.isEmpty {
+                    Text(display)
+                        .font(BridgeTokens.Typeface.name)
+                        .foregroundStyle(BridgeTokens.fg1)
+                        .lineLimit(3)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 HStack(spacing: 8) {
                     TextField("Memo title", text: $titleDraft)
                         .textFieldStyle(.roundedBorder)
@@ -264,10 +302,34 @@ struct MemoryProcessTab: View {
     private func inspectorDetail(plan: VoiceMemoPlan, row: CockpitIntentRow) -> some View {
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 10) {
-                BridgeCardLabel("Commit — \(row.kind.rawValue)")
+                BridgeCardLabel("Commit — \(MemoryHubCockpitLabels.intentKind(row.kind))")
                 Text(row.destinationField)
                     .font(BridgeTokens.Typeface.sub)
                     .foregroundStyle(BridgeTokens.fg2)
+
+                // W3 — provenance badge: WHO produced these intents (frontier agent / cloud /
+                // local), and whether the result is a degraded fallback. Passive (no AX id).
+                BridgeBadge(
+                    MemoryHubCockpitLabels.provenanceBadge(plan.provenance, degraded: plan.degraded),
+                    tone: plan.degraded ? .warn : .neutral
+                )
+
+                // W3 — commit-value preview: the actual text that will be written, read-only,
+                // so the operator commits with sight not blind.
+                if let value = MemoryProcessCockpit.commitValuePreview(for: row) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        BridgeCardLabel("Will write")
+                        Text(value)
+                            .font(BridgeTokens.Typeface.mono)
+                            .foregroundStyle(BridgeTokens.fg2)
+                            .textSelection(.enabled)
+                            .lineLimit(6)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                            .background { RoundedRectangle(cornerRadius: 6).fill(BridgeTokens.wellFill) }
+                    }
+                }
 
                 if !row.isPrimary {
                     BridgeButton("Make primary", systemImage: "star") {
@@ -378,7 +440,12 @@ struct MemoryProcessTab: View {
     @MainActor
     private func loadPreview(for memo: VoiceMemoRecording) async {
         isLoading = true
-        statusMessage = nil
+        // W3 — DISTINCT pre-await status: a no-transcript memo triggers an on-device
+        // transcription run (first run may DOWNLOAD the model) here, which otherwise reads
+        // as a hang. The "transcribing" line makes the run legible. Shown in both the intent
+        // zone (isLoading spinner label) and the inspector status line.
+        statusMessage = MemoryHubCockpitLabels.selectStatus(hasTranscript: memo.hasTranscript)
+        loadingLabel = statusMessage ?? "Loading preview…"
         defer { isLoading = false }
         guard let router = await JobsManager.shared.router_() else {
             statusMessage = "MCP server not ready."
@@ -396,6 +463,12 @@ struct MemoryProcessTab: View {
                 return
             }
             transcript = t
+            // W3 — clear the transcribing line once resolved; if STILL empty (on-device
+            // transcription disabled + no Apple transcript), surface the actionable next step
+            // instead of leaving the inspector silent.
+            statusMessage = t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? MemoryHubCockpitLabels.unresolvedTranscriptMessage()
+                : nil
             let parsedPlan = parsePlan(from: planObj)
             plan = parsedPlan
             // PKT-MEM-114 P2 — generate-on-select: cache the Tier-1 heuristic title.
@@ -521,7 +594,7 @@ struct MemoryProcessTab: View {
                 if case .string(let d)? = env["detail"] { detail = d }
                 if case .bool(true)? = env["needsManual"] { statusMessage = "Manual commit needed: \(detail)"; ok = false }
             }
-            if ok { statusMessage = "Committed \(row.kind.rawValue): \(detail)" }
+            if ok { statusMessage = "Committed \(MemoryHubCockpitLabels.intentKind(row.kind)): \(detail)" }
         } catch {
             detail = error.localizedDescription
             statusMessage = detail
@@ -570,7 +643,14 @@ struct MemoryProcessTab: View {
                 intents.append(intent)
             }
         }
-        return VoiceMemoPlan(generatedTitle: title, skipMemoryKeep: skip, summary: summary, actions: actions, intents: intents)
+        // FRONTIER-FIRST W3 — decode the provenance/degraded the envelope now carries
+        // (planValue, W1 fields). Default to the heuristic floor when absent so an older
+        // envelope still parses; the inspector badge reads these.
+        let provenance = stringField(obj, "provenance").flatMap { ParseProvenance(rawValue: $0) } ?? .heuristic
+        let degraded = boolField(obj, "degraded") ?? false
+        return VoiceMemoPlan(
+            generatedTitle: title, skipMemoryKeep: skip, summary: summary,
+            actions: actions, intents: intents, provenance: provenance, degraded: degraded)
     }
 
     private func stringField(_ obj: [String: Value], _ key: String) -> String? {

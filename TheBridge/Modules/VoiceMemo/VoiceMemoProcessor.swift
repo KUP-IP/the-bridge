@@ -779,12 +779,17 @@ public enum VoiceMemoProcessor {
     }
 
     static func planValue(_ plan: VoiceMemoPlan) -> Value {
+        // `provenance` + `degraded` (FRONTIER-FIRST W1) are carried into the envelope so the
+        // Process cockpit can surface a provenance badge (W3). Additive — existing consumers
+        // ignore unknown keys; the only reader (`MemoryProcessTab.parsePlan`) defaults them.
         .object([
             "generatedTitle": .string(plan.generatedTitle),
             "skipMemoryKeep": .bool(plan.skipMemoryKeep),
             "summary": .string(plan.summary),
             "actions": .array(plan.actions.map { .string($0) }),
             "intents": .array(plan.intents.map(intentValue)),
+            "provenance": .string(plan.provenance.rawValue),
+            "degraded": .bool(plan.degraded),
         ])
     }
 

@@ -148,6 +148,29 @@ public enum MemoryProcessCockpit {
         pending.filter { $0.memoId == memoId && $0.status == .pending }
     }
 
+    /// The actual VALUE this row will write, so the operator commits with sight, not blind
+    /// (W3 commit-value preview). Mirrors the writer's source-of-text precedence per lane:
+    /// registry lanes write `fields[destinationField]` (the first sorted field shown in the
+    /// destination label); reminder/memory/agent lanes write the intent `title` (the proposed
+    /// text). Returns nil when there is nothing concrete to show yet (e.g. an empty field map).
+    public static func commitValuePreview(for row: CockpitIntentRow) -> String? {
+        switch row.kind {
+        case .registryUpdate:
+            // The destination label uses the first sorted field key; preview that field's value.
+            if let key = row.fields.keys.sorted().first, let value = row.fields[key], !value.isEmpty {
+                return value
+            }
+            // Fall back to any non-empty field value so the operator still sees the payload.
+            return row.fields.values.sorted().first { !$0.isEmpty }
+        case .reminder, .memoryKeep, .agentMemory, .review:
+            if let title = row.title, !title.isEmpty { return title }
+            if let key = row.fields.keys.sorted().first, let value = row.fields[key], !value.isEmpty {
+                return value
+            }
+            return nil
+        }
+    }
+
     // MARK: - Labels
 
     static func destinationLabel(for intent: VoiceMemoIntent) -> String {

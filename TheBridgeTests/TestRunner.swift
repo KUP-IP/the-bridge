@@ -699,6 +699,7 @@ await runVoiceMemoModuleTests()        // Voice Memos curator: registry-centric 
 await runVoiceMemoLiveRegressionTests() // PKT-MEM-105/106 live fixture regression
 await runVoiceMemoParseChainTests()    // Voice Curator FRONTIER-FIRST (Phase 1 W1): parse provider chain + plan provenance/degraded
 await runVoiceMemoCloudParseTests()    // Voice Curator FRONTIER-FIRST (Phase 1 W2): real cloud frontier parse (whole-transcript strict-JSON extraction)
+await runMemoryHubCockpitLabelsTests() // Voice Curator FRONTIER-FIRST (Phase 1 W3): cockpit human labels + provenance badge + commit-value preview
 // PKT-MEM-106 0a + 0b run early in runAllTests() (flake-avoidance) — not duplicated here.
 await runMemorySettingsTests()         // PKT-MEM-102: Memory Settings section + Inbox UI
 await runOllamaModuleTests()           // Local Ollama client + module (Wave 2a)
