@@ -1493,7 +1493,9 @@ set -euo pipefail
 # Bridge initialization contract (2026-06-26): +3 net-new tests for manifest+metadata COMPLETE,
 # metadata-drift DEGRADED, and valid zero-supplemental COMPLETE. Replaced the obsolete routing-only
 # fallback assertion in place (count-neutral). Full harness: 2553 passed / 0 failed.
-FLOOR="${BRIDGE_TEST_FLOOR:-2553}"
+# PKT-MEM-114 P1 (2026-06-26): +21 net-new green — MemoryHubMemoTitle (title model + edited-pinned cache +
+# Tier-1 intent-led heuristic + locale-aware date floor; suite runMemoryHubMemoTitleTests). 2571 passed / 0 failed.
+FLOOR="${BRIDGE_TEST_FLOOR:-2571}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
