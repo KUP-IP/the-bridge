@@ -20,6 +20,9 @@ struct MemoryProcessTab: View {
     @State private var activity: [MemoryHubActivityEvent] = []
     @State private var statusMessage: String?
     @State private var isLoading = false
+    /// PKT-MEM-114 P2 — cached intent-led titles (memo-titles.json), read-only over the
+    /// parsed plan/election. Loaded with the memo list; refreshed on selection.
+    @State private var titleCache: [String: MemoTitle] = [:]
 
     private var rows: [CockpitIntentRow] {
         guard let plan, let selectedId else { return [] }
@@ -72,6 +75,11 @@ struct MemoryProcessTab: View {
 
     private func memoRow(_ memo: VoiceMemoRecording) -> some View {
         let selected = selectedId == memo.id
+        let display = MemoryHubMemoTitler.listDisplay(recording: memo, cached: titleCache[memo.id])
+        // Muted (fg4) when it's the computed date floor — signals "no real title yet".
+        let titleColor: Color = display.isPlaceholder
+            ? BridgeTokens.fg4
+            : (selected ? BridgeTokens.fg1 : BridgeTokens.fg2)
         return Button {
             selectedId = memo.id
             overrideIntentId = nil
@@ -81,10 +89,17 @@ struct MemoryProcessTab: View {
             Task { await loadPreview(for: memo) }
         } label: {
             VStack(alignment: .leading, spacing: 4) {
-                Text(memo.title)
-                    .font(BridgeTokens.Typeface.name)
-                    .foregroundStyle(selected ? BridgeTokens.fg1 : BridgeTokens.fg2)
-                    .lineLimit(2)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(display.text)
+                        .font(BridgeTokens.Typeface.name)
+                        .foregroundStyle(titleColor)
+                        .lineLimit(2)
+                    if display.intentCount > 1 {
+                        Text("+\(display.intentCount - 1)")
+                            .font(BridgeTokens.Typeface.meta)
+                            .foregroundStyle(BridgeTokens.accent)
+                    }
+                }
                 Text(memo.hasTranscript ? memo.transcriptSource.rawValue : "no transcript")
                     .font(BridgeTokens.Typeface.meta)
                     .foregroundStyle(BridgeTokens.fg4)
@@ -308,6 +323,7 @@ struct MemoryProcessTab: View {
 
     private func reloadMemos() {
         memos = VoiceMemoProcessor.listUnprocessed()
+        titleCache = MemoryHubMemoTitleStore.load()
     }
 
     private func reloadActivity() {
@@ -338,7 +354,13 @@ struct MemoryProcessTab: View {
                 return
             }
             transcript = t
-            plan = parsePlan(from: planObj)
+            let parsedPlan = parsePlan(from: planObj)
+            plan = parsedPlan
+            // PKT-MEM-114 P2 — generate-on-select: cache the Tier-1 heuristic title.
+            // edited-pinned put() preserves a prior human rename; read-only over the plan.
+            let title = MemoryHubMemoTitler.heuristicTitle(plan: parsedPlan, transcript: t)
+            MemoryHubMemoTitleStore.put(title, memoId: memo.id)
+            titleCache[memo.id] = MemoryHubMemoTitleStore.title(for: memo.id)
         } catch {
             statusMessage = error.localizedDescription
         }
