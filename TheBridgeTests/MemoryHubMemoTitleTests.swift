@@ -256,6 +256,7 @@ func runMemoryHubMemoTitleTests() async {
     // MARK: P3a — Tier-2 local (Ollama) gating + edited-pin + idle sweep
 
     await runMemoryHubMemoTitleP3aTests(cal: cal, now: now)
+    await runMemoryHubMemoTitleP3bTests(cal: cal, now: now)
 
     // MARK: Freshness / invalidation
 
@@ -456,6 +457,236 @@ func runMemoryHubMemoTitleP3aTests(cal: Calendar, now: Date) async {
             try expect(n == 2, "per-sweep cap holds (wrote \(n))")
             let titled = (0..<5).filter { MemoryHubMemoTitleStore.title(for: "cap-\($0)") != nil }.count
             try expect(titled == 2, "exactly cap memos titled this pass (got \(titled))")
+        }
+    }
+}
+
+// MARK: - P3b: operator rename override + manual Tier-3 cloud title -------------------------
+
+/// Injected cloud chat transport stub — never opens a socket. Either returns a canned
+/// `(Data, HTTPURLResponse)` with a chosen status code, or throws to simulate a network
+/// failure/timeout. Records the last request so a test can assert headers/body/url.
+private final class StubCloudTransport: CloudChatTransport, @unchecked Sendable {
+    let status: Int
+    let payload: Data
+    let throwError: Error?
+    private(set) var lastRequest: URLRequest?
+
+    init(status: Int = 200, json: String = "", throwError: Error? = nil) {
+        self.status = status
+        self.payload = Data(json.utf8)
+        self.throwError = throwError
+    }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        lastRequest = request
+        if let throwError { throw throwError }
+        let response = HTTPURLResponse(url: request.url!, statusCode: status,
+                                       httpVersion: "HTTP/1.1", headerFields: nil)!
+        return (payload, response)
+    }
+}
+
+/// A fully-runnable cloud provider (enabled + model + valid base URL) ⇒ `canRunCloud == true`.
+private func runnableProvider(model: String = "gpt-4o-mini") -> MemoryHubProvider {
+    MemoryHubProvider(id: MemoryHubProviderConfigStore.openAICompatibleId,
+                      baseURL: MemoryHubProviderConfigStore.defaultBaseURL,
+                      model: model, enabled: true)
+}
+
+/// A canned OpenAI-compatible chat-completions body carrying one choice with `content`.
+private func chatCompletionJSON(_ content: String) -> String {
+    let escaped = content.replacingOccurrences(of: "\"", with: "\\\"")
+    return "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"\(escaped)\"}}]}"
+}
+
+func runMemoryHubMemoTitleP3bTests(cal: Calendar, now: Date) async {
+    print("\n🏷️  Memory Hub titles — P3b rename override + manual cloud (PKT-MEM-114)")
+
+    // MARK: (a) Operator rename override precedence
+
+    await test("p3b_rename_writesEdited_andAutoNeverOverwrites") {
+        try await withTitleTempHome {
+            // Operator rename → .edited (this mirrors the cockpit saveRename path).
+            let edited = mtitle("Quarterly board deck", .edited,
+                                ISO8601DateFormatter().string(from: now), hash: "h1", count: 2)
+            MemoryHubMemoTitleStore.put(edited, memoId: "m1")
+            let afterRename = MemoryHubMemoTitleStore.title(for: "m1")
+            try expect(afterRename?.provenance == .edited && afterRename?.title == "Quarterly board deck",
+                       "rename writes .edited: \(String(describing: afterRename))")
+            try expect(afterRename?.intentCount == 2, "rename carries the prior +N count")
+
+            // A later heuristic / .local / .cloud put() must NOT overwrite the human edit.
+            MemoryHubMemoTitleStore.put(mtitle("auto heuristic", .heuristic, "2026-06-26T01:00:00Z"), memoId: "m1")
+            MemoryHubMemoTitleStore.put(mtitle("auto local", .local, "2026-06-26T02:00:00Z"), memoId: "m1")
+            MemoryHubMemoTitleStore.put(mtitle("auto cloud", .cloud, "2026-06-26T03:00:00Z"), memoId: "m1")
+            let got = MemoryHubMemoTitleStore.title(for: "m1")
+            try expect(got?.provenance == .edited && got?.title == "Quarterly board deck",
+                       "edit survives every later auto tier: \(String(describing: got))")
+        }
+    }
+
+    await test("p3b_rename_emptyOrWhitespace_isNoOp") {
+        // The cockpit guards empty/whitespace renames before put(); assert nothing is stored.
+        let trimmedEmpty = "   \n  ".trimmingCharacters(in: .whitespacesAndNewlines)
+        try expect(trimmedEmpty.isEmpty, "whitespace-only rename trims to empty ⇒ guarded no-op")
+    }
+
+    // MARK: (b) Tier-3 cloud helper — success / sanitize / failure modes
+
+    await test("p3b_cloud_success_cachesCloudProvenance_andSanitizes") {
+        try await withTitleTempHome {
+            // Canned completion is quoted + over-long: the helper must strip quotes and cap to ≤8 words.
+            let stub = StubCloudTransport(status: 200,
+                json: chatCompletionJSON("\"Ship Bridge v4 trust fixes before the end of the week\""))
+            let out = try await MemoryHubCloudTitler.improve(
+                memoId: "m1", transcript: "we shipped the trust fixes for bridge v4",
+                provider: runnableProvider(), now: now,
+                keyProvider: { "sk-test-123" }, transport: stub)
+            try expect(out.provenance == .cloud, "cached as .cloud: \(out.provenance)")
+            try expect(out.title.split(separator: " ").count <= 9, "≤8 words + ellipsis token: \(out.title)")
+            try expect(!out.title.contains("\""), "surrounding quotes stripped: \(out.title)")
+            try expect(out.transcriptHash?.isEmpty == false, "carries a transcript hash for invalidation")
+            try expect(MemoryHubMemoTitleStore.title(for: "m1")?.provenance == .cloud, "persisted to the cache")
+        }
+    }
+
+    await test("p3b_cloud_sendsBearerAuthAndChatCompletionsPath") {
+        try await withTitleTempHome {
+            let stub = StubCloudTransport(status: 200, json: chatCompletionJSON("Concise Title"))
+            _ = try await MemoryHubCloudTitler.improve(
+                memoId: "m1", transcript: "transcript body", provider: runnableProvider(), now: now,
+                keyProvider: { "sk-secret" }, transport: stub)
+            let req = stub.lastRequest
+            try expect(req?.httpMethod == "POST", "POST request")
+            try expect(req?.url?.absoluteString.hasSuffix("/chat/completions") == true,
+                       "targets /chat/completions: \(String(describing: req?.url?.absoluteString))")
+            try expect(req?.value(forHTTPHeaderField: "Authorization") == "Bearer sk-secret", "bearer auth header")
+            try expect(req?.timeoutInterval == MemoryHubPreview.cloudTimeoutSeconds, "bounded by the 20s cloud timeout")
+            // Body carries the model + the concise-title system prompt (no key in the body).
+            let body = req?.httpBody.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            try expect(body.contains("gpt-4o-mini"), "request body carries the provider model")
+            try expect(body.contains("intent-led title"), "request body carries the concise-title system prompt")
+            try expect(!body.contains("sk-secret"), "the key is the header only — never in the body")
+        }
+    }
+
+    await test("p3b_cloud_nonSuccess_throwsHttpStatus_keepsPriorTitle_noReview") {
+        try await withTitleTempHome {
+            // A prior heuristic exists; a non-2xx cloud attempt must keep it (and queue no review).
+            MemoryHubMemoTitleStore.put(mtitle("Heuristic title", .heuristic, "2026-06-25T10:00:00Z", hash: "h0", count: 1), memoId: "m1")
+            let stub = StubCloudTransport(status: 429, json: "{\"error\":\"rate_limited\"}")
+            var threw = false
+            do {
+                _ = try await MemoryHubCloudTitler.improve(
+                    memoId: "m1", transcript: "t", provider: runnableProvider(), now: now,
+                    keyProvider: { "sk-test" }, transport: stub)
+            } catch let err as MemoryHubCloudTitler.CloudTitleError {
+                threw = true
+                try expect(err == .httpStatus(429), "surfaces the non-2xx status: \(err)")
+            }
+            try expect(threw, "non-2xx ⇒ throws (caller swallows + keeps the title)")
+            let got = MemoryHubMemoTitleStore.title(for: "m1")
+            try expect(got?.provenance == .heuristic && got?.title == "Heuristic title",
+                       "prior title untouched on failure: \(String(describing: got))")
+        }
+    }
+
+    await test("p3b_cloud_transportThrows_timeout_keepsPriorTitle") {
+        try await withTitleTempHome {
+            MemoryHubMemoTitleStore.put(mtitle("Heuristic title", .heuristic, "2026-06-25T10:00:00Z"), memoId: "m1")
+            // Simulate a timeout/network failure: the transport throws.
+            let stub = StubCloudTransport(throwError: URLError(.timedOut))
+            var threw = false
+            do {
+                _ = try await MemoryHubCloudTitler.improve(
+                    memoId: "m1", transcript: "t", provider: runnableProvider(), now: now,
+                    keyProvider: { "sk-test" }, transport: stub)
+            } catch { threw = true }
+            try expect(threw, "transport failure propagates so the caller keeps the title")
+            try expect(MemoryHubMemoTitleStore.title(for: "m1")?.provenance == .heuristic,
+                       "timeout ⇒ prior title kept, no .cloud written")
+        }
+    }
+
+    await test("p3b_cloud_emptyChoices_throwsEmptyCompletion") {
+        try await withTitleTempHome {
+            let stub = StubCloudTransport(status: 200, json: "{\"choices\":[]}")
+            var threw = false
+            do {
+                _ = try await MemoryHubCloudTitler.improve(
+                    memoId: "m1", transcript: "t", provider: runnableProvider(), now: now,
+                    keyProvider: { "sk-test" }, transport: stub)
+            } catch let err as MemoryHubCloudTitler.CloudTitleError {
+                threw = (err == .emptyCompletion)
+            }
+            try expect(threw, "2xx with no usable content ⇒ emptyCompletion (keep the title)")
+            try expect(MemoryHubMemoTitleStore.title(for: "m1") == nil, "nothing cached on empty completion")
+        }
+    }
+
+    await test("p3b_cloud_neverOverwritesEdited") {
+        try await withTitleTempHome {
+            // A human rename is pinned: even a successful cloud title must NOT clobber it.
+            MemoryHubMemoTitleStore.put(mtitle("My own title", .edited, "2026-06-25T09:00:00Z"), memoId: "m1")
+            let stub = StubCloudTransport(status: 200, json: chatCompletionJSON("Cloud Suggested Title"))
+            let out = try await MemoryHubCloudTitler.improve(
+                memoId: "m1", transcript: "t", provider: runnableProvider(), now: now,
+                keyProvider: { "sk-test" }, transport: stub)
+            // improve() returns the STORED title (edited-pinned), so the edit is what survives.
+            try expect(out.provenance == .edited && out.title == "My own title",
+                       "cloud put() is edited-pinned: \(out.title)")
+            try expect(MemoryHubMemoTitleStore.title(for: "m1")?.provenance == .edited, "edit survives the cloud upgrade")
+        }
+    }
+
+    await test("p3b_cloud_missingKey_throwsMissingKey") {
+        try await withTitleTempHome {
+            let stub = StubCloudTransport(status: 200, json: chatCompletionJSON("Title"))
+            var threw = false
+            do {
+                _ = try await MemoryHubCloudTitler.improve(
+                    memoId: "m1", transcript: "t", provider: runnableProvider(), now: now,
+                    keyProvider: { "   " }, transport: stub)   // blank key
+            } catch let err as MemoryHubCloudTitler.CloudTitleError {
+                threw = (err == .missingKey)
+            }
+            try expect(threw, "no key ⇒ missingKey before any network attempt")
+            try expect(stub.lastRequest == nil, "the transport is never invoked without a key")
+        }
+    }
+
+    // MARK: (c) canRunCloud gating — the button-enabled predicate
+
+    await test("p3b_canRunCloud_gating") {
+        // The cockpit shows/enables the cloud button ONLY when canRunCloud is true.
+        let runnable = runnableProvider()
+        try expect(MemoryHubProviderConfigStore.canRunCloud(runnable), "enabled + model + valid URL ⇒ runnable")
+
+        var disabled = runnable; disabled.enabled = false
+        try expect(!MemoryHubProviderConfigStore.canRunCloud(disabled), "disabled ⇒ not runnable (button hidden)")
+
+        var noModel = runnable; noModel.model = "   "
+        try expect(!MemoryHubProviderConfigStore.canRunCloud(noModel), "blank model ⇒ not runnable")
+
+        var badURL = runnable; badURL.baseURL = "not a url"
+        try expect(!MemoryHubProviderConfigStore.canRunCloud(badURL), "malformed base URL ⇒ not runnable")
+    }
+
+    await test("p3b_cloud_notRunnableProvider_throwsBeforeNetwork") {
+        try await withTitleTempHome {
+            var disabled = runnableProvider(); disabled.enabled = false
+            let stub = StubCloudTransport(status: 200, json: chatCompletionJSON("Title"))
+            var threw = false
+            do {
+                _ = try await MemoryHubCloudTitler.improve(
+                    memoId: "m1", transcript: "t", provider: disabled, now: now,
+                    keyProvider: { "sk-test" }, transport: stub)
+            } catch let err as MemoryHubCloudTitler.CloudTitleError {
+                threw = (err == .notRunnable)
+            }
+            try expect(threw, "a non-runnable provider ⇒ notRunnable, no network")
+            try expect(stub.lastRequest == nil, "the transport is never invoked when not runnable")
         }
     }
 }
