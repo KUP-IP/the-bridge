@@ -1,61 +1,89 @@
-# Unified Memory — Wave 3 Surfacing & Governance Spec (v1.0)
+# Unified Memory — Wave 3 Surfacing & Governance Spec (v2.0)
 
-**Status:** Operator-approved recommendations locked 2026-06-26  
+**Status:** v1.0 operator lock preserved; v2.0 incorporates codebase recon audit (2026-06-26)  
 **Packet label:** PKT-MEM-115 (proposed)  
 **Project:** The Bridge v3.8.x → v3.9.0 vertical — agent memory surfacing, routing integration, operator governance  
-**Depends on:** Wave 1 foundation (`MemoryStore`, `memory_remember`/`memory_recall`) + Wave 2 (`export`/`import`, `consolidationSweep`, `asyncComposition`, client-source threading seam)  
-**SSOT for:** implementation packets, test-floor raises, Settings UX, `fetch_skill` envelope extension
+**Depends on:** Wave 1 (`MemoryStore`, `memory_remember`/`memory_recall`) + Wave 2 (`export`/`import`, `consolidationSweep`, `asyncComposition`, `MemoryAutoInjectClientStore`, client-source threading)  
+**SSOT for:** implementation packets, test-floor raises, Settings UX, `fetch_skill` envelope extension  
+**Supersedes:** v1.0 (same file — see §0 Audit critique)
 
 ---
 
-## 0. Executive summary
+## 0. Audit critique (v1.0 → v2.0)
+
+Recon against live code (`MemoryModule`, `MemoryStore`, `StandingOrdersDelivery`, `SkillsModule`, `ServerManager`, `MemoryAgentTab`, standing orders v7.0.2). Items are ordered by severity.
+
+| # | Severity | Finding | v1.0 assumption | v2.0 resolution |
+|---|----------|---------|-----------------|-----------------|
+| C1 | **Blocker** | `fetch_skill` returns cached envelopes **before** any post-processing (`SkillsModule` L312–314). A `scopedMemory` appendix baked into the cache would go stale as memories change; omitting it from cache means cache hits skip the appendix entirely. | Appendix wired inside handler before `cache.set` | **Post-cache merge:** always append `scopedMemory` after cache get/set, never include memory state in `cacheKey` |
+| C2 | **Blocker** | `ServerManager` stdio initialize calls `asyncComposition(clientName: nil)` (L246) while tool dispatch uses synthetic `"stdio"` for `memory_remember` source (L322). Per-client Cursor inject cannot work on stdio until `clientName` is threaded on the stdio initialize path. | Cursor override works for all transports | Document stdio limitation in Phase A; add **stdio `clientName` pass-through** (use `"stdio"` or future initialize metadata) as a small seam fix in WP1 |
+| C3 | **High** | WP3 claims `memory_recall` must add `source` — **`entryValue` already exposes `source`** (`MemoryModule` L267). Remaining work is `renderMemoryMarkdown` + Agent tab meta row only. | Net-new recall shape | Downscope WP3 to formatter + UI; one assertion test that `source` is present (likely already true) |
+| C4 | **High** | `renderMemoryMarkdown` omits `source` and `createdAt` (only type, text, entity, useCount). Inject rows and `bridge://memory` inherit the gap. | WP3 covers this | Explicit shared row formatter used by inject, resource, and appendix |
+| C5 | **High** | Keeper→scope map lists `project-keepr` implicitly via examples; **v7.0.2 standing orders removed inline keeper prose** — roster is live via `skills_routing_list`. `project-keepr` may still resolve as a skill but is no longer a routing entry point. | Static keeper table is authoritative | Scope map keys on **`fetch_skill` `name` param (parent slug)**; derive canonical rows from live `skills_routing_list` names; map `project-keepr` → same scopes as `focus-keepr` for backward compatibility |
+| C6 | **High** | Appendix keyed on parent slug is **correct** for intent routing (`buildSkillResult` uses parent `skillConfig.name` even when a specialist body is swapped in). v1.0 did not document this invariant. | Unclear whether specialist envelope changes scope | Document: scope map uses **request parent**, not resolved specialist title |
+| C7 | **Medium** | Entity hint regex `[a-z0-9-]{3,}` on full `intent` will false-positive on common tokens (`make`, `install`, `bridge`). | Minimal regex is sufficient | v2: extract entity only from **slug-like tokens after normalization**, denylist common verbs, prefer tokens matching known `entity` values in store (optional second pass) |
+| C8 | **Medium** | Appendix promotion policy (`recall` use-promotes) vs handshake (`handshakeSlice` does **not** promote) is correct but unstated side effect: frequent `fetch_skill` re-routing will inflate `useCount` and salience. | Promotion is uniformly good | Keep promote on appendix; cap at 5 rows; document salience side effect in operator docs |
+| C9 | **Medium** | D7 "keep both contradictions below Jaccard" is imprecise: **`remember` supersedes at Jaccard ≥ 0.72** within scope+entity. Recall shows multiple rows only when texts are *semantically* conflicting but lexically distinct. | Contradiction handling is recall-only | Clarify D7: near-dup write-time supersede vs recall-time multi-row presentation |
+| C10 | **Medium** | Cursor seed `{"cursor": true}` has **no first-install migration** — `MemoryAutoInjectClientStore` returns empty dict on fresh install. UI "seed on first open" is fragile (Settings may never open). | Operator setup script is enough | Add **`seedDefaultsIfNeeded()`** on app launch (idempotent): global OFF, `cursor` → ON when override map empty |
+| C11 | **Medium** | MCP `clientInfo.name` for Cursor is **assumed** `"cursor"` — not verified in repo. Mismatch would break seeded override. | `cursor` is canonical | Add Delivery-audit log line for observed `clientName` at initialize; document how to fix override key in Settings |
+| C12 | **Medium** | Voice-memo `agent_memory` lane writes `type: reference` → **90-day unused tombstone** via `consolidationSweep`. Operators may not expect voice-captured facts to expire. | Lifecycle section is complete | Add operator-facing note in Memory Agent tab footer + spec §8; recommend `fact`/`preference` at commit time for durable voice captures (future voice-memo tweak — out of Wave 3 scope unless trivial) |
+| C13 | **Low** | `memory_pin` MCP tool is optional for Wave 3 — **MEMORY-HUB + UI can call `MemoryStore.pin` directly**; `memory_forget` already exists for agents. | +1 tool required | **Split:** Phase A ships UI pin/forget via store; `memory_pin` MCP is Phase A optional / Phase B if agent ergonomics need it |
+| C14 | **Low** | Agent tab empty state says **"read-only"** (`MemoryAgentTab` L105) — conflicts with planned pin/forget/inject controls. | UI work is additive | Update copy + empty-state layout as part of WP1/WP4 |
+| C15 | **Low** | `bridge-keepr` in scope map is harmless but **not a normal `fetch_skill` parent** (standing-orders identity). | Listed as keeper | Keep `global` fallback; remove `bridge-keepr` row from map (dead entry) |
+| C16 | **Low** | `staticFeatureModuleToolCount` = **187** today; optional `memory_pin` → 188 + `Version.swift` comment. | +1 always | Only bump if `memory_pin` ships |
+| C17 | **Low** | Cloud agent / CI **cannot run `make test`** (no Swift on Linux). Floor raise must happen on Mac. | Tests listed generically | Phase C explicitly Mac-only verification |
+
+**Net:** v1.0 direction is sound; v2.0 tightens transport seams, cache architecture, scope-map authority, promotion semantics, and scopes WP3/WP4 to match what code already does.
+
+---
+
+## 0.1 Executive summary (unchanged intent, revised execution)
 
 Wave 3 makes **agent memory useful without handshake bloat**:
 
-1. **Handshake auto-inject** — global OFF; per-client ON for Cursor; Settings toggle (no UserDefaults surgery).
-2. **Memory-rides-routing** — minimal appendix on `fetch_skill` (keeper→scope map + intent query).
-3. **Lifecycle** — keep current launch sweep; no auto-TTL on `decision`/`preference`.
-4. **Provenance** — one shared brain; finish threading `source` + surface it in recall/UI.
-5. **Operator UI** — pin/forget on Memory → Agent tab; inject controls on same pane.
-6. **Sync** — defer cloud; `memory_export`/`memory_import` remain the migration seam.
+1. **Handshake auto-inject** — global OFF; per-client ON for Cursor (launch-seeded); Settings toggle; stdio `clientName` fix.
+2. **Memory-rides-routing** — `scopedMemory` appendix on `fetch_skill`, **post-cache**, parent-slug scope map.
+3. **Lifecycle** — keep launch sweep; no auto-TTL on `decision`/`preference`; document voice-memo `reference` behavior.
+4. **Provenance** — finish `renderMemoryMarkdown` + UI (recall JSON already has `source`).
+5. **Operator UI** — pin/forget + inject controls on Memory → Agent tab.
+6. **Sync** — defer cloud; export/import remains migration seam.
 
-**Explicit non-goals (Wave 3):** cloud sync, encryption-at-rest, operator text-edit CRUD, demote tiers (hot/warm/cold), background Jobs consolidation, Notion MEMORY DS bidirectional sync.
+**Explicit non-goals (Wave 3):** cloud sync, encryption-at-rest, operator text-edit CRUD, demote tiers, Jobs consolidation, Notion MEMORY DS bidirectional sync, NLP entity extraction.
 
 ---
 
-## 0.1 Decision ledger (operator lock 2026-06-26)
+## 0.2 Decision ledger (operator lock 2026-06-26, D7 clarified)
 
-| ID | Decision | Locked resolution | Rationale |
+| ID | Decision | Locked resolution | v2.0 note |
 |----|----------|-------------------|-----------|
-| D1 | Auto-inject default | **OFF global** | Handshake already carries standing orders + routing index; global inject adds variable tokens every session |
-| D2 | Per-client inject | **ON for `cursor`** (override), others inherit global | Cursor is primary builder surface; Claude web / ChatGPT need less Mac-scoped noise |
-| D3 | Memory-rides-routing | **Ship minimal** on `fetch_skill` | Highest leverage: task-scoped grounding without agent remembering to `memory_recall` |
-| D4 | Lifecycle TTL | **No default TTL** on `decision`/`preference`; keep `reference` 90d sweep + explicit `ttlSeconds` | Long-lived operator truths must not silently expire |
-| D5 | Memory lanes | **Source-agnostic dedup** (one operator brain) | Matches KEEP OS trajectory; Cursor + Claude collapse duplicates |
-| D6 | Provenance | **Thread real MCP client into `source`** when caller omits it; show at recall + UI | Audit trail without fragmenting memory |
-| D7 | Contradictions | **Keep both** below Jaccard threshold; surface both with `source` + date at recall | Agent asks once; operator supersedes via new `memory_remember` |
-| D8 | Scope taxonomy | **Open-ended storage; canonical documented set** | `people \| project \| mac \| time \| skill \| global` — agents should use consistently |
-| D9 | UI posture | **Pin + forget + inject toggles** on Memory → Agent; no text edit | Matches Memory Hub trust posture (PKT-MEM-106) |
-| D10 | Sync | **Local-only**; export/import for backup | Defer cloud until multi-Mac or sale-ready privacy review |
+| D1 | Auto-inject default | **OFF global** | unchanged |
+| D2 | Per-client inject | **ON for `cursor`**, launch-seeded | + C10 migration, C11 verify client name |
+| D3 | Memory-rides-routing | **Minimal `scopedMemory` on `fetch_skill`** | + C1 post-cache merge |
+| D4 | Lifecycle TTL | **No default TTL** on `decision`/`preference`; `reference` 90d sweep | + C12 voice-memo note |
+| D5 | Memory lanes | **Source-agnostic dedup** | unchanged |
+| D6 | Provenance | **Thread MCP client into `source`**; surface in markdown + UI | recall JSON done (C3) |
+| D7 | Contradictions | **Near-dup write: supersede at Jaccard ≥ 0.72**; recall may return multiple distinct rows — agent reconciles | clarified (C9) |
+| D8 | Scope taxonomy | **Open-ended storage; documented canonical set** | map follows live roster (C5) |
+| D9 | UI posture | **Pin + forget + inject toggles**; no text edit | unchanged |
+| D10 | Sync | **Local-only** | unchanged |
 
 ---
 
-## 1. Current baseline (what already ships)
+## 1. Current baseline (recon-verified)
 
 | Capability | Location | Wave 3 touch |
 |------------|----------|--------------|
-| SQLite + FTS5 + embeddings + salience | `MemoryStore.swift` | Add `memory_pin` MCP tool; scope map helper |
-| `memory_remember` / `memory_recall` / `forget` / `export` / `import` | `MemoryModule.swift` | Recall returns `source`; new `memory_pin` |
-| Client `source` injection on remember | `MemoryModule.argumentsWithClientSource`, `SSETransport` + `ServerManager` | Verify all transports; document |
-| Handshake auto-inject (flag only) | `StandingOrdersDelivery.asyncComposition` | UI for flags; seed Cursor override |
-| `bridge://memory` resource | `BridgeResources` + `memoryMarkdown()` | Unchanged |
-| Launch consolidation sweep | `AppDelegate` → `consolidationSweep()` | Unchanged |
-| Agent tab (read-only list) | `MemoryAgentTab.swift` | Add pin/forget/inject controls |
-| `fetch_skill` envelope | `SkillsModule.buildSkillResult` | Add optional `scopedMemory` key |
+| SQLite + FTS5 + embeddings + salience | `MemoryStore.swift` | scope map helper; optional `memory_pin` MCP |
+| `memory_remember` / `memory_recall` / `forget` / `export` / `import` | `MemoryModule.swift` | recall `source` ✅; formatter; optional `memory_pin` |
+| Client `source` on remember | `MemoryModule.argumentsWithClientSource`, SSE + stdio dispatch | verify HTTP; fix stdio inject `clientName` |
+| Handshake auto-inject | `StandingOrdersDelivery.asyncComposition` | UI + launch seed + stdio fix |
+| `handshakeSlice` (no promote) | `MemoryStore.swift` L491 | unchanged |
+| `bridge://memory` resource | `BridgeResources` + `memoryMarkdown()` | inherits new row formatter |
+| Launch `consolidationSweep` | `AppDelegate` | doc comment only |
+| Agent tab (read-only today) | `MemoryAgentTab.swift` | pin/forget/inject; copy fix |
+| `fetch_skill` envelope + cache | `SkillsModule.swift` | post-cache `scopedMemory` |
 
-**Storage paths:**
-- DB: `~/.config/notion-bridge/memory.sqlite` (relocates with `BRIDGE_CONFIG_PATH`)
-- Not the same as Notion MEMORY DS or Claude Code `MEMORY.md` files
+**Storage:** `~/.config/notion-bridge/memory.sqlite` (relocates with `BRIDGE_CONFIG_PATH`).
 
 ---
 
@@ -64,109 +92,147 @@ Wave 3 makes **agent memory useful without handshake bloat**:
 ```text
 CAPTURE (explicit)                    SURFACE (passive)
 ─────────────────────                   ─────────────────
-memory_remember                         handshake auto-inject (optional)
-voice_memo agent_memory lane            bridge://memory (opt-in read)
-                                        memory_recall (agent query)
-                                        fetch_skill scopedMemory (NEW)
+memory_remember                         handshake auto-inject (optional, no promote)
+voice_memo agent_memory lane            bridge://memory (opt-in read, no promote)
+                                        memory_recall (agent query, promotes)
+                                        fetch_skill scopedMemory (NEW, promotes)
 ```
 
-**Invariant:** The Bridge never auto-captures from chat. Capture requires `memory_remember` (agent) or approved voice-memo commit.
+**Invariants:**
+- No auto-capture from chat.
+- Passive surfaces (`handshakeSlice`, `bridge://memory`) never use-promote.
+- Active surfaces (`recall`, appendix) use-promote returned rows.
 
 ---
 
-## 3. Work packages
+## 3. Work packages (v2.0)
 
-### WP1 — Handshake auto-inject UI + defaults (D1, D2)
+### WP1 — Handshake auto-inject UI, launch seed, stdio fix (D1, D2)
 
-**Goal:** Operator can govern inject without `defaults write`; fresh policy = global OFF, Cursor ON.
+**Goal:** Operator governs inject without `defaults write`; fresh policy = global OFF, Cursor ON; stdio clients can use per-client overrides.
 
-#### 3.1 Settings UI (`MemoryAgentTab` or new `MemorySurfacingCard`)
+#### 3.1 Launch seed (new — C10)
 
-Add to **Settings → Memory → Agent** (top card, above list):
+Idempotent on app launch (e.g. `AppDelegate` after store open):
 
-| Control | Type | Binds to |
-|---------|------|----------|
-| Handshake memory inject (global) | Toggle | `BridgeDefaults.memoryHandshakeAutoInject` |
-| Per-client overrides | Compact list editor | `MemoryAutoInjectClientStore` |
-| Seed row: `cursor` → ON | Pre-filled on first open if map empty | `setOverride(true, forClient: "cursor")` |
-
-**Per-client editor UX (minimal):**
-- Text field: client name (from MCP `clientInfo.name`, e.g. `cursor`, `claude-code`)
-- Tri-state: Inherit global / Force ON / Force OFF
-- Stored as `Bool` override only when not inheriting
-
-#### 3.2 Inject resolution (unchanged logic, document)
-
-```text
-shouldInject(clientName):
-  if perClientOverride(clientName) != nil → use override
-  else → BridgeDefaults.memoryHandshakeAutoInjectEffective
+```swift
+// Pseudocode
+if MemoryAutoInjectClientStore.shared.allOverrides().isEmpty
+   && !BridgeDefaults.memoryHandshakeAutoInjectEffective {
+    MemoryAutoInjectClientStore.shared.setOverride(true, forClient: "cursor")
+}
 ```
 
-#### 3.3 Inject content (unchanged algorithm, document)
+Does not overwrite operator edits (non-empty override map skips seed).
 
-1. `handshakeSlice(limit: 20)` — pinned first, then salience
-2. `renderMemoryMarkdown(entries)`
-3. Truncate to `memoryHandshakeTokenBudget` (2000 chars ≈ 500 tokens) in salience order
-4. Append under `## Memory` after standing orders + routing trailer
+#### 3.2 Settings UI (`MemorySurfacingSettingsCard` extracted from `MemoryAgentTab`)
 
-#### 3.4 Acceptance criteria
+| Control | Binds to |
+|---------|----------|
+| Handshake memory inject (global) | `BridgeDefaults.memoryHandshakeAutoInject` |
+| Per-client overrides | `MemoryAutoInjectClientStore` |
+| Helper text | Shows last observed MCP client names from Delivery audit (read-only, C11) |
 
-- [ ] Global toggle OFF → `asyncComposition` byte-identical to `composition` (existing test pattern)
-- [ ] Global OFF + Cursor override ON → Cursor sessions get `## Memory` block; others do not
-- [ ] Toggle survives relaunch; no UserDefaults key knowledge required
-- [ ] Delivery audit line: `memoryInjected: true/false, tokenEstimate: N` (optional telemetry)
+Tri-state per client: **Inherit** (remove key) / **Force ON** / **Force OFF** — maps to absent/`true`/`false` in store (already supported).
 
-#### 3.5 Files
+#### 3.3 Stdio `clientName` seam (new — C2)
 
-- `TheBridge/UI/Sections/MemoryAgentTab.swift` (or extract `MemorySurfacingSettingsCard.swift`)
-- `TheBridge/Core/BridgeDefaults.swift` (no schema change)
-- `TheBridge/Modules/StandingOrders/StandingOrdersDelivery.swift` (telemetry only, if added)
-- `TheBridgeTests/MemoryModuleTests.swift` (+2 UI-adjacent store tests if no View tests)
+`ServerManager` stdio initialize path:
+
+```swift
+// Today: asyncComposition(clientName: nil)
+// v2:    asyncComposition(clientName: "stdio")
+```
+
+Aligns with synthetic `"stdio"` already used for `memory_remember` source injection. Document that real per-client names require Streamable HTTP/SSE initialize with `clientInfo`.
+
+#### 3.4 Inject content (unchanged algorithm)
+
+1. `handshakeSlice(limit: 20)` — pinned first, salience; **no promote**
+2. `MemoryRowFormatter.markdown(entries)` (shared with WP3)
+3. Truncate to `memoryHandshakeTokenBudget` (2000 chars)
+4. Append `## Memory` after standing orders + routing trailer
+
+#### 3.5 Acceptance criteria
+
+- [ ] Launch seed: fresh install → `cursor` override ON without opening Settings
+- [ ] Global OFF + Cursor ON → HTTP Cursor sessions get `## Memory`; global OFF + no override → no block
+- [ ] stdio with override `"stdio": true` receives inject (after C2 fix)
+- [ ] `asyncComposition` OFF → byte-identical to `composition` (existing test)
+- [ ] Optional: Delivery audit records `memoryInjected` + `clientName`
+
+#### 3.6 Files
+
+- `TheBridge/App/AppDelegate.swift` (seed)
+- `TheBridge/Server/ServerManager.swift` (stdio clientName)
+- `TheBridge/UI/Sections/MemorySurfacingSettingsCard.swift` (new)
+- `TheBridge/UI/Sections/MemoryAgentTab.swift`
+- `TheBridgeTests/StandingOrdersDeliveryTests.swift` (+inject override tests)
 
 ---
 
-### WP2 — Memory-rides-routing on `fetch_skill` (D3)
+### WP2 — Memory-rides-routing (`scopedMemory`) (D3)
 
-**Goal:** When an agent loads a keeper skill, receive a small, task-scoped memory appendix without a separate `memory_recall` call.
+**Goal:** Task-scoped memory appendix on `fetch_skill` without extra tool calls or stale cache.
 
-#### 3.6 Keeper → scope map (canonical)
+#### 3.7 Scope map (`MemoryRoutingScopeMap.swift`)
 
-New pure enum/module: `MemoryRoutingScopeMap.swift`
+Keyed on **`fetch_skill` `name` parent slug** (before `/` child path). Align with live routing roster; legacy aliases preserved:
 
-| Keeper slug (`fetch_skill` parent) | Primary scope | Secondary scope |
-|-----------------------------------|---------------|-----------------|
+| Parent slug | Primary | Secondary |
+|-------------|---------|-----------|
 | `focus-keepr` | `project` | `global` |
+| `project-keepr` | `project` | `global` |
 | `people-keepr` | `people` | — |
 | `mac-keepr` | `mac` | — |
 | `notion-keepr` | `skill` | `project` |
 | `time-keepr` | `time` | — |
 | `skill-keepr` | `skill` | — |
-| `bridge-keepr` | `global` | — |
 | `executor` | `project` | `global` |
-| *unknown parent* | `global` | — |
+| *unknown* | `global` | — |
 
-**Entity extraction (minimal):** If `intent` matches a slug-like token (`[a-z0-9-]{3,}`) after normalization, pass as `entity` filter for primary scope recall. No NLP — regex only.
+`bridge-keepr` omitted (not a fetch parent). Unknown parents → `global` only.
 
-#### 3.7 Recall query for appendix
+#### 3.8 Entity hint (revised — C7)
+
+```text
+1. Normalize intent (trim, lowercased).
+2. Tokenize on whitespace/punctuation.
+3. Keep tokens matching ^[a-z0-9-]{3,}$ EXCEPT denylist:
+   make, install, copy, build, test, run, the, bridge, keep, fetch, skill, ...
+4. If multiple candidates, prefer one that matches an existing live entity in mapped scope(s) (single SQLite lookup).
+5. Else use first candidate; if none → no entity filter.
+```
+
+#### 3.9 Appendix builder (`MemoryRoutingAppendix.swift`)
 
 ```swift
-// Pseudocode — lives in MemoryRoutingAppendix.build(parent:intent:)
-let scopes = MemoryRoutingScopeMap.scopes(for: parentSlug)
-let entity = MemoryRoutingScopeMap.extractEntityHint(from: intent)
-let query = intent.trimmed.isEmpty ? "" : intent  // FTS when non-empty
+// Pseudocode
+let parent = parsedParentSlug(name)  // "mac-keepr/update" → "mac-keepr"
+let scopes = MemoryRoutingScopeMap.scopes(for: parent)
+let entity = await MemoryRoutingScopeMap.extractEntityHint(intent, scopes: scopes, store: store)
+let query = intent?.trimmed ?? ""
 var entries: [MemoryEntry] = []
 for scope in scopes {
     entries += try await store.recall(query: query, scope: scope, entity: entity, limit: 3)
 }
 entries = dedupeById(entries).prefix(5)
+// promotes via recall — document salience side effect (C8)
 ```
 
-**Promotion policy:** Appendix recall **does promote** (same as `memory_recall`) — routed memories are actively used.
+#### 3.10 Post-cache merge (critical — C1)
 
-#### 3.8 Envelope extension (additive)
+In `SkillsModule` handler, **after** `if let cached = await cache.get(cacheKey) { ... }` return path AND after fresh build:
 
-Add optional key to `fetch_skill` success object:
+```swift
+result = await MemoryRoutingAppendix.attach(to: result, parent: parentSlug, intent: intentArg)
+return result
+// Do NOT include appendix in cacheKey or cached payload.
+```
+
+Plain cache hits and network misses both get fresh memory. Appendix omitted when zero hits.
+
+#### 3.11 Envelope shape (additive)
 
 ```json
 {
@@ -177,285 +243,196 @@ Add optional key to `fetch_skill` success object:
     "intent": "install Bridge to Applications",
     "scopesQueried": ["mac"],
     "count": 2,
-    "markdown": "### Scoped memory (mac)\n- [fact] Use make install-copy for agent sessions · the-bridge · source: cursor · used 4×\n..."
+    "markdown": "### Scoped memory (mac)\n- [fact] Use make install-copy … · source: cursor · 2026-06-26 · used 4×"
   }
 }
 ```
 
-- Omit `scopedMemory` entirely when zero hits (no empty shell)
-- `markdown` uses same row format as `renderMemoryMarkdown` plus `source:` segment
-- **Byte-stable:** existing keys unchanged; consumers ignore unknown keys
+#### 3.12 Dispatch contract addition
 
-#### 3.9 Agent protocol (dispatch contract addition)
+> After `fetch_skill(parent, intent:)`, read `scopedMemory.markdown` when present. Treat as grounding for **this sub-task only**; re-fetch when intent changes. Scope map uses the **parent** slug from `name`, not a resolved specialist title.
 
-Append to `SkillsModule.dispatchContract` (or standing orders § Routing):
+#### 3.13 Acceptance criteria
 
-> After `fetch_skill(parent, intent:)`, read `scopedMemory.markdown` when present and treat it as grounding for this sub-task only. Do not cache across sub-task changes — re-fetch when intent changes.
+- [ ] Cache hit + memory insert afterwards → appendix reflects new row (proves post-cache)
+- [ ] `fetch_skill('mac-keepr', intent: 'make install-copy')` returns appendix when mac memories exist
+- [ ] `fetch_skill('focus-keepr', intent: 'triage stale projects')` queries `project` + `global`
+- [ ] `project-keepr` alias still maps to `project` scope
+- [ ] Zero hits → no `scopedMemory` key
+- [ ] Hermetic tests with temp `MemoryStore` injected via test seam
 
-#### 3.10 Acceptance criteria
+#### 3.14 Files
 
-- [ ] `fetch_skill('mac-keepr', intent: 'make install-copy')` returns `scopedMemory` when mac-scoped memories exist
-- [ ] Unknown parent → `global` scope only
-- [ ] Empty intent → salience-ranked list within mapped scope(s), limit 5
-- [ ] No network beyond existing `fetch_skill` Notion read
-- [ ] Hermetic tests with temp `MemoryStore` injected into `SkillsModule` test seam
-
-#### 3.11 Files
-
-- **New:** `TheBridge/Modules/MemoryRoutingScopeMap.swift`
-- **New:** `TheBridge/Modules/MemoryRoutingAppendix.swift`
-- `TheBridge/Modules/SkillsModule.swift` (wire appendix into handler after skill body resolved)
+- **New:** `MemoryRoutingScopeMap.swift`, `MemoryRoutingAppendix.swift`, `MemoryRowFormatter.swift`
+- `SkillsModule.swift` (post-cache attach only)
 - `TheBridgeTests/MemoryRoutingAppendixTests.swift` (new)
-- `TheBridgeTests/SkillsModuleTests.swift` or dedicated fetch test file
-- `TheBridge/Server/ToolAnnotations.swift` (update `fetch_skill` description)
+- `ToolAnnotations.swift` (`fetch_skill` description)
 
 ---
 
-### WP3 — Provenance finish + recall shape (D5, D6, D7)
+### WP3 — Provenance finish (D5, D6, D7) — downscoped
 
-**Goal:** One brain with visible provenance; contradictions survivable.
+**Goal:** Visible provenance on all markdown surfaces; recall JSON already complete.
 
-#### 3.12 Client source threading (verify + complete)
-
-Already implemented for `memory_remember` on SSE + stdio when caller omits `source`.
-
-| Transport | clientName passed | Action |
-|-----------|-------------------|--------|
-| Streamable HTTP `/mcp` | `SessionContext.clientName` | ✅ verify |
-| Legacy SSE | same | ✅ verify |
-| stdio | `"stdio"` | ✅ acceptable synthetic label |
-
-**Wave 3:** Include `source` in `memory_recall` JSON response (already on `MemoryEntry`; verify `entryValue` exposes it). Include in `renderMemoryMarkdown` / appendix rows.
-
-#### 3.13 Recall row format (additive)
+#### 3.15 Shared row formatter (`MemoryRowFormatter.swift`)
 
 ```markdown
 - [fact] Use make install-copy for agent sessions · the-bridge · source: cursor · 2026-06-26 · used 4×
 ```
 
-#### 3.14 Contradiction policy (documentation only — no new code)
+Used by: `renderMemoryMarkdown`, `scopedMemory.markdown`, `bridge://memory` body.
 
-When two live rows share scope+entity but Jaccard < 0.72:
-- Both returned at recall
-- Agent presents both with provenance
-- Resolution = new `memory_remember` (may supersede if near-dup) or `memory_forget` on stale id
+#### 3.16 Recall JSON
 
-#### 3.15 Acceptance criteria
+`entryValue` already includes `source` — add/keep one regression test; update tool description if needed.
 
-- [ ] `memory_recall` returns `source` field per entry
-- [ ] UI Agent tab shows `source` + `createdAt` in meta row
-- [ ] Voice-memo writes still show `source: voice-memo`
+#### 3.17 Agent tab meta row
 
-#### 3.16 Files
+Show `source` + short `createdAt` date beside scope/type badges.
 
-- `TheBridge/Modules/MemoryModule.swift` (`entryValue` — verify)
-- `TheBridge/Modules/StandingOrders/StandingOrdersDelivery.swift` (`renderMemoryMarkdown`)
-- `TheBridge/UI/Sections/MemoryAgentTab.swift`
+#### 3.18 Acceptance criteria
+
+- [ ] `renderMemoryMarkdown` includes `source` + date
+- [ ] `bridge://memory` inherits formatter
+- [ ] UI shows source + date
+- [ ] D7 documented in tool descriptions (write-time supersede vs multi-row recall)
+
+#### 3.19 Files
+
+- `StandingOrdersDelivery.swift` (delegate to `MemoryRowFormatter`)
+- `MemoryAgentTab.swift`
+- `MemoryModuleTests.swift` (+1 source assertion)
 
 ---
 
 ### WP4 — Operator governance UI (D9)
 
-**Goal:** Pin and forget without MCP round-trip; soft-delete only.
+**Goal:** Pin and forget without MCP round-trip.
 
-#### 3.17 New MCP tool: `memory_pin`
-
-| Field | Value |
-|-------|-------|
-| Tier | `.notify` |
-| Input | `{ "id": "<uuid>", "pinned": true \| false }` |
-| Behavior | `MemoryStore.pin(id:pinned:)` |
-| Annotation | Required `ToolAnnotationCatalog` entry |
-
-#### 3.18 Agent tab row actions
-
-Per `MemoryAgentTab` row:
+#### 3.20 Pin / forget
 
 | Action | Implementation |
 |--------|----------------|
-| Pin / Unpin | `memory_pin` via direct `MemoryStore` actor call from UI (same pattern as other Settings panes — no MCP round-trip) |
+| Pin / Unpin | `MemoryStore.pin(id:_:)` direct from UI |
 | Forget | `MemoryStore.forget(id:)` with confirm alert |
 
-**Trust:** No inline text edit. No hard delete.
+**Optional MCP `memory_pin`** (notify tier) — defer unless agent callers need it; UI does not require it (C13). If shipped: +1 tool, annotation, registry count 187→188.
 
-#### 3.19 Acceptance criteria
+#### 3.21 Acceptance criteria
 
-- [ ] Pin survives relaunch; pinned rows sort first in recall and inject
-- [ ] Forget tombstones row; disappears from list and export
-- [ ] Pinned rows never swept by `consolidationSweep`
+- [ ] Pin survives relaunch; pinned sort first in recall, inject, appendix
+- [ ] Forget tombstones; gone from list and export
+- [ ] Pinned rows exempt from `consolidationSweep` (already true)
+- [ ] Empty state copy no longer says "read-only"
 - [ ] AX IDs: `BridgeAXID.Memory.agentPinButton`, `agentForgetButton`
 
-#### 3.20 Files
+#### 3.22 Files
 
-- `TheBridge/Modules/MemoryModule.swift` (`memory_pin` registration)
-- `TheBridge/UI/Sections/MemoryAgentTab.swift`
-- `TheBridge/UI/BridgeAXID.swift` (new identifiers)
-- `TheBridge/Server/BridgeModuleRegistry.swift` (+1 tool count)
-- `TheBridge/Server/ToolAnnotations.swift`
-- `TheBridgeTests/MemoryModuleTests.swift`
+- `MemoryAgentTab.swift`
+- `BridgeAXID.swift`
+- Optional: `MemoryModule.swift` (`memory_pin`)
 
 ---
 
-### WP5 — Lifecycle confirmation (D4) — docs + tests only
+### WP5 — Lifecycle confirmation (D4) — docs + tests
 
-**No code change** unless regression found.
+No algorithm change unless regression found.
 
-| Mechanism | Behavior | Wave 3 |
-|-----------|----------|--------|
-| Salience decay | Old unused entries rank lower | Keep |
-| `ttlSeconds` on remember | Sets `expiresAt`; swept on launch | Keep |
-| `reference` 90d unused | Tombstone on `consolidationSweep` | Keep |
-| `decision` / `preference` | Indefinite unless TTL or forget | Keep — do not add default TTL |
-| Hard delete | Never | Keep |
+| Mechanism | Behavior |
+|-----------|----------|
+| `handshakeSlice` / resource | No promote |
+| `recall` / appendix | Promotes returned rows |
+| `reference` 90d unused | Tombstone on launch sweep |
+| `decision` / `preference` | Indefinite unless TTL or forget |
+| Voice-memo `agent_memory` → `reference` | Subject to 90d sweep — document in UI (C12) |
 
-**Add:** One doc comment block in `MemoryStore.consolidationSweep` cross-linking this spec.
-
----
-
-### WP6 — Deferred registry (explicit)
-
-| Item | Defer to | Notes |
-|------|----------|-------|
-| Cloud sync | PKT-MEM-12x | Privacy review required |
-| Encryption at rest | Same | Keychain envelope TBD |
-| Operator memory authoring (CRUD) | After Wave 3 usage | |
-| Demote tiers (hot/warm/cold) | Same | |
-| Jobs-based idle consolidation | Same | Launch sweep sufficient for now |
-| Claude Code `MEMORY.md` unification | PKT-MEM-966 area | See `v3.7.7-memory-design-questions.md` §6 |
-| Notion MEMORY DS sync | Notion-keeper scope | Agent memory stays local |
+Add cross-link doc comment on `consolidationSweep`.
 
 ---
 
-## 4. Implementation phasing
+### WP6 — Deferred (unchanged)
+
+Cloud sync, encryption, operator CRUD, demote tiers, Jobs consolidation, Claude `MEMORY.md` unification, Notion MEMORY DS sync.
+
+---
+
+## 4. Implementation phasing (revised)
 
 ```text
-Phase A (ship together) — ~1 PR
-  WP1 Auto-inject UI + Cursor seed default
-  WP4 memory_pin + Agent tab pin/forget
-  WP3 provenance in recall/UI (small)
+Phase A — operator-facing, low risk
+  WP1  inject UI + launch seed + stdio clientName
+  WP3  MemoryRowFormatter + UI provenance
+  WP4  pin/forget UI (no memory_pin unless trivial)
 
-Phase B — ~1 PR (can parallel after A starts)
-  WP2 Memory-rides-routing on fetch_skill
-  dispatchContract + tool description update
+Phase B — fetch_skill hot path
+  WP2  scope map + appendix + post-cache merge + dispatch contract
 
-Phase C — verification only
-  WP5 lifecycle audit
-  Live handshake smoke (Cursor ON → see ## Memory)
-  Live fetch_skill smoke (mac-keepr + mac memories)
+Phase C — Mac-only verification
+  WP5  lifecycle audit
+  Live smoke: Cursor inject, fetch_skill appendix, pin/forget
+  Floor raise (+10–14 tests estimated)
 ```
 
-**Recommended merge order:** A → B. Phase A is operator-facing and low risk; Phase B touches hot `fetch_skill` path.
+**Merge order:** A → B. Phase B must not land without post-cache merge tests.
 
 ---
 
 ## 5. Test plan + floor
 
-| Test file | New cases (estimate) |
-|-----------|---------------------|
-| `MemoryModuleTests.swift` | `memory_pin` round-trip; recall includes `source` |
-| `MemoryRoutingAppendixTests.swift` | scope map; entity extract; appendix limit; empty omit |
-| `StandingOrdersDeliveryTests.swift` | inject toggle + Cursor override composition |
-| `MemoryModuleTests.swift` (UI store) | `MemoryAutoInjectClientStore` seed cursor — may exist |
+| Test file | New cases |
+|-----------|-----------|
+| `StandingOrdersDeliveryTests.swift` | formatter rows; inject ON with override; OFF byte-identical |
+| `MemoryRoutingAppendixTests.swift` | scope map; entity denylist; post-cache freshness; empty omit |
+| `MemoryModuleTests.swift` | recall `source` regression; pin round-trip (if MCP ships) |
+| `MemoryAutoInjectClientStore` / seed | launch seed idempotency |
 
-**Floor raise:** +8–12 net-new tests → update `scripts/test-floor-gate.sh` with dated provenance comment only after `make test` green count measured.
-
-**Live verification checklist:**
-1. Settings → Memory → Agent: toggle global inject OFF, Cursor ON
-2. Restart Bridge; reconnect Cursor → handshake contains `## Memory` with pinned + salient rows
-3. `fetch_skill('mac-keepr', intent: 'install copy')` → `scopedMemory.markdown` present
-4. Pin a memory in UI → appears first in inject slice
-5. Forget a memory → gone from recall and Agent tab
+**Floor raise:** measure on Mac after `make test`; +10–14 net-new → update `scripts/test-floor-gate.sh`.
 
 ---
 
 ## 6. MCP tool inventory delta
 
-| Tool | Tier | Wave 3 |
-|------|------|--------|
-| `memory_remember` | notify | unchanged |
-| `memory_recall` | open | response documents `source` |
-| `memory_forget` | notify | unchanged |
-| `memory_export` | request | unchanged |
-| `memory_import` | request | unchanged |
-| `memory_pin` | notify | **NEW** |
-
-`staticFeatureModuleToolCount` +1 when `memory_pin` ships.
+| Tool | Wave 3 |
+|------|--------|
+| `memory_recall` | document `source` (already returned) |
+| `memory_pin` | **optional** — UI uses store directly |
 
 ---
 
-## 7. Operator setup script (post-Phase A)
-
-After install, Wave 3 seeds:
-
-```text
-memoryHandshakeAutoInject = false
-memoryAutoInjectClientOverrides = { "cursor": true }
-```
-
-Operator may enable global inject from Settings if they later want all clients to receive memory.
-
----
-
-## 8. Examples — end-to-end flows
-
-### 8.1 Cursor session with inject ON
-
-1. Bridge starts → `consolidationSweep` (silent)
-2. Cursor MCP initialize → standing orders + routing index + `## Memory` (top 5 salient)
-3. User: "install the bridge build"
-4. Agent: `fetch_skill('mac-keepr', intent: 'install bridge build')`
-5. Response includes skill body + `scopedMemory` with `make install-copy` fact
-6. Agent executes without separate `memory_recall`
-
-### 8.2 Capturing a preference
-
-1. Agent concludes: operator prefers terse answers when tired
-2. `memory_remember { text, scope: "global", type: "preference" }` — `source` auto = `cursor`
-3. Row appears in Settings → Memory → Agent
-4. Next Cursor session: inject surfaces preference if salient enough
-
-### 8.3 Pruning a stale reference
-
-1. 90 days pass without recall on `type: reference` row
-2. App launch → `consolidationSweep` tombstones it
-3. Row gone from recall/export; still in SQLite for forensics
-
----
-
-## 9. Risks + mitigations
+## 7. Risks + mitigations (updated)
 
 | Risk | Mitigation |
 |------|------------|
-| Handshake token bloat | Global OFF; 500-token cap; salience truncation |
-| `fetch_skill` latency | Appendix uses local SQLite only; limit 5 entries |
-| Wrong scoped memories | Keeper→scope map is conservative; empty appendix when no hits |
-| Pin/forget accidents | Confirm on forget; notify tier on `memory_pin` MCP (UI bypasses gate) |
-| Tool count inflation | One new tool (`memory_pin`); appendix is not a tool |
+| Stale appendix in cache | Post-cache merge (C1) |
+| Wrong Cursor client key | Launch seed + audit log of observed name (C11) |
+| Entity false positives | Denylist + optional entity DB match (C7) |
+| Salience inflation from routing | Cap 5 appendix rows; document promotion (C8) |
+| Voice facts expire | Operator note; future type override at commit |
+| stdio clients miss Cursor override | stdio uses `"stdio"` key; document HTTP for Cursor |
 
 ---
 
-## 10. Packet breakdown (for PACKETS DS)
+## 8. Packet breakdown
 
 | Packet | Scope | Phase |
 |--------|-------|-------|
-| **PKT-MEM-115a** | WP1 + WP4 + WP3 recall/UI provenance | A |
-| **PKT-MEM-115b** | WP2 fetch_skill scopedMemory | B |
-| **PKT-MEM-115c** | Live verification + floor raise + CHANGELOG | C |
+| **PKT-MEM-115a** | WP1 + WP3 + WP4 | A |
+| **PKT-MEM-115b** | WP2 post-cache appendix | B |
+| **PKT-MEM-115c** | Mac verify + floor + CHANGELOG | C |
 
 ---
 
-## 11. CHANGELOG entry (draft)
+## 9. CHANGELOG entry (draft)
 
 ```markdown
 ## v3.9.0 — Unified Memory Wave 3 (surfacing + governance)
 
-- **Handshake memory inject** — Settings toggle (global OFF default); per-client overrides with Cursor seeded ON.
-- **Memory-rides-routing** — `fetch_skill` returns optional `scopedMemory` appendix (keeper→scope map + intent recall).
-- **`memory_pin`** — MCP tool + Agent tab pin/forget actions.
-- **Provenance** — `memory_recall` and inject surfaces show `source` + date.
+- Handshake memory inject — Settings toggle (global OFF); per-client overrides with Cursor launch-seeded ON; stdio clientName fix.
+- Memory-rides-routing — `fetch_skill` returns optional `scopedMemory` appendix (post-cache; parent→scope map).
+- Agent memory UI — pin/forget on Memory → Agent tab; provenance in inject, recall, and appendix rows.
 - Lifecycle unchanged: `reference` 90d sweep + explicit TTL only.
 ```
 
 ---
 
-*End of spec. Operator approval recorded 2026-06-26. Implementation may proceed on PKT-MEM-115a.*
+*v2.0 — recon audit 2026-06-26. Operator decisions from v1.0 stand; implementation proceeds on PKT-MEM-115a with revisions above.*
