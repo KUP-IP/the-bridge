@@ -80,8 +80,18 @@ func runMemoryHubCockpitLabelsTests() async {
     await test("label_provenanceBadge_perArm") {
         try expect(MemoryHubCockpitLabels.provenanceBadge(.agent, degraded: false) == "Parsed by Claude (agent)", "agent")
         try expect(MemoryHubCockpitLabels.provenanceBadge(.cloud, degraded: false) == "Parsed by cloud", "cloud")
-        try expect(MemoryHubCockpitLabels.provenanceBadge(.local, degraded: false) == "Parsed locally", "local")
-        try expect(MemoryHubCockpitLabels.provenanceBadge(.heuristic, degraded: false) == "Parsed locally", "heuristic")
+        try expect(MemoryHubCockpitLabels.provenanceBadge(.local, degraded: false) == "Parsed locally (on-device model)", "local")
+        try expect(MemoryHubCockpitLabels.provenanceBadge(.heuristic, degraded: false) == "Parsed locally (rules)", "heuristic")
+    }
+
+    await test("label_provenanceBadge_localAndHeuristicAreDistinct") {
+        // W4 finding #5: a real on-device LLM parse must be distinguishable from the
+        // deterministic regex floor — they are different quality tiers.
+        let local = MemoryHubCockpitLabels.provenanceBadge(.local, degraded: false)
+        let heuristic = MemoryHubCockpitLabels.provenanceBadge(.heuristic, degraded: false)
+        try expect(local != heuristic, "local (on-device model) must read differently from heuristic (rules)")
+        try expect(local.contains("model"), "local badge should name the on-device model")
+        try expect(heuristic.contains("rules"), "heuristic badge should name the rules floor")
     }
 
     await test("label_provenanceBadge_degradedOverridesAllArms") {

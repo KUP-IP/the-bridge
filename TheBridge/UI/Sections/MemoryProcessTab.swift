@@ -314,11 +314,12 @@ struct MemoryProcessTab: View {
                     tone: plan.degraded ? .warn : .neutral
                 )
 
-                // W3 — commit-value preview: the actual text that will be written, read-only,
-                // so the operator commits with sight not blind.
+                // W3/W4 — commit-value preview: the text that will be written, read-only, so the
+                // operator commits with sight not blind. The label is honest about partial cases
+                // (first-of-N fields / append-merge) via `commitWriteLabel`.
                 if let value = MemoryProcessCockpit.commitValuePreview(for: row) {
                     VStack(alignment: .leading, spacing: 4) {
-                        BridgeCardLabel("Will write")
+                        BridgeCardLabel(MemoryProcessCockpit.commitWriteLabel(for: row) ?? "Will write")
                         Text(value)
                             .font(BridgeTokens.Typeface.mono)
                             .foregroundStyle(BridgeTokens.fg2)

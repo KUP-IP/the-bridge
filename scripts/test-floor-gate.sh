@@ -1542,7 +1542,15 @@ set -euo pipefail
 # selection + unresolved-transcript message, and the commit-value preview. UI-free (no net/Ollama/audio). Same
 # WorkOS-injection caveat above applies: measured with the committed fail-closed RemoteAccessIdentity.swift
 # restored. make test 2653 / 0 failed. 2639→2653.
-FLOOR="${BRIDGE_TEST_FLOOR:-2653}"
+# 2026-06-26 (Voice Curator FRONTIER-FIRST W4 — Phase-1 review remediation): +14 tests across
+# runVoiceCuratorPhase1RemediationTests (durable .understand cloud-send activity receipt w/ hash+excerpt
+# only, never the full transcript; receiptValue surfaces provenance/degraded; notifier cloud-send lane; honest
+# commitWriteLabel for first-of-N + append-merge registry fields) plus the W3 label_provenanceBadge_localAnd
+# HeuristicAreDistinct net-new (local "on-device model" vs heuristic "rules"). All pure/hermetic (no net/Ollama/
+# audio). SAME WorkOS-injection caveat: the 4 placeholder failures are the build-injected RemoteAccessIdentity.swift
+# (operator IdP baked locally), NOT this slice — measured 2667/0 with the committed fail-closed source restored
+# (gate EXIT=0). 2653→2667.
+FLOOR="${BRIDGE_TEST_FLOOR:-2667}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

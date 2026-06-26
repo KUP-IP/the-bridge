@@ -64,7 +64,7 @@ struct MemoryProcessingTab: View {
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 12) {
                 BridgeCardLabel("Cloud enhancement (OpenAI-compatible)")
-                Text("Optional, operator-triggered cloud enhancement. The API key is stored in the Keychain only; base URL, model, and enabled live in providers.json. Save validates syntax; the model and network are checked only when you run cloud enhancement.")
+                Text("Optional cloud provider for the manual “Improve title” action AND, when the curator Mode is Auto or Cloud, for the Understand step. In those modes, enabling this sends the FULL transcript to \(providerBaseURL) automatically during processing — including the scheduled morning curator job — not only when you trigger it by hand. Each cloud send is recorded in the Activity log. The API key is stored in the Keychain only; base URL, model, and enabled live in providers.json.")
                     .font(BridgeTokens.Typeface.sub)
                     .foregroundStyle(BridgeTokens.fg3)
                     .fixedSize(horizontal: false, vertical: true)

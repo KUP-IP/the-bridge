@@ -148,11 +148,21 @@ public enum MemoryProcessCockpit {
         pending.filter { $0.memoId == memoId && $0.status == .pending }
     }
 
-    /// The actual VALUE this row will write, so the operator commits with sight, not blind
-    /// (W3 commit-value preview). Mirrors the writer's source-of-text precedence per lane:
-    /// registry lanes write `fields[destinationField]` (the first sorted field shown in the
-    /// destination label); reminder/memory/agent lanes write the intent `title` (the proposed
-    /// text). Returns nil when there is nothing concrete to show yet (e.g. an empty field map).
+    /// Append-only registry field keys: the writer (`mergeAppendRegistryFields`) writes
+    /// existing + proposed for these (a MERGE), so the previewed value is only the delta
+    /// that will be appended — not the final stored value. Kept here next to the preview so
+    /// the label and the writer's precedence cannot drift.
+    static let appendOnlyRegistryFields: Set<String> = ["brief", "objective", "summary", "description"]
+
+    /// The VALUE this row's preview shows. Mirrors the writer's source-of-text precedence per
+    /// lane: registry lanes preview `fields[first-sorted-key]` (the field named in the
+    /// destination label); reminder/memory/agent lanes preview the intent `title`. Returns nil
+    /// when there is nothing concrete yet (e.g. an empty field map).
+    ///
+    /// FIDELITY CAVEAT (W4): for a MULTI-field registry update this is only the FIRST of N
+    /// fields, and for an append-only field it is the proposed DELTA, not the merged result the
+    /// writer stores. Use `commitWriteLabel(for:)` for the honest label that states which case
+    /// this is, so the operator is not told a partial preview is "the actual value".
     public static func commitValuePreview(for row: CockpitIntentRow) -> String? {
         switch row.kind {
         case .registryUpdate:
@@ -169,6 +179,25 @@ public enum MemoryProcessCockpit {
             }
             return nil
         }
+    }
+
+    /// Honest label for the commit-value preview, co-located with `commitValuePreview` so the
+    /// two cannot drift. States plainly when the shown value is partial:
+    ///   • a multi-field registry update → "Will write (first of N fields)"
+    ///   • an append-only field (brief/objective/summary/description) → "Will append (adds to existing)"
+    ///     (the writer merges existing + this delta; combinable with the first-of-N note)
+    ///   • otherwise → "Will write"
+    /// Returns nil when there is no preview value (so the view shows no label either).
+    public static func commitWriteLabel(for row: CockpitIntentRow) -> String? {
+        guard commitValuePreview(for: row) != nil else { return nil }
+        guard row.kind == .registryUpdate else { return "Will write" }
+        let fieldCount = row.fields.filter { !$0.value.isEmpty }.count
+        let shownKey = row.fields.keys.sorted().first { !(row.fields[$0] ?? "").isEmpty }
+        let isAppend = shownKey.map { appendOnlyRegistryFields.contains($0) } ?? false
+        if isAppend {
+            return fieldCount > 1 ? "Will append (first of \(fieldCount) fields, adds to existing)" : "Will append (adds to existing)"
+        }
+        return fieldCount > 1 ? "Will write (first of \(fieldCount) fields)" : "Will write"
     }
 
     // MARK: - Labels

@@ -6,29 +6,35 @@ import MCP
 
 public enum VoiceMemoNotifier {
 
-    /// Per-batch counts for the three operator-facing notification lanes.
+    /// Per-batch counts for the operator-facing notification lanes.
     public struct NotifyCounts: Sendable, Equatable {
         public var review: Int
         public var noTranscript: Int
         public var routingFailed: Int
+        /// Memos whose Understand step sent the transcript to a CLOUD provider (FRONTIER-FIRST
+        /// W4). Surfaced so the autonomous batch/scheduled path tells the operator content left
+        /// the device — pairs with the durable `.understand` activity receipt.
+        public var cloudSends: Int
 
-        public init(review: Int = 0, noTranscript: Int = 0, routingFailed: Int = 0) {
+        public init(review: Int = 0, noTranscript: Int = 0, routingFailed: Int = 0, cloudSends: Int = 0) {
             self.review = review
             self.noTranscript = noTranscript
             self.routingFailed = routingFailed
+            self.cloudSends = cloudSends
         }
 
         public var needsNotification: Bool {
-            review > 0 || noTranscript > 0 || routingFailed > 0
+            review > 0 || noTranscript > 0 || routingFailed > 0 || cloudSends > 0
         }
     }
 
-    /// Classify a batch of receipts into the three Memory/Inbox notification lanes.
+    /// Classify a batch of receipts into the operator notification lanes.
     public static func classify(receipts: [VoiceMemoReceipt]) -> NotifyCounts {
         let noTranscript = receipts.filter(isNoTranscriptSkip).count
         let routingFailed = receipts.flatMap(\.outcomes).filter { $0.status == .failed }.count
         let review = receipts.flatMap(\.outcomes).filter { $0.status == .review }.count
-        return NotifyCounts(review: review, noTranscript: noTranscript, routingFailed: routingFailed)
+        let cloudSends = receipts.filter { $0.provenance == .cloud }.count
+        return NotifyCounts(review: review, noTranscript: noTranscript, routingFailed: routingFailed, cloudSends: cloudSends)
     }
 
     private static func isNoTranscriptSkip(_ receipt: VoiceMemoReceipt) -> Bool {
@@ -96,6 +102,22 @@ public enum VoiceMemoNotifier {
                 body: body,
                 settingsSection: "Memory",
                 settingsAnchor: "inbox",
+                router: router
+            )
+        }
+        if counts.cloudSends > 0 {
+            // PRIVACY (FRONTIER-FIRST W4): make the cloud Understand send visible on the
+            // autonomous path — pairs with the durable `.understand` activity receipt so a
+            // morning scheduled run is never a silent off-device send.
+            let n = counts.cloudSends
+            let body = n == 1
+                ? "1 transcript sent to your cloud provider for parsing"
+                : "\(n) transcripts sent to your cloud provider for parsing"
+            await notify(
+                title: "Voice Memos used cloud parsing",
+                body: body,
+                settingsSection: "Memory",
+                settingsAnchor: "activity",
                 router: router
             )
         }

@@ -149,11 +149,28 @@ public struct VoiceMemoReceipt: Sendable, Equatable {
     public var title: String
     public var skippedReason: String?
     public var outcomes: [VoiceMemoIntentOutcome]
+    /// Which Understand-chain arm produced this memo's plan (FRONTIER-FIRST provenance).
+    /// Surfaced in the process envelope + drives the auto-path cloud audit trail so the
+    /// autonomous batch/scheduled run is auditable (a cloud send is never silent).
+    /// nil for receipts produced before the parse step (e.g. no-transcript / already-processed skips).
+    public var provenance: ParseProvenance?
+    /// True when a higher-preference rung was available but returned nil at runtime
+    /// (graceful degrade). nil-provenance receipts carry `false`.
+    public var degraded: Bool
 
-    public init(memoId: String, title: String, skippedReason: String? = nil, outcomes: [VoiceMemoIntentOutcome] = []) {
+    public init(
+        memoId: String,
+        title: String,
+        skippedReason: String? = nil,
+        outcomes: [VoiceMemoIntentOutcome] = [],
+        provenance: ParseProvenance? = nil,
+        degraded: Bool = false
+    ) {
         self.memoId = memoId
         self.title = title
         self.skippedReason = skippedReason
         self.outcomes = outcomes
+        self.provenance = provenance
+        self.degraded = degraded
     }
 }

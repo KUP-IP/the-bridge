@@ -54,6 +54,12 @@ public enum MemoryHubCockpitLabels {
     /// When `degraded`, a higher-preference rung was available by config but returned
     /// nil at runtime, so the operator is told the result is a fallback (reconnect /
     /// add credits for full quality). Pure label — the badge tone lives in the view.
+    ///
+    /// `.local` (on-device Ollama LLM) and `.heuristic` (deterministic regex floor) get
+    /// DISTINCT labels: they are different quality tiers, so collapsing them would hide a
+    /// meaningful signal (W4). `.agent` provenance is RESERVED for the out-of-process commit
+    /// path — the in-process cockpit preview never stamps it (agent mode previews on the
+    /// heuristic floor), so this label only ever shows if a plan genuinely carries `.agent`.
     public static func provenanceBadge(_ provenance: ParseProvenance, degraded: Bool) -> String {
         if degraded {
             return "Parsed locally — degraded; reconnect or add credits for full quality"
@@ -61,8 +67,8 @@ public enum MemoryHubCockpitLabels {
         switch provenance {
         case .agent:     return "Parsed by Claude (agent)"
         case .cloud:     return "Parsed by cloud"
-        case .local:     return "Parsed locally"
-        case .heuristic: return "Parsed locally"
+        case .local:     return "Parsed locally (on-device model)"
+        case .heuristic: return "Parsed locally (rules)"
         }
     }
 

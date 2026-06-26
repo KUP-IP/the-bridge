@@ -158,6 +158,13 @@ public enum VoiceMemoProcessor {
             fallbackTitle: recording.title,
             recordingPath: recording.path
         )
+        // PRIVACY (FRONTIER-FIRST W4): the autonomous path (batch + scheduled curator
+        // job, .auto/.cloud mode) can send the WHOLE transcript to a cloud provider as
+        // the Understand step. Write a DURABLE Understand receipt the instant the cloud
+        // rung wins so the operator can later see content left the device — hash +
+        // excerpt only, NEVER the full transcript. Fires even on dryRun (the send was
+        // real). Best-effort: a failed append never blocks processing.
+        recordUnderstandCloudSend(recording: recording, plan: plan, transcript: transcript)
         let needsLLMSummary = plan.intents.contains { $0.kind == .memoryKeep }
             && VoiceMemoCuratorRouter.shouldSummarizeForMemoryKeep()
         if needsLLMSummary {
@@ -294,7 +301,13 @@ public enum VoiceMemoProcessor {
             try VoiceMemoProcessedGate.markProcessedIfClear(memoId: recording.id)
         }
 
-        return VoiceMemoReceipt(memoId: recording.id, title: plan.generatedTitle, outcomes: outcomes)
+        return VoiceMemoReceipt(
+            memoId: recording.id,
+            title: plan.generatedTitle,
+            outcomes: outcomes,
+            provenance: plan.provenance,
+            degraded: plan.degraded
+        )
     }
 
     // MARK: - Execution lanes
@@ -628,8 +641,8 @@ public enum VoiceMemoProcessor {
         }
     }
 
-    static func receiptValue(_ receipt: VoiceMemoReceipt) -> Value {
-        .object([
+    public static func receiptValue(_ receipt: VoiceMemoReceipt) -> Value {
+        var obj: [String: Value] = [
             "memoId": .string(receipt.memoId),
             "title": .string(receipt.title),
             "skippedReason": receipt.skippedReason.map { .string($0) } ?? .null,
@@ -640,7 +653,42 @@ public enum VoiceMemoProcessor {
                     "detail": .string($0.detail),
                 ])
             }),
-        ])
+        ]
+        // FRONTIER-FIRST W4: surface the Understand-chain arm so the autonomous-path
+        // envelope is auditable (esp. that a CLOUD send occurred). Additive — older
+        // consumers ignore unknown keys.
+        if let provenance = receipt.provenance {
+            obj["provenance"] = .string(provenance.rawValue)
+            obj["degraded"] = .bool(receipt.degraded)
+        }
+        return .object(obj)
+    }
+
+    /// PRIVACY audit (FRONTIER-FIRST W4): when the winning Understand provenance is
+    /// `.cloud`, the WHOLE transcript was sent off-device — write ONE durable
+    /// `.understand` receipt to the activity log so the operator can later see it
+    /// happened (critical for the silent scheduled-curator path). The detail carries a
+    /// SHA-256 hash + short excerpt via `transcriptEvidence`, NEVER the full transcript.
+    /// Non-cloud arms write nothing (local/heuristic stay on-device). Best-effort — a
+    /// failed append never blocks processing. `now` is injectable for hermetic tests.
+    public static func recordUnderstandCloudSend(
+        recording: VoiceMemoRecording,
+        plan: VoiceMemoPlan,
+        transcript: String,
+        now: Date = Date()
+    ) {
+        guard plan.provenance == .cloud else { return }
+        let event = MemoryHubActivityEvent(
+            timestamp: ISO8601DateFormatter().string(from: now),
+            memoId: recording.id,
+            phase: .understand,
+            action: "cloud_parse",
+            status: plan.degraded ? "degraded" : "ok",
+            provenance: "cloud",
+            actor: "curator",
+            detail: MemoryHubActivityLog.transcriptEvidence(transcript)
+        )
+        try? MemoryHubActivityLog.append(event, now: now)
     }
 
     private static func stringArg(_ obj: [String: Value], _ key: String) -> String? {
