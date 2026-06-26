@@ -10,8 +10,8 @@
 //
 // TRUST INVARIANT: a provider only changes WHO produces the `VoiceMemoPlan`.
 // The produced plan feeds the EXISTING election / guardrails / processed-gate /
-// per-intent commit — all unchanged. The cloud rung is a STUB this wave (W2
-// implements the real OpenAI-compatible call by reusing `CloudChatTransport`).
+// per-intent commit — all unchanged. The cloud rung (W2) is a REAL OpenAI-
+// compatible frontier call (`MemoryHubCloudParser`) reusing `CloudChatTransport`.
 
 import Foundation
 
@@ -30,30 +30,45 @@ public protocol VoiceMemoParseProvider: Sendable {
     func parse(transcript: String, fallbackTitle: String, recordingPath: String) async -> VoiceMemoPlan?
 }
 
-// MARK: - Cloud (frontier API) — STUB this wave
+// MARK: - Cloud (frontier API) — REAL (W2)
 
-/// Tier-3 cloud (frontier API) Understand rung. STUB for W1: never available and
-/// always returns nil, so `.auto`/`.cloud` chains fall straight through to the
-/// local/heuristic floor with no behavior change. W2 replaces the body with a
-/// real OpenAI-compatible chat-completions call that reuses the injectable
-/// `CloudChatTransport` seam (see `MemoryHubCloudTitle.swift`) and the
-/// `MemoryHubProviderConfigStore` gate (`canRunCloud` + Keychain key), stamping
-/// `.cloud` provenance. Keeping the rung in the chain now means W2 is a pure
-/// body swap with no router/model churn.
+/// Frontier cloud (OpenAI-compatible API) Understand rung — the zero-marginal-cost
+/// / best-quality arm. Availability is the loaded provider's config gate
+/// (`canRunCloud` ∧ a Keychain key); `parse` delegates to `MemoryHubCloudParser`,
+/// which one-shots the WHOLE transcript (frontier large context — no 4000-char
+/// cap) into a strict-JSON `VoiceMemoPlan`. It returns nil on ANY failure (non-2xx
+/// / timeout / unparseable JSON / zero intents) so the chain gracefully degrades to
+/// Local → Heuristic (`degraded == true`). The router stamps `.cloud` provenance;
+/// the API key is read from the Keychain at call time and is NEVER logged.
 public struct CloudParseProvider: VoiceMemoParseProvider {
     public init() {}
 
     public var provenance: ParseProvenance { .cloud }
 
-    /// STUB: cloud is not wired this wave. W2 returns
-    /// `MemoryHubProviderConfigStore.canRunCloud(provider) && keyConfigured`.
-    public func isAvailable() -> Bool { false }
+    /// The loaded provider slot (first in `providers.json`). nil ⇒ never configured.
+    private var loadedProvider: MemoryHubProvider? {
+        MemoryHubProviderConfigStore.load().first
+    }
 
-    /// STUB: W1 never produces a cloud plan. W2 builds + sends the request and
-    /// maps the completion into a `VoiceMemoPlan` (provenance `.cloud`), or nil
-    /// on any non-2xx / timeout / parse failure (⇒ degrade to local/heuristic).
+    /// Cheap gate: a configured provider that `canRunCloud` (enabled + model + valid
+    /// base URL) AND has a Keychain API key. No network here.
+    public func isAvailable() -> Bool {
+        guard let provider = loadedProvider else { return false }
+        return MemoryHubProviderConfigStore.canRunCloud(provider)
+            && MemoryHubProviderConfigStore.keyConfigured(providerId: provider.id)
+    }
+
+    /// Frontier parse over the WHOLE transcript. Returns nil on any throw (the
+    /// router then degrades to local/heuristic). Provenance is (re)stamped `.cloud`
+    /// by the router, so we do not set it here.
     public func parse(transcript: String, fallbackTitle: String, recordingPath: String) async -> VoiceMemoPlan? {
-        nil
+        guard let provider = loadedProvider else { return nil }
+        return try? await MemoryHubCloudParser.parse(
+            transcript: transcript,
+            fallbackTitle: fallbackTitle,
+            recordingPath: recordingPath,
+            provider: provider
+        )
     }
 }
 

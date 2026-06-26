@@ -11,8 +11,10 @@
 //  • .agent / .heuristics resolve to the floor
 //
 // All rungs are injected STUBS via `VoiceMemoParseRouter.providerOverride` — no
-// real network / Ollama / agent. The real CloudParseProvider is a W1 stub
-// (unavailable), so the production chains are also exercised offline.
+// real network / Ollama / agent. The REAL CloudParseProvider is unavailable in
+// the hermetic test env (no providers.json / Keychain key), so the production
+// chains are also exercised offline here; the real cloud parse path (request
+// shape, JSON map, degrade-on-failure) is covered in VoiceMemoCloudParseTests.
 
 import Foundation
 import MCP
@@ -241,11 +243,12 @@ func runVoiceMemoParseChainTests() async {
         try expect(chainResult?.1 == false)
     }
 
-    await test(".auto with the REAL stub cloud (unavailable) falls through offline") {
-        // The W1 CloudParseProvider is a stub (isAvailable==false). With no Ollama
-        // model configured in the hermetic test env, Local is also unavailable, so
-        // production .auto must land on the heuristic floor with NO degrade
-        // (unavailable rungs don't degrade).
+    await test(".auto with the REAL cloud (unavailable in hermetic env) falls through offline") {
+        // The real CloudParseProvider is unavailable here (no providers.json /
+        // Keychain key ⇒ isAvailable==false). With no Ollama model configured in
+        // the hermetic test env, Local is also unavailable, so production .auto
+        // must land on the heuristic floor with NO degrade (unavailable rungs
+        // don't degrade).
         VoiceMemoParseRouter.providerOverride = nil
         await withCuratorMode(.auto) {
             let plan = await VoiceMemoParseRouter.parse(transcript: "remind me to ship", fallbackTitle: "F")
@@ -266,12 +269,17 @@ func runVoiceMemoParseChainTests() async {
         try expect(plan?.intents.isEmpty == false, "heuristic always yields ≥1 intent")
     }
 
-    await test("CloudParseProvider is a W1 stub: unavailable + nil") {
+    await test("CloudParseProvider is unavailable + nil with no provider configured (hermetic)") {
+        // W2: the cloud rung is REAL, but in the hermetic test env there is no
+        // providers.json / Keychain key, so isAvailable() is false and parse()
+        // returns nil — the production .auto/.cloud chains still fall through
+        // offline exactly as before. (Behavioral cloud parsing is covered in
+        // VoiceMemoCloudParseTests with an injected transport + provider.)
         let c = CloudParseProvider()
-        try expect(!c.isAvailable(), "W1 cloud stub must be unavailable")
+        try expect(!c.isAvailable(), "cloud rung must be unavailable with no provider/key")
         let plan = await c.parse(transcript: "x", fallbackTitle: "F", recordingPath: "")
-        try expect(plan == nil, "W1 cloud stub must return nil")
-        try expect(c.provenance == .cloud, "cloud provenance is .cloud even as a stub")
+        try expect(plan == nil, "cloud rung must return nil when unavailable")
+        try expect(c.provenance == .cloud, "cloud provenance is .cloud")
     }
 
     await test("VoiceMemoPlan defaults provenance .heuristic + not degraded") {

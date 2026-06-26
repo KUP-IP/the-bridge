@@ -1522,7 +1522,21 @@ set -euo pipefail
 # → floor, W1 Cloud stub unavailable+nil, parseWithOptionalOllama shim routes through the chain, ParseProvenance
 # Codable + VoiceMemoPlan default-field lock. Stub providers injected via VoiceMemoParseRouter.providerOverride
 # (no real network/Ollama/agent). make test 2621 / 0 failed.
-FLOOR="${BRIDGE_TEST_FLOOR:-2621}"
+# Voice Curator FRONTIER-FIRST W2 (2026-06-26): +18 net-new green — REAL cloud frontier parse rung
+# (MemoryHubCloudParser + CloudParseProvider; runVoiceMemoCloudParseTests): canned strict-JSON completion →
+# mapped VoiceMemoPlan (summary + typed intents + fields, .cloud provenance via router stamp); the WHOLE
+# transcript is sent UNCAPPED (a >4000-char transcript's tail sentinel appears in the request body — frontier
+# large context, NO 4000 truncation); POST /chat/completions + Bearer auth + 20s timeout, key header-only
+# (never in body); a fenced ```json block is tolerated; non-2xx / transport-timeout / garbage-JSON / empty-
+# intents / all-unknown-lane / missing-key / disabled-provider → THROW ⇒ CloudParseProvider.parse returns nil
+# ⇒ router degrades to Local→Heuristic with degraded=true; isAvailable() false with no provider/key/disabled,
+# true with a configured provider + saved Keychain key; router↔parser integration (real parser behind an
+# injected CloudChatTransport via providerOverride) proves degrade + cloud-win provenance hermetically. NOTE:
+# `make build` runs inject-remote-access which bakes the operator's REAL WorkOS identity into
+# RemoteAccessIdentity.swift — that breaks 4 fail-closed-placeholder assertions (RemoteAccessIdentityTests/
+# RemoteAccessConfigWave2Tests/EnableCloudAccessFlowTests×2); they PASS against the committed placeholder source
+# (this count measured with the placeholder source restored). make test 2639 / 0 failed.
+FLOOR="${BRIDGE_TEST_FLOOR:-2639}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
