@@ -18,7 +18,7 @@ import Foundation
 public enum AppVersion {
     /// Marketing version (CFBundleShortVersionString equivalent).
     /// Format: MAJOR.MINOR.PATCH (Semantic Versioning).
-    public static let marketing = "3.8.2"
+    public static let marketing = "3.8.3"
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
@@ -87,7 +87,11 @@ public enum AppVersion {
     ///   tier; seeded Skills entity guarded behind explicit confirm) + a "Remove"
     ///   affordance in the Data Sources pane. staticFeatureModuleToolCount 171 →
     ///   172. test-floor 2163 → 2169, zero regression.
-    public static let build = "61"
+    /// v3.8.3: 61 → 62 — Memory Hub Phase 0 (trust + Process cockpit + guardrails) +
+    ///   PKT-MEM-114 progressive AI memo titles (intent-led heuristic / Ollama / cloud
+    ///   tiers, edited-pinned cache, idle sweep) + standing-orders initialization
+    ///   contract. staticFeatureModuleToolCount unchanged (187 — titles add no tools).
+    public static let build = "62"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }

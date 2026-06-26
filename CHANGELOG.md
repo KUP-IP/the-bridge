@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased — Memory Hub + Voice Memo curator
+## v3.8.3 — Memory Hub + Voice Memo curator + AI memo titles
 
+- **Voice memo AI titles (PKT-MEM-114)** — the Process cockpit memo list + Inbox now show scannable, intent-led titles instead of raw `20260624 203010` timestamps. Progressive + local-first: a locale-aware humanized-date floor (never a raw id), an intent-led Tier-1 heuristic from the elected primary lane (with a `+N` badge for multi-intent memos), an automatic Tier-2 Ollama upgrade **only** when local processing is enabled, a **manual** Tier-3 cloud title, and an operator rename that is **pinned** (never auto-overwritten by any later tier). Titles are cached per memo keyed by `memoId` + transcript hash; the backlog is seeded by a bounded idle/launch sweep that reuses existing plan snapshots (no transcript re-parse). Trust invariants intact: titles are read-only over the parsed plan/election; the title cache is separate state.
 - **Bridge initialization contract** — handshake standing orders are now validated through a machine-readable source manifest. `orders.md`, `metadata.json`, and the routing roster are required; `standing_orders_list` is supplemental, so a valid zero count can no longer be mistaken for “no standing orders.” Every handshake includes a COMPLETE / DEGRADED / INCOMPLETE receipt with doctrine version, routing state, supplemental count, and integrity issues. Legacy metadata is migrated once from the old FNV hash to the documented SHA-256 prefix.
 - **Settings → Memory** — dedicated pane (Inbox · Notion · Agent) replaces voice-memo review in Advanced. Inbox shows the review queue with transcript preview, source badges (Apple / Parakeet / Sidecar), status filters, and dispositions (File as Memory, Add reminder, Agent should know, Retry routing, Mark handled, Dismiss). Sidebar badge when pending count > 0.
 - **Transcription ladder** — sidecar cache → Apple Voice Memos embedded `tsrp` → FluidAudio Parakeet fallback; `transcript.meta.json` provenance; `voice_memo_list.transcriptSource`.
@@ -9,7 +10,7 @@
 - **Notifications** — distinct copy for review / no-transcript / routing-failed; tap opens **Memory → Inbox** via `BridgeNotificationDeepLink`.
 - **Ollama / Local Models** — Qwen thinking fallback, Gemma4:12b summarization defaults, Local Models section in Advanced.
 - **Jobs** — `job_run` on paused jobs via `allowPaused: true` (backlog drain still skips paused).
-- Test floor 2270 → **2292** (+22). `staticFeatureModuleToolCount` 181 → **183**.
+- Test floor → **2602** (PKT-MEM-114 progressive titles + standing-orders init contract; raised by measured net-new only). `staticFeatureModuleToolCount` **187** (titles add no MCP tools).
 
 ## v3.8.2 — Registry entity-management: `registry_remove_entity` + pane Remove
 
