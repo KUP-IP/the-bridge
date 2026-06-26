@@ -206,6 +206,53 @@ func runMemoryHubMemoTitleTests() async {
         try expect(!d.text.contains("20260625"), "floor is humanized, never the raw stem: \(d.text)")
     }
 
+    // MARK: P2 — generate-on-select + Inbox resolution (cockpit list + Inbox surfaces)
+
+    await test("selectThenList_heuristicCached_beatsDateFloor") {
+        // Generate-on-select semantics: a default-named recording shows the date floor until
+        // selection caches the Tier-1 heuristic; thereafter the list resolves to that title.
+        try await withTitleTempHome {
+            let rec = VoiceMemoRecording(id: "m1", path: "/x", title: "20260625 203010",
+                                         recordedAt: mk(cal, 2026, 6, 25, 20, 30), transcript: nil)
+            // Before selection: no cache ⇒ muted date floor.
+            let before = MemoryHubMemoTitler.listDisplay(recording: rec, cached: MemoryHubMemoTitleStore.title(for: "m1"), now: now)
+            try expect(before.isPlaceholder, "no cache yet ⇒ date floor")
+
+            // On select: generate + cache the heuristic (as the cockpit's loadPreview does).
+            let plan = VoiceMemoPlan(generatedTitle: "Voice memo", skipMemoryKeep: false, summary: "s", actions: [],
+                intents: [VoiceMemoIntent(kind: .reminder, confidence: 0.95, title: "Send Jacob results")])
+            let t = MemoryHubMemoTitler.heuristicTitle(plan: plan, transcript: "remind me…", now: now)
+            MemoryHubMemoTitleStore.put(t, memoId: "m1")
+
+            // After selection: the list resolves to the cached heuristic, not the floor.
+            let after = MemoryHubMemoTitler.listDisplay(recording: rec, cached: MemoryHubMemoTitleStore.title(for: "m1"), now: now)
+            try expect(!after.isPlaceholder, "cached ⇒ no longer a placeholder")
+            try expect(after.text == "Send Jacob results" && after.provenance == .heuristic, "shows the heuristic: \(after.text)")
+        }
+    }
+    await test("selectThenList_editedRename_survivesGenerateOnSelect") {
+        // A prior human rename must NOT be clobbered when select regenerates the heuristic.
+        try await withTitleTempHome {
+            MemoryHubMemoTitleStore.put(mtitle("My own title", .edited, "2026-06-25T09:00:00Z"), memoId: "m1")
+            let plan = VoiceMemoPlan(generatedTitle: "g", skipMemoryKeep: false, summary: "s", actions: [],
+                intents: [VoiceMemoIntent(kind: .reminder, confidence: 0.95, title: "auto guess")])
+            MemoryHubMemoTitleStore.put(MemoryHubMemoTitler.heuristicTitle(plan: plan, transcript: "x", now: now), memoId: "m1")
+            let got = MemoryHubMemoTitleStore.title(for: "m1")
+            try expect(got?.title == "My own title" && got?.provenance == .edited, "edit survives select: \(String(describing: got))")
+        }
+    }
+    await test("inboxResolution_cachedTitleWins_elseFallsBackToEntry") {
+        // The Inbox is a read-only consumer: the cache wins, an absent entry falls back to memoTitle.
+        try await withTitleTempHome {
+            MemoryHubMemoTitleStore.put(mtitle("Send Jacob results", .heuristic, "2026-06-25T10:00:00Z"), memoId: "cached")
+            let cachedResolved = MemoryHubMemoTitleStore.title(for: "cached")?.title ?? "20260625 203010"
+            try expect(cachedResolved == "Send Jacob results", "cached intent-led title wins over the raw stem")
+
+            let fallbackResolved = MemoryHubMemoTitleStore.title(for: "absent")?.title ?? "Stored entry title"
+            try expect(fallbackResolved == "Stored entry title", "no cache ⇒ falls back to the entry's memoTitle")
+        }
+    }
+
     // MARK: Freshness / invalidation
 
     await test("freshness_hashMatch_andListNilCurrent") {

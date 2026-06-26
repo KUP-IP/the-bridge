@@ -1492,7 +1492,10 @@ set -euo pipefail
 # registry_hydrate). make test 2550 passed / 0 failed. Raise only by measured net-new; never lower.
 # PKT-MEM-114 P1 (2026-06-26): +21 net-new green — MemoryHubMemoTitle (title model + edited-pinned cache +
 # Tier-1 intent-led heuristic + locale-aware date floor; suite runMemoryHubMemoTitleTests). 2571 passed / 0 failed.
-FLOOR="${BRIDGE_TEST_FLOOR:-2571}"
+# PKT-MEM-114 P2 (2026-06-26): +3 net-new green — surface intent-led titles in the cockpit memo list + Inbox
+# (generate-on-select + edited-rename survival + Inbox cache-wins/fallback; same runMemoryHubMemoTitleTests suite).
+# 2574 passed / 0 failed.
+FLOOR="${BRIDGE_TEST_FLOOR:-2574}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

@@ -257,7 +257,9 @@ public struct MemorySection: View {
         return BridgeGlassCard {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(entry.memoTitle)
+                    // PKT-MEM-114 P2 — read-only consumer of the title cache: prefer the
+                    // intent-led title when one exists, else the stored memoTitle. Never generates.
+                    Text(MemoryHubMemoTitleStore.title(for: entry.memoId)?.title ?? entry.memoTitle)
                         .font(BridgeTokens.Typeface.name)
                         .foregroundStyle(BridgeTokens.fg1)
                         .lineLimit(2)
