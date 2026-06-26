@@ -1490,7 +1490,10 @@ set -euo pipefail
 # MERGE main → Memory Hub branch (2026-06-25): integrated green re-measured = 2550 (2508 branch + 42 main
 # net-new: registry_hydrate +10/+1 + tool-surface +30, + Version staticFeatureModuleToolCount 186→187 for
 # registry_hydrate). make test 2550 passed / 0 failed. Raise only by measured net-new; never lower.
-FLOOR="${BRIDGE_TEST_FLOOR:-2550}"
+# Bridge initialization contract (2026-06-26): +3 net-new tests for manifest+metadata COMPLETE,
+# metadata-drift DEGRADED, and valid zero-supplemental COMPLETE. Replaced the obsolete routing-only
+# fallback assertion in place (count-neutral). Full harness: 2553 passed / 0 failed.
+FLOOR="${BRIDGE_TEST_FLOOR:-2553}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

@@ -65,15 +65,18 @@ func runStandingOrdersDeliveryTests() async {
         }
     }
 
-    await test("Delivery: empty/unreadable orders fall back to routing index alone") {
+    await test("Delivery: missing doctrine is explicit INCOMPLETE, never silent routing-only") {
         try await withDeliveryTempHome { _ in
             try StandingOrdersStore.shared.resetForTesting()
-            // No file written → empty orders → byte-identical to routing index.
             let c = StandingOrdersDelivery.composition()
-            try expect(c.instructionsMarkdown == c.routingIndexMarkdown,
-                       "empty orders → instructions == routing index (no separator, no prefix)")
-            try expect(!c.instructionsMarkdown.contains("\n\n---\n\n"),
-                       "no separator when orders are empty")
+            try expect(c.initializationReceipt.initializationState == .incomplete)
+            try expect(c.initializationReceipt.issues.contains { $0.contains("orders.md is missing") })
+            try expect(c.instructionsMarkdown.contains(c.routingIndexMarkdown),
+                       "routing remains available for recovery")
+            try expect(c.instructionsMarkdown.contains("## Bridge initialization receipt"))
+            try expect(c.instructionsMarkdown.contains("- Initialization: INCOMPLETE"))
+            try expect(c.instructionsMarkdown != c.routingIndexMarkdown,
+                       "missing doctrine must not masquerade as routing-only success")
         }
     }
 

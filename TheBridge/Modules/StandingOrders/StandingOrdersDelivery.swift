@@ -5,23 +5,20 @@
 // hand-rolled JSON-RPC switch in SSETransport) called the SAME inline concat
 // to build `initialize.instructions`:
 //
-//   composed = standing_orders_markdown + "\n\n---\n\n" + routing_index
-//            (or routing_index alone when orders are empty / unreadable)
+//   composed = standing_orders_markdown + routing_index + initialization_receipt
 //
 // That logic now lives here exactly once. `composition(clientName:)` returns:
-//   • instructionsMarkdown   — byte-identical to the pre-SSOT handshake payload
+//   • instructionsMarkdown   — doctrine + routing + evidence-backed receipt
 //   • routingIndexMarkdown   — the routing index alone (the `bridge://routing-
 //                              skills` resource body)
+//   • initializationReceipt  — COMPLETE / DEGRADED / INCOMPLETE source evidence
 //   • tokenCount             — cheap chars/4 estimate
 //   • contentHash            — SHA256 hex of instructionsMarkdown (resource
 //                              change detection / determinism guard)
 //
-// The `clientName` parameter is a deliberate HOOK for future per-client
-// overlays / memory injection (see StandingOrdersComposer.ClientOverlay). It
-// is intentionally IGNORED for content today — overlays are not implemented
-// here yet, and the default-empty-overlay thesis (one center across every
-// system) holds. Resolving the connecting client now keeps the seam wired so
-// the resource handlers can pass it through without re-plumbing.
+// `clientName` selects an optional per-client overlay. The overlay remains the
+// final client-specific instruction layer; the initialization receipt is always
+// present before it.
 
 import Foundation
 import CryptoKit
@@ -144,8 +141,8 @@ public enum BridgeResources {
     /// salience, NON-promoting — a passive surface read must not perturb recall
     /// counters) and renders it via `StandingOrdersDelivery.renderMemoryMarkdown`.
     /// Best-effort: a store read failure degrades to the empty-state line so
-    /// `resources/read` still succeeds, mirroring the composition's degrade-to-
-    /// routing-index posture.
+    /// `resources/read` still succeeds. Standing-orders initialization failures
+    /// use the separate explicit receipt contract above.
     public static func memoryMarkdown() async -> String {
         let entries: [MemoryEntry]
         do {
@@ -159,13 +156,41 @@ public enum BridgeResources {
 
 public enum StandingOrdersDelivery {
 
+    public struct InitializationReceipt: Equatable, Sendable {
+        public let bridgeState: String
+        public let doctrineVersion: String
+        public let routingRosterState: String
+        public let supplementalOrderCount: Int
+        public let initializationState: StandingOrdersStore.InitializationState
+        public let issues: [String]
+
+        public var markdown: String {
+            var lines = [
+                "## Bridge initialization receipt",
+                "",
+                "- Bridge state: \(bridgeState)",
+                "- Doctrine version: \(doctrineVersion)",
+                "- Routing roster: \(routingRosterState)",
+                "- Supplemental orders: \(supplementalOrderCount)",
+                "- Initialization: \(initializationState.rawValue)",
+            ]
+            if !issues.isEmpty {
+                lines.append("")
+                lines.append("### Initialization issues")
+                lines.append(contentsOf: issues.map { "- \($0)" })
+            }
+            return lines.joined(separator: "\n")
+        }
+    }
+
     /// The composed delivery payload, served identically by every transport.
     public struct Composition: Equatable, Sendable {
-        /// The full handshake payload: standing orders + routing index.
-        /// Byte-identical to what `initialize.instructions` sent pre-SSOT.
+        /// The full handshake payload: standing orders + routing index + receipt.
         public let instructionsMarkdown: String
         /// The routing index alone (the `bridge://routing-skills` resource).
         public let routingIndexMarkdown: String
+        /// Evidence-backed initialization result included in the handshake.
+        public let initializationReceipt: InitializationReceipt
         /// Cheap token estimate (chars / 4) over `instructionsMarkdown`.
         public let tokenCount: Int
         /// SHA256 hex of `instructionsMarkdown` — stable per identical content.
@@ -174,48 +199,68 @@ public enum StandingOrdersDelivery {
         public init(
             instructionsMarkdown: String,
             routingIndexMarkdown: String,
+            initializationReceipt: InitializationReceipt,
             tokenCount: Int,
             contentHash: String
         ) {
             self.instructionsMarkdown = instructionsMarkdown
             self.routingIndexMarkdown = routingIndexMarkdown
+            self.initializationReceipt = initializationReceipt
             self.tokenCount = tokenCount
             self.contentHash = contentHash
         }
     }
 
-    /// Build the composition.
-    ///
-    /// `clientName` selects the per-client overlay (item 6): an optional
-    /// operator-authored addendum, persisted by client name, that is
-    /// appended to the composed instructions when that client connects.
-    /// EMPTY BY DEFAULT — with no overlay set for the client (the default
-    /// for every install), the composed bytes are byte-identical to the
-    /// pre-overlay payload, so existing sessions see no change.
-    ///
-    /// Best-effort posture preserved from the prior inline compose: if the
-    /// on-disk Standing Orders store is missing or unreadable, the payload
-    /// falls back to the routing index alone so initialize still succeeds.
+    /// Build the composition and attach an evidence-backed initialization
+    /// receipt. Missing required doctrine never silently becomes “no standing
+    /// orders”: the handshake remains available, but reports INCOMPLETE or
+    /// DEGRADED with the exact failed assertion.
     public static func composition(clientName: String? = nil) -> Composition {
         let routingIndex = SkillsModule.buildRoutingInstructions()
 
-        // PKT-9 v3.5 (now SSOT): prepend user-authored Standing Orders to the
-        // routing index. Best-effort — a read failure degrades to routing-only,
-        // exactly as the two inline composes did before this refactor.
+        // Migrate legacy installations by creating only missing integrity files.
+        // Existing mismatches are never overwritten; the report below surfaces them.
+        try? StandingOrdersStore.shared.ensureInitializationContract()
+        let report = StandingOrdersStore.shared.initializationReport()
+        let supplemental = StandingOrdersRecordStore.inspectOnDisk()
+
+        var issues = report.issues
+        var finalState = report.state
+        let routingRosterLoaded = !routingIndex.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if !routingRosterLoaded {
+            issues.append("Required routing roster is empty.")
+            finalState = .incomplete
+        }
+        if !supplemental.loaded {
+            if let issue = supplemental.issue { issues.append(issue) }
+            if finalState == .complete { finalState = .degraded }
+        }
+
+        let receipt = InitializationReceipt(
+            bridgeState: "running",
+            doctrineVersion: report.doctrineVersion,
+            routingRosterState: routingRosterLoaded ? "loaded" : "missing",
+            supplementalOrderCount: supplemental.activeCount,
+            initializationState: finalState,
+            issues: issues
+        )
+
         var instructions: String = {
-            do {
-                let snapshot = try StandingOrdersStore.shared.read()
-                let orders = snapshot.markdown.trimmingCharacters(in: .whitespacesAndNewlines)
-                if orders.isEmpty { return routingIndex }
-                return orders + "\n\n---\n\n" + routingIndex
-            } catch {
+            guard report.doctrineLoaded,
+                  let snapshot = try? StandingOrdersStore.shared.read() else {
                 return routingIndex
             }
+            let orders = snapshot.markdown.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !orders.isEmpty else { return routingIndex }
+            return orders + "\n\n---\n\n" + routingIndex
         }()
 
+        // The receipt is always present, including valid zero supplemental orders.
+        instructions += "\n\n---\n\n" + receipt.markdown
+
         // Item 6: per-client overlay. Append the operator-authored addendum
-        // for THIS client, if one is set. No-op (byte-identical) when the
-        // client is nil or has no overlay — the default for every install.
+        // for THIS client, if one is set. It remains the final client-specific
+        // instruction layer after the initialization evidence.
         if let name = clientName,
            let overlay = ClientOverlayStore.shared.overlay(forClient: name)?
                .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -224,12 +269,11 @@ public enum StandingOrdersDelivery {
         }
 
         // Note: memory auto-inject (Q1) is wired in `asyncComposition(clientName:)`.
-        // The sync path stays byte-deterministic and is used by the legacy SSE path
-        // and by callers that cannot await. Auto-inject consumers call the async variant.
-
+        // The sync path stays byte-deterministic and is used by resource callers.
         return Composition(
             instructionsMarkdown: instructions,
             routingIndexMarkdown: routingIndex,
+            initializationReceipt: receipt,
             tokenCount: estimateTokens(instructions),
             contentHash: sha256Hex(instructions)
         )
@@ -274,6 +318,7 @@ public enum StandingOrdersDelivery {
         return Composition(
             instructionsMarkdown: injected,
             routingIndexMarkdown: base.routingIndexMarkdown,
+            initializationReceipt: base.initializationReceipt,
             tokenCount: estimateTokens(injected),
             contentHash: sha256Hex(injected)
         )

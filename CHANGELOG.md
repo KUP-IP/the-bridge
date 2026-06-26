@@ -2,6 +2,7 @@
 
 ## Unreleased — Memory Hub + Voice Memo curator
 
+- **Bridge initialization contract** — handshake standing orders are now validated through a machine-readable source manifest. `orders.md`, `metadata.json`, and the routing roster are required; `standing_orders_list` is supplemental, so a valid zero count can no longer be mistaken for “no standing orders.” Every handshake includes a COMPLETE / DEGRADED / INCOMPLETE receipt with doctrine version, routing state, supplemental count, and integrity issues. Legacy metadata is migrated once from the old FNV hash to the documented SHA-256 prefix.
 - **Settings → Memory** — dedicated pane (Inbox · Notion · Agent) replaces voice-memo review in Advanced. Inbox shows the review queue with transcript preview, source badges (Apple / Parakeet / Sidecar), status filters, and dispositions (File as Memory, Add reminder, Agent should know, Retry routing, Mark handled, Dismiss). Sidebar badge when pending count > 0.
 - **Transcription ladder** — sidecar cache → Apple Voice Memos embedded `tsrp` → FluidAudio Parakeet fallback; `transcript.meta.json` provenance; `voice_memo_list.transcriptSource`.
 - **Review resolve MCP** — `voice_memo_review_resolve` + `voice_memo_transcript_refresh`; TTL sweep (pending 30d auto-dismiss, dismissed 7d purge) on launch/wake.

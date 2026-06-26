@@ -92,6 +92,55 @@ func runStandingOrdersTests() async {
         try expect(labels.count == 3, "labels must be distinct")
     }
 
+    // MARK: - Initialization contract
+
+    await test("Initialization: write creates manifest + metadata and validates COMPLETE") {
+        try await withTempHome { _ in
+            try StandingOrdersStore.shared.resetForTesting()
+            _ = try StandingOrdersStore.shared.write("# Standing Orders\n\nrequired doctrine")
+
+            let report = StandingOrdersStore.shared.initializationReport()
+            try expect(report.state == .complete, "expected COMPLETE, got \(report.state)")
+            try expect(report.doctrineLoaded)
+            try expect(report.manifestLoaded)
+            try expect(report.metadataVerified)
+            try expect(report.issues.isEmpty)
+
+            let dir = BridgePaths.applicationSupport(.standingOrders)
+            try expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("manifest.json").path))
+            try expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("metadata.json").path))
+        }
+    }
+
+    await test("Initialization: metadata hash drift reports DEGRADED") {
+        try await withTempHome { _ in
+            try StandingOrdersStore.shared.resetForTesting()
+            _ = try StandingOrdersStore.shared.write("# Standing Orders\n\ncanonical")
+            let metadataURL = BridgePaths.applicationSupport(.standingOrders)
+                .appendingPathComponent("metadata.json")
+            let tampered = "{\"hash\":\"0000000000000000\",\"updatedAt\":\"2026-06-26T00:00:00Z\",\"version\":\"unversioned\"}"
+            try tampered.write(to: metadataURL, atomically: true, encoding: .utf8)
+
+            let report = StandingOrdersStore.shared.initializationReport()
+            try expect(report.state == .degraded)
+            try expect(!report.metadataVerified)
+            try expect(report.issues.contains { $0.contains("metadata.json hash") })
+        }
+    }
+
+    await test("Initialization: zero supplemental orders remains COMPLETE") {
+        try await withTempHome { _ in
+            try StandingOrdersStore.shared.resetForTesting()
+            _ = try StandingOrdersStore.shared.write("# Standing Orders\n\ncanonical")
+
+            let composition = StandingOrdersDelivery.composition()
+            try expect(composition.initializationReceipt.supplementalOrderCount == 0)
+            try expect(composition.initializationReceipt.initializationState == .complete)
+            try expect(composition.instructionsMarkdown.contains("- Supplemental orders: 0"))
+            try expect(composition.instructionsMarkdown.contains("- Initialization: COMPLETE"))
+        }
+    }
+
     // MARK: - RoutingIndex
 
     await test("RoutingIndex: empty list renders placeholder") {
