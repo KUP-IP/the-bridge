@@ -1502,7 +1502,13 @@ set -euo pipefail
 # edited-pin preserved, fallback/empty rejected) + snapshot-derived heuristic + local-first idle sweep
 # (caches from plan snapshots, leaves edited/existing, per-sweep cap; stubbed LLM, runMemoryHubMemoTitleP3aTests).
 # 2582 passed / 0 failed.
-FLOOR="${BRIDGE_TEST_FLOOR:-2582}"
+# PKT-MEM-114 P3b (2026-06-26): +11 net-new green — manual Tier-3 cloud title tier (MemoryHubCloudTitler:
+# injected CloudChatTransport stub → success caches .cloud + sanitizes/caps, non-2xx/timeout/empty/missing-key
+# throw and keep the prior title with NO review queued, edited-pin preserved; bearer-auth + /chat/completions
+# + 20s timeout asserted) + operator rename override (→ pinned .edited, auto tiers never overwrite, empty no-op)
+# + canRunCloud button-enabled gating. New AX ids process.titleRename/titleCloud added to the .memory manifest.
+# runMemoryHubMemoTitleP3bTests. 2593 passed / 0 failed.
+FLOOR="${BRIDGE_TEST_FLOOR:-2593}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

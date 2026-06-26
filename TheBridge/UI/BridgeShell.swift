@@ -232,6 +232,10 @@ public enum BridgeAXID {
             public static func registryRow(entity: String, rowId: String) -> String { id("process.registryRow.\(entity).\(rowId)") }
             public static func commit(_ intentId: String) -> String { id("process.commit.\(intentId)") }
             public static func primaryOverride(_ intentId: String) -> String { id("process.primaryOverride.\(intentId)") }
+            // PKT-MEM-114 P3b — detail-inspector title controls: operator rename (→ pinned
+            // `.edited`) + the MANUAL Tier-3 cloud-title button (shown only when canRunCloud).
+            public static let titleRename      = id("process.titleRename")
+            public static let titleCloud       = id("process.titleCloud")
         }
     }
 }

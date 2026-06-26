@@ -23,6 +23,14 @@ struct MemoryProcessTab: View {
     /// PKT-MEM-114 P2 — cached intent-led titles (memo-titles.json), read-only over the
     /// parsed plan/election. Loaded with the memo list; refreshed on selection.
     @State private var titleCache: [String: MemoTitle] = [:]
+    /// PKT-MEM-114 P3b — operator rename field (detail inspector). Seeded with the current
+    /// display title on selection; on Save it writes a pinned `.edited` title.
+    @State private var titleDraft: String = ""
+    /// PKT-MEM-114 P3b — Tier-3 cloud title state: the loaded provider (gates the button),
+    /// an in-flight flag, and a small inline status line. Cloud is MANUAL-only.
+    @State private var cloudProvider: MemoryHubProvider?
+    @State private var cloudBusy = false
+    @State private var titleStatus: String?
 
     private var rows: [CockpitIntentRow] {
         guard let plan, let selectedId else { return [] }
@@ -191,6 +199,7 @@ struct MemoryProcessTab: View {
                 }
                 if let plan, let row = inspectorRow {
                     transcriptCard
+                    titleEditorCard
                     inspectorDetail(plan: plan, row: row)
                 } else {
                     Text("Select a memo to preview and commit intents.")
@@ -214,6 +223,39 @@ struct MemoryProcessTab: View {
                     .foregroundStyle(BridgeTokens.fg2)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// PKT-MEM-114 P3b — title editor: operator rename (→ pinned `.edited`) + manual Tier-3
+    /// cloud polish. Read-only over the plan/election; only the separate title cache is touched.
+    private var titleEditorCard: some View {
+        BridgeGlassCard {
+            VStack(alignment: .leading, spacing: 10) {
+                BridgeCardLabel("Title")
+                HStack(spacing: 8) {
+                    TextField("Memo title", text: $titleDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier(BridgeAXID.Memory.Process.titleRename)
+                    BridgeButton("Rename", systemImage: "pencil", variant: .primary) { saveRename() }
+                        .accessibilityIdentifier(BridgeAXID.Memory.Process.titleRename)
+                }
+                // Tier-3 cloud is MANUAL-only and shown/enabled solely when the loaded provider
+                // is enabled with a model + a configured key (canRunCloud). Otherwise hidden.
+                if let provider = cloudProvider, MemoryHubProviderConfigStore.canRunCloud(provider) {
+                    HStack(spacing: 8) {
+                        BridgeButton("Improve title (cloud)", systemImage: "sparkles", isEnabled: !cloudBusy) {
+                            Task { await improveTitleViaCloud(provider: provider) }
+                        }
+                        .accessibilityIdentifier(BridgeAXID.Memory.Process.titleCloud)
+                        if cloudBusy { ProgressView().controlSize(.small) }
+                    }
+                }
+                if let titleStatus {
+                    Text(titleStatus)
+                        .font(BridgeTokens.Typeface.meta)
+                        .foregroundStyle(BridgeTokens.fg4)
+                }
             }
         }
     }
@@ -361,6 +403,11 @@ struct MemoryProcessTab: View {
             let title = MemoryHubMemoTitler.heuristicTitle(plan: parsedPlan, transcript: t)
             MemoryHubMemoTitleStore.put(title, memoId: memo.id)
             titleCache[memo.id] = MemoryHubMemoTitleStore.title(for: memo.id)
+            // PKT-MEM-114 P3b — seed the rename field with the resolved display title and load
+            // the cloud provider (gates the Tier-3 button). Read-only over the plan/election.
+            titleStatus = nil
+            titleDraft = MemoryHubMemoTitler.listDisplay(recording: memo, cached: titleCache[memo.id]).text
+            cloudProvider = MemoryHubProviderConfigStore.load().first
             // PKT-MEM-114 P3a — Tier-2 local upgrade: AUTO only when Ollama processing is
             // enabled. Non-blocking; on a better title it caches `.local` (edited-pinned) and
             // refreshes the row on the main actor. Failure/timeout keeps the heuristic silently.
@@ -375,6 +422,51 @@ struct MemoryProcessTab: View {
             }
         } catch {
             statusMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: PKT-MEM-114 P3b — title rename + manual cloud title
+
+    /// Operator rename → pinned `.edited` title. Empty/whitespace is a no-op. Carries the
+    /// current cached intentCount + transcriptHash so the `+N` badge and freshness survive the
+    /// edit. The store's edited-pin then guarantees later auto tiers never overwrite it.
+    @MainActor
+    private func saveRename() {
+        guard let memoId = selectedId else { return }
+        let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let prior = titleCache[memoId]
+        let edited = MemoTitle(
+            title: trimmed,
+            provenance: .edited,
+            intentCount: prior?.intentCount ?? 0,
+            transcriptHash: prior?.transcriptHash,
+            generatedAt: ISO8601DateFormatter().string(from: Date())
+        )
+        MemoryHubMemoTitleStore.put(edited, memoId: memoId)
+        titleCache[memoId] = MemoryHubMemoTitleStore.title(for: memoId)
+        titleStatus = "Renamed."
+    }
+
+    /// Tier-3 cloud title (MANUAL only). POSTs an OpenAI-compatible chat-completions request via
+    /// the testable `MemoryHubCloudTitler` helper, caching a pinned-safe `.cloud` title on
+    /// success. Any failure/timeout surfaces a small inline status and keeps the existing title —
+    /// it NEVER blocks the UI and queues NO review. The key is read inside the helper, never here.
+    @MainActor
+    private func improveTitleViaCloud(provider: MemoryHubProvider) async {
+        guard let memoId = selectedId, !cloudBusy else { return }
+        cloudBusy = true
+        titleStatus = "Improving title via cloud…"
+        defer { cloudBusy = false }
+        do {
+            let updated = try await MemoryHubCloudTitler.improve(
+                memoId: memoId, transcript: transcript, provider: provider)
+            titleCache[memoId] = updated
+            titleDraft = updated.title
+            titleStatus = "Title updated (cloud)."
+        } catch {
+            // Keep the existing title; surface a brief, non-blocking status (no key in the message).
+            titleStatus = "Cloud title unavailable — kept the current title."
         }
     }
 

@@ -113,6 +113,9 @@ public enum SettingsUIValidationHarness {
                     BridgeAXID.Memory.Process.intentTable,
                     BridgeAXID.Memory.Process.detailInspector,
                     BridgeAXID.Memory.Process.activityStrip,
+                    // PKT-MEM-114 P3b — title rename + manual cloud-title controls (inspector).
+                    BridgeAXID.Memory.Process.titleRename,
+                    BridgeAXID.Memory.Process.titleCloud,
                     BridgeAXID.Memory.processingPane,
                     BridgeAXID.Memory.processingProviderSave,
                     BridgeAXID.Memory.processingProviderStatus,
