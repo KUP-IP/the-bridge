@@ -32,6 +32,9 @@ public struct MemorySection: View {
     @ObservedObject private var nav = SettingsNavigation.shared
     @State private var selection: Tab
     @State private var entries: [VoiceMemoReviewEntry] = []
+    /// Title cache loaded ONCE per reload (mirrors the cockpit's MemoryProcessTab pattern), so
+    /// inboxRow reads in-memory instead of a full memo-titles.json read+decode per row per render.
+    @State private var titleCache: [String: MemoTitle] = [:]
     @State private var expandedIds: Set<String> = []
     @State private var actionMessage: String?
     @State private var resolvingIds: Set<String> = []
@@ -259,7 +262,8 @@ public struct MemorySection: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     // PKT-MEM-114 P2 — read-only consumer of the title cache: prefer the
                     // intent-led title when one exists, else the stored memoTitle. Never generates.
-                    Text(MemoryHubMemoTitleStore.title(for: entry.memoId)?.title ?? entry.memoTitle)
+                    // Reads the once-loaded titleCache (not the store) to avoid a per-row disk read.
+                    Text(titleCache[entry.memoId]?.title ?? entry.memoTitle)
                         .font(BridgeTokens.Typeface.name)
                         .foregroundStyle(BridgeTokens.fg1)
                         .lineLimit(2)
@@ -340,6 +344,7 @@ public struct MemorySection: View {
 
     private func reloadEntries() {
         entries = VoiceMemoReviewStore.pendingEntries()
+        titleCache = MemoryHubMemoTitleStore.load()   // one disk read per reload, not per row per render
         MemoryReviewBadgeCounter.shared.refresh()
     }
 

@@ -257,6 +257,7 @@ func runMemoryHubMemoTitleTests() async {
 
     await runMemoryHubMemoTitleP3aTests(cal: cal, now: now)
     await runMemoryHubMemoTitleP3bTests(cal: cal, now: now)
+    await runMemoryHubMemoTitleReviewRemediationTests(cal: cal, now: now)
 
     // MARK: Freshness / invalidation
 
@@ -687,6 +688,105 @@ func runMemoryHubMemoTitleP3bTests(cal: Calendar, now: Date) async {
             }
             try expect(threw, "a non-runnable provider ⇒ notRunnable, no network")
             try expect(stub.lastRequest == nil, "the transport is never invoked when not runnable")
+        }
+    }
+}
+
+// MARK: - Review remediation (PKT-MEM-114) — char-ceiling + sweep single-write -------------
+
+func runMemoryHubMemoTitleReviewRemediationTests(cal: Calendar, now: Date) async {
+    print("\n🏷️  Memory Hub titles — review remediation (char ceiling + sweep write)")
+
+    // MARK: Finding 1 — character ceiling on the heuristic (CJK / long no-whitespace token)
+
+    await test("remediation_heuristic_cjkNoWhitespace_charCapped") {
+        // A long CJK string has NO whitespace separators ⇒ split-on-whitespace yields ONE
+        // "word", so prefix(8 words) keeps it whole. Without a char ceiling the entire field
+        // would persist verbatim into memo-titles.json (privacy parity with the 120-char
+        // activity-log excerpt cap). 200 CJK chars, no spaces:
+        let longCJK = String(repeating: "中", count: 200)
+        let plan = VoiceMemoPlan(generatedTitle: "g", skipMemoryKeep: false, summary: "s", actions: [],
+            intents: [VoiceMemoIntent(kind: .reminder, confidence: 0.95, title: longCJK)])
+        let t = MemoryHubMemoTitler.heuristicTitle(plan: plan, transcript: "x", now: now)
+        // Title is bounded (≤ cap + the single ellipsis char), NOT the full 200-char field.
+        try expect(t.title.count <= 121, "char-capped (≤120 + ellipsis), got \(t.title.count): \(t.title)")
+        try expect(t.title.hasSuffix("…"), "truncated title carries the ellipsis: \(t.title)")
+    }
+
+    await test("remediation_heuristic_longURLToken_charCapped") {
+        // A single long token (URL / base64 / id) is also one whitespace-split "word".
+        let longToken = "https://example.com/" + String(repeating: "a", count: 300)
+        let plan = VoiceMemoPlan(generatedTitle: "g", skipMemoryKeep: false, summary: "s", actions: [],
+            intents: [VoiceMemoIntent(kind: .reminder, confidence: 0.95, title: longToken)])
+        let t = MemoryHubMemoTitler.heuristicTitle(plan: plan, transcript: "x", now: now)
+        try expect(t.title.count <= 121, "long single-token title is char-capped, got \(t.title.count)")
+    }
+
+    await test("remediation_shortMultiword_unchanged_noFalseEllipsis") {
+        // Regression guard: a short, normal space-separated title must NOT gain an ellipsis or
+        // get clipped by the new char ceiling. Driven via the public heuristic entry point.
+        let plan = VoiceMemoPlan(generatedTitle: "g", skipMemoryKeep: false, summary: "s", actions: [],
+            intents: [VoiceMemoIntent(kind: .reminder, confidence: 0.95, title: "Send Jacob the results")])
+        let t = MemoryHubMemoTitler.heuristicTitle(plan: plan, transcript: "x", now: now)
+        try expect(t.title == "Send Jacob the results", "short title untouched by the char cap: \(t.title)")
+    }
+
+    await test("remediation_snapshotHeuristic_cjk_charCapped") {
+        // The sweep path (heuristicTitle(snapshot:)) funnels through the same clean(); a CJK
+        // snapshot field must also be bounded before it is written unattended at launch/wake.
+        let longCJK = String(repeating: "あ", count: 200)
+        let snap = PlanSnapshot(memoId: "m1", provenance: .heuristic, version: 1,
+                                createdAt: "2026-06-25T10:00:00Z",
+                                intents: [snapIntent("i1", "reminder", 0.95, title: longCJK)])
+        let t = MemoryHubMemoTitler.heuristicTitle(snapshot: snap, now: now)
+        try expect(t.title.count <= 121, "snapshot heuristic char-capped, got \(t.title.count)")
+    }
+
+    // MARK: Finding 3 — launchSweep persists once (writes survive, edited preserved)
+
+    await test("remediation_sweep_singleWrite_titlesPersist") {
+        // Behavioural guard that the single-save refactor still persists every written title
+        // (the prune(cache) save after the loop must include the in-loop mutations).
+        try await withTitleTempHome {
+            for i in 0..<3 {
+                let snap = PlanSnapshot(memoId: "sw-\(i)", provenance: .heuristic, version: 1,
+                                        createdAt: "2026-06-25T10:00:00Z",
+                                        intents: [snapIntent("i1", "reminder", 0.95, title: "Title \(i)")])
+                _ = try MemoryHubPlanSnapshotStore.append(snap)
+            }
+            let n = MemoryHubMemoTitler.launchSweep(now: now)
+            try expect(n == 3, "all three titled in one sweep (got \(n))")
+            // Re-load from disk (not the in-loop cache) to prove the single save flushed them.
+            let reloaded = MemoryHubMemoTitleStore.load()
+            for i in 0..<3 {
+                try expect(reloaded["sw-\(i)"]?.title == "Title \(i)",
+                           "sw-\(i) persisted to disk: \(String(describing: reloaded["sw-\(i)"]))")
+            }
+        }
+    }
+
+    await test("remediation_sweep_singleWrite_preservesEdited") {
+        // The in-memory edited-pin guard must still hold with the single-write path: a pinned
+        // human edit is left untouched even though the loop mutates the shared cache dict.
+        try await withTitleTempHome {
+            let snap = PlanSnapshot(memoId: "edited", provenance: .heuristic, version: 1,
+                                    createdAt: "2026-06-25T10:00:00Z",
+                                    intents: [snapIntent("i1", "reminder", 0.95, title: "Auto would say this")])
+            _ = try MemoryHubPlanSnapshotStore.append(snap)
+            let snap2 = PlanSnapshot(memoId: "fresh", provenance: .heuristic, version: 1,
+                                     createdAt: "2026-06-25T10:00:00Z",
+                                     intents: [snapIntent("i1", "reminder", 0.95, title: "New title")])
+            _ = try MemoryHubPlanSnapshotStore.append(snap2)
+            MemoryHubMemoTitleStore.put(mtitle("Human kept this", .edited, "2026-06-25T09:00:00Z"), memoId: "edited")
+
+            let n = MemoryHubMemoTitler.launchSweep(now: now)
+            try expect(n == 1, "only the un-titled memo is written (got \(n))")
+            try expect(MemoryHubMemoTitleStore.title(for: "edited")?.provenance == .edited,
+                       "edit preserved through the single-write sweep")
+            try expect(MemoryHubMemoTitleStore.title(for: "edited")?.title == "Human kept this",
+                       "edited title body unchanged")
+            try expect(MemoryHubMemoTitleStore.title(for: "fresh")?.title == "New title",
+                       "the un-titled memo got its heuristic")
         }
     }
 }

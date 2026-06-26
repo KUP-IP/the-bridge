@@ -1508,7 +1508,12 @@ set -euo pipefail
 # + 20s timeout asserted) + operator rename override (→ pinned .edited, auto tiers never overwrite, empty no-op)
 # + canRunCloud button-enabled gating. New AX ids process.titleRename/titleCloud added to the .memory manifest.
 # runMemoryHubMemoTitleP3bTests. 2593 passed / 0 failed.
-FLOOR="${BRIDGE_TEST_FLOOR:-2593}"
+# PKT-MEM-114 review remediation (2026-06-26): +6 net-new green — Tier-1 heuristic char ceiling (clean() now
+# clamps to 120 chars so a single no-whitespace token — CJK/Thai/URL/base64/id — can no longer persist verbatim
+# into memo-titles.json incl. unattended via launchSweep; privacy parity with the activity-log excerpt cap) +
+# launchSweep single-write (mutate the loaded cache in-memory, save(prune) ONCE instead of put()-per-item,
+# edited-pin preserved). runMemoryHubMemoTitleReviewRemediationTests. 2599 passed / 0 failed.
+FLOOR="${BRIDGE_TEST_FLOOR:-2599}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

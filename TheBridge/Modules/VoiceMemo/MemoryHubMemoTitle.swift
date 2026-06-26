@@ -115,6 +115,14 @@ public enum MemoryHubMemoTitleStore {
 
 public enum MemoryHubMemoTitler {
     static let maxWords = 8
+    /// Hard character ceiling on a final title — privacy parity with the activity-log
+    /// excerpt cap (`MemoryHubActivityLog.transcriptEvidence` 120) and `sanitizeTitle`'s
+    /// 120-char cap. The word cap alone does NOT bound a single-token / no-whitespace field
+    /// (CJK/Thai/Lao, a URL, base64, an id), so clean() must clamp characters too — otherwise
+    /// the whole field would persist verbatim into memo-titles.json (incl. unattended via
+    /// launchSweep). All three tiers funnel their final pass through clean(), so this is the
+    /// one chokepoint that closes the gap.
+    static let maxChars = 120
 
     // MARK: Date floor
 
@@ -191,13 +199,20 @@ public enum MemoryHubMemoTitler {
         }
     }
 
-    static func clean(_ raw: String, maxWords: Int = maxWords) -> String {
+    static func clean(_ raw: String, maxWords: Int = maxWords, maxChars: Int = maxChars) -> String {
         let words = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             .split(whereSeparator: { $0.isWhitespace })
         guard !words.isEmpty else { return "Untitled memo" }
         var result = words.prefix(maxWords).joined(separator: " ")
+        // Character ceiling (privacy parity): the word cap does not bound a single no-whitespace
+        // token (CJK/URL/base64/id), so clamp characters before the ellipsis decision.
+        var charTruncated = false
+        if result.count > maxChars {
+            result = String(result.prefix(maxChars))
+            charTruncated = true
+        }
         result = result.trimmingCharacters(in: CharacterSet(charactersIn: " .,;:!?—-"))
-        if words.count > maxWords { result += "…" }
+        if words.count > maxWords || charTruncated { result += "…" }
         return result.isEmpty ? "Untitled memo" : result
     }
 
@@ -309,7 +324,10 @@ public enum MemoryHubMemoTitler {
         guard let files = try? FileManager.default.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: nil) else { return 0 }
 
-        let cache = MemoryHubMemoTitleStore.load()
+        // Mutate the already-loaded cache in memory and persist ONCE after the loop, instead of
+        // a full load()+save() per written title via put() (read/write amplification on the
+        // launch/wake path). The edited-pin guard below mirrors put()'s `.edited` protection.
+        var cache = MemoryHubMemoTitleStore.load()
         var written = 0
         for file in files where file.pathExtension == "json" {
             if written >= cap { break }
@@ -321,9 +339,11 @@ public enum MemoryHubMemoTitler {
             if let existing = cache[memoId], existing.provenance == .edited || existing.isFresh(forTranscriptHash: nil) {
                 continue
             }
-            let title = heuristicTitle(snapshot: snapshot, now: now)
-            MemoryHubMemoTitleStore.put(title, memoId: memoId)
+            cache[memoId] = heuristicTitle(snapshot: snapshot, now: now)   // .edited never reached (guarded above)
             written += 1
+        }
+        if written > 0 {
+            MemoryHubMemoTitleStore.save(MemoryHubMemoTitleStore.prune(cache))
         }
         return written
     }
