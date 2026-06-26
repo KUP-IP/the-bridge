@@ -267,7 +267,11 @@ public struct AdvancedSection: View {
             Spacer(minLength: 8)
 
             BridgeButton("Check for updates", systemImage: "arrow.down.circle") {
-                (NSApp.delegate as? AppDelegate)?.checkForUpdates()
+                // PKT-932 / PKT-1005: use the identity-correct AppDelegate.shared
+                // first (the @NSApplicationDelegateAdaptor-safe handle); fall back
+                // to the fragile cast so the button still fires if shared is nil
+                // during tests or unusual launch paths.
+                (AppDelegate.shared ?? (NSApp.delegate as? AppDelegate))?.checkForUpdates()
             }
             .accessibilityIdentifier(BridgeAXID.Advanced.checkUpdates)   // PKT-1005 remainder (b)
             BridgeButton("Export diagnostics", systemImage: "square.and.arrow.up", action: onExportDiagnostics)
