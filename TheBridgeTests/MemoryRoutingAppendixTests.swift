@@ -76,7 +76,6 @@ func runMemoryRoutingAppendixTests() async {
         _ = try await store.remember(
             text: "Use make install-copy for agent sessions",
             scope: "mac",
-            entity: "the-bridge",
             type: .fact,
             source: "cursor"
         )
@@ -84,7 +83,7 @@ func runMemoryRoutingAppendixTests() async {
         let out = await MemoryRoutingAppendix.attach(
             to: base,
             parent: "mac-keepr",
-            intent: "make install-copy",
+            intent: "install-copy",
             store: store
         )
         guard case .object(let obj) = out,
@@ -104,7 +103,7 @@ func runMemoryRoutingAppendixTests() async {
         let store = try await makeTempMemoryStore()
         defer { Task { await store.close() } }
         let base: Value = .object(["name": .string("mac-keepr"), "content": .string("cached")])
-        let first = await MemoryRoutingAppendix.attach(to: base, parent: "mac-keepr", intent: "x", store: store)
+        let first = await MemoryRoutingAppendix.attach(to: base, parent: "mac-keepr", intent: "zzznomatch", store: store)
         guard case .object(let firstObj) = first else {
             try expect(false, "first attach failed")
             return
@@ -112,7 +111,7 @@ func runMemoryRoutingAppendixTests() async {
         try expect(firstObj["scopedMemory"] == nil, "no memory yet")
 
         _ = try await store.remember(text: "Fresh fact after cache", scope: "mac", type: .fact, source: "test")
-        let second = await MemoryRoutingAppendix.attach(to: base, parent: "mac-keepr", intent: "Fresh", store: store)
+        let second = await MemoryRoutingAppendix.attach(to: base, parent: "mac-keepr", intent: "", store: store)
         guard case .object(let secondObj) = second,
               case .object(let appendix)? = secondObj["scopedMemory"],
               case .string(let markdown)? = appendix["markdown"] else {
@@ -141,7 +140,7 @@ private func makeTempMemoryStore() async throws -> MemoryStore {
         .appendingPathComponent("bridge-memory-appendix-tests", isDirectory: true)
         .appendingPathComponent(UUID().uuidString, isDirectory: true)
     let url = dir.appendingPathComponent("memory.sqlite")
-    let store = MemoryStore(path: url)
+    let store = MemoryStore(path: url, embedder: StubMemoryEmbedder())
     try await store.open()
     return store
 }

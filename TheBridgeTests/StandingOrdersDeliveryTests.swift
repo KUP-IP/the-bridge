@@ -192,11 +192,9 @@ func runStandingOrdersDeliveryTests() async {
                    "entity row present; got:\n\(md)")
         try expect(md.contains("source: t"), "row must include source; got:\n\(md)")
         try expect(md.contains("used 3×"), "use count present; got:\n\(md)")
-        // No entity → entity segment omitted; useCount 0 → use segment omitted.
-        try expect(md.contains("- [fact] no entity here"), "no-entity row present")
-        try expect(md.contains("source: t"), "no-entity row still has source")
-        try expect(!md.contains("- [fact] no entity here ·"),
-                   "no-entity row must not have a dangling entity segment")
+        // No entity → entity segment omitted; source + date always present.
+        try expect(md.contains("- [fact] no entity here · source: t"), "no-entity row includes source; got:\n\(md)")
+        try expect(!md.contains("- [fact] no entity here · isaiah"), "no-entity row must not include a fake entity segment")
         // useCount 1 still renders (only 0 is omitted).
         try expect(md.contains("- [decision] ships in Q3 · atlas"),
                    "decision row with entity; got:\n\(md)")
