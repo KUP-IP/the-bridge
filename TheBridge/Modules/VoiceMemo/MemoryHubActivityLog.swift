@@ -53,6 +53,18 @@ public enum MemoryHubActivityEventType: String, Codable, Sendable, CaseIterable 
 
     /// Forward-compat fallback — decode unknown raw values to this.
     case unknown
+
+    // Custom Codable: fall back to .unknown instead of throwing on unrecognised raw values,
+    // so future event types added to the log don't break older Bridge versions reading the JSONL.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = MemoryHubActivityEventType(rawValue: raw) ?? .unknown
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(rawValue)
+    }
 }
 
 /// One Memory Hub activity receipt (the structured envelope, SPEC §2 / PKT-MEM-106 0b).

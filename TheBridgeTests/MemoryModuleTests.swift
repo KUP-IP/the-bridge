@@ -285,12 +285,12 @@ func runMemoryModuleTests() async {
 
     // MARK: - Module registration + tiering
 
-    await test("MemoryModule registers exactly 5 tools") {
+    await test("MemoryModule registers exactly 6 tools") {
         let (store, url) = makeTempStore()
         defer { Task { await store.close(); cleanup(url) } }
         let router = await makeMemoryRouter(store)
         let tools = await router.registrations(forModule: "memory")
-        try expect(tools.count == 5, "expected 5 memory tools, got \(tools.count)")
+        try expect(tools.count == 6, "expected 6 memory tools (added memory_update D35), got \(tools.count)")
     }
 
     await test("memory_forget soft-tombstones an entry") {
