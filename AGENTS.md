@@ -43,7 +43,7 @@ There is no way to run a single test file in isolation — all tests run from `T
 ```bash
 make app           # Release build + package .build/TheBridge.app
 make install       # sign → notarize → staple → ditto → /Applications/The Bridge.app (needs Developer ID + notary keychain profile)
-make install-copy  # Same .app to /Applications without sign/notarize — local dev only
+make install-copy  # Developer ID sign + copy → /Applications (no notarize) — daily dev install
 make dmg           # Create distributable DMG
 make sign          # Code-sign with Developer ID
 make notarize      # Submit to Apple notarization (requires keychain profile)
@@ -51,9 +51,11 @@ make release       # Full pipeline: clean → test → app → sign → notarize
 make check-appcast # Fail if appcast.xml does not match Info.plist version/build numbers
 ```
 
-**Production install ladder (canonical):** `make test` → `make app` → `make install` when signing credentials exist; otherwise `make install-copy` and accept ad-hoc / Gatekeeper differences. **`swift build` alone does not refresh `/Applications`** — always use the Makefile app target.
+**Production install ladder (canonical):** `make test` → `make app` → `make install` when signing credentials exist (notarized, Gatekeeper-stapled); otherwise `make install-copy` (signed with Developer ID, **not** notarized — ~2 min vs ~28 min). **`swift build` alone does not refresh `/Applications`** — always use the Makefile app target. Testing from `.build/TheBridge.app` without install breaks TCC identity; always install to `/Applications/The Bridge.app`.
 
-**Agents / Cursor / MCP-driven sessions:** After `make app`, use **`make install-copy`** or **`make install-agent-safe`** (same target) to copy `.build/TheBridge.app` → `/Applications/The Bridge.app` without running the full notarize pipeline. Avoid long `make install` / `make release` from the same session that hosts your MCP connection if the workflow would time out or abort. The `install` target only sends `killall Dock` (icon refresh), not the The Bridge process—historical friction is documented in `AGENT_FEEDBACK.md` and resolved by preferring `install-copy` for copy-only installs.
+**Agents / Cursor / MCP-driven sessions:** After `make app`, use **`make install-copy`** or **`make install-agent-safe`** (alias — same target: `check-stale-build sign` then copy) to refresh `/Applications/The Bridge.app` without the notarize pipeline. Neither target ships to users — only `git tag` + CI does (Sparkle). Avoid long `make install` / `make release` from the same session that hosts your MCP connection if the workflow would time out or abort. The `install` target only sends `killall Dock` (icon refresh), not the The Bridge process—historical friction is documented in `AGENT_FEEDBACK.md` and resolved by preferring `install-copy` for copy-only installs.
+
+**Notion skill sync:** After editing the **app-dev** skill page in Notion, run `skill_sync_notion` (Bridge MCP) on your Mac so `fetch_skill('app-dev')` serves the updated body. Bridge restart may be required if the skill cache was already loaded.
 
 If `make app` warns that `actool` failed, icons may fall back to PNGs; see Makefile `app` target (asset compile is best-effort). A common cause is a broken **ibtoold** plugin load (`xcodebuild -runFirstLaunch` or opening **Xcode** once to refresh system content), not Swift source errors.
 

@@ -234,7 +234,7 @@ Other useful targets:
 ```bash
 make clean
 make install
-make install-copy    # or: make install-agent-safe — copy .app to /Applications without full notarize (agent-safe)
+make install-copy    # or: make install-agent-safe — Developer ID sign + copy to /Applications (no notarize)
 make release
 ```
 
