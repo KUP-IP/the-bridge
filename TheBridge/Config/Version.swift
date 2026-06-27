@@ -225,7 +225,9 @@ public enum BridgeConstants {
     /// Packet Runner v1 (FR-1/§8.3, merged from main 2026-06-25): + registry_hydrate
     ///   (packet-registry-v1 one-hop envelope). 186 + 1 = 187.
     ///   (PKT-MEM-106 Phase 0 added internal types only — no new MCP tools.)
-    public static let staticFeatureModuleToolCount = 187
+    /// Memory Hub UX Reconstruction (D35/D41, 2026-06-27): + memory_update
+    ///   (in-place AGENTS field update tool). 187 + 1 = 188.
+    public static let staticFeatureModuleToolCount = 188
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

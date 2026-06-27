@@ -218,6 +218,10 @@ public enum ToolAnnotationCatalog {
         "memory_recall": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "memory_remember": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "memory_forget": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: false, openWorld: false),
+        // D35/D41: in-place update of editable AGENTS fields. Non-destructive (fields remain,
+        // content is updated in place), not idempotent (calling with different text changes
+        // content each time), tier .notify → requiresConfirmation:false. Closed local store.
+        "memory_update": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "voice_memo_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "voice_memo_process": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "voice_memo_review_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),

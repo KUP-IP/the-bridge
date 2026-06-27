@@ -3,6 +3,46 @@
 
 import Foundation
 import MCP
+#if canImport(AppKit)
+import AppKit
+#endif
+
+// MARK: - Disposition types (D8 / D9 / D13)
+
+/// Scope for a dismiss operation: this lane only, or all sibling lanes for the memo.
+public enum DismissScope: String, Sendable, Equatable, CaseIterable {
+    case thisLane
+    case allLanes
+}
+
+/// Result of a dismiss operation.
+public struct DismissResult: Sendable, Equatable {
+    /// True if the targeted lane (and any sibling lanes per scope) was found and dismissed.
+    public let dismissed: Bool
+    /// True if the source memo was marked processed as a result (all pending lanes resolved).
+    public let memoMarkedProcessed: Bool
+    /// True if sibling pending lanes exist and scope was .thisLane (caller may offer scope choice).
+    public let hasSiblingLanes: Bool
+
+    public init(dismissed: Bool, memoMarkedProcessed: Bool, hasSiblingLanes: Bool) {
+        self.dismissed = dismissed
+        self.memoMarkedProcessed = memoMarkedProcessed
+        self.hasSiblingLanes = hasSiblingLanes
+    }
+}
+
+/// Result of a trash operation (D9).
+public struct TrashResult: Sendable, Equatable {
+    /// Number of items moved to macOS Trash (audio + sidecars).
+    public let itemsTrashed: Int
+    /// Evidence id emitted to MemoryHubActivityLog.
+    public let evidenceId: UUID
+
+    public init(itemsTrashed: Int, evidenceId: UUID) {
+        self.itemsTrashed = itemsTrashed
+        self.evidenceId = evidenceId
+    }
+}
 
 public struct VoiceMemoReviewEntry: Codable, Sendable, Equatable, Identifiable {
     public enum Status: String, Codable, Sendable {
@@ -175,15 +215,161 @@ public enum VoiceMemoReviewStore {
         load().entries.filter { $0.status == .pending }
     }
 
+    /// Legacy single-Bool dismiss — kept for existing callers.
     @discardableResult
     public static func dismiss(id: String, at date: Date = Date()) throws -> Bool {
+        let result = try dismissWithResult(id: id, scope: .thisLane, at: date)
+        return result.dismissed
+    }
+
+    /// Structured dismiss with D8/D13 semantics.
+    ///
+    /// - When `scope == .thisLane`: dismiss just this lane. If sibling pending entries
+    ///   exist for the same memo, `hasSiblingLanes` is true and the memo is NOT marked
+    ///   processed yet (caller presents scope choice per D13).
+    /// - When `scope == .allLanes`: dismiss this lane AND all sibling pending entries
+    ///   for the same memo. Marks memo processed once all lanes are resolved.
+    @discardableResult
+    public static func dismissWithResult(
+        id: String,
+        scope: DismissScope = .thisLane,
+        at date: Date = Date()
+    ) throws -> DismissResult {
         var manifest = load()
-        guard let idx = manifest.entries.firstIndex(where: { $0.id == id }) else { return false }
+        guard let idx = manifest.entries.firstIndex(where: { $0.id == id }) else {
+            return DismissResult(dismissed: false, memoMarkedProcessed: false, hasSiblingLanes: false)
+        }
+        let memoId = manifest.entries[idx].memoId
+
+        // Dismiss the targeted lane.
         manifest.entries[idx].status = .dismissed
         manifest.entries[idx].statusChangedAt = ISO8601DateFormatter().string(from: date)
         materializeIntentId(&manifest.entries[idx])
+
+        if scope == .allLanes {
+            // Dismiss all other pending lanes for the same memo.
+            for i in manifest.entries.indices where manifest.entries[i].memoId == memoId
+                && manifest.entries[i].id != id
+                && manifest.entries[i].status == .pending {
+                manifest.entries[i].status = .dismissed
+                manifest.entries[i].statusChangedAt = ISO8601DateFormatter().string(from: date)
+                materializeIntentId(&manifest.entries[i])
+            }
+        }
+
         try save(manifest)
-        return true
+
+        // Determine sibling state AFTER dismissal.
+        let remainingPending = manifest.entries.filter {
+            $0.memoId == memoId && $0.status == .pending
+        }
+        let hasSiblings = !remainingPending.isEmpty
+
+        // Mark memo processed if gate is clear (no pending lanes remain).
+        var markedProcessed = false
+        if !hasSiblings {
+            markedProcessed = (try? VoiceMemoProcessedGate.markProcessedIfClear(memoId: memoId, at: date)) ?? false
+        }
+
+        return DismissResult(
+            dismissed: true,
+            memoMarkedProcessed: markedProcessed,
+            hasSiblingLanes: hasSiblings
+        )
+    }
+
+    /// Trash: move the source audio file and sidecars to macOS Trash (D9).
+    /// Dismisses ALL pending review entries for the memo and emits ACTIVITY evidence.
+    public static func trash(memoId: String, at date: Date = Date()) async throws -> TrashResult {
+        let evidenceId = UUID()
+
+        // Collect URLs to trash.
+        var urlsToTrash: [URL] = []
+
+        // Find the audio file URL from the review entries or discovered recordings.
+        var memoPath: String? = {
+            let manifest = load()
+            return manifest.entries.first(where: { $0.memoId == memoId })?.memoPath
+        }()
+
+        // Also check discovery roots if no path in review entries.
+        if memoPath == nil {
+            let roots = VoiceMemoDiscovery.defaultRecordingRoots()
+            let recordings = VoiceMemoDiscovery.listRecordings(roots: roots)
+            memoPath = recordings.first(where: { VoiceMemoDiscovery.stableId(for: URL(fileURLWithPath: $0.path)) == memoId })?.path
+        }
+
+        if let path = memoPath {
+            let audioURL = URL(fileURLWithPath: path)
+            let fm = FileManager.default
+            if fm.fileExists(atPath: audioURL.path) {
+                urlsToTrash.append(audioURL)
+            }
+            // Sidecars: transcript.json and summary.json alongside the audio.
+            let base = audioURL.deletingPathExtension()
+            let sidecarSuffixes = [".transcript.json", ".summary.json", ".json"]
+            for suffix in sidecarSuffixes {
+                let sidecar = base.deletingLastPathComponent()
+                    .appendingPathComponent(base.lastPathComponent + suffix)
+                if fm.fileExists(atPath: sidecar.path) {
+                    urlsToTrash.append(sidecar)
+                }
+            }
+        }
+
+        // Move to macOS Trash via NSWorkspace (must call on main actor).
+        var itemsTrashed = 0
+        if !urlsToTrash.isEmpty {
+#if canImport(AppKit)
+            itemsTrashed = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Int, Error>) in
+                let urlsCopy = urlsToTrash
+                DispatchQueue.main.async {
+                    NSWorkspace.shared.recycle(urlsCopy) { trashedURLs, error in
+                        if let error {
+                            continuation.resume(throwing: error)
+                        } else {
+                            continuation.resume(returning: trashedURLs.count)
+                        }
+                    }
+                }
+            }
+#else
+            // Fallback for non-AppKit builds: attempt FileManager removal.
+            for url in urlsToTrash {
+                if (try? FileManager.default.trashItem(at: url, resultingItemURL: nil)) != nil {
+                    itemsTrashed += 1
+                }
+            }
+#endif
+        }
+
+        // Dismiss ALL pending review entries for this memo.
+        var manifest = load()
+        for i in manifest.entries.indices where manifest.entries[i].memoId == memoId
+            && manifest.entries[i].status == .pending {
+            manifest.entries[i].status = .dismissed
+            manifest.entries[i].statusChangedAt = ISO8601DateFormatter().string(from: date)
+            materializeIntentId(&manifest.entries[i])
+        }
+        try save(manifest)
+
+        // Mark memo processed (gate should now be clear).
+        try? VoiceMemoProcessedGate.markProcessedIfClear(memoId: memoId, at: date)
+
+        // Emit ACTIVITY evidence (D9 / D12).
+        let trashEvent = MemoryHubActivityEvent(
+            timestamp: ISO8601DateFormatter().string(from: date),
+            memoId: memoId,
+            phase: .execute,
+            action: "dispositionTrash",
+            status: "completed",
+            provenance: "VoiceMemoReviewStore.trash",
+            actor: "system",
+            detail: "Moved \(itemsTrashed) item(s) to Trash; evidenceId=\(evidenceId.uuidString)"
+        )
+        try? MemoryHubActivityLog.append(trashEvent, now: date)
+
+        return TrashResult(itemsTrashed: itemsTrashed, evidenceId: evidenceId)
     }
 
     @discardableResult
