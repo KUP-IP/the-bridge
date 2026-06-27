@@ -66,11 +66,12 @@ public enum MemoryRoutingScopeMap {
 
         guard !tokens.isEmpty else { return nil }
 
-        let scopedEntities = liveEntities
-        for token in tokens where scopedEntities.contains(token) {
+        for token in tokens where liveEntities.contains(token) {
             return token
         }
-        return tokens.first
+        // Only filter by entity when a token matches a live row — avoids
+        // false-positive entity filters from verb-adjacent slug tokens.
+        return nil
     }
 
     /// Collect distinct non-empty entity strings for the given scopes.

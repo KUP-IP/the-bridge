@@ -83,7 +83,7 @@ func runMemoryRoutingAppendixTests() async {
         let out = await MemoryRoutingAppendix.attach(
             to: base,
             parent: "mac-keepr",
-            intent: "install-copy",
+            intent: "make install-copy",
             store: store
         )
         guard case .object(let obj) = out,
