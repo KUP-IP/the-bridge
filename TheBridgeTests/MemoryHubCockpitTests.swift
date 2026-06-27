@@ -108,22 +108,25 @@ func runMemoryHubCockpitTests() async {
         }
     }
 
-    await test("activity_retention_500eventCap") {
+    await test("activity_retention_eventCap") {
+        // D24: cap at maxEvents (2000). Test with maxEvents+1 events.
         let now = ISO8601DateFormatter().date(from: "2026-06-25T12:00:00Z")!
         let events = (0..<(MemoryHubActivityLog.maxEvents + 1)).map { i in
             makeEvent(action: "a\(i)", timestamp: "2026-06-25T11:00:00Z")
         }
         let pruned = MemoryHubActivityLog.prune(events, now: now)
-        try expect(pruned.count == MemoryHubActivityLog.maxEvents, "501 recent ⇒ pruned to 500, got \(pruned.count)")
-        try expect(pruned.first?.action == "a1", "oldest dropped (kept the newest 500)")
+        try expect(pruned.count == MemoryHubActivityLog.maxEvents, "\(MemoryHubActivityLog.maxEvents + 1) recent ⇒ pruned to \(MemoryHubActivityLog.maxEvents), got \(pruned.count)")
+        try expect(pruned.first?.action == "a1", "oldest dropped (kept the newest \(MemoryHubActivityLog.maxEvents))")
     }
 
-    await test("activity_retention_30dayCap_whicheverSmaller") {
+    await test("activity_retention_90dayCap_whicheverSmaller") {
+        // D24: 2000 events OR 90 days — whichever removes more.
         let now = ISO8601DateFormatter().date(from: "2026-06-25T12:00:00Z")!
-        let old = makeEvent(action: "old", timestamp: "2026-05-01T12:00:00Z")   // > 30 days
+        // 2026-03-01 is ~116 days before 2026-06-25 → older than 90 days → pruned
+        let old = makeEvent(action: "old", timestamp: "2026-03-01T12:00:00Z")
         let fresh = makeEvent(action: "fresh", timestamp: "2026-06-25T11:00:00Z")
         let pruned = MemoryHubActivityLog.prune([old, fresh], now: now)
-        try expect(pruned.map(\.action) == ["fresh"], "events older than 30 days dropped even under 500-count")
+        try expect(pruned.map(\.action) == ["fresh"], "events older than 90 days dropped even under 2000-count")
     }
 
     await test("activity_file_path_underMemoryHub") {
