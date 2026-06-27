@@ -3,14 +3,14 @@
     <channel>
         <title>TheBridge</title>
         <item>
-            <title>3.8.5</title>
-            <pubDate>Fri, 26 Jun 2026 20:49:45 +0000</pubDate>
+            <title>3.9.0</title>
+            <pubDate>Sat, 27 Jun 2026 03:19:34 +0000</pubDate>
             <link>https://github.com/KUP-IP/the-bridge/releases</link>
-            <sparkle:version>65</sparkle:version>
-            <sparkle:shortVersionString>3.8.5</sparkle:shortVersionString>
+            <sparkle:version>66</sparkle:version>
+            <sparkle:shortVersionString>3.9.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/KUP-IP/the-bridge/releases/download/v3.8.5/the-bridge-v3.8.5.dmg" length="21616839" type="application/octet-stream" sparkle:edSignature="w2hXZc3l+8KjCZ/zSAv+YS0pMGPNkrKYwTVyOsjFOY5COrjFCfvi+71XvlBQQbTEFQh4fNpKW6S1+zR1aHp+Aw=="/>
+            <enclosure url="https://github.com/KUP-IP/the-bridge/releases/download/v3.9.0/the-bridge-v3.9.0.dmg" length="21658295" type="application/octet-stream" sparkle:edSignature="8DxuasnEwDyaFVE8irt2gX9bASTSwt196jBCKfKMCG+I9aCMuRo8XvpTnaz339q+Tm5EogH7avJFh747o6UmDA=="/>
         </item>
     </channel>
 </rss>
