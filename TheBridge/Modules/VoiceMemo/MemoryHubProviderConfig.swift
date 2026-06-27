@@ -7,6 +7,11 @@
 // OpenAI endpoint; model has no default and must be operator-entered before cloud
 // enhancement can run. Save validates LOCAL SYNTAX only (URL shape + required local
 // fields); network/model validation happens only when manual cloud enhancement runs.
+//
+// PROCESSING provider capability profile contracts (D6/D17/D23/D36/D42):
+// ProviderFamily, ProviderCapability, CredentialReference, ProviderCapabilityProfile,
+// ProviderFallbackChain, ProviderProfileConfig, ProviderValidationError,
+// ProviderSyntaxValidator, ProviderTestResult.
 
 import Foundation
 
@@ -118,5 +123,160 @@ public enum MemoryHubProviderConfigStore {
     @discardableResult
     public static func deleteKey(providerId: String) -> Bool {
         KeychainManager.shared.delete(key: keychainKey(for: providerId))
+    }
+}
+
+// MARK: - PROCESSING Provider Capability Profile Contracts (D6/D17/D23/D36/D42)
+
+/// Which AI provider family a profile targets.
+public enum ProviderFamily: Codable, Sendable, Equatable, Hashable {
+    case anthropic
+    case openai
+    case cursor
+    case google
+    case elevenLabs
+    case custom(id: String)
+}
+
+/// What capability a provider profile is configured to serve.
+public enum ProviderCapability: String, CaseIterable, Codable, Sendable, Equatable, Hashable {
+    case transcription
+    case summarization
+    case titleGeneration
+    case quizGeneration
+    case routing
+    case general
+}
+
+/// A reference to a Keychain-stored credential. The field holds the Keychain key name only —
+/// never a raw secret value (D23).
+public struct CredentialReference: Codable, Sendable, Equatable {
+    /// Keychain key name (not the secret itself — the key under which the secret is stored).
+    public let credentialKey: String
+    /// Human-readable label for UI display.
+    public let label: String?
+
+    public init(credentialKey: String, label: String? = nil) {
+        self.credentialKey = credentialKey
+        self.label = label
+    }
+}
+
+/// A single profile in a capability fallback chain (D42).
+public struct ProviderCapabilityProfile: Codable, Sendable, Equatable {
+    public let capability: ProviderCapability
+    public let family: ProviderFamily
+    /// Keychain credential reference — never a raw secret (D23).
+    public let credentialRef: CredentialReference?
+    public let modelId: String?
+    public let endpointOverride: URL?
+    public let isEnabled: Bool
+
+    public init(
+        capability: ProviderCapability,
+        family: ProviderFamily,
+        credentialRef: CredentialReference? = nil,
+        modelId: String? = nil,
+        endpointOverride: URL? = nil,
+        isEnabled: Bool = true
+    ) {
+        self.capability = capability
+        self.family = family
+        self.credentialRef = credentialRef
+        self.modelId = modelId
+        self.endpointOverride = endpointOverride
+        self.isEnabled = isEnabled
+    }
+}
+
+/// Ordered fallback chain for a single capability: first enabled profile wins (D42).
+public typealias ProviderFallbackChain = [ProviderCapabilityProfile]
+
+public extension ProviderFallbackChain {
+    /// Returns the first enabled profile in the chain, or nil if none are enabled.
+    func activeProfile() -> ProviderCapabilityProfile? {
+        first(where: { $0.isEnabled })
+    }
+}
+
+/// Top-level config: one fallback chain per capability (D42).
+public struct ProviderProfileConfig: Codable, Sendable {
+    public let chains: [ProviderCapability: ProviderFallbackChain]
+
+    public init(chains: [ProviderCapability: ProviderFallbackChain] = [:]) {
+        self.chains = chains
+    }
+
+    /// Returns the fallback chain for a capability, or [] if not configured.
+    public func chain(for capability: ProviderCapability) -> ProviderFallbackChain {
+        chains[capability] ?? []
+    }
+
+    /// Returns the active (first enabled) profile for a capability, or nil.
+    public func activeProfile(for capability: ProviderCapability) -> ProviderCapabilityProfile? {
+        chain(for: capability).activeProfile()
+    }
+}
+
+/// A validation error for a specific field of a provider profile (D36).
+public struct ProviderValidationError: Sendable, Equatable {
+    public let field: String
+    public let message: String
+
+    public init(field: String, message: String) {
+        self.field = field
+        self.message = message
+    }
+}
+
+/// Local-only syntax validator for a provider capability profile (D36: no network calls here).
+public struct ProviderSyntaxValidator: Sendable {
+    public init() {}
+
+    /// Validates syntax of a profile. Returns [] if valid. No network calls are made (D36).
+    public func validateSyntax(_ profile: ProviderCapabilityProfile) -> [ProviderValidationError] {
+        var errors: [ProviderValidationError] = []
+
+        // modelId present but empty string is an error
+        if let modelId = profile.modelId, modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            errors.append(ProviderValidationError(field: "modelId", message: "modelId must not be an empty string when set"))
+        }
+
+        // endpointOverride: if non-nil URL was constructed it's valid by construction; however
+        // we guard against a nil URL from a bad string that might slip through at init via a
+        // property wrapper — the URL type itself guarantees structural validity for non-nil.
+        // No additional check needed for URL type field; callers constructing from a string
+        // should use URL(string:) which will produce nil for malformed strings.
+
+        // credentialRef present but credentialKey is empty
+        if let ref = profile.credentialRef, ref.credentialKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            errors.append(ProviderValidationError(field: "credentialRef.credentialKey", message: "credentialKey must not be empty when credentialRef is set"))
+        }
+
+        return errors
+    }
+}
+
+/// Result of an explicit "Test profile" action (D36/D42). The evidenceId links to the
+/// ACTIVITY log entry emitted for this test run.
+public struct ProviderTestResult: Codable, Sendable {
+    public let capability: ProviderCapability
+    public let success: Bool
+    public let message: String
+    public let evidenceId: UUID
+    public let testedAt: Date
+
+    public init(
+        capability: ProviderCapability,
+        success: Bool,
+        message: String,
+        evidenceId: UUID = UUID(),
+        testedAt: Date = Date()
+    ) {
+        self.capability = capability
+        self.success = success
+        self.message = message
+        self.evidenceId = evidenceId
+        self.testedAt = testedAt
     }
 }
