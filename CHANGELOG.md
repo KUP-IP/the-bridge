@@ -1,6 +1,6 @@
 # Changelog
 
-## v3.9.0 — Unified Memory Wave 3 (surfacing + governance) — PKT-MEM-115
+## v3.9.0 — Unified Memory Wave 3 (surfacing + governance) — PKT-MEM-115 — 2026-06-26
 
 - **Handshake memory inject** — Settings toggle (global OFF default); per-client overrides with Cursor launch-seeded ON; stdio `clientName` pass-through for per-client inject resolution.
 - **Memory-rides-routing** — `fetch_skill` returns optional `scopedMemory` appendix (post-cache merge; parent→scope map + intent recall).
