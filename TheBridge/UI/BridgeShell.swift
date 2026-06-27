@@ -202,6 +202,20 @@ public enum BridgeAXID {
         public static let agentScopeFilter = id("agent.filter.scope")
         /// Agent type filter menu.
         public static let agentTypeFilter  = id("agent.filter.type")
+        /// Pin / unpin on an agent memory row.
+        public static let agentPinButton   = id("agent.pin")
+        /// Soft-forget on an agent memory row.
+        public static let agentForgetButton = id("agent.forget")
+        /// Surfacing settings card (inject controls).
+        public static let surfacingCard    = id("agent.surfacing")
+        /// Global handshake inject toggle.
+        public static let injectGlobalToggle = id("agent.inject.global")
+        /// New per-client override name field.
+        public static let injectClientNameField = id("agent.inject.clientName")
+        /// Add per-client override button.
+        public static let injectAddOverride = id("agent.inject.add")
+        /// Remove per-client override button (shared id).
+        public static let injectRemoveOverride = id("agent.inject.remove")
         // Pre-cockpit Process ids (process.list/preview/pipeline/dryRun/execute) were removed:
         // the PKT-MEM-106 0b cockpit replaced them with the `Process.*` nested enum below, and
         // they were orphaned (no view/test/manifest references).

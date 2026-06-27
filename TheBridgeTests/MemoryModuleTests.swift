@@ -738,4 +738,40 @@ func runMemoryModuleTests() async {
         store.resetForTesting()
         try expect(store.allOverrides().isEmpty, "resetForTesting must clear all overrides")
     }
+
+    await test("memory_recall response includes source field") {
+        let (store, url) = makeTempStore()
+        defer { Task { await store.close(); cleanup(url) } }
+        _ = try await store.remember(text: "provenance row", scope: "global", source: "cursor")
+        let router = await makeMemoryRouter(store)
+        let result = try await callMemoryHandler(router, "memory_recall", .object([
+            "query": .string("provenance"),
+            "scope": .string("global"),
+            "limit": .int(5)
+        ]))
+        if case .array(let rows)? = memObjField(result, "memories"),
+           let first = rows.first,
+           case .object(let obj) = first,
+           case .string(let source)? = obj["source"] {
+            try expect(source == "cursor", "source must round-trip; got \(source)")
+        } else {
+            try expect(false, "recall must return memories with source")
+        }
+    }
+
+    await test("MemoryStore pin toggles pinned flag") {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("memory-pin-test-\(UUID().uuidString)", isDirectory: true)
+        let url = dir.appendingPathComponent("memory.sqlite")
+        let store = MemoryStore(path: url)
+        defer { Task { await store.close() } }
+        try await store.open()
+        let saved = try await store.remember(text: "pin target", scope: "global", source: "t")
+        try await store.pin(id: saved.id, true)
+        let pinned = try await store.get(id: saved.id)
+        try expect(pinned?.pinned == true, "pin must set pinned true")
+        try await store.pin(id: saved.id, false)
+        let unpinned = try await store.get(id: saved.id)
+        try expect(unpinned?.pinned == false, "pin must clear pinned flag")
+    }
 }

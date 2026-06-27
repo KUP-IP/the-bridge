@@ -187,16 +187,18 @@ func runStandingOrdersDeliveryTests() async {
         try expect(md.range(of: "## people")!.lowerBound < md.range(of: "## project")!.lowerBound,
                    "scopes follow first-appearance (ranked) order")
 
-        // Row shape: [type] text · entity · used N×
-        try expect(md.contains("- [preference] prefers concise replies · isaiah · used 3×"),
-                   "pinned entity row with use count; got:\n\(md)")
-        // No entity → entity segment omitted; useCount 0 → use segment omitted.
-        try expect(md.contains("- [fact] no entity here"), "no-entity row present")
-        try expect(!md.contains("- [fact] no entity here ·"),
-                   "no-entity / zero-use row must have NO trailing · segments")
+        // Row shape: [type] text · entity · source · date · used N×
+        try expect(md.contains("- [preference] prefers concise replies · isaiah"),
+                   "entity row present; got:\n\(md)")
+        try expect(md.contains("source: t"), "row must include source; got:\n\(md)")
+        try expect(md.contains("used 3×"), "use count present; got:\n\(md)")
+        // No entity → entity segment omitted; source + date always present.
+        try expect(md.contains("- [fact] no entity here · source: t"), "no-entity row includes source; got:\n\(md)")
+        try expect(!md.contains("- [fact] no entity here · isaiah"), "no-entity row must not include a fake entity segment")
         // useCount 1 still renders (only 0 is omitted).
-        try expect(md.contains("- [decision] ships in Q3 · atlas · used 1×"),
-                   "decision row with entity + use count 1")
+        try expect(md.contains("- [decision] ships in Q3 · atlas"),
+                   "decision row with entity; got:\n\(md)")
+        try expect(md.contains("used 1×"), "decision use count")
     }
 
     await test("Memory resource: read via temp-store actor bridges cleanly (pinned-first, non-empty)") {
@@ -229,6 +231,47 @@ func runStandingOrdersDeliveryTests() async {
         try expect(md.range(of: "pin me to the top")!.lowerBound
                    < md.range(of: "ordinary salient fact")!.lowerBound,
                    "pinned entry must render before the unpinned one")
+    }
+
+    await test("asyncComposition: per-client override ON injects memory block") {
+        let injectStore = MemoryAutoInjectClientStore.shared
+        injectStore.resetForTesting()
+        defer { injectStore.resetForTesting() }
+
+        try await withDeliveryTempHome { _ in
+            try StandingOrdersStore.shared.resetForTesting()
+            _ = try StandingOrdersStore.shared.write("# Orders\n\nwave3 inject")
+
+            let memStore = MemoryStore.shared
+            try await memStore.open()
+            _ = try await memStore.remember(text: "inject me at handshake", scope: "global", source: "cursor")
+
+            UserDefaults.standard.set(false, forKey: BridgeDefaults.memoryHandshakeAutoInject)
+            injectStore.setOverride(true, forClient: "cursor")
+
+            let sync = StandingOrdersDelivery.composition(clientName: "cursor")
+            let injected = await StandingOrdersDelivery.asyncComposition(clientName: "cursor")
+            try expect(injected.instructionsMarkdown.contains("## Memory"),
+                       "cursor override must inject memory section")
+            try expect(injected.instructionsMarkdown.contains("inject me at handshake"),
+                       "injected slice must include salient memory")
+            try expect(sync.instructionsMarkdown != injected.instructionsMarkdown,
+                       "injected composition must differ from sync when override ON")
+        }
+    }
+
+    await test("MemoryAutoInjectClientStore: seedWave3DefaultsIfNeeded is idempotent") {
+        let store = MemoryAutoInjectClientStore.shared
+        store.resetForTesting()
+        defer { store.resetForTesting() }
+
+        UserDefaults.standard.set(false, forKey: BridgeDefaults.memoryHandshakeAutoInject)
+        MemoryAutoInjectClientStore.seedWave3DefaultsIfNeeded()
+        try expect(store.override(forClient: "cursor") == true, "first seed sets cursor ON")
+        store.setOverride(false, forClient: "cursor")
+        MemoryAutoInjectClientStore.seedWave3DefaultsIfNeeded()
+        try expect(store.override(forClient: "cursor") == false,
+                   "seed must not overwrite non-empty override map")
     }
 }
 

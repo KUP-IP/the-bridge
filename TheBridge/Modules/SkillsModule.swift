@@ -74,7 +74,11 @@ public enum SkillsModule {
     specialist it returns. When the sub-task changes, re-route with a fresh \
     intent. If fetch_skill returns a `disambiguate` annotation, pick from its \
     `candidates` (fetch_skill('parent/<name>')) rather than guessing; a \
-    `routingFooter` names the sibling specialists you can switch to.
+    `    routingFooter` names the sibling specialists you can switch to.
+    After `fetch_skill(parent, intent:)`, read `scopedMemory.markdown` when \
+    present and treat it as grounding for this sub-task only — re-fetch when \
+    the intent changes (scope map uses the parent slug from `name`, not a \
+    resolved specialist title).
     Capture disambiguation: when something should be DONE for the user, use \
     reminders_create (a real Apple/iCloud reminder the user will see); when \
     something should be KNOWN by the agent for later, use the memory/remember \
@@ -283,7 +287,11 @@ public enum SkillsModule {
                         )
                         // fb-resultsize: apply the optional section selector
                         // to the file-source envelope's rendered `content`.
-                        return Self.applySectionToEnvelope(fileEnvelope, section: sectionArg)
+                        return await MemoryRoutingAppendix.attach(
+                            to: Self.applySectionToEnvelope(fileEnvelope, section: sectionArg),
+                            parent: name,
+                            intent: intentArg
+                        )
                     }
                     let closeMatches = closestSkillMatches(for: name)
                     let allSkills = listAvailableSkillNames()
@@ -310,7 +318,11 @@ public enum SkillsModule {
                 let cacheKey = "\(name.lowercased())|n=\(includeNested)|mb=\(maxBlocks)|md=\(maxDepth)|meta=\(skillConfig.metadataCacheToken)\(pathSelectorKey)\(sectionKey)"
 
                 if let cached = await cache.get(cacheKey) {
-                    return cached
+                    return await MemoryRoutingAppendix.attach(
+                        to: cached,
+                        parent: name,
+                        intent: intentArg
+                    )
                 }
 
                 guard skillConfig.enabled else {
@@ -385,7 +397,11 @@ public enum SkillsModule {
                             )
                         }
                     }
-                    return result
+                    return await MemoryRoutingAppendix.attach(
+                        to: result,
+                        parent: name,
+                        intent: intentArg
+                    )
                 }
 
                 // Fetch from Notion API
@@ -530,8 +546,11 @@ public enum SkillsModule {
                         try? await bodyStore.write(entry)
                     }
 
-                    return result
-
+                    return await MemoryRoutingAppendix.attach(
+                        to: result,
+                        parent: name,
+                        intent: intentArg
+                    )
                 } catch let error as NotionClientError {
                     // F10: 403 handling — structured error + "Access Lost" badge
                     if case .httpError(let code, let msg) = error, code == 403 {

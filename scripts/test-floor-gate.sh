@@ -1550,7 +1550,13 @@ set -euo pipefail
 # audio). SAME WorkOS-injection caveat: the 4 placeholder failures are the build-injected RemoteAccessIdentity.swift
 # (operator IdP baked locally), NOT this slice — measured 2667/0 with the committed fail-closed source restored
 # (gate EXIT=0). 2653→2667.
-FLOOR="${BRIDGE_TEST_FLOOR:-2667}"
+# 2026-06-26 (PKT-MEM-115 Wave 3 — memory surfacing + governance): +15 tests across
+# runMemoryRoutingAppendixTests (scope map, entity denylist, row formatter provenance,
+# appendix attach/omit, post-cache freshness, error-skip) plus StandingOrdersDelivery
+# inject-override composition + seedWave3DefaultsIfNeeded idempotency, MemoryModule
+# recall source + pin toggle. Hermetic temp DB / shared hermetic config path.
+# 2667→2682.
+FLOOR="${BRIDGE_TEST_FLOOR:-2682}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

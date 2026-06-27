@@ -294,6 +294,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             print("[PathMigration] WARNING: migration failed: \(error)")
         }
 
+        // PKT-MEM-115 Wave 3: fresh installs seed per-client Cursor inject ON.
+        MemoryAutoInjectClientStore.seedWave3DefaultsIfNeeded()
+
         // PKT-977 Wave 2: demote stale reference memories on launch (best-effort).
         Task {
             do {
