@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "Bridge MCP SSE": {
+      "serverUrl": "http://127.0.0.1:9700/sse",
+      "headers": {
+        "Authorization": "Bearer c2OBNaZBvtiFZJSxyNzxNx1qNwx3+ph+2u6FS/svbNI="
+      }
+    },
+    "Bridge MCP HTTP": {
+      "serverUrl": "http://127.0.0.1:9700/mcp",
+      "headers": {
+        "Authorization": "Bearer c2OBNaZBvtiFZJSxyNzxNx1qNwx3+ph+2u6FS/svbNI="
+      }
+    }
+  }
+}

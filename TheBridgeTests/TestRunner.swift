@@ -923,6 +923,12 @@ await runBridgeTokensAdaptiveTests()
 // dir — never touches /Applications.
 await runSparkleResilienceTests()
 
+// Memory Hub Foundation — ACTIVITY+KEEP (D12 event log, D24 retention, KeepReview model)
+await runMemoryHubActivityTests()
+
+// Memory Hub Foundation — PROCESSING provider contracts (D23 credential refs, provider chain)
+await runProcessingProviderTests()
+
 // ============================================================
 // MARK: - Summary
 // ============================================================
