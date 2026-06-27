@@ -204,7 +204,78 @@ public enum MemoryModule {
             }
         ))
 
-        // MARK: 5. memory_forget — notify (soft tombstone, reversible via export only)
+        // MARK: 5. memory_update — notify (in-place editable field update, D35/D41)
+        await router.register(ToolRegistration(
+            name: "memory_update",
+            module: moduleName,
+            tier: .notify,
+            description: "Update editable fields of an agent memory row by ID (text, scope, entity, type, pinned, source, expiry). Protected fields (id, createdAt, lastUsedAt, useCount, contentHash, supersededBy) are rejected. Last-save-wins; no conflict detection. Returns the updated entry.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "id": .object(["type": .string("string"), "description": .string("Row ID to update (required)")]),
+                    "text": .object(["type": .string("string"), "description": .string("New text content")]),
+                    "scope": .object(["type": .string("string"), "description": .string("New scope (people | project | mac | time | skill | global | …)")]),
+                    "entity": .object(["type": .string("string"), "description": .string("New entity sub-key within the scope")]),
+                    "type": .object(["type": .string("string"), "description": .string("fact | preference | decision | reference")]),
+                    "pinned": .object(["type": .string("boolean"), "description": .string("Pin (true) or unpin (false) the entry")]),
+                    "source": .object(["type": .string("string"), "description": .string("Writing agent/client label")]),
+                    "expiry": .object(["type": .string("string"), "description": .string("ISO 8601 date after which the entry is soft-tombstoned")])
+                ]),
+                "required": .array([.string("id")])
+            ]),
+            metadata: ToolMetadata(
+                title: "Memory Update",
+                whenToUse: [
+                    "correct or refine an existing agent memory by its ID",
+                    "pin or unpin an entry",
+                    "change the scope, entity, or type of an existing memory"
+                ],
+                whenNotToUse: [
+                    "creating a new memory (use memory_remember)",
+                    "removing a memory (use memory_forget)",
+                    "modifying protected fields (id, createdAt, lastUsedAt, useCount, contentHash, supersededBy)"
+                ],
+                relatedTools: ["memory_remember", "memory_recall", "memory_forget"]
+            ),
+            handler: { arguments in
+                guard case .object(let obj) = arguments else {
+                    throw ToolRouterError.invalidArguments(toolName: "memory_update", reason: "expected an object")
+                }
+                guard case .string(let id)? = obj["id"], !id.isEmpty else {
+                    throw ToolRouterError.invalidArguments(toolName: "memory_update", reason: "missing 'id'")
+                }
+
+                // Reject protected fields.
+                for key in obj.keys where MemoryStore.protectedFields.contains(key) && key != "id" {
+                    return .object(["error": .bool(true), "message": .string("Field '\(key)' is not editable")])
+                }
+
+                let text = stringArg(obj, "text")
+                let scope = stringArg(obj, "scope")
+                let entity = stringArg(obj, "entity")
+                let type = stringArg(obj, "type")
+                let source = stringArg(obj, "source")
+
+                let pinned: Bool? = {
+                    if case .bool(let b)? = obj["pinned"] { return b }
+                    return nil
+                }()
+
+                let expiry: Date? = {
+                    guard let expiryStr = stringArg(obj, "expiry") else { return nil }
+                    return ISO8601DateFormatter().date(from: expiryStr)
+                }()
+
+                let entry = try await store.update(
+                    id: id, text: text, scope: scope, entity: entity,
+                    type: type, pinned: pinned, source: source, expiry: expiry
+                )
+                return entryValue(entry)
+            }
+        ))
+
+        // MARK: 6. memory_forget — notify (soft tombstone, reversible via export only)
         await router.register(ToolRegistration(
             name: "memory_forget",
             module: moduleName,

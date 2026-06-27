@@ -452,6 +452,112 @@ public actor MemoryStore {
 
     // MARK: Public API — pin / forget / list / get
 
+    // MARK: Public API — update (D35/D41)
+
+    /// Fields that may never be set via update. Callers should reject any input
+    /// whose key appears here before calling update().
+    public static let protectedFields: [String] = [
+        "id", "createdAt", "lastUsedAt", "useCount", "contentHash", "supersededBy"
+    ]
+
+    /// In-place update of editable fields by row id (D11: direct SQLite, last-save-wins).
+    /// Only non-nil parameters are written. Refreshes FTS and embedding index when text changes.
+    /// Throws MemoryStoreError.notFound if no row with `id` exists.
+    @discardableResult
+    public func update(
+        id: String,
+        text: String? = nil,
+        scope: String? = nil,
+        entity: String? = nil,
+        type: String? = nil,
+        pinned: Bool? = nil,
+        source: String? = nil,
+        expiry: Date? = nil
+    ) throws -> MemoryEntry {
+        try ensureOpen()
+
+        // Verify the row exists.
+        guard let _ = try get(id: id) else {
+            throw MemoryStoreError.notFound(id)
+        }
+
+        // Resolve text: validate and compute new hash if provided.
+        let resolvedText: String?
+        let resolvedHash: String?
+        if let rawText = text {
+            let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                throw MemoryStoreError.invalidArgument("text may not be empty")
+            }
+            resolvedText = trimmed
+            resolvedHash = Self.contentHash(trimmed)
+        } else {
+            resolvedText = nil
+            resolvedHash = nil
+        }
+
+        // Build SET clause fragments.
+        // Each entry: (fragment, bind closure taking the statement + 1-based column index)
+        typealias BindFn = (OpaquePointer?, Int32) -> Void
+        var parts: [(String, BindFn)] = []
+
+        if let t = resolvedText, let h = resolvedHash {
+            let tCopy = t
+            let hCopy = h
+            parts.append(("text = ?", { stmt, i in sqlite3_bind_text(stmt, i, tCopy, -1, MEM_SQLITE_TRANSIENT) }))
+            parts.append(("contentHash = ?", { stmt, i in sqlite3_bind_text(stmt, i, hCopy, -1, MEM_SQLITE_TRANSIENT) }))
+        }
+        if let s = scope {
+            let v = s
+            parts.append(("scope = ?", { stmt, i in sqlite3_bind_text(stmt, i, v, -1, MEM_SQLITE_TRANSIENT) }))
+        }
+        if let e = entity {
+            let v = e
+            parts.append(("entity = ?", { stmt, i in sqlite3_bind_text(stmt, i, v, -1, MEM_SQLITE_TRANSIENT) }))
+        }
+        if let t = type {
+            let v = t
+            parts.append(("type = ?", { stmt, i in sqlite3_bind_text(stmt, i, v, -1, MEM_SQLITE_TRANSIENT) }))
+        }
+        if let p = pinned {
+            let v = p
+            parts.append(("pinned = ?", { stmt, i in sqlite3_bind_int(stmt, i, v ? 1 : 0) }))
+        }
+        if let s = source {
+            let v = s
+            parts.append(("source = ?", { stmt, i in sqlite3_bind_text(stmt, i, v, -1, MEM_SQLITE_TRANSIENT) }))
+        }
+        if let ex = expiry {
+            let v = ex.timeIntervalSince1970
+            parts.append(("expiresAt = ?", { stmt, i in sqlite3_bind_double(stmt, i, v) }))
+        }
+
+        // If nothing to update, return existing row.
+        guard !parts.isEmpty else {
+            return try get(id: id) ?? { throw MemoryStoreError.notFound(id) }()
+        }
+
+        let setClause = parts.map(\.0).joined(separator: ", ")
+        let sql = "UPDATE memory SET \(setClause) WHERE id = ?;"
+
+        try bindStep(sql) { stmt in
+            for (idx, (_, bindFn)) in parts.enumerated() {
+                bindFn(stmt, Int32(idx + 1))
+            }
+            sqlite3_bind_text(stmt, Int32(parts.count + 1), id, -1, MEM_SQLITE_TRANSIENT)
+        }
+
+        // Refresh embedding index when text changes.
+        if resolvedText != nil, let updated = try get(id: id) {
+            embeddingIndex.index(entries: [updated])
+        }
+
+        guard let updated = try get(id: id) else {
+            throw MemoryStoreError.notFound(id)
+        }
+        return updated
+    }
+
     public func pin(id: String, _ pinned: Bool) throws {
         try ensureOpen()
         try bindStep("UPDATE memory SET pinned=? WHERE id=?;") { stmt in
