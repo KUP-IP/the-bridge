@@ -12,9 +12,14 @@ import Foundation
 public struct MemoryHubRegistryRow: Codable, Sendable, Equatable, Identifiable {
     public let id: String
     public let title: String
-    public init(id: String, title: String) {
+    /// Optional KEEP review metadata mirrored from Notion (D10 / D19).
+    /// Populated when the cached row represents a Memory entity row with review fields.
+    public var reviewMetadata: KeepReviewMetadata?
+
+    public init(id: String, title: String, reviewMetadata: KeepReviewMetadata? = nil) {
         self.id = id
         self.title = title
+        self.reviewMetadata = reviewMetadata
     }
 }
 
@@ -99,5 +104,68 @@ public enum MemoryHubRegistryCache {
         }
         let result = String(mapped)
         return result.isEmpty ? "entity" : result
+    }
+
+    // MARK: — KEEP Review Schema (D43)
+
+    /// Map a Notion property dictionary to a `KeepReviewMetadata` value.
+    /// Expects `properties` in the same shape returned by RegistryPropertyCodec /
+    /// Notion list responses — string values for `reviewStatus`, ISO-8601 for dates,
+    /// and a numeric value for `recallScore`.
+    ///
+    /// Returns `nil` when none of the 4 required KEEP fields are present (i.e. the
+    /// Notion database schema has not yet had review fields added).
+    public static func keepReviewMetadata(from notionProperties: [String: Any]) -> KeepReviewMetadata? {
+        let statusRaw  = notionProperties[KeepSchemaContract.notionPropReviewStatus] as? String
+        let nextRaw    = notionProperties[KeepSchemaContract.notionPropNextReviewAt] as? String
+        let lastRaw    = notionProperties[KeepSchemaContract.notionPropLastReviewedAt] as? String
+        let scoreRaw   = notionProperties[KeepSchemaContract.notionPropRecallScore] as? Double
+
+        // If none of the four KEEP fields are present, the schema hasn't been migrated yet.
+        guard statusRaw != nil || nextRaw != nil || lastRaw != nil || scoreRaw != nil else {
+            return nil
+        }
+
+        let iso = ISO8601DateFormatter()
+        let status: KeepReviewStatus = statusRaw.flatMap { KeepReviewStatus(rawValue: $0) } ?? .unknown
+        return KeepReviewMetadata(
+            reviewStatus: status,
+            nextReviewAt: nextRaw.flatMap { iso.date(from: $0) },
+            lastReviewedAt: lastRaw.flatMap { iso.date(from: $0) },
+            recallScore: scoreRaw ?? 0.0
+        )
+    }
+
+    /// Ensure the Notion Memory database has all 4 required KEEP review fields (D43).
+    ///
+    /// For each field in `KeepRequiredSchemaField.allRequired` that is absent from the
+    /// existing database schema, this method creates it using the Notion API.
+    /// The method is idempotent — calling it repeatedly is safe.
+    ///
+    /// - Parameters:
+    ///   - databaseId: The Notion database ID for the Memory data source.
+    ///   - client: The `NotionClient` to use for schema reads and property creation.
+    ///
+    /// - Note: Auto-creation emits a `keepFieldAutoCreated` ACTIVITY event per field
+    ///   created (D43). Implementation delegates to `RegistrySchemaBinder` / Notion
+    ///   database PATCH once that plumbing is available. Body is stubbed pending
+    ///   `NotionClient.updateDatabase(id:properties:)` surface (TODO: wire when available).
+    public static func ensureReviewSchema(databaseId: String, client: NotionClient) async throws {
+        // TODO: Implement D43 auto-creation of missing KEEP review fields.
+        //
+        // Algorithm:
+        //   1. GET /databases/{databaseId} → inspect existing property names.
+        //   2. Diff against KeepRequiredSchemaField.allRequired.
+        //   3. For each missing field: PATCH /databases/{databaseId} with the new property
+        //      definition (type per KeepRequiredSchemaField.notionType).
+        //   4. Emit a `keepFieldAutoCreated` ACTIVITY event for each created field.
+        //
+        // NotionClient currently exposes `getDatabase(databaseId:)` for step 1.
+        // Step 3 requires a `updateDatabaseSchema(id:properties:)` method not yet on
+        // NotionClient — add it when wiring this stub.
+        //
+        // For now this is a compile-verified no-op stub (D43 plumbing packet).
+        _ = databaseId
+        _ = client
     }
 }

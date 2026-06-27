@@ -889,6 +889,15 @@ await runCloudAccessWSGTests()
 await runMemoryModuleTests()
 await runMemoryRoutingAppendixTests()
 
+// Memory Hub UX Reconstruction — INBOX disposition (D8/D9/D13) and AGENTS
+// memory_update tool (D35/D41). DismissScope/DismissResult/TrashResult struct
+// constructibility, dismissWithResult single/multi-lane semantics, sibling
+// detection, .allLanes resolution, legacy dismiss() backward compat.
+// MemoryStore.update round-trip, protectedFields constant, memory_update
+// tool registration + tier + handler (text update + protected field rejection).
+await runInboxDispositionTests()
+await runMemoryUpdateTests()
+
 // PKT-1007 Slice 1: Dense-vector recall + RRF fusion. StubMemoryEmbedder
 // (deterministic, no CoreML assets), MemoryEmbeddingIndex (index/rank/evict),
 // ReciprocaLRankFusion (single-list, dual-list, hybrid boost), MemoryStore.recall
@@ -913,6 +922,12 @@ await runBridgeTokensAdaptiveTests()
 // missing/malformed bundle paths + a synthetic Contents-less .bundle in a temp
 // dir — never touches /Applications.
 await runSparkleResilienceTests()
+
+// Memory Hub Foundation — ACTIVITY+KEEP (D12 event log, D24 retention, KeepReview model)
+await runMemoryHubActivityTests()
+
+// Memory Hub Foundation — PROCESSING provider contracts (D23 credential refs, provider chain)
+await runProcessingProviderTests()
 
 // ============================================================
 // MARK: - Summary

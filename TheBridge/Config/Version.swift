@@ -18,7 +18,7 @@ import Foundation
 public enum AppVersion {
     /// Marketing version (CFBundleShortVersionString equivalent).
     /// Format: MAJOR.MINOR.PATCH (Semantic Versioning).
-    public static let marketing = "3.9.0"
+    public static let marketing = "3.9.1"
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
@@ -106,7 +106,16 @@ public enum AppVersion {
     /// v3.9.0: 65 → 66 — Unified Memory Wave 3 (PKT-MEM-115): handshake inject settings,
     ///   fetch_skill scopedMemory appendix (post-cache), Memory → Agent pin/forget + provenance.
     ///   test-floor 2667 → 2682 (+15). staticFeatureModuleToolCount unchanged (187).
-    public static let build = "66"
+    /// v3.9.1: 66 → 67 — Memory Hub Foundation (PKT-MEM-115): D12 ACTIVITY taxonomy (22
+    ///   event types + evidenceId), D8/D9/D13 INBOX disposition (DismissScope/Result/
+    ///   TrashResult + NSWorkspace.recycle), D35/D41 memory_update MCP tool (notify tier,
+    ///   protectedFields guard), D6/D17/D23/D36/D42 PROCESSING provider profiles (9 types:
+    ///   ProviderFamily/Capability/CredentialReference/CapabilityProfile/FallbackChain/
+    ///   ProfileConfig/ValidationError/SyntaxValidator/TestResult), D15/D19/D20/D43
+    ///   KeepReviewModel (KeepReviewStatus + KeepReviewMetadata + KeepSchemaContract +
+    ///   KeepRequiredSchemaField). staticFeatureModuleToolCount 187 → 188. test-floor
+    ///   2682 → 2744 (+62).
+    public static let build = "67"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }
@@ -225,7 +234,9 @@ public enum BridgeConstants {
     /// Packet Runner v1 (FR-1/§8.3, merged from main 2026-06-25): + registry_hydrate
     ///   (packet-registry-v1 one-hop envelope). 186 + 1 = 187.
     ///   (PKT-MEM-106 Phase 0 added internal types only — no new MCP tools.)
-    public static let staticFeatureModuleToolCount = 187
+    /// Memory Hub UX Reconstruction (D35/D41, 2026-06-27): + memory_update
+    ///   (in-place AGENTS field update tool). 187 + 1 = 188.
+    public static let staticFeatureModuleToolCount = 188
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

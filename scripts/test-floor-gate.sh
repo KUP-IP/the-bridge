@@ -1556,7 +1556,18 @@ set -euo pipefail
 # inject-override composition + seedWave3DefaultsIfNeeded idempotency, MemoryModule
 # recall source + pin toggle. Hermetic temp DB / shared hermetic config path.
 # 2667→2682.
-FLOOR="${BRIDGE_TEST_FLOOR:-2682}"
+# 2026-06-27 (PKT-MEM-115 Memory Hub Foundation — D12/D8/D9/D13/D35/D41/D6/D17/D23/D36/D42):
+# +62 tests across 4 new suites: runMemoryHubActivityTests (D12 22-case ACTIVITY taxonomy +
+# evidenceId uniqueness + D24 retention constants + D20 KeepReviewStatus 6 cases + D19
+# KeepReviewMetadata defaults/clamping + D15 KeepSchemaContract names + D43
+# KeepRequiredSchemaField manifest), runInboxDispositionTests (D8/D9 DismissScope/Result,
+# D13 TrashResult, dismiss marks processed, hasSiblingLanes, .allLanes), runMemoryUpdateTests
+# (D35/D41 protectedFields set, memory_update registered, update round-trip, protected-field
+# rejection), runProcessingProviderTests (D6/D17/D23/D36/D42 ProviderFamily/Capability/
+# CredentialReference/FallbackChain/SyntaxValidator/TestResult). Plus 2 mechanical fixes:
+# MemoryHubActivityEventType custom Codable (unknown forward-compat), MemoryModuleTests
+# tool-count 5→6 (memory_update D35). All hermetic; no net/Ollama/audio. 2682→2744.
+FLOOR="${BRIDGE_TEST_FLOOR:-2744}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

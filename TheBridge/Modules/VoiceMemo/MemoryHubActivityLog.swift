@@ -5,11 +5,67 @@
 // Each line is one structured receipt envelope. PRIVACY (trust invariant): no full
 // transcripts are ever written — transcript evidence is limited to a SHA-256 hash +
 // short excerpt. The full SHA-256 receiptHash is stored; the UI / live-test tables
-// reference only its first 12 chars. Retention prunes by 500 events OR 30 days,
-// whichever comes first. Survives relaunch (file-backed, not view state).
+// reference only its first 12 chars. Retention prunes by 2000 events OR 90 days,
+// whichever removes more. Survives relaunch (file-backed, not view state).
 
 import Foundation
 import CryptoKit
+
+// MARK: — D12 Unified Operator Timeline Event Types
+
+/// Typed event taxonomy for the ACTIVITY unified operator timeline (D12 / PKT-MEM-115).
+/// Use `eventType` on `MemoryHubActivityEvent` to stamp a machine-readable category
+/// alongside the freeform `action` string. `unknown` is the forward-compat fallback.
+public enum MemoryHubActivityEventType: String, Codable, Sendable, CaseIterable {
+    // Memo lifecycle
+    case memoProcessed
+    case memoTranscribed
+    case memoSummarized
+    case memoTitleGenerated
+
+    // Disposition
+    case dispositionDismissed
+    case dispositionMarkHandled
+    case dispositionSaveToKeep
+    case dispositionSaveForAgents
+    case dispositionCreateReminder
+    case dispositionTrash
+
+    // KEEP sync
+    case keepSyncSuccess
+    case keepSyncError
+    case keepFieldAutoCreated
+
+    // Agent memory
+    case agentMemoryCreated
+    case agentMemoryEdited
+    case agentMemoryForgotten
+
+    // Provider calls
+    case providerCallStarted
+    case providerCallCompleted
+    case providerCallFailed
+    case providerTestRun
+
+    // Migration
+    case migrationRun
+    case migrationError
+
+    /// Forward-compat fallback — decode unknown raw values to this.
+    case unknown
+
+    // Custom Codable: fall back to .unknown instead of throwing on unrecognised raw values,
+    // so future event types added to the log don't break older Bridge versions reading the JSONL.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = MemoryHubActivityEventType(rawValue: raw) ?? .unknown
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(rawValue)
+    }
+}
 
 /// One Memory Hub activity receipt (the structured envelope, SPEC §2 / PKT-MEM-106 0b).
 public struct MemoryHubActivityEvent: Codable, Sendable, Equatable, Identifiable {
@@ -19,11 +75,16 @@ public struct MemoryHubActivityEvent: Codable, Sendable, Equatable, Identifiable
 
     public var id: String { eventId }
     public let eventId: String
+    /// Stable evidence identifier — UUID assigned at log time. Survives relaunch;
+    /// may be referenced in ACTIVITY evidence fields (D9).
+    public let evidenceId: UUID
     public let timestamp: String        // ISO-8601
     public let schemaVersion: Int
     public let memoId: String
     public let intentId: String?
     public let phase: Phase
+    /// Machine-readable event category (D12). Defaults to `.unknown` for legacy events.
+    public let eventType: MemoryHubActivityEventType
     public let action: String
     public let status: String
     public let provenance: String
@@ -37,13 +98,58 @@ public struct MemoryHubActivityEvent: Codable, Sendable, Equatable, Identifiable
     /// First 12 chars of the full receipt hash — the value referenced in UI + grade tables.
     public var receiptHashShort: String { String(receiptHash.prefix(12)) }
 
+    // MARK: Coding Keys (explicit — evidenceId added; eventType added; both have defaults for legacy rows)
+    enum CodingKeys: String, CodingKey {
+        case eventId, evidenceId, timestamp, schemaVersion, memoId, intentId
+        case phase, eventType, action, status, provenance, actor, detail, receiptHash
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        eventId       = try c.decode(String.self, forKey: .eventId)
+        evidenceId    = try c.decodeIfPresent(UUID.self, forKey: .evidenceId) ?? UUID()
+        timestamp     = try c.decode(String.self, forKey: .timestamp)
+        schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
+        memoId        = try c.decode(String.self, forKey: .memoId)
+        intentId      = try c.decodeIfPresent(String.self, forKey: .intentId)
+        phase         = try c.decode(Phase.self, forKey: .phase)
+        // Forward-compat: unknown raw values fall back to .unknown
+        eventType     = (try? c.decodeIfPresent(MemoryHubActivityEventType.self, forKey: .eventType)) ?? .unknown
+        action        = try c.decode(String.self, forKey: .action)
+        status        = try c.decode(String.self, forKey: .status)
+        provenance    = try c.decode(String.self, forKey: .provenance)
+        actor         = try c.decode(String.self, forKey: .actor)
+        detail        = try c.decode(String.self, forKey: .detail)
+        receiptHash   = try c.decode(String.self, forKey: .receiptHash)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(eventId,       forKey: .eventId)
+        try c.encode(evidenceId,    forKey: .evidenceId)
+        try c.encode(timestamp,     forKey: .timestamp)
+        try c.encode(schemaVersion, forKey: .schemaVersion)
+        try c.encode(memoId,        forKey: .memoId)
+        try c.encodeIfPresent(intentId, forKey: .intentId)
+        try c.encode(phase,         forKey: .phase)
+        try c.encode(eventType,     forKey: .eventType)
+        try c.encode(action,        forKey: .action)
+        try c.encode(status,        forKey: .status)
+        try c.encode(provenance,    forKey: .provenance)
+        try c.encode(actor,         forKey: .actor)
+        try c.encode(detail,        forKey: .detail)
+        try c.encode(receiptHash,   forKey: .receiptHash)
+    }
+
     public init(
         eventId: String = UUID().uuidString,
+        evidenceId: UUID = UUID(),
         timestamp: String,
         schemaVersion: Int = MemoryHubActivityLog.schemaVersion,
         memoId: String,
         intentId: String? = nil,
         phase: Phase,
+        eventType: MemoryHubActivityEventType = .unknown,
         action: String,
         status: String,
         provenance: String,
@@ -52,11 +158,13 @@ public struct MemoryHubActivityEvent: Codable, Sendable, Equatable, Identifiable
         receiptHash: String? = nil
     ) {
         self.eventId = eventId
+        self.evidenceId = evidenceId
         self.timestamp = timestamp
         self.schemaVersion = schemaVersion
         self.memoId = memoId
         self.intentId = intentId
         self.phase = phase
+        self.eventType = eventType
         self.action = action
         self.status = status
         self.provenance = provenance
@@ -71,9 +179,10 @@ public struct MemoryHubActivityEvent: Codable, Sendable, Equatable, Identifiable
 
 public enum MemoryHubActivityLog {
     public static let schemaVersion = 1
-    /// Retention bounds (SPEC §2 / PKT-MEM-106 0b): whichever comes first.
-    public static let maxEvents = 500
-    public static let maxAgeDays = 30
+    /// Retention bounds (D24): evict entries older than 90 days AND cap at 2000 total —
+    /// whichever removes more events wins.
+    public static let maxEvents = 2000
+    public static let maxAgeDays = 90
 
     public static var fileURL: URL {
         BridgePaths.applicationSupport(.memoryHub).appendingPathComponent("activity.jsonl")
