@@ -1573,7 +1573,9 @@ set -euo pipefail
 # and routing-consistency lint detection/clean-state behavior. The clean base
 # measured 2746 passing tests; this branch measures 2755 passed / 0 failed.
 # 2744 recorded floor → 2755 measured floor.
-FLOOR="${BRIDGE_TEST_FLOOR:-2755}"
+# 2026-06-29 (standing orders v7.0.2 transplant): +3 StandingOrdersTests (bundled seedIfEmpty,
+# parseDoctrineVersion, explicit doctrineVersion write bump). Current main floor 2755→2758.
+FLOOR="${BRIDGE_TEST_FLOOR:-2758}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
