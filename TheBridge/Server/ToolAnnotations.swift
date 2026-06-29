@@ -354,6 +354,12 @@ public enum ToolAnnotationCatalog {
         "snippets_rename": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: true, openWorld: false),
         "snippets_search": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "snippets_update": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: true, openWorld: false),
+        "commands_create": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: false),
+        "commands_delete": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: true, requiresConfirmation: true, openWorld: false),
+        "commands_get": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
+        "commands_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
+        "commands_search": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
+        "commands_update": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: true, openWorld: false),
         "spotlight_query": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         // standing_orders_* (PKT-931): operator-curated config. read/list are
         // read-only but tier .notify (deliberate exception — see ReadOnlyTierAuditTests).

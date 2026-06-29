@@ -708,6 +708,7 @@ await runGhModuleTests()
 await runGitModuleTests()
 await runWSHMenuBarTests()        // PKT-804 (v2.3): menu-bar quick-page
 await runSnippetsModuleTests()    // PKT-2135a9e9 (v2.3 · WS-D): snippets module
+await runCommandsModuleTests()    // PKT-1061: CommandStore commands_* MCP surface
 await runStandingOrdersModuleTests() // PKT-931 (v3.7·B): standing_orders_* MCP tools
 await runShortcutsModuleTests()   // PKT-959 (v3.7·F): shortcuts_* MCP tools (mock CLI seam)
 await runCommandsDataTests()      // cmd-w2: Commands data layer (CommandsManager + MentionResolver + cache)
