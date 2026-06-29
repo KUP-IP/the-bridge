@@ -10,13 +10,16 @@ public struct OllamaClient: Sendable {
     public struct GenerateOptions: Sendable {
         public var numPredict: Int
         public var temperature: Double
-        /// When true, ask Ollama to skip extended thinking (Qwen3+).
+        public var numContext: Int
         public var think: Bool?
+        public var keepAlive: String
 
-        public init(numPredict: Int = 256, temperature: Double = 0.2, think: Bool? = nil) {
+        public init(numPredict: Int = 256, temperature: Double = 0.2, numContext: Int = 4096, think: Bool? = false, keepAlive: String = "0") {
             self.numPredict = numPredict
             self.temperature = temperature
+            self.numContext = numContext
             self.think = think
+            self.keepAlive = keepAlive
         }
     }
 
@@ -68,12 +71,14 @@ public struct OllamaClient: Sendable {
             "model": model,
             "prompt": prompt,
             "stream": false,
+            "keep_alive": options.keepAlive,
             "options": [
                 "num_predict": options.numPredict,
                 "temperature": options.temperature,
+                "num_ctx": options.numContext,
             ],
         ]
-        if model.lowercased().contains("qwen"), let think = options.think {
+        if let think = options.think {
             payload["think"] = think
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
