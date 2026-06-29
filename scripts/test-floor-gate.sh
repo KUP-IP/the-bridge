@@ -1567,7 +1567,13 @@ set -euo pipefail
 # CredentialReference/FallbackChain/SyntaxValidator/TestResult). Plus 2 mechanical fixes:
 # MemoryHubActivityEventType custom Codable (unknown forward-compat), MemoryModuleTests
 # tool-count 5→6 (memory_update D35). All hermetic; no net/Ollama/audio. 2682→2744.
-FLOOR="${BRIDGE_TEST_FLOOR:-2744}"
+# 2026-06-28 (skill-system routing governance):
+# +9 tests covering routeReceipt schema exposure, missing/valid/stale receipt
+# validation, enforcement across all mutation tools, read-only metadata pull,
+# and routing-consistency lint detection/clean-state behavior. The clean base
+# measured 2746 passing tests; this branch measures 2755 passed / 0 failed.
+# 2744 recorded floor → 2755 measured floor.
+FLOOR="${BRIDGE_TEST_FLOOR:-2755}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

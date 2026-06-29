@@ -75,6 +75,11 @@ public enum SkillsModule {
     intent. If fetch_skill returns a `disambiguate` annotation, pick from its \
     `candidates` (fetch_skill('parent/<name>')) rather than guessing; a \
     `    routingFooter` names the sibling specialists you can switch to.
+    Skill-system ownership: when the target is a KEEP OS skill or command \
+    definition, call fetch_skill('skill-keepr', intent: '<this sub-task>') \
+    before selecting a specialist or executor. A named worker does not \
+    transfer ownership. Re-route when targets change or planning moves to \
+    execution; normal use of an existing skill routes to that skill.
     After `fetch_skill(parent, intent:)`, read `scopedMemory.markdown` when \
     present and treat it as grounding for this sub-task only — re-fetch when \
     the intent changes (scope map uses the parent slug from `name`, not a \
@@ -624,7 +629,7 @@ public enum SkillsModule {
             name: "skill_create",
             module: moduleName,
             tier: .notify,
-            description: "Create one or more skills (Notion-source or file-source). For a single skill: name + url (+ optional visibility). For bulk: skills=[{name,url},...]. Replaces manage_skill action='add'/'bulk_add'.",
+            description: "Create one or more skills after SKILLS Keepr approves the construction route. Requires routeReceipt. For a single skill: name + url (+ optional visibility). For bulk: skills=[{name,url},...]. Replaces manage_skill action='add'/'bulk_add'.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -636,7 +641,8 @@ public enum SkillsModule {
                         "description": .string("Array of {name, url} objects for bulk creation."),
                         "items": .object(["type": .string("object")])
                     ]),
-                    "bypassConfirmation": .object(["type": .string("boolean")])
+                    "bypassConfirmation": .object(["type": .string("boolean")]),
+                    "routeReceipt": SkillRouteReceiptValidator.schema
                 ])
             ]),
             handler: { args in
@@ -651,6 +657,11 @@ public enum SkillsModule {
                             pairs.append((name: n, pageId: u))
                         }
                     }
+                    try Self.requireSkillRouteReceipt(
+                        dict,
+                        expectedTargets: pairs.map { $0.name },
+                        toolName: "skill_create"
+                    )
                     let result = writeBulkAdd(skills: pairs)
                     var bulk: [String: Value] = [
                         "action": .string("bulk_add"),
@@ -673,6 +684,11 @@ public enum SkillsModule {
                         reason: "single-skill mode requires 'name' and 'url' parameters"
                     )
                 }
+                try Self.requireSkillRouteReceipt(
+                    dict,
+                    expectedTargets: [name],
+                    toolName: "skill_create"
+                )
                 let vis = parseVisibilityArg(dict) ?? .standard
                 let parseResult = SkillURLParser.parse(url: url)
                 switch parseResult {
@@ -717,12 +733,13 @@ public enum SkillsModule {
             module: moduleName,
             tier: .request,
             neverAutoApprove: true,
-            description: "Delete one skill by name. Replaces manage_skill action='delete'.",
+            description: "Delete one skill by name after SKILLS Keepr approves the lifecycle route. Requires routeReceipt. Replaces manage_skill action='delete'.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "name": .object(["type": .string("string"), "description": .string("Skill name to delete.")]),
-                    "bypassConfirmation": .object(["type": .string("boolean")])
+                    "bypassConfirmation": .object(["type": .string("boolean")]),
+                    "routeReceipt": SkillRouteReceiptValidator.schema
                 ]),
                 "required": .array([.string("name")])
             ]),
@@ -734,6 +751,11 @@ public enum SkillsModule {
                         reason: "'name' parameter is required"
                     )
                 }
+                try Self.requireSkillRouteReceipt(
+                    dict,
+                    expectedTargets: [name],
+                    toolName: "skill_delete"
+                )
                 let success = writeDeleteSkill(named: name)
                 return .object([
                     "success": .bool(success),
@@ -749,7 +771,7 @@ public enum SkillsModule {
             name: "skill_update",
             module: moduleName,
             tier: .notify,
-            description: "Update one skill: toggle on/off, change its URL, set visibility, or replace MCP metadata (summary + trigger/anti-trigger phrases). Picks the right action automatically based on which fields are present. Replaces manage_skill toggle/update_url/set_visibility/set_metadata.",
+            description: "Update one skill after SKILLS Keepr approves the change. Requires routeReceipt. Supports toggle, URL, visibility, or MCP metadata changes. Replaces manage_skill toggle/update_url/set_visibility/set_metadata.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -760,7 +782,8 @@ public enum SkillsModule {
                     "summary": .object(["type": .string("string")]),
                     "triggerPhrases": .object(["type": .string("array"), "items": .object(["type": .string("string")])]),
                     "antiTriggerPhrases": .object(["type": .string("array"), "items": .object(["type": .string("string")])]),
-                    "bypassConfirmation": .object(["type": .string("boolean")])
+                    "bypassConfirmation": .object(["type": .string("boolean")]),
+                    "routeReceipt": SkillRouteReceiptValidator.schema
                 ]),
                 "required": .array([.string("name")])
             ]),
@@ -772,6 +795,11 @@ public enum SkillsModule {
                         reason: "'name' parameter is required"
                     )
                 }
+                try Self.requireSkillRouteReceipt(
+                    dict,
+                    expectedTargets: [name],
+                    toolName: "skill_update"
+                )
                 if case .bool(true) = dict["toggle"] {
                     let result = writeToggleSkill(named: name)
                     return .object([
@@ -862,13 +890,14 @@ public enum SkillsModule {
             name: "skill_rename",
             module: moduleName,
             tier: .notify,
-            description: "Rename one skill (preserves UUID, enabled state, visibility, metadata). Replaces manage_skill action='rename'.",
+            description: "Rename one skill after SKILLS Keepr approves identity propagation. Requires routeReceipt and preserves UUID, enabled state, visibility, and metadata. Replaces manage_skill action='rename'.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "name": .object(["type": .string("string"), "description": .string("Current skill name.")]),
                     "newName": .object(["type": .string("string"), "description": .string("New skill name.")]),
-                    "bypassConfirmation": .object(["type": .string("boolean")])
+                    "bypassConfirmation": .object(["type": .string("boolean")]),
+                    "routeReceipt": SkillRouteReceiptValidator.schema
                 ]),
                 "required": .array([.string("name"), .string("newName")])
             ]),
@@ -881,6 +910,11 @@ public enum SkillsModule {
                         reason: "'name' and 'newName' parameters are required"
                     )
                 }
+                try Self.requireSkillRouteReceipt(
+                    dict,
+                    expectedTargets: [name, newName],
+                    toolName: "skill_rename"
+                )
                 let success = writeRenameSkill(named: name, to: newName)
                 return .object([
                     "success": .bool(success),
@@ -897,7 +931,7 @@ public enum SkillsModule {
             name: "skill_sync_notion",
             module: moduleName,
             tier: .notify,
-            description: "Sync one skill's MCP metadata (summary + trigger/anti-trigger phrases) between local store and Notion. direction='push' uploads local → Notion. direction='pull' downloads Notion → local. Replaces manage_skill sync_metadata_to_notion / sync_metadata_from_notion.",
+            description: "Sync one skill's MCP metadata between local store and Notion. direction='push' is a skill-system mutation and requires routeReceipt; direction='pull' is read-only. Replaces manage_skill sync_metadata_to_notion / sync_metadata_from_notion.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -907,7 +941,8 @@ public enum SkillsModule {
                         "description": .string("'push' = local → Notion. 'pull' = Notion → local."),
                         "enum": .array([.string("push"), .string("pull")])
                     ]),
-                    "bypassConfirmation": .object(["type": .string("boolean")])
+                    "bypassConfirmation": .object(["type": .string("boolean")]),
+                    "routeReceipt": SkillRouteReceiptValidator.schema
                 ]),
                 "required": .array([.string("name"), .string("direction")])
             ]),
@@ -921,6 +956,13 @@ public enum SkillsModule {
                 }
                 let isPush = (dir == "push")
                 let actionLabel = isPush ? "sync_metadata_to_notion" : "sync_metadata_from_notion"
+                if isPush {
+                    try Self.requireSkillRouteReceipt(
+                        dict,
+                        expectedTargets: [name],
+                        toolName: "skill_sync_notion"
+                    )
+                }
                 guard let skill = lookupSkill(named: name) else {
                     return .object(["success": .bool(false), "action": .string(actionLabel), "message": .string("Skill not found.")])
                 }
@@ -989,6 +1031,19 @@ public enum SkillsModule {
     fileprivate static func unpackArgsObject(_ v: Value) -> [String: Value] {
         if case .object(let dict) = v { return dict }
         return [:]
+    }
+
+    private static func requireSkillRouteReceipt(
+        _ args: [String: Value],
+        expectedTargets: [String],
+        toolName: String
+    ) throws {
+        if let error = SkillRouteReceiptValidator.validationError(
+            receipt: args["routeReceipt"],
+            expectedTargets: expectedTargets
+        ) {
+            throw ToolRouterError.invalidArguments(toolName: toolName, reason: error)
+        }
     }
 
     // MARK: - UserDefaults Write Helpers (non-MainActor safe)
@@ -3091,6 +3146,43 @@ public enum SkillsModule {
                     dict["specialistsStale"] = .bool(true)
                 }
             }
+
+            let specialistSummaries: [SpecialistSummary] = {
+                guard case .array(let values)? = dict["specialists"] else { return [] }
+                return values.compactMap { value in
+                    guard case .object(let item) = value,
+                          case .string(let path)? = item["path"],
+                          case .string(let title)? = item["title"] else { return nil }
+                    let summary: String = {
+                        if case .string(let text)? = item["summary"] { return text }
+                        return ""
+                    }()
+                    return SpecialistSummary(path: path, title: title, summary: summary)
+                }
+            }()
+            let summary: String = {
+                if case .string(let text)? = dict["summary"] { return text }
+                return ""
+            }()
+            let triggers: [String] = {
+                guard case .array(let values)? = dict["triggerPhrases"] else { return [] }
+                return values.compactMap { if case .string(let text) = $0 { return text }; return nil }
+            }()
+            let antiTriggers: [String] = {
+                guard case .array(let values)? = dict["antiTriggerPhrases"] else { return [] }
+                return values.compactMap { if case .string(let text) = $0 { return text }; return nil }
+            }()
+            let warnings = SkillRoutingConsistencyLinter.warnings(
+                parentName: name,
+                summary: summary,
+                triggerPhrases: triggers,
+                antiTriggerPhrases: antiTriggers,
+                specialists: specialistSummaries
+            )
+            if !warnings.isEmpty {
+                dict["routingWarnings"] = .array(warnings.map(Value.string))
+            }
+
             out.append(.object(dict))
         }
         return out
