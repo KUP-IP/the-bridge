@@ -80,6 +80,9 @@ public struct ToolRegistration: Sendable {
 /// Central dispatch hub. Every tool call flows through here.
 public actor ToolRouter {
     private var registry: [String: ToolRegistration] = [:]
+    /// FB-4: withhold `tools/list` until `BridgeModuleRegistry` finishes so
+    /// clients never cache a partial surface during startup registration.
+    private var modulesRegistrationComplete = false
     private let securityGate: SecurityGate
     private let auditLog: AuditLog
 
@@ -134,6 +137,21 @@ public actor ToolRouter {
     /// Enabled registrations excluding disabled tools (PKT-350: F2).
     public func enabledRegistrations(disabledNames: Set<String>) -> [ToolRegistration] {
         registry.values.filter { !disabledNames.contains($0.name) }
+    }
+
+    /// Mark module registration finished — `registrationsForListTools` stays empty until this runs.
+    public func markModulesRegistrationComplete() {
+        modulesRegistrationComplete = true
+    }
+
+    public func isModulesRegistrationComplete() -> Bool {
+        modulesRegistrationComplete
+    }
+
+    /// Surface for MCP `tools/list` — empty until startup registration completes (FB-4).
+    public func registrationsForListTools(disabledNames: Set<String>) -> [ToolRegistration] {
+        guard modulesRegistrationComplete else { return [] }
+        return enabledRegistrations(disabledNames: disabledNames)
     }
 
     // MARK: Dispatch

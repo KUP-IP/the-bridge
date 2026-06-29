@@ -27,9 +27,11 @@ func runBridgeAutomationModuleTests() async {
 
     // MARK: - Registration + tiers
 
-    await test("BridgeAutomationModule registers both Settings tools") {
+    await test("BridgeAutomationModule registers all three Settings tools") {
         let tools = await router.registrations(forModule: "automation")
         try expect(tools.contains { $0.name == "bridge_settings_navigate" }, "missing bridge_settings_navigate")
+        try expect(tools.contains { $0.name == "bridge_open_settings" }, "missing bridge_open_settings")
+        try expect(tools.contains { $0.name == "bridge_focus_settings" }, "missing bridge_focus_settings")
     }
 
     // PKT-1005 (Pillar A): the cold-open tool must be registered.
@@ -53,6 +55,29 @@ func runBridgeAutomationModuleTests() async {
         let tools = await router.registrations(forModule: "automation")
         let t = tools.first { $0.name == "bridge_settings_navigate" }!
         try expect(t.tier == .open, "expected .open, got \(t.tier.rawValue)")
+    }
+
+    await test("bridge_focus_settings is .open tier") {
+        let tools = await router.registrations(forModule: "automation")
+        let t = tools.first { $0.name == "bridge_focus_settings" }!
+        try expect(t.tier == .open, "expected .open, got \(t.tier.rawValue)")
+    }
+
+    await test("bridge_focus_settings returns focus outcome (headless: focused=false + note)") {
+        let result = try await router.dispatch(
+            toolName: "bridge_focus_settings",
+            arguments: .object([:])
+        )
+        guard case .object(let dict) = result else {
+            throw TestError.assertion("expected object response")
+        }
+        try expect(dict["success"] != nil, "missing success")
+        if case .bool(let focused) = dict["focused"] {
+            try expect(focused == false, "headless test should report focused=false")
+        } else {
+            throw TestError.assertion("missing focused bool")
+        }
+        try expect(dict["note"] != nil, "headless focus should surface a note")
     }
 
     // MARK: - Section resolution

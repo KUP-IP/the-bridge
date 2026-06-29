@@ -416,5 +416,38 @@ public enum BridgeAutomationModule {
                 return .object(result)
             }
         ))
+
+        // ── bridge_focus_settings (open) ─────────────────────────────────
+        await router.register(ToolRegistration(
+            name: "bridge_focus_settings",
+            module: moduleName,
+            tier: .open,
+            description: "Bring The Bridge's Settings window frontmost and raise it so screen_capture or AX reads see it. The app is LSUIElement (accessory), so Settings can hide behind other apps after deactivation. Pair with bridge_settings_navigate or bridge_open_settings before capturing Settings.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "openIfNeeded": .object([
+                        "type": .string("boolean"),
+                        "description": .string("When true (default), open Settings first if no Settings window exists.")
+                    ])
+                ])
+            ]),
+            handler: { arguments in
+                let params = unwrap(arguments)
+                let openIfNeeded = boolParam(params, "openIfNeeded", default: true)
+                let outcome = await BridgeSettingsAutomation.focusSettings(openIfNeeded: openIfNeeded)
+                var result: [String: Value] = [
+                    "success": .bool(true),
+                    "focused": .bool(outcome.windowFound),
+                    "activated": .bool(outcome.activated)
+                ]
+                if !outcome.windowFound {
+                    result["note"] = .string(openIfNeeded
+                        ? "App activated but no Settings window host present (headless/test context)."
+                        : "No Settings window found to focus.")
+                }
+                return .object(result)
+            }
+        ))
     }
 }
