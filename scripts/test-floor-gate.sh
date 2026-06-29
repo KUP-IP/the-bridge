@@ -1583,7 +1583,8 @@ set -euo pipefail
 # 2755 recorded floor → 2762 measured floor (rebased atop standing-orders 2758).
 # 2026-06-29 (v3.9.2 release train): measured 2765 passed / 0 failed after #68+#66+#67 merge.
 # 2762 recorded floor → 2765 measured floor.
-FLOOR="${BRIDGE_TEST_FLOOR:-2765}"
+# 2026-06-29 (PKT-1061 commands_* MCP): +8 CommandsModuleTests (registration/tier/CRUD dispatch). 2765→2773.
+FLOOR="${BRIDGE_TEST_FLOOR:-2773}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

@@ -236,7 +236,8 @@ public enum BridgeConstants {
     ///   (PKT-MEM-106 Phase 0 added internal types only — no new MCP tools.)
     /// Memory Hub UX Reconstruction (D35/D41, 2026-06-27): + memory_update
     ///   (in-place AGENTS field update tool). 187 + 1 = 188.
-    public static let staticFeatureModuleToolCount = 188
+    /// PKT-1061 Commands MCP (2026-06-29): +6 commands_* tools (list/get/search/create/update/delete). 188 + 6 = 194.
+    public static let staticFeatureModuleToolCount = 194
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.
@@ -264,5 +265,6 @@ public enum BridgeConstants {
     /// Tool-Dev (PRJCT-2754): + bgprocess family (bg_run/bg_poll/bg_kill) = 28.
     /// Voice Memos curator (2026-06-24): + voice family = 29.
     /// Local Ollama (2026-06-24): + ollama family = 30.
-    public static let staticFeatureModuleFamilyCount = 30
+    /// PKT-1061 (2026-06-29): + commands family = 31.
+    public static let staticFeatureModuleFamilyCount = 31
 }

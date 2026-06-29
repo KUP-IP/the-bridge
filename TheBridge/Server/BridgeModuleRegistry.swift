@@ -66,6 +66,7 @@ public enum BridgeModuleRegistry {
         await PasteboardHistoryModule.register(on: router)
         await ArtifactModule.register(on: router)
         await SnippetsModule.register(on: router)
+        await CommandsModule.register(on: router)          // PKT-1061: CommandStore-backed commands_* (6 tools)
         await StandingOrdersModule.register(on: router)
         await ShortcutsModule.register(on: router)
         await MemoryModule.register(on: router)
