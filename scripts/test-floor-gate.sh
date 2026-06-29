@@ -1584,7 +1584,10 @@ set -euo pipefail
 # 2026-06-29 (v3.9.2 release train): measured 2765 passed / 0 failed after #68+#66+#67 merge.
 # 2762 recorded floor → 2765 measured floor.
 # 2026-06-29 (PKT-1061 commands_* MCP): +8 CommandsModuleTests (registration/tier/CRUD dispatch). 2765→2773.
-FLOOR="${BRIDGE_TEST_FLOOR:-2773}"
+# 2026-06-29 (Wave 3 FB bundle): +bridge_focus_settings, skill body-cache eviction on
+# Notion writes, ListTools registration gate (FB-4), CalendarISOParsing tests.
+# Combined measured 2783 passed / 0 failed (2773 + 10 Wave 3 FB). 2765 → 2783.
+FLOOR="${BRIDGE_TEST_FLOOR:-2783}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

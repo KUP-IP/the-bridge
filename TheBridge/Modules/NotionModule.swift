@@ -349,6 +349,8 @@ public enum NotionModule {
                 let id = resultJSON["id"] as? String ?? pageId
                 let url = resultJSON["url"] as? String ?? ""
 
+                await SkillBodyCacheEviction.evictIfConfiguredSkillPage(pageId)
+
                 return .object([
                     "success": .bool(true),
                     "id": .string(id),
@@ -860,6 +862,8 @@ public enum NotionModule {
 
                 // 4. Write the edited body back.
                 _ = try await client.replacePageMarkdown(pageId: pageId, markdown: editedMarkdown)
+
+                await SkillBodyCacheEviction.evictIfConfiguredSkillPage(pageId)
 
                 let totalReplacements = editResults.reduce(0) { $0 + $1.replacements }
                 return .object([

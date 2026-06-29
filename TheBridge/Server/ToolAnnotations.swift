@@ -109,6 +109,7 @@ public enum ToolAnnotationCatalog {
         // own UI, mutates no user data, idempotent (re-opening an open window is
         // a no-op re-point), not an open world.
         "bridge_open_settings": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
+        "bridge_focus_settings": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
         // WS-D (PKT-921): cloud-gated health probe. Reads the local
         // BridgeCloudManager state machine; touches nothing — pure read.
         "bridge_status": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),

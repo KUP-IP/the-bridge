@@ -225,6 +225,8 @@ public actor ServerManager {
             await startCloudHeartbeat(for: manager)
         }
 
+        await router.markModulesRegistrationComplete()
+
         // Reconcile any jobs orphaned by a prior Bridge force-quit. Flips dead-pid running jobs to .unknown
         // and runs the 7-day cleanup pass for terminal jobs.
         _ = await BgProcessRuntime.shared.reconcileOrphans()
@@ -279,7 +281,7 @@ public actor ServerManager {
         let cloudManager = self.cloudManager
         await server.withMethodHandler(ListTools.self) { [router, toolAllowlist, isCloudRequest, cloudManager] _ in
             let disabledNames = CredentialsFeature.mergedDisabledToolNames()
-            var registrations = await router.enabledRegistrations(disabledNames: disabledNames)
+            var registrations = await router.registrationsForListTools(disabledNames: disabledNames)
 
             if let allowlist = toolAllowlist {
                 registrations = registrations.filter { allowlist.contains($0.name) }

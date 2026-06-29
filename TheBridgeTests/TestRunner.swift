@@ -829,6 +829,8 @@ await runSkillsCacheTests()
 // with stale-while-revalidate — CachedSkillBody + SkillBodyCacheStore +
 // envelope-equivalence between the cache-hit and network paths.
 await runSkillBodyCacheTests()
+await runSkillBodyCacheEvictionTests()
+await runToolRouterListToolsReadyTests()
 
 // routing/specialist-relation (v3.7.4): specialists now sourced from the
 // parent's curated `Specialist` relation property (NotionJSON.extract-

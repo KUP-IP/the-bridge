@@ -315,6 +315,42 @@ func runCalendarModuleTests() async {
         } catch is ToolRouterError { /* expected */ }
     }
 
+    // MARK: naive ISO parsing (CalendarISOParsing)
+
+    await test("CalendarISOParsing accepts timezone-qualified ISO-8601") {
+        let date = try CalendarISOParsing.parse("2026-06-05T09:00:00Z")
+        let iso = ISO8601DateFormatter().string(from: date)
+        try expect(iso.hasPrefix("2026-06-05"), "parsed Z timestamp: \(iso)")
+    }
+
+    await test("CalendarISOParsing accepts naive local wall-clock timestamps") {
+        let date = try CalendarISOParsing.parse("2026-06-03T14:30:00")
+        var cal = Calendar.current
+        cal.timeZone = TimeZone.current
+        let comps = cal.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+        try expect(comps.year == 2026 && comps.month == 6 && comps.day == 3, "year/month/day")
+        try expect(comps.hour == 14 && comps.minute == 30, "hour/minute in local TZ")
+    }
+
+    await test("CalendarISOParsing accepts date-only strings at local midnight") {
+        let date = try CalendarISOParsing.parse("2026-06-03")
+        var cal = Calendar.current
+        cal.timeZone = TimeZone.current
+        let comps = cal.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+        try expect(comps.year == 2026 && comps.month == 6 && comps.day == 3, "date-only parse")
+        try expect(comps.hour == 0 && comps.minute == 0, "date-only anchors local midnight")
+    }
+
+    await test("CalendarISOParsing rejects garbage input") {
+        do {
+            _ = try CalendarISOParsing.parse("not-a-date")
+            throw TestError.assertion("expected invalidDate")
+        } catch let e as CalendarModuleError {
+            if case .invalidDate = e { return }
+            throw TestError.assertion("expected invalidDate, got \(e)")
+        }
+    }
+
     // MARK: delete
 
     await test("calendar_delete removes the event (re-delete throws notFound)") {
