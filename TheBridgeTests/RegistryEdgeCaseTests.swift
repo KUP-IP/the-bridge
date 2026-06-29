@@ -60,6 +60,7 @@ private actor EdgeGateway: RegistryNotionGateway {
     }
     func archive(pageId: String, workspace: String?) async throws { if failNetwork { throw Err.offline }; pages[CachedRow.normalize(pageId)] = nil }
     func markdown(pageId: String, workspace: String?) async throws -> String { if failNetwork { throw Err.offline }; return "# body \(pageId)" }
+    func writeMarkdown(pageId: String, workspace: String?, markdown: String) async throws { if failNetwork { throw Err.offline } }
     enum Err: Error { case offline, notFound }
 }
 

@@ -28,6 +28,7 @@ private actor FakeRegistryGateway: RegistryNotionGateway {
     private(set) var created: [[BoundField]] = []
     private(set) var updated: [(id: String, fields: [BoundField])] = []
     private(set) var archived: [String] = []
+    private(set) var markdownWrites: [(pageId: String, markdown: String)] = []
     private var nextId = 1
 
     func setFail(_ v: Bool) { failNetwork = v }
@@ -76,6 +77,10 @@ private actor FakeRegistryGateway: RegistryNotionGateway {
     func markdown(pageId: String, workspace: String?) async throws -> String {
         if failNetwork { throw FakeError.offline }
         return "# Body of \(pageId)\n\npossessed."
+    }
+    func writeMarkdown(pageId: String, workspace: String?, markdown: String) async throws {
+        if failNetwork { throw FakeError.offline }
+        markdownWrites.append((pageId, markdown))
     }
 
     enum FakeError: Error { case offline, notFound }
