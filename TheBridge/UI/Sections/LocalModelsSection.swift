@@ -45,13 +45,13 @@ public struct LocalModelsSection: View {
                 modelPicker(
                     label: "Routing model",
                     selection: $routingModel,
-                    help: "Voice memo intent classification — default gemma4:12b on M1 16 GB"
+                    help: "Fast routing and structured output — default qwen3.5:9b on M1 Pro 16 GB"
                 )
 
                 modelPicker(
                     label: "Summary model",
                     selection: $summarizationModel,
-                    help: "One-sentence Memory summary (Relevant:) — empty uses routing model"
+                    help: "Higher-quality summaries and reasoning — default gemma4:12b-mlx"
                 )
 
                 Toggle(isOn: $voiceMemoOllamaRouting) {

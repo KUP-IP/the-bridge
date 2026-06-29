@@ -179,14 +179,17 @@ public enum BridgeDefaults {
     /// When true, extract Apple embedded `tsrp` transcript before Parakeet fallback.
     public static let voiceMemoAppleTranscript = "com.notionbridge.voiceMemo.appleTranscript"
 
-    /// Ollama model for one-sentence Memory summaries (Relevant:). Falls back to routing model.
+    /// Ollama model for one-sentence Memory summaries (Relevant:). Falls back to its quality default.
     public static let ollamaSummarizationModel = "com.notionbridge.ollama.summarizationModel"
 
     /// Voice memo curator Understand routing: auto | heuristics | local | agent | cloud.
     public static let voiceMemoCuratorMode = "com.notionbridge.voiceMemo.curatorMode"
 
-    /// Suggested default routing model (M1 16 GB — Gemma4 12B).
-    public static let ollamaRoutingModelDefault = "gemma4:12b"
+    /// Default operational model for routing, tool-oriented classification, and structured output.
+    public static let ollamaRoutingModelDefault = "qwen3.5:9b"
+
+    /// Default quality model for summaries and higher-complexity local reasoning.
+    public static let ollamaSummarizationModelDefault = "gemma4:12b-mlx"
 
     public static var ollamaBaseURLEffective: URL {
         let raw = UserDefaults.standard.string(forKey: ollamaBaseURL)?
@@ -229,7 +232,7 @@ public enum BridgeDefaults {
         let raw = UserDefaults.standard.string(forKey: ollamaSummarizationModel)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if let raw, !raw.isEmpty { return raw }
-        return ollamaRoutingModelEffective
+        return ollamaSummarizationModelDefault
     }
 
     /// Apply first-run defaults for local models when keys are absent.
@@ -237,6 +240,9 @@ public enum BridgeDefaults {
         let d = UserDefaults.standard
         if d.string(forKey: ollamaRoutingModel)?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
             d.set(ollamaRoutingModelDefault, forKey: ollamaRoutingModel)
+        }
+        if d.string(forKey: ollamaSummarizationModel)?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+            d.set(ollamaSummarizationModelDefault, forKey: ollamaSummarizationModel)
         }
         if d.object(forKey: voiceMemoOllamaRouting) == nil {
             d.set(true, forKey: voiceMemoOllamaRouting)

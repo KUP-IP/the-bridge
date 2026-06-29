@@ -49,14 +49,20 @@ func runOllamaModuleTests() async {
         try expect(text.contains("memory_keep"), "JSON extracted from thinking")
     }
 
-    await test("BridgeDefaults.seedOllamaDefaultsIfNeeded sets gemma routing model") {
+    await test("BridgeDefaults.seedOllamaDefaultsIfNeeded sets split routing and summary models") {
         let d = UserDefaults.standard
         let savedRouting = d.string(forKey: BridgeDefaults.ollamaRoutingModel)
+        let savedSummary = d.string(forKey: BridgeDefaults.ollamaSummarizationModel)
         d.removeObject(forKey: BridgeDefaults.ollamaRoutingModel)
+        d.removeObject(forKey: BridgeDefaults.ollamaSummarizationModel)
         BridgeDefaults.seedOllamaDefaultsIfNeeded()
         let seeded = d.string(forKey: BridgeDefaults.ollamaRoutingModel)
-        try expect(seeded == BridgeDefaults.ollamaRoutingModelDefault, "default gemma4:12b")
+        let seededSummary = d.string(forKey: BridgeDefaults.ollamaSummarizationModel)
+        try expect(seeded == BridgeDefaults.ollamaRoutingModelDefault, "default qwen3.5:9b")
+        try expect(seededSummary == BridgeDefaults.ollamaSummarizationModelDefault, "default gemma4:12b-mlx")
         if let savedRouting { d.set(savedRouting, forKey: BridgeDefaults.ollamaRoutingModel) }
         else { d.removeObject(forKey: BridgeDefaults.ollamaRoutingModel) }
+        if let savedSummary { d.set(savedSummary, forKey: BridgeDefaults.ollamaSummarizationModel) }
+        else { d.removeObject(forKey: BridgeDefaults.ollamaSummarizationModel) }
     }
 }
