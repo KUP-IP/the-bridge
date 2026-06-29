@@ -13,9 +13,11 @@ private actor ModFakeGateway: RegistryNotionGateway {
     var schemaToReturn: DataSourceSchema
     var queryRows: [NotionRow]
     var pages: [String: NotionRow]
+    var failMarkdownWrite = false
     private(set) var created: [[BoundField]] = []
     private(set) var updated: [(String, [BoundField])] = []
     private(set) var archived: [String] = []
+    private(set) var markdownWrites: [(pageId: String, markdown: String)] = []
     init(schema: DataSourceSchema, queryRows: [NotionRow] = [], pages: [String: NotionRow] = [:]) {
         self.schemaToReturn = schema; self.queryRows = queryRows; self.pages = pages
     }
@@ -39,6 +41,11 @@ private actor ModFakeGateway: RegistryNotionGateway {
     }
     func archive(pageId: String, workspace: String?) async throws { archived.append(pageId) }
     func markdown(pageId: String, workspace: String?) async throws -> String { "# Possessed \(pageId)" }
+    func writeMarkdown(pageId: String, workspace: String?, markdown: String) async throws {
+        if failMarkdownWrite { throw NSError(domain: "fake.markdown", code: 500) }
+        markdownWrites.append((pageId, markdown))
+    }
+    func setFailMarkdownWrite(_ value: Bool) { failMarkdownWrite = value }
 }
 
 private func skillsSchema() -> DataSourceSchema {
@@ -51,6 +58,14 @@ private func skillsSchema() -> DataSourceSchema {
         "Status": .init(id: "id_status", type: "status"),
         "Domain": .init(id: "id_domain", type: "select"),
         "Specialist": .init(id: "id_spec", type: "relation"),
+    ])
+}
+
+private func packetSchema() -> DataSourceSchema {
+    DataSourceSchema(columnsByName: [
+        "Packet Name": .init(id: "id_packet_title", type: "title"),
+        "Status": .init(id: "id_packet_status", type: "status"),
+        "PROJECT": .init(id: "id_packet_project", type: "relation"),
     ])
 }
 
@@ -74,6 +89,7 @@ private func withRegistryModuleEnv(_ fake: ModFakeGateway, _ body: () async thro
         BridgePaths.overrideHomeForTesting(nil)
         try? FileManager.default.removeItem(at: tmp)
     }
+    try? await RegistryCreateIdempotencyStore.shared.resetForTesting()
     try await body()
 }
 
@@ -183,6 +199,162 @@ func runRegistryModuleTests() async {
             let updatedCalls = await fake.updated.count
             try expect(createdCalls == 1 && updatedCalls == 1, "create-then-update (title create + rest patch)")
         }
+    }
+
+    await test("registry_create creates body-bearing packet with relation and verbatim Markdown body") {
+        let fake = ModFakeGateway(schema: packetSchema())
+        try await withRegistryModuleEnv(fake) {
+            _ = try await RegistryModule.makeAddEntity().handler(.object([
+                "key": .string("session"),
+                "displayName": .string("Packets"),
+                "dataSourceId": .string("packet_ds"),
+                "hasBody": .bool(true),
+                "properties": .array([
+                    .object(["key": .string("name"), "notionName": .string("Packet Name"), "type": .string("title"), "role": .string("title")]),
+                    .object(["key": .string("status"), "notionName": .string("Status"), "type": .string("status"), "role": .string("status")]),
+                    .object(["key": .string("project"), "notionName": .string("PROJECT"), "type": .string("relation"), "role": .string("relation")]),
+                ]),
+            ]))
+            _ = try await RegistryModule.makeIntrospect().handler(.object(["entity": .string("session")]))
+            let markdown = """
+            # Approved Proposal
+
+            Keep this **exact** wording.
+
+            - First item
+            - [Linked item](https://example.com)
+
+            > Quoted source text
+
+            ```json
+            {"copy":"verbatim"}
+            ```
+            """
+            let out = try await RegistryModule.makeCreate().handler(.object([
+                "entity": .string("session"),
+                "fields": .object([
+                    "name": .string("Bridge Tool Surface Completeness and Policy Coherence"),
+                    "status": .string("QUEUE"),
+                    "project": .array([.string("37fcbb58-889e-81f1-867e-d71b11dd9baf")]),
+                ]),
+                "bodyMarkdown": .string(markdown),
+            ]))
+            try expect(obj(out)["created"] == .bool(true), "created")
+            try expect(obj(out)["partialFailure"] == .bool(false), "not partial")
+            let created = await fake.created
+            let updated = await fake.updated
+            try expect(created.count == 1 && created[0].contains(where: { $0.notionName == "Packet Name" && $0.isTitle }), "title created")
+            try expect(updated.count == 1, "non-title fields patched")
+            try expect(updated[0].1.contains(where: { $0.notionName == "PROJECT" && $0.type == "relation" }), "PROJECT relation patched normally")
+            let writes = await fake.markdownWrites
+            try expect(writes.count == 1, "one body write")
+            try expect(writes[0].markdown == markdown, "markdown body must be passed verbatim")
+            let bodyWrite = obj(obj(out)["bodyWrite"] ?? .null)
+            try expect(bodyWrite["requested"] == .bool(true) && bodyWrite["succeeded"] == .bool(true), "body write receipt")
+        }
+    }
+
+    await test("registry_create remains compatible for property-only creates") {
+        let fake = ModFakeGateway(schema: skillsSchema())
+        try await withRegistryModuleEnv(fake) {
+            _ = try await RegistryModule.makeIntrospect().handler(.object(["entity": .string("skill")]))
+            let out = try await RegistryModule.makeCreate().handler(.object([
+                "entity": .string("skill"),
+                "fields": .object(["name": .string("Property Only")]),
+            ]))
+            try expect(obj(out)["created"] == .bool(true), "created")
+            let writes = await fake.markdownWrites
+            try expect(writes.isEmpty, "no body write for property-only create")
+        }
+    }
+
+    await test("registry_create rejects bodyMarkdown for non-body entity before row creation") {
+        let fake = ModFakeGateway(schema: skillsSchema())
+        try await withRegistryModuleEnv(fake) {
+            _ = try await RegistryModule.makeAddEntity().handler(.object([
+                "key": .string("project"),
+                "dataSourceId": .string("project_ds"),
+                "hasBody": .bool(false),
+                "properties": .array([
+                    .object(["key": .string("name"), "notionName": .string("Skill Name"), "type": .string("title"), "role": .string("title")]),
+                ]),
+            ]))
+            var threw = false
+            do {
+                _ = try await RegistryModule.makeCreate().handler(.object([
+                    "entity": .string("project"),
+                    "fields": .object(["name": .string("No Body")]),
+                    "bodyMarkdown": .string("# Should not create"),
+                ]))
+            } catch { threw = true }
+            try expect(threw, "bodyMarkdown on non-body entity must fail")
+            try expect(await fake.created.isEmpty, "must fail before row creation")
+        }
+    }
+
+    await test("registry_create reports explicit partial failure when body write fails") {
+        let fake = ModFakeGateway(schema: skillsSchema())
+        await fake.setFailMarkdownWrite(true)
+        try await withRegistryModuleEnv(fake) {
+            _ = try await RegistryModule.makeIntrospect().handler(.object(["entity": .string("skill")]))
+            let out = try await RegistryModule.makeCreate().handler(.object([
+                "entity": .string("skill"),
+                "fields": .object(["name": .string("Body Fails")]),
+                "bodyMarkdown": .string("# Missing body"),
+            ]))
+            try expect(obj(out)["created"] == .bool(false), "partial failure must not be success")
+            try expect(obj(out)["partialFailure"] == .bool(true), "partial failure flag")
+            try expect(obj(out)["reason"] == .string("body_write_failed"), "structured reason")
+            try expect(await fake.created.count == 1, "row was created before body failed")
+        }
+    }
+
+    await test("registry_create idempotencyKey prevents duplicate create on retry") {
+        let fake = ModFakeGateway(schema: skillsSchema())
+        try await withRegistryModuleEnv(fake) {
+            _ = try await RegistryModule.makeIntrospect().handler(.object(["entity": .string("skill")]))
+            let args: Value = .object([
+                "entity": .string("skill"),
+                "fields": .object(["name": .string("Retry Safe")]),
+                "bodyMarkdown": .string("# Same body"),
+                "idempotencyKey": .string("approved-proposal-123"),
+            ])
+            let first = try await RegistryModule.makeCreate().handler(args)
+            let second = try await RegistryModule.makeCreate().handler(args)
+            try expect(obj(first)["created"] == .bool(true), "first creates")
+            try expect(obj(second)["created"] == .bool(false), "retry returns existing")
+            try expect(obj(second)["idempotentReplay"] == .bool(true), "replay flagged")
+            try expect(await fake.created.count == 1, "no duplicate row create")
+            try expect(await fake.markdownWrites.count == 1, "no duplicate body write after successful replay")
+        }
+    }
+
+    await test("registry_create rejects oversized bodyMarkdown before row creation") {
+        let fake = ModFakeGateway(schema: skillsSchema())
+        try await withRegistryModuleEnv(fake) {
+            _ = try await RegistryModule.makeIntrospect().handler(.object(["entity": .string("skill")]))
+            let tooLarge = String(repeating: "x", count: RegistryModule.maxBodyMarkdownCharacters + 1)
+            var threw = false
+            do {
+                _ = try await RegistryModule.makeCreate().handler(.object([
+                    "entity": .string("skill"),
+                    "fields": .object(["name": .string("Too Large")]),
+                    "bodyMarkdown": .string(tooLarge),
+                ]))
+            } catch { threw = true }
+            try expect(threw, "oversized body must fail")
+            try expect(await fake.created.isEmpty, "oversized body must fail before create")
+        }
+    }
+
+    await test("registry_create schema exposes bodyMarkdown and idempotencyKey") {
+        let reg = RegistryModule.makeCreate()
+        let schema = obj(reg.inputSchema)
+        let props = obj(schema["properties"] ?? .null)
+        try expect(props["bodyMarkdown"] != nil, "bodyMarkdown discoverable")
+        try expect(props["idempotencyKey"] != nil, "idempotencyKey discoverable")
+        try expect(reg.description.contains("bodyMarkdown initializes"), "description explains body behavior")
+        try expect(reg.description.contains("Max 100000"), "description documents max payload size")
     }
 
     await test("registry_possess loads the body of a body-bearing entity") {

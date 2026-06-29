@@ -12,11 +12,13 @@
 // connection resolution) and the read-through `RegistryRowCache`, so reads are
 // warm-cache fast and offline-tolerant.
 
+import CryptoKit
 import Foundation
 import MCP
 
 public enum RegistryModule {
     public static let moduleName = "registry"
+    public static let maxBodyMarkdownCharacters = 100_000
 
     // MARK: - Injectable seams (tests override; production uses live defaults)
 
@@ -57,9 +59,38 @@ public enum RegistryModule {
         return nil
     }
 
+    static func stringIfPresent(_ args: [String: Value], _ key: String) -> String? {
+        if case .string(let s)? = args[key] { return s }
+        return nil
+    }
+
     static func fields(_ args: [String: Value]) -> [String: Value] {
         if case .object(let o)? = args["fields"] { return o }
         return [:]
+    }
+
+    static func markdownHash(_ markdown: String) -> String {
+        SHA256.hash(data: Data(markdown.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func bodyWriteValue(
+        requested: Bool,
+        succeeded: Bool,
+        characters: Int,
+        markdownHash: String?,
+        operation: String = "replacePageMarkdown",
+        error: String? = nil
+    ) -> Value {
+        var out: [String: Value] = [
+            "requested": .bool(requested),
+            "succeeded": .bool(succeeded),
+            "operation": .string(operation),
+            "characters": .int(characters),
+            "maxCharacters": .int(maxBodyMarkdownCharacters),
+        ]
+        if let markdownHash { out["markdownSha256"] = .string(markdownHash) }
+        if let error { out["error"] = .string(error) }
+        return .object(out)
     }
 
     static func entityValue(_ e: RegistryEntity) -> Value {
@@ -315,12 +346,14 @@ public enum RegistryModule {
     public static func makeCreate() -> ToolRegistration {
         ToolRegistration(
             name: "registry_create", module: moduleName, tier: .notify,
-            description: "Create a new row in a registry entity from canonical field keys (create-then-update: a titled row is created first, then the rest of the properties are set). Each supplied field must already be bound to a Notion property id — run registry_introspect first.",
+            description: "Create a new row in a registry entity from canonical field keys. Optional bodyMarkdown initializes the newly-created Notion page body for body-bearing entities (see registry_entities hasBody=true); the supplied Markdown is copied as source content, not summarized, regenerated, or improved. Supported Markdown is Notion's page-markdown subset: headings, paragraphs, bulleted/numbered lists, code fences, block quotes, links, and inline emphasis. bodyMarkdown is optional, Max 100000 characters, and used only for initial creation via replacePageMarkdown on the new blank page. Use idempotencyKey to make retries return the first created page instead of creating duplicates. If the body write fails after row creation, the result is created=false with partialFailure=true and the page id plus body error; it is never reported as a successful creation.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "entity": .object(["type": .string("string")]),
                     "fields": .object(["type": .string("object"), "description": .string("Map of canonical field key → value (e.g. {\"name\":\"…\",\"status\":\"Active\"}).")]),
+                    "bodyMarkdown": .object(["type": .string("string"), "description": .string("Optional initial page body for body-bearing entities only. Copied verbatim as Markdown source through Notion's page-markdown writer; never summarized or rewritten. Max 100000 characters.")]),
+                    "idempotencyKey": .object(["type": .string("string"), "description": .string("Optional stable retry key/source id. Reusing the same key returns the first created page and avoids duplicate packets.")]),
                 ]),
                 "required": .array([.string("entity"), .string("fields")]),
             ]),
@@ -330,9 +363,148 @@ public enum RegistryModule {
                 }
                 let config = await loadConfig()
                 let entity = try requireEntity(key, in: config, tool: "registry_create")
-                let writer = RegistryWriter(gateway: gateway())
+                let bodyMarkdown = stringIfPresent(a, "bodyMarkdown")
+                let bodyRequested = bodyMarkdown != nil
+                if bodyRequested && !entity.hasBody {
+                    throw ToolRouterError.invalidArguments(
+                        toolName: "registry_create",
+                        reason: "entity ‘\(key)’ does not support page bodies — omit bodyMarkdown or choose an entity with hasBody=true")
+                }
+                if let bodyMarkdown, bodyMarkdown.count > maxBodyMarkdownCharacters {
+                    throw ToolRouterError.invalidArguments(
+                        toolName: "registry_create",
+                        reason: "bodyMarkdown is \(bodyMarkdown.count) characters; max is \(maxBodyMarkdownCharacters). Nothing was created.")
+                }
+                let bodyHash = bodyMarkdown.map(markdownHash)
+                let idempotencyKey = string(a, "idempotencyKey")
+                let idemStore = RegistryCreateIdempotencyStore.shared
+                let gateway = gateway()
+                if let idempotencyKey, let record = try await idemStore.record(entity: entity.key, key: idempotencyKey) {
+                    if let bodyHash, let priorHash = record.bodyMarkdownHash, priorHash != bodyHash {
+                        throw ToolRouterError.invalidArguments(
+                            toolName: "registry_create",
+                            reason: "idempotencyKey ‘\(idempotencyKey)’ was already used with different bodyMarkdown")
+                    }
+                    if record.bodyRequested, !record.bodySucceeded, let bodyMarkdown {
+                        do {
+                            try await gateway.writeMarkdown(pageId: record.row.pageId, workspace: entity.workspace, markdown: bodyMarkdown)
+                            let healed = record.withBodySuccess()
+                            try await idemStore.save(healed)
+                            return .object([
+                                "created": .bool(false),
+                                "idempotentReplay": .bool(true),
+                                "partialFailure": .bool(false),
+                                "row": rowValue(healed.row, stale: false),
+                                "bodyWrite": bodyWriteValue(
+                                    requested: true,
+                                    succeeded: true,
+                                    characters: healed.bodyCharacters,
+                                    markdownHash: healed.bodyMarkdownHash),
+                            ])
+                        } catch {
+                            let failed = record.withBodyFailure(String(describing: error))
+                            try? await idemStore.save(failed)
+                            return .object([
+                                "created": .bool(false),
+                                "idempotentReplay": .bool(true),
+                                "partialFailure": .bool(true),
+                                "reason": .string("body_write_failed"),
+                                "row": rowValue(failed.row, stale: false),
+                                "bodyWrite": bodyWriteValue(
+                                    requested: true,
+                                    succeeded: false,
+                                    characters: failed.bodyCharacters,
+                                    markdownHash: failed.bodyMarkdownHash,
+                                    error: failed.bodyError),
+                            ])
+                        }
+                    }
+                    return .object([
+                        "created": .bool(false),
+                        "idempotentReplay": .bool(true),
+                        "partialFailure": .bool(!record.bodySucceeded && record.bodyRequested),
+                        "row": rowValue(record.row, stale: false),
+                        "bodyWrite": bodyWriteValue(
+                            requested: record.bodyRequested,
+                            succeeded: record.bodySucceeded,
+                            characters: record.bodyCharacters,
+                            markdownHash: record.bodyMarkdownHash,
+                            error: record.bodyError),
+                    ])
+                }
+                let writer = RegistryWriter(gateway: gateway)
                 let row = try await writer.create(entity: entity, fields: fields(a))
-                return .object(["created": .bool(true), "row": rowValue(row, stale: false)])
+                if let idempotencyKey {
+                    try await idemStore.save(RegistryCreateIdempotencyRecord(
+                        entity: entity.key,
+                        key: idempotencyKey,
+                        row: row,
+                        bodyRequested: bodyRequested,
+                        bodySucceeded: !bodyRequested,
+                        bodyMarkdownHash: bodyHash,
+                        bodyCharacters: bodyMarkdown?.count ?? 0,
+                        bodyError: nil,
+                        createdAt: Date()))
+                }
+                guard let bodyMarkdown else {
+                    return .object([
+                        "created": .bool(true),
+                        "partialFailure": .bool(false),
+                        "row": rowValue(row, stale: false),
+                        "bodyWrite": bodyWriteValue(requested: false, succeeded: false, characters: 0, markdownHash: nil),
+                    ])
+                }
+                do {
+                    try await gateway.writeMarkdown(pageId: row.pageId, workspace: entity.workspace, markdown: bodyMarkdown)
+                    if let idempotencyKey {
+                        try await idemStore.save(RegistryCreateIdempotencyRecord(
+                            entity: entity.key,
+                            key: idempotencyKey,
+                            row: row,
+                            bodyRequested: true,
+                            bodySucceeded: true,
+                            bodyMarkdownHash: bodyHash,
+                            bodyCharacters: bodyMarkdown.count,
+                            bodyError: nil,
+                            createdAt: Date()))
+                    }
+                    return .object([
+                        "created": .bool(true),
+                        "partialFailure": .bool(false),
+                        "row": rowValue(row, stale: false),
+                        "bodyWrite": bodyWriteValue(
+                            requested: true,
+                            succeeded: true,
+                            characters: bodyMarkdown.count,
+                            markdownHash: bodyHash),
+                    ])
+                } catch {
+                    let err = String(describing: error)
+                    if let idempotencyKey {
+                        try? await idemStore.save(RegistryCreateIdempotencyRecord(
+                            entity: entity.key,
+                            key: idempotencyKey,
+                            row: row,
+                            bodyRequested: true,
+                            bodySucceeded: false,
+                            bodyMarkdownHash: bodyHash,
+                            bodyCharacters: bodyMarkdown.count,
+                            bodyError: err,
+                            createdAt: Date()))
+                    }
+                    return .object([
+                        "created": .bool(false),
+                        "partialFailure": .bool(true),
+                        "reason": .string("body_write_failed"),
+                        "row": rowValue(row, stale: false),
+                        "bodyWrite": bodyWriteValue(
+                            requested: true,
+                            succeeded: false,
+                            characters: bodyMarkdown.count,
+                            markdownHash: bodyHash,
+                            error: err),
+                    ])
+                }
             })
     }
 
@@ -445,5 +617,114 @@ public enum RegistryModule {
                 let envelope = try await reader.hydrate(entity: entity, pageId: id, forceRefresh: force)
                 return envelope.asValue()
             })
+    }
+}
+
+public struct RegistryCreateIdempotencyRecord: Codable, Sendable, Equatable {
+    public let entity: String
+    public let key: String
+    public let row: CachedRow
+    public let bodyRequested: Bool
+    public let bodySucceeded: Bool
+    public let bodyMarkdownHash: String?
+    public let bodyCharacters: Int
+    public let bodyError: String?
+    public let createdAt: Date
+
+    public init(
+        entity: String,
+        key: String,
+        row: CachedRow,
+        bodyRequested: Bool,
+        bodySucceeded: Bool,
+        bodyMarkdownHash: String?,
+        bodyCharacters: Int,
+        bodyError: String?,
+        createdAt: Date
+    ) {
+        self.entity = entity
+        self.key = key
+        self.row = row
+        self.bodyRequested = bodyRequested
+        self.bodySucceeded = bodySucceeded
+        self.bodyMarkdownHash = bodyMarkdownHash
+        self.bodyCharacters = bodyCharacters
+        self.bodyError = bodyError
+        self.createdAt = createdAt
+    }
+
+    public func withBodySuccess() -> RegistryCreateIdempotencyRecord {
+        RegistryCreateIdempotencyRecord(
+            entity: entity,
+            key: key,
+            row: row,
+            bodyRequested: bodyRequested,
+            bodySucceeded: true,
+            bodyMarkdownHash: bodyMarkdownHash,
+            bodyCharacters: bodyCharacters,
+            bodyError: nil,
+            createdAt: createdAt)
+    }
+
+    public func withBodyFailure(_ error: String) -> RegistryCreateIdempotencyRecord {
+        RegistryCreateIdempotencyRecord(
+            entity: entity,
+            key: key,
+            row: row,
+            bodyRequested: bodyRequested,
+            bodySucceeded: false,
+            bodyMarkdownHash: bodyMarkdownHash,
+            bodyCharacters: bodyCharacters,
+            bodyError: error,
+            createdAt: createdAt)
+    }
+}
+
+public actor RegistryCreateIdempotencyStore {
+    public static let shared = RegistryCreateIdempotencyStore()
+
+    private var loaded: [String: RegistryCreateIdempotencyRecord]?
+
+    public init() {}
+
+    private var fileURL: URL {
+        BridgePaths.applicationSupport(.registry).appendingPathComponent("create-idempotency.json")
+    }
+
+    private func composite(entity: String, key: String) -> String {
+        "\(entity)\u{1F}\(key)"
+    }
+
+    private func load() -> [String: RegistryCreateIdempotencyRecord] {
+        if let loaded { return loaded }
+        guard let data = try? Data(contentsOf: fileURL),
+              let decoded = try? JSONDecoder().decode([String: RegistryCreateIdempotencyRecord].self, from: data) else {
+            loaded = [:]
+            return [:]
+        }
+        loaded = decoded
+        return decoded
+    }
+
+    public func record(entity: String, key: String) throws -> RegistryCreateIdempotencyRecord? {
+        load()[composite(entity: entity, key: key)]
+    }
+
+    public func save(_ record: RegistryCreateIdempotencyRecord) throws {
+        var records = load()
+        records[composite(entity: record.entity, key: record.key)] = record
+        try BridgePaths.ensureApplicationSupport(.registry)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(records)
+        try data.write(to: fileURL, options: [.atomic])
+        loaded = records
+    }
+
+    public func resetForTesting() throws {
+        loaded = [:]
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            try FileManager.default.removeItem(at: fileURL)
+        }
     }
 }

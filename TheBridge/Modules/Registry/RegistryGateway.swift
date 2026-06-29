@@ -22,6 +22,7 @@ public protocol RegistryNotionGateway: Sendable {
     func update(pageId: String, workspace: String?, fields: [BoundField]) async throws -> NotionRow
     func archive(pageId: String, workspace: String?) async throws
     func markdown(pageId: String, workspace: String?) async throws -> String
+    func writeMarkdown(pageId: String, workspace: String?, markdown: String) async throws
 }
 
 public extension RegistryNotionGateway {
@@ -100,6 +101,13 @@ public struct LiveRegistryGateway: RegistryNotionGateway {
             if let content = obj["content"] as? String { return content }
         }
         return String(decoding: data, as: UTF8.self)
+    }
+
+    public func writeMarkdown(pageId: String, workspace: String?, markdown: String) async throws {
+        let c = try await client(workspace)
+        _ = try await limiter.throttled {
+            try await c.replacePageMarkdown(pageId: pageId, markdown: markdown)
+        }
     }
 
     /// Build the `{"PROPERTY_NAME": <payload>}` envelope from bound fields,

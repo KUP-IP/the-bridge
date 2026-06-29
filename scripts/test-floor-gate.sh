@@ -1575,7 +1575,13 @@ set -euo pipefail
 # 2744 recorded floor → 2755 measured floor.
 # 2026-06-29 (standing orders v7.0.2 transplant): +3 StandingOrdersTests (bundled seedIfEmpty,
 # parseDoctrineVersion, explicit doctrineVersion write bump). Current main floor 2755→2758.
-FLOOR="${BRIDGE_TEST_FLOOR:-2758}"
+# 2026-06-29 (registry_create body initialization):
+# +7 tests covering body-bearing one-call packet creation, relation patching,
+# verbatim Markdown body write, property-only compatibility, non-body validation,
+# explicit partial failure on body-write error, idempotency retry, oversized body
+# rejection, and schema discovery. make test-floor measured 2762 passed / 0 failed.
+# 2755 recorded floor → 2762 measured floor (rebased atop standing-orders 2758).
+FLOOR="${BRIDGE_TEST_FLOOR:-2762}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

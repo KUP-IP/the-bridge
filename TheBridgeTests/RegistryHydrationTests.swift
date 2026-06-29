@@ -48,6 +48,9 @@ private actor HydrationGateway: RegistryNotionGateway {
         if failNetwork { throw Err.offline }
         return "# packet body \(pageId)"
     }
+    func writeMarkdown(pageId: String, workspace: String?, markdown: String) async throws {
+        if failNetwork { throw Err.offline }
+    }
     enum Err: Error { case offline, notFound, forbidden }
 }
 

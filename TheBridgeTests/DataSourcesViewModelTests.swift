@@ -31,6 +31,7 @@ private actor VMFakeGateway: RegistryNotionGateway {
     func update(pageId: String, workspace: String?, fields: [BoundField]) async throws -> NotionRow { throw NSError(domain: "vmfake", code: 405) }
     func archive(pageId: String, workspace: String?) async throws {}
     func markdown(pageId: String, workspace: String?) async throws -> String { "" }
+    func writeMarkdown(pageId: String, workspace: String?, markdown: String) async throws {}
 }
 
 private func fullSkillsSchema() -> DataSourceSchema {
