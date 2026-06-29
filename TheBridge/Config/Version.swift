@@ -18,7 +18,7 @@ import Foundation
 public enum AppVersion {
     /// Marketing version (CFBundleShortVersionString equivalent).
     /// Format: MAJOR.MINOR.PATCH (Semantic Versioning).
-    public static let marketing = "3.9.1"
+    public static let marketing = "3.9.2"
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
@@ -115,7 +115,7 @@ public enum AppVersion {
     ///   KeepReviewModel (KeepReviewStatus + KeepReviewMetadata + KeepSchemaContract +
     ///   KeepRequiredSchemaField). staticFeatureModuleToolCount 187 → 188. test-floor
     ///   2682 → 2744 (+62).
-    public static let build = "67"
+    public static let build = "68"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }

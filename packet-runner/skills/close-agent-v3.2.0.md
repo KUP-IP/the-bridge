@@ -134,7 +134,7 @@ Auto-detect from conversation: **unresolved_items** · **decisions_made** · **a
 1. **Detect** `file_append` availability → absent → skip
 2. **Collect** bugs · friction · enhancements · feature requests
 3. **Filter** — discard anything without concrete tool-invocation evidence
-4. **Write** — append to `~/developer/notion-bridge/AGENT_FEEDBACK.md` (canonical Bridge repo path; renamed from `keepr-bridge` 2026-04-19), one `### [date]` block per session
+4. **Write** — append to `~/Developer/the-bridge/AGENT_FEEDBACK.md` (canonical Bridge repo path; was `~/developer/notion-bridge/` pre-2026-06-29), one `### [date]` block per session
 5. **Skip** — no entries → log "no entries this session"
 ### Phase 2 — Retrospective (Internal, UP-AC2)
 #### §2.1 Universal Reflection Core (4 questions per §W.1)
@@ -506,7 +506,7 @@ Archived → <mention-page url="https://app.notion.com/p/d366a5e9b6214d9990df293
 <tr>
 <td>2026-04-19</td>
 <td>3.0.1</td>
-<td>Bridge repo renamed `keepr-bridge` → `notion-bridge`. Phase 1.5 write target updated to `~/developer/notion-bridge/AGENT_FEEDBACK.md`. Description property updated. Zero behavioral changes — path-only.</td>
+<td>Bridge repo renamed `keepr-bridge` → `notion-bridge` → `the-bridge` (2026-06-29). Phase 1.5 write target updated to `~/Developer/the-bridge/AGENT_FEEDBACK.md`. Description property updated. Zero behavioral changes — path-only.</td>
 <td><mention-user url="user://025089e2-a0be-4eae-8aba-7589adccbf83"/> · close-agent</td>
 </tr>
 <tr>
