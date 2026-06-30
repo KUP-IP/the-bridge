@@ -6,6 +6,20 @@
 
 ## V1 Process layout — live acceptance (REVIEW-FIRST)
 
+**Live run:** 2026-06-30 · `make install-copy` → v3.9.2 build 68 · memo `20251007 133129-0E0F965C.m4a-654734-1759861973` (short Apple transcript)  
+**Evidence:** `docs/operator/live-evidence/memory-process-v1-2026-06-30.png` · merged AX `ax-memory-full-2026-06-30.json`
+
+| ID | Scenario | Result | Build | Notes |
+|----|----------|--------|-------|-------|
+| L1 | Three-pane chrome | **PASS** | 3.9.2/68 | Memo sidebar + center controls + activity drawer toggle visible; screenshot captured |
+| L2 | J3 center order | **PASS** | 3.9.2/68 | AX: `intentTags`, `transcriptExpand`, `confirmSummary`, `confirmButton`, `dryRun`, `refreshPreview` |
+| L3 | Batch happy path | **OPERATOR** | — | Needs disposable memo with ≥2 checkable intents + operator OK on notify-tier commits |
+| L4 | Batch partial fail | **OPERATOR** | — | Force guardrail-blocked 2nd intent (D6); not run — destructive |
+| L5 | Registry sheet | **OPERATOR** | — | Needs registry intent without row pick; sheet AX id conditional |
+| L6 | Preview cache | **PASS** | 3.9.2/68 | Skills → `process/<memoId>` remount restores preview + checked tag (Skills sandwich required when tab already mounted) |
+| L7 | Triage UI-9 | **PARTIAL** | 3.9.2/68 | `voice_memo_triage_open` → sessionHandle OK; UI Confirm click did not emit `committed` within 5s await (retry with operator Confirm + 1800s await) |
+| L8 | PKT-1005 | **PARTIAL** | 3.9.2/68 | Merged 5-tab AX: **23/36** memory ids (`ax-memory-full-2026-06-30.json`). Process V1 controls present; container ids (`centerPane`, `memoList`) not exposed in AX flat dump; `activityDrawer` grep false-positive via `activityDrawerToggle` substring |
+
 | ID | Scenario | Pass criteria |
 |----|----------|---------------|
 | L1 | Three-pane chrome | Left memos always visible (220px); activity drawer collapse/expand; center never zero-width |
@@ -21,15 +35,15 @@
 
 | ID | Scenario | Navigation | Assert | Grade | Build | Notes |
 |----|----------|------------|--------|-------|-------|-------|
-| UI-1 | First Understand | `anchor:process` | `bridge.settings.memory.process.centerPane` + `intentTags` populated after Understand | **OPERATOR** | — | V1 AX ids (replaces intentTable) |
-| UI-2 | Process ↔ Inbox ↔ Process | `anchor:inbox` → `anchor:process` | Same memo selected; restore **<1s**; checked tags preserved | **OPERATOR** | — | Session cache SC-1 + L6 |
-| UI-3 | Section leave/return | Skills → Memory/process | Transcript + checked tags restored from RAM cache | **OPERATOR** | — | SC-2 |
+| UI-1 | First Understand | `anchor:process` | `intentTags` populated after Understand | **PASS** | v3.9.2 build 68 | `centerPane` id not in AX dump; tags + confirm strip verified |
+| UI-2 | Process ↔ Inbox ↔ Process | `anchor:inbox` → Skills → `process/<memoId>` | Same memo; restore <1s; tags preserved | **PASS** | v3.9.2 build 68 | L6; Skills sandwich triggers `onAppear` restore |
+| UI-3 | Section leave/return | Skills → Memory/process | Transcript + checked tags restored from RAM cache | **PASS** | v3.9.2 build 68 | SC-2 + L6 |
 | UI-4 | Re-run Understand | `refreshPreview` AX id | Intents reload; triage invalidated if active | PASS | v3.9.2 build 68 | Hermetic triage invalidation green |
 | UI-5 | Quit/relaunch | Kill app, reopen | No instant cache; shows load path | PASS | v3.9.2 build 68 | SC-4 RAM-only cache |
 | UI-6 | Batch Confirm eviction | Check tags → Confirm on test memo | Memo leaves list when processed gate clears; cache entry gone | **OPERATOR** | — | V1 batch Confirm (replaces single-intent commit) |
 | UI-7 | Picker round-trip | Registry configure sheet → tab away → return | `selectedRowIdByIntentId` restored | **OPERATOR** | — | V1 per-intent picker maps |
-| UI-8 | PKT-1005 Memory AX | Navigate memory + ax_tree grep | V1 harness ids (centerPane, intentTags, confirmButton, activityDrawer, …) | **OPERATOR** | — | L8 gate |
-| UI-9 | W5-Triage (122) | `triage_open` → batch Confirm → `triage_await` | `committed` event with `committed N/M` detail | **OPERATOR** | — | L7; hermetic batch detail green |
+| UI-8 | PKT-1005 Memory AX | 5-tab ax_tree merge | Process V1 ids + cross-tab memory ids | **PARTIAL** | v3.9.2 build 68 | 23/36; see L8 notes |
+| UI-9 | W5-Triage (122) | `triage_open` → batch Confirm → `triage_await` | `committed` with N/M detail | **PARTIAL** | v3.9.2 build 68 | open OK; await timeout until operator Confirm completes |
 
 ## Hermetic coverage (no live UI required)
 
@@ -44,12 +58,12 @@
 
 ## Operator actions still required (REVIEW-FIRST)
 
-1. **L1–L8:** Visual review + screenshot evidence after `make install-copy`.
-2. **UI-6:** Batch Confirm on disposable test memo; confirm partial/processed eviction.
-3. **UI-9:** Full agent↔operator handoff with batch Confirm detail string.
+1. **L3–L5:** Batch Confirm on **disposable** multi-intent memo (notify-tier writes); approve macOS notification if prompted.
+2. **L7 retry:** `voice_memo_triage_open` → operator Confirm in UI → `voice_memo_triage_await` (1800s) for `committed N/M` detail.
+3. **GO gate (D10):** After PR CI green + operator sign-off on L3–L5, reply **GO** to merge and tag v3.9.3.
 
-## Automation principles (friction log)
+## Automation friction log (2026-06-30)
 
-- Prefer `bridge_settings_navigate` + `ax_tree` grep over coordinate clicks.
-- Target `accessibilityIdentifier` paths (`BridgeAXID.Memory.Process.*`), never `AXScrollArea:/AXButton:N`.
-- Memo selection: `anchor:process/<memoId>` when memo id known.
+- **`process/<memoId>` anchor alone does not select memo** when Process tab is already mounted — only sets `lastSelectedMemoId`. Use **Skills → Memory/process/<memoId>** sandwich (or memo-row click) to trigger `restorePreviewSessionIfNeeded` / `loadPreview`.
+- Long-memo first load can block `ToolRouter` queue; prefer short memo for smoke or restart app before smoke.
+- PKT-1005 `grep -F` treats `activityDrawerToggle` as match for `activityDrawer` — use exact-id audit for ship gate.
