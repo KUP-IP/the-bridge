@@ -19,9 +19,9 @@ Required **before** merging `feat/mem-120-routing-quality-ux`. Single-memo only.
 
 | Case | Build | Mode | MCP | Memo ID | Grade | Receipt refs | Notes |
 |------|-------|------|-----|---------|-------|--------------|-------|
-| W1-A | … | Auto | Cursor connected | … | | | defer — no autonomous write; commit via get/commit |
-| W1-B | … | Auto | none (quit Cursor) | … | | | autonomous execute or review per guardrails |
-| W1-C | … | Connected MCP agent | connected | … | | | matches W1-A defer behavior |
+| W1-A | v3.9.2 build 68 / `037a70b` | Auto | Cursor connected | `20260204 200742-56AF3049.m4a-17800675-1770264815` | PASS | `cf424aa32421` | defer — no autonomous write; `agent_memory` commit OK; `processed:true` after commit |
+| W1-B | v3.9.2 build 68 / `037a70b` | Auto | Bridge alone | — | **PARTIAL** | _(hermetic)_ | **Blocked in-session:** Cursor HTTP MCP keeps `clients:1` → presence true. Hermetic `deferExecute_autoMode_alone_autonomous` green. Operator: quit Cursor ≥5s, process one memo, fill row. |
+| W1-C | v3.9.2 build 68 / `037a70b` | Connected MCP agent | Cursor connected | `20260130 171649-D4A3F901.m4a-426976-1769816399` | PASS | `f9b6f22239e4` | defer matches W1-A; review dismissed after smoke (memo stays unprocessed) |
 
 ## Protocol (operator)
 
