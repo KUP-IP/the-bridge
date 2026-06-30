@@ -252,6 +252,11 @@ public enum BridgeAXID {
             // `.edited`) + the MANUAL Tier-3 cloud-title button (shown only when canRunCloud).
             public static let titleRename      = id("process.titleRename")
             public static let titleCloud       = id("process.titleCloud")
+            /// PKT-MEM-121 — explicit Re-run Understand (invalidates triage + bypasses cache).
+            public static let refreshPreview   = id("process.refreshPreview")
+            /// PKT-MEM-122 — agent triage session banner + end control.
+            public static let triageBanner       = id("process.triageBanner")
+            public static let triageEndSession   = id("process.triageEndSession")
         }
     }
 }

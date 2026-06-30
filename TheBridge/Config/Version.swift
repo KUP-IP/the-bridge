@@ -238,7 +238,7 @@ public enum BridgeConstants {
     ///   (in-place AGENTS field update tool). 187 + 1 = 188.
     /// PKT-1061 Commands MCP (2026-06-29): +6 commands_* tools (list/get/search/create/update/delete). 188 + 6 = 194.
     /// Wave 3 FB (2026-06-29): + bridge_focus_settings (automation family). 194 + 1 = 195.
-    public static let staticFeatureModuleToolCount = 195
+    public static let staticFeatureModuleToolCount = 197
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

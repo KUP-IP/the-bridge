@@ -25,7 +25,7 @@
 #      so the agent knows exactly what to assert.
 #         ./scripts/pkt1005-ui-validate.sh --manifest
 #
-# The 7 sections (stable case names): orders skills jobs tools security connection advanced
+# The 9 sections (stable case names): orders skills jobs tools security connection memory datasources advanced
 #
 # Exit 0 = all asserted ids found; non-zero = at least one missing (names printed).
 
@@ -54,14 +54,54 @@ bridge.settings.skills.metadata.grid
 EOF
 }
 
-expected_ids() {  # $1 = section
-  shared_ids "$1"
-  if [ "$1" = "skills" ]; then
-    skills_extra_ids
-  fi
+memory_extra_ids() {
+  cat <<'EOF'
+bridge.settings.memory.tab.bar
+bridge.settings.memory.tab.process
+bridge.settings.memory.tab.inbox
+bridge.settings.memory.tab.notion
+bridge.settings.memory.tab.agent
+bridge.settings.memory.tab.processing
+bridge.settings.memory.process.memoList
+bridge.settings.memory.process.intentTable
+bridge.settings.memory.process.detailInspector
+bridge.settings.memory.process.activityStrip
+bridge.settings.memory.process.titleRename
+bridge.settings.memory.process.titleCloud
+bridge.settings.memory.process.refreshPreview
+bridge.settings.memory.process.triageBanner
+bridge.settings.memory.process.triageEndSession
+bridge.settings.memory.processing.pane
+bridge.settings.memory.processing.provider.save
+bridge.settings.memory.processing.provider.status
+bridge.settings.memory.inbox.list
+bridge.settings.memory.inbox.dismiss
+bridge.settings.memory.notion.list
+bridge.settings.memory.notion.refresh
+bridge.settings.memory.agent.list
+bridge.settings.memory.agent.filter.scope
+bridge.settings.memory.agent.filter.type
+EOF
 }
 
-ALL_SECTIONS="orders skills jobs tools security connection advanced"
+datasources_extra_ids() {
+  cat <<'EOF'
+bridge.settings.datasources.introspect
+bridge.settings.datasources.clearCache
+bridge.settings.datasources.proposal.confirm
+EOF
+}
+
+expected_ids() {  # $1 = section
+  shared_ids "$1"
+  case "$1" in
+    skills) skills_extra_ids ;;
+    memory) memory_extra_ids ;;
+    datasources) datasources_extra_ids ;;
+  esac
+}
+
+ALL_SECTIONS="orders skills jobs tools security connection memory datasources advanced"
 
 print_manifest() {
   for s in $ALL_SECTIONS; do

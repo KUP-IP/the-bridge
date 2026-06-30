@@ -36,6 +36,7 @@ struct MemoryProcessTab: View {
     @State private var titleStatus: String?
     @State private var intentDiffBadges: [String: String] = [:]
     @State private var awaitingAgentMemoIds: Set<String> = []
+    @State private var triageSessionActive = false
 
     private var rows: [CockpitIntentRow] {
         guard let plan, let selectedId else { return [] }
@@ -57,6 +58,10 @@ struct MemoryProcessTab: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if triageSessionActive, selectedId != nil {
+                triageBanner
+                Divider().background(BridgeTokens.hairlineFaint)
+            }
             HStack(alignment: .top, spacing: 0) {
                 memoListZone
                     .frame(minWidth: 210, idealWidth: 230, maxWidth: 250)
@@ -72,7 +77,45 @@ struct MemoryProcessTab: View {
             activityStripZone
                 .frame(height: 96)
         }
-        .onAppear { reloadMemos(); reloadActivity() }
+        .onAppear {
+            reloadMemos()
+            reloadActivity()
+            Task { await restorePreviewSessionIfNeeded() }
+            Task { await refreshTriageBanner() }
+        }
+        .onChange(of: selectedId) { _, _ in
+            Task { await refreshTriageBanner() }
+        }
+    }
+
+    private var triageBanner: some View {
+        HStack(spacing: 10) {
+            BridgeBadge("Agent triage active", tone: .info, showsDot: true)
+            Text("Bridge executes commits — agent must not re-commit.")
+                .font(BridgeTokens.Typeface.meta)
+                .foregroundStyle(BridgeTokens.fg3)
+            Spacer(minLength: 8)
+            BridgeButton("End session", systemImage: "xmark.circle") {
+                if let memoId = selectedId {
+                    MemoryHubTriageSessionBridge.endSession(memoId: memoId)
+                }
+                triageSessionActive = false
+            }
+            .accessibilityIdentifier(BridgeAXID.Memory.Process.triageEndSession)
+        }
+        .padding(.horizontal, BridgeTokens.Space.paneH)
+        .padding(.vertical, 10)
+        .background(BridgeTokens.accent.opacity(0.08))
+        .accessibilityIdentifier(BridgeAXID.Memory.Process.triageBanner)
+    }
+
+    @MainActor
+    private func refreshTriageBanner() async {
+        guard let memoId = selectedId else {
+            triageSessionActive = false
+            return
+        }
+        triageSessionActive = await MemoryHubTriageSessionBridge.isActive(memoId: memoId)
     }
 
     // MARK: Zone 1 — memo list
@@ -108,7 +151,7 @@ struct MemoryProcessTab: View {
             selectedIntentId = nil
             picker = nil
             selectedRowId = nil
-            Task { await loadPreview(for: memo) }
+            Task { await loadPreview(for: memo, forceRefresh: false) }
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -176,6 +219,7 @@ struct MemoryProcessTab: View {
             selectedIntentId = row.intentId
             picker = nil
             selectedRowId = nil
+            persistPreviewSession()
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -324,11 +368,28 @@ struct MemoryProcessTab: View {
                     .foregroundStyle(BridgeTokens.fg2)
 
                 // W3 — provenance badge: WHO produced these intents (frontier agent / cloud /
-                // local), and whether the result is a degraded fallback. Passive (no AX id).
-                BridgeBadge(
-                    MemoryHubCockpitLabels.provenanceBadge(plan.provenance, degraded: plan.degraded),
-                    tone: plan.degraded ? .warn : .neutral
-                )
+                // local), and whether the result is a degraded fallback.
+                HStack(alignment: .top, spacing: 8) {
+                    BridgeBadge(
+                        MemoryHubCockpitLabels.provenanceBadge(plan.provenance, degraded: plan.degraded),
+                        tone: plan.degraded ? .warn : .neutral
+                    )
+                    Spacer(minLength: 8)
+                    if !isLoading {
+                        VStack(alignment: .trailing, spacing: 4) {
+                            BridgeButton("Re-run Understand", systemImage: "arrow.clockwise") {
+                                guard let memoId = selectedId,
+                                      let memo = memos.first(where: { $0.id == memoId }) else { return }
+                                MemoryHubTriageSessionBridge.invalidateForMemo(memoId: memoId)
+                                Task { await loadPreview(for: memo, forceRefresh: true) }
+                            }
+                            .accessibilityIdentifier(BridgeAXID.Memory.Process.refreshPreview)
+                            Text("Runs local/cloud parse again")
+                                .font(BridgeTokens.Typeface.meta)
+                                .foregroundStyle(BridgeTokens.fg4)
+                        }
+                    }
+                }
 
                 // W3/W4 — commit-value preview: the text that will be written, read-only, so the
                 // operator commits with sight not blind. The label is honest about partial cases
@@ -351,6 +412,7 @@ struct MemoryProcessTab: View {
                 if !row.isPrimary {
                     BridgeButton("Make primary", systemImage: "star") {
                         overrideIntentId = row.intentId
+                        persistPreviewSession()
                     }
                     .accessibilityIdentifier(BridgeAXID.Memory.Process.primaryOverride(row.intentId))
                 }
@@ -391,6 +453,7 @@ struct MemoryProcessTab: View {
                 ForEach(picker.rows) { prow in
                     Button {
                         selectedRowId = prow.id
+                        persistPreviewSession()
                     } label: {
                         HStack {
                             Image(systemName: selectedRowId == prow.id ? "largecircle.fill.circle" : "circle")
@@ -460,7 +523,18 @@ struct MemoryProcessTab: View {
     }
 
     @MainActor
-    private func loadPreview(for memo: VoiceMemoRecording) async {
+    private func loadPreview(for memo: VoiceMemoRecording, forceRefresh: Bool) async {
+        await MemoryProcessPreviewSession.shared.setLastSelectedMemoId(memo.id)
+
+        if !forceRefresh, let cached = await cachedBundle(for: memo) {
+            applyBundle(cached)
+            return
+        }
+
+        if forceRefresh {
+            await MemoryProcessPreviewSession.shared.invalidate(memoId: memo.id)
+        }
+
         isLoading = true
         // W3 — DISTINCT pre-await status: a no-transcript memo triggers an on-device
         // transcription run (first run may DOWNLOAD the model) here, which otherwise reads
@@ -504,6 +578,7 @@ struct MemoryProcessTab: View {
             titleStatus = nil
             titleDraft = MemoryHubMemoTitler.listDisplay(recording: memo, cached: titleCache[memo.id]).text
             cloudProvider = MemoryHubProviderConfigStore.load().first
+            persistPreviewSession()
             // PKT-MEM-114 P3a — Tier-2 local upgrade: AUTO only when Ollama processing is
             // enabled. Non-blocking; on a better title it caches `.local` (edited-pinned) and
             // refreshes the row on the main actor. Failure/timeout keeps the heuristic silently.
@@ -519,6 +594,65 @@ struct MemoryProcessTab: View {
         } catch {
             statusMessage = error.localizedDescription
         }
+    }
+
+    @MainActor
+    private func restorePreviewSessionIfNeeded() async {
+        guard selectedId == nil,
+              let memoId = await MemoryProcessPreviewSession.shared.lastSelectedMemoId,
+              let memo = memos.first(where: { $0.id == memoId }) else { return }
+        selectedId = memoId
+        await loadPreview(for: memo, forceRefresh: false)
+    }
+
+    @MainActor
+    private func cachedBundle(for memo: VoiceMemoRecording) async -> MemoryProcessPreviewBundle? {
+        let fp = MemoryProcessPreviewSession.transcriptFingerprint(memo.transcript ?? "")
+        if let hit = await MemoryProcessPreviewSession.shared.get(memoId: memo.id, transcriptFingerprint: fp) {
+            return hit
+        }
+        let listEmpty = memo.transcript?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true
+        if listEmpty {
+            return await MemoryProcessPreviewSession.shared.getIfPresent(memoId: memo.id)
+        }
+        return nil
+    }
+
+    @MainActor
+    private func applyBundle(_ bundle: MemoryProcessPreviewBundle) {
+        transcript = bundle.transcript
+        plan = bundle.plan
+        overrideIntentId = bundle.overrideIntentId
+        selectedIntentId = bundle.selectedIntentId
+        intentDiffBadges = bundle.intentDiffBadges
+        picker = bundle.picker
+        selectedRowId = bundle.selectedRowId
+        if let draft = bundle.titleDraft { titleDraft = draft }
+        statusMessage = bundle.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? MemoryHubCockpitLabels.unresolvedTranscriptMessage()
+            : nil
+        if let memoId = selectedId {
+            titleCache[memoId] = MemoryHubMemoTitleStore.title(for: memoId)
+            cloudProvider = MemoryHubProviderConfigStore.load().first
+        }
+    }
+
+    @MainActor
+    private func persistPreviewSession() {
+        guard let memoId = selectedId, let plan else { return }
+        let bundle = MemoryProcessPreviewBundle(
+            memoId: memoId,
+            transcript: transcript,
+            transcriptFingerprint: MemoryProcessPreviewSession.transcriptFingerprint(transcript),
+            plan: plan,
+            selectedIntentId: selectedIntentId,
+            overrideIntentId: overrideIntentId,
+            intentDiffBadges: intentDiffBadges,
+            picker: picker,
+            selectedRowId: selectedRowId,
+            titleDraft: titleDraft
+        )
+        Task { await MemoryProcessPreviewSession.shared.put(bundle) }
     }
 
     private func reloadPlanDiffBadges(memoId: String) {
@@ -552,6 +686,7 @@ struct MemoryProcessTab: View {
         MemoryHubMemoTitleStore.put(edited, memoId: memoId)
         titleCache[memoId] = MemoryHubMemoTitleStore.title(for: memoId)
         titleStatus = "Renamed."
+        persistPreviewSession()
     }
 
     /// Tier-3 cloud title (MANUAL only). POSTs an OpenAI-compatible chat-completions request via
@@ -596,6 +731,7 @@ struct MemoryProcessTab: View {
                 return MemoryHubRegistryRow(id: id, title: title)
             }
             picker = MemoryProcessCockpit.picker(entity: entity, liveRows: liveRows)
+            persistPreviewSession()
         } catch {
             picker = MemoryProcessCockpit.picker(entity: entity, liveRows: nil, sourceError: error.localizedDescription)
         }
@@ -632,6 +768,16 @@ struct MemoryProcessTab: View {
             detail = error.localizedDescription
             statusMessage = detail
         }
+        if ok {
+            await MemoryProcessPreviewSession.shared.remove(memoId: memoId)
+            plan = nil
+            transcript = ""
+            selectedIntentId = nil
+            overrideIntentId = nil
+            picker = nil
+            selectedRowId = nil
+            selectedId = nil
+        }
         let event = MemoryHubActivityEvent(
             timestamp: ISO8601DateFormatter().string(from: Date()),
             memoId: memoId, intentId: row.intentId, phase: .execute,
@@ -641,6 +787,11 @@ struct MemoryProcessTab: View {
             actor: "operator", detail: String(detail.prefix(160))
         )
         try? MemoryHubActivityLog.append(event)
+        if ok {
+            MemoryHubTriageSessionBridge.emitCommitted(
+                memoId: memoId, receiptHash: event.receiptHash, detail: detail)
+            triageSessionActive = false
+        }
         reloadActivity()
         reloadMemos()
     }

@@ -95,6 +95,8 @@ public struct MemorySection: View {
             reloadEntries()
             MemoryHubUIState.setMemorySectionVisible(true)
             MemoryHubUIState.setProcessTabSelected(selection == .process)
+            applyNavigation(from: anchor ?? nav.anchor)
+            consumeNavigationAnchorIfNeeded()
         }
         .onDisappear {
             MemoryHubUIState.setMemorySectionVisible(false)
@@ -104,10 +106,28 @@ public struct MemorySection: View {
             MemoryHubUIState.setProcessTabSelected(newSelection == .process)
         }
         .onChange(of: anchor) { _, newAnchor in
-            if let t = MemorySection.tab(for: newAnchor) { selection = t }
+            applyNavigation(from: newAnchor)
+            consumeNavigationAnchorIfNeeded()
         }
         .onChange(of: nav.anchor) { _, newAnchor in
-            if let t = MemorySection.tab(for: newAnchor) { selection = t }
+            applyNavigation(from: newAnchor)
+            consumeNavigationAnchorIfNeeded()
+        }
+    }
+
+    private func applyNavigation(from rawAnchor: String?) {
+        let res = MemoryNavigationAnchor.resolve(rawAnchor)
+        if let t = res.tab { selection = t }
+        if let f = res.inboxFilter { inboxFilter = f }
+        if res.memoId != nil {
+            Task { await BridgeSettingsAutomation.applyMemoryNavigationSideEffects(anchor: rawAnchor) }
+        }
+    }
+
+    /// Skills-pattern: consume sticky MCP anchor after one apply.
+    private func consumeNavigationAnchorIfNeeded() {
+        if nav.section == .memory, nav.anchor != nil {
+            SettingsNavigation.shared.go(.memory, anchor: nil)
         }
     }
 
@@ -185,12 +205,21 @@ public struct MemorySection: View {
 
     @ViewBuilder
     private var tabBody: some View {
-        switch selection {
-        case .process: MemoryProcessTab()
-        case .inbox: inboxTab
-        case .notion: MemoryNotionTab()
-        case .agent: MemoryAgentTab()
-        case .processing: MemoryProcessingTab()
+        // PKT-MEM-121 — keep Process mounted so preview @State survives sub-tab switches.
+        ZStack {
+            MemoryProcessTab()
+                .opacity(selection == .process ? 1 : 0)
+                .allowsHitTesting(selection == .process)
+                .accessibilityHidden(selection != .process)
+            Group {
+                switch selection {
+                case .process: EmptyView()
+                case .inbox: inboxTab
+                case .notion: MemoryNotionTab()
+                case .agent: MemoryAgentTab()
+                case .processing: MemoryProcessingTab()
+                }
+            }
         }
     }
 
@@ -476,26 +505,6 @@ public struct MemorySection: View {
     // MARK: - Deep-link anchor → tab
 
     public static func tab(for anchor: String?) -> Tab? {
-        guard let raw = anchor?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .replacingOccurrences(of: " ", with: "")
-            .replacingOccurrences(of: "_", with: "")
-            .replacingOccurrences(of: "-", with: ""),
-            !raw.isEmpty else { return nil }
-        switch raw {
-        case "process", "curator", "pipeline":
-            return .process
-        case "inbox", "review", "voicememos", "voicememo", "voice":
-            return .inbox
-        case "notion", "registry":
-            return .notion
-        case "agent", "sqlite", "remember":
-            return .agent
-        case "processing", "models", "routing":
-            return .processing
-        default:
-            return nil
-        }
+        MemoryNavigationAnchor.resolve(anchor).tab
     }
 }

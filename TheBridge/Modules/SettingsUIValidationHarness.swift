@@ -116,6 +116,9 @@ public enum SettingsUIValidationHarness {
                     // PKT-MEM-114 P3b — title rename + manual cloud-title controls (inspector).
                     BridgeAXID.Memory.Process.titleRename,
                     BridgeAXID.Memory.Process.titleCloud,
+                    BridgeAXID.Memory.Process.refreshPreview,
+                    BridgeAXID.Memory.Process.triageBanner,
+                    BridgeAXID.Memory.Process.triageEndSession,
                     BridgeAXID.Memory.processingPane,
                     BridgeAXID.Memory.processingProviderSave,
                     BridgeAXID.Memory.processingProviderStatus,

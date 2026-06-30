@@ -1591,7 +1591,15 @@ set -euo pipefail
 # (MCPClientPresence grace + test override, Auto+MCP Execute defer, awaiting-agent review
 # tags, agent_deferred activity receipt, notifier lane, MemoryHubUIState notification gate,
 # cockpit label helpers) +1 MemorySettingsTests notionRefresh AX id. 2783 → 2796.
-FLOOR="${BRIDGE_TEST_FLOOR:-2796}"
+# 2026-06-30 (PKT-MEM-121 Process preview session cache): +10 MemoryProcessPreviewSessionTests
+# (LRU put/get, fingerprint mismatch, remove, invalidate, lastSelectedMemoId, picker round-trip,
+# getIfPresent, triage invalidation stub, refreshPreview AX id). 2796 → 2806.
+# 2026-06-30 (Memory Hub Sprint Finish): +VoiceMemoSuiteAuditTests (10 voice_memo_* invariants),
+# +ToolSurfaceCoverageAuditTests (static tool dispatch/suite-audit meta gate),
+# +TriageSessionTests (PKT-MEM-122 triage open/await/end, compound Memory navigation anchors),
+# +MemorySettingsTests compound anchor + resolved JSON, pkt1005 memory/datasources sections.
+# 2806 → 2824 measured green.
+FLOOR="${BRIDGE_TEST_FLOOR:-2824}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

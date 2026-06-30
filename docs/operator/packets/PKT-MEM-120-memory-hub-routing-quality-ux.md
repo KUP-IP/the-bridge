@@ -1,12 +1,12 @@
 # PKT-MEM-120 — Memory Hub Routing + Quality + UX
 
-**Status:** QUEUE (validated 2026-06-30)  
-**Class:** Standard · **Execution Class:** REVIEW-FIRST  
+**Status:** IMPLEMENTED · **Execution Class:** REVIEW-FIRST (W1-B smoke + sprint 121/122 pending)  
 **Project:** Ship The Bridge v4  
 **Branch:** `feat/mem-120-routing-quality-ux` (single integration PR)  
 **Spec SSOT:** [`MEMORY-HUB-EXECUTION-SPEC.md`](../MEMORY-HUB-EXECUTION-SPEC.md) + **§PKT-MEM-120 amendments** (below)  
-**Plan SSOT:** `.cursor/plans/memory_hub_sprint_e107afc7.plan.md` (21 C2C decisions locked)  
-**Baseline:** test floor **2783** · app v3.9.2 build 68 (worktree `9lxf`)
+**Plan SSOT:** `.cursor/plans/memory_hub_sprint_e107afc7.plan.md` (C2C R1–R12 locked)  
+**Sub-packets (same sprint — execute sequentially):** [PKT-MEM-121](./PKT-MEM-121-process-preview-session-cache.md) · [PKT-MEM-122](./PKT-MEM-122-operator-triage-session.md)  
+**Baseline:** test floor **2796** · app v3.9.2 build 68
 
 > **Validate pass (2026-06-30).** This packet supersedes stale rows in PKT-MEM-110 and amends spec §0.1 for autonomous cloud Understand. Executor must treat **this packet + plan decision ledger** as authoritative over PKT-MEM-110 and over spec rows explicitly amended here.
 
@@ -50,6 +50,7 @@ When Processing mode is **Auto**, Bridge **defers Execute to a connected MCP age
 - `registry_remove_entity`, embeddings/recall, v2 entity seeds.
 - Version bump (full sprint closeout only, separate release commit).
 - Clearing ~220 memo backlog (operator MCP batches on **Connected MCP agent** mode until W1 ships).
+- **PKT-MEM-121 / PKT-MEM-122** — sibling sub-packets on same sprint branch (not in *this packet's* code scope; required for sprint merge per R11.1).
 
 ### Constraints
 
@@ -175,7 +176,7 @@ After merge + install: operator opens Memory → Process, sees accurate routing 
 
 ### Current Canonical Result
 
-_Implemented 2026-06-30 in worktree `9lxf`; hermetic floor 2796. Awaiting W1 live smoke before PR._
+_Implemented 2026-06-30 on `feat/mem-120-routing-quality-ux`; hermetic floor 2796. W1-A/C live PASS; W1-B PARTIAL (operator). PKT-MEM-121/122 validated QUEUE — dispatch next._
 
 ### Artifact Manifest
 

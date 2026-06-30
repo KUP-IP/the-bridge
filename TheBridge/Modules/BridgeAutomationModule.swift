@@ -184,6 +184,10 @@ public enum BridgeSettingsAutomation {
             delegate.openSettings(section: section)
         }
 
+        if section == .memory, let anchor {
+            Task { await applyMemoryNavigationSideEffects(anchor: anchor) }
+        }
+
         // Authoritative host-presence: does a real Settings NSWindow now exist?
         // This — not the delegate cast — is what determines success, so a deep
         // link to an open window no longer reports a false "no host" note.
@@ -236,7 +240,7 @@ public enum BridgeSettingsAutomation {
         // Ensure the window exists if requested and none is open yet.
         if openIfNeeded {
             let alreadyOpen = NSApp.windows.contains { $0.isVisible && isSettingsWindow($0) }
-            if !alreadyOpen, let delegate = NSApp.delegate as? AppDelegate {
+            if !alreadyOpen, let delegate = liveAppDelegate() {
                 delegate.openSettings(section: nil)
             }
         }
@@ -261,6 +265,25 @@ public enum BridgeSettingsAutomation {
         // window otherwise hides on deactivation.
         window.orderFrontRegardless()
         return (windowFound: true, activated: true)
+    }
+
+    /// Apply Memory-specific deep-link side effects (memo selection for Process tab).
+    public static func applyMemoryNavigationSideEffects(anchor: String?) async {
+        let res = MemoryNavigationAnchor.resolve(anchor)
+        if let memoId = res.memoId {
+            await MemoryProcessPreviewSession.shared.setLastSelectedMemoId(memoId)
+        }
+    }
+
+    /// JSON `resolved` payload for Memory compound anchors (tab / memoId / filter).
+    public static func memoryResolvedValue(anchor: String?) -> Value? {
+        let res = MemoryNavigationAnchor.resolve(anchor)
+        guard res.tab != nil || res.memoId != nil || res.inboxFilter != nil else { return nil }
+        var obj: [String: Value] = [:]
+        if let tab = res.tab { obj["tab"] = .string(tab.rawValue) }
+        if let memoId = res.memoId { obj["memoId"] = .string(memoId) }
+        if let filter = res.inboxFilter { obj["filter"] = .string(filter.rawValue) }
+        return .object(obj)
     }
 }
 
@@ -306,7 +329,7 @@ public enum BridgeAutomationModule {
                     ]),
                     "anchor": .object([
                         "type": .string("string"),
-                        "description": .string("Optional sub-section anchor (e.g. a credential row slug) passed through to the section.")
+                        "description": .string("Optional sub-section anchor. Memory examples: process, process/<memoId>, inbox, inbox/awaitingAgent, notion, agent, processing, activity. Security/Connection legacy tab anchors (vault, remote, …) also accepted.")
                     ]),
                     "focus": .object([
                         "type": .string("boolean"),
@@ -345,6 +368,13 @@ public enum BridgeAutomationModule {
                     "windowOpened": .bool(windowDriven)
                 ]
                 if let anchor { result["anchor"] = .string(anchor) }
+                if section == .memory, let anchor {
+                    if let resolved = await MainActor.run(body: {
+                        BridgeSettingsAutomation.memoryResolvedValue(anchor: anchor)
+                    }) {
+                        result["resolved"] = resolved
+                    }
+                }
                 let shouldFocus = boolParam(params, "focus", default: true)
                 if shouldFocus {
                     let focusOutcome = await BridgeSettingsAutomation.focusSettings(openIfNeeded: true)

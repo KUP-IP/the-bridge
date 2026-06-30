@@ -23,6 +23,14 @@ Required **before** merging `feat/mem-120-routing-quality-ux`. Single-memo only.
 | W1-B | v3.9.2 build 68 / `037a70b` | Auto | Bridge alone | — | **PARTIAL** | _(hermetic)_ | **Blocked in-session:** Cursor HTTP MCP keeps `clients:1` → presence true. Hermetic `deferExecute_autoMode_alone_autonomous` green. Operator: quit Cursor ≥5s, process one memo, fill row. |
 | W1-C | v3.9.2 build 68 / `037a70b` | Connected MCP agent | Cursor connected | `20260130 171649-D4A3F901.m4a-426976-1769816399` | PASS | `f9b6f22239e4` | defer matches W1-A; review dismissed after smoke (memo stays unprocessed) |
 
+## PKT-MEM-122 W5-Triage merge gate (2026-06-30)
+
+Required **before** sprint merge (with PKT-MEM-121 checklist).
+
+| Step | Build | Memo ID | Grade | Receipt refs | Notes |
+|------|-------|---------|-------|--------------|-------|
+| W5-Triage | v3.9.2 build 68 | — | **PARTIAL** | _(hermetic)_ | Hermetic `TriageSessionTests` + `voice_memo_triage_*` dispatch green. Live: agent `triage_open` + operator UI commit + `triage_await` → `committed` pending operator run. |
+
 ## Protocol (operator)
 
 1. **Build/relaunch:** `make test` → `make app` → `make install-copy` (or signing-backed `make install`) → `open -a "The Bridge"`.
