@@ -240,18 +240,25 @@ public enum BridgeAXID {
         public enum Process {
             private static func id(_ slug: String) -> String { BridgeAXID.control(.memory, slug) }
             public static let memoList         = id("process.memoList")
-            public static let intentTable      = id("process.intentTable")
-            public static let detailInspector  = id("process.detailInspector")
-            public static let activityStrip    = id("process.activityStrip")
+            public static let centerPane       = id("process.centerPane")
+            public static let intentTags       = id("process.intentTags")
+            public static func intentTagCheckbox(_ intentId: String) -> String { id("process.intentTag.\(intentId)") }
+            public static let confirmButton    = id("process.confirmButton")
+            public static let confirmSummary   = id("process.confirmSummary")
+            public static let transcriptExpand = id("process.transcriptExpand")
+            public static let transcriptCollapse = id("process.transcriptCollapse")
+            public static let activityDrawer   = id("process.activityDrawer")
+            public static let activityDrawerToggle = id("process.activityDrawerToggle")
+            public static let activityDrawerCollapse = id("process.activityDrawerCollapse")
+            public static let registryConfigureSheet = id("process.registryConfigureSheet")
             public static func memoRow(_ memoId: String) -> String { id("process.memoRow.\(memoId)") }
-            public static func intentRow(_ intentId: String) -> String { id("process.intentRow.\(intentId)") }
             public static func registryRow(entity: String, rowId: String) -> String { id("process.registryRow.\(entity).\(rowId)") }
-            public static func commit(_ intentId: String) -> String { id("process.commit.\(intentId)") }
-            public static func primaryOverride(_ intentId: String) -> String { id("process.primaryOverride.\(intentId)") }
             // PKT-MEM-114 P3b — detail-inspector title controls: operator rename (→ pinned
             // `.edited`) + the MANUAL Tier-3 cloud-title button (shown only when canRunCloud).
             public static let titleRename      = id("process.titleRename")
             public static let titleCloud       = id("process.titleCloud")
+            /// PKT-MEM-124 — memo-level dry-run preview (voice_memo_process dryRun:true).
+            public static let dryRun           = id("process.dryRun")
             /// PKT-MEM-121 — explicit Re-run Understand (invalidates triage + bypasses cache).
             public static let refreshPreview   = id("process.refreshPreview")
             /// PKT-MEM-122 — agent triage session banner + end control.

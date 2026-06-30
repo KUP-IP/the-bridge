@@ -73,6 +73,17 @@ func runTriageSessionTests() async {
         MemoryHubTriageSessionBridge.invalidateForMemo(memoId: "noop")
     }
 
+    await test("triage_batchDetail_format") {
+        let outcomes = [
+            MemoryProcessBatchConfirm.BatchCommitOutcome(intentId: "a", kind: .reminder, ok: true, needsManual: false, detail: "ok", receiptHash: "hash1"),
+            MemoryProcessBatchConfirm.BatchCommitOutcome(intentId: "b", kind: .agentMemory, ok: true, needsManual: false, detail: "ok", receiptHash: "hash2"),
+        ]
+        let result = MemoryProcessBatchConfirm.BatchCommitResult(outcomes: outcomes, processedGateCleared: false)
+        let detail = MemoryProcessBatchConfirm.triageCommittedDetail(result: result)
+        try expect(detail.contains("2/2"), "batch triage detail N/M")
+        try expect(detail.contains("lastReceipt=hash2"), "last receipt in triage detail")
+    }
+
     await test("MemoryNavigationAnchor_compound_process_memoId") {
         let res = MemoryNavigationAnchor.resolve("process/memo-abc")
         try expect(res.tab == .process, "process tab")

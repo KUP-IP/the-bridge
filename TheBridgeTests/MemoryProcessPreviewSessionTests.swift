@@ -141,6 +141,40 @@ func runMemoryProcessPreviewSessionTests() async {
         try expect(true, "triage invalidation hook callable without crash")
     }
 
+    await test("previewSession_v1Fields_roundTrip") {
+        await MemoryProcessPreviewSession.shared.resetForTesting()
+        let bundle = MemoryProcessPreviewBundle(
+            memoId: "m1",
+            transcript: "v1 fields",
+            transcriptFingerprint: MemoryProcessPreviewSession.transcriptFingerprint("v1 fields"),
+            plan: makePlan(),
+            selectedIntentId: nil,
+            overrideIntentId: nil,
+            intentDiffBadges: [:],
+            picker: nil,
+            selectedRowId: nil,
+            titleDraft: "Draft",
+            checkedIntentIds: ["intent_a", "intent_b"],
+            transcriptExpanded: true,
+            selectedRowIdByIntentId: ["intent_a": "row-1"],
+            pickerByIntentId: [:]
+        )
+        await MemoryProcessPreviewSession.shared.put(bundle)
+        let fp = MemoryProcessPreviewSession.transcriptFingerprint("v1 fields")
+        let hit = await MemoryProcessPreviewSession.shared.get(memoId: "m1", transcriptFingerprint: fp)
+        try expect(hit?.checkedIntentIds == ["intent_a", "intent_b"], "checkedIntentIds preserved")
+        try expect(hit?.transcriptExpanded == true, "transcriptExpanded preserved")
+        try expect(hit?.selectedRowIdByIntentId["intent_a"] == "row-1", "per-intent row map preserved")
+    }
+
+    await test("previewSession_defaultCheckedIntentIds_whenBundleEmpty") {
+        let rows = MemoryProcessCockpit.intentRows(memoId: "m", plan: makePlan())
+        let defaults = MemoryProcessBatchConfirm.defaultCheckedIntentIds(rows: rows)
+        try expect(defaults.count == 1, "primary-only default")
+        let primaryId = rows.first { $0.isPrimary }!.intentId
+        try expect(defaults.contains(primaryId), "primary in defaults")
+    }
+
     await test("previewSession_refreshPreview_axId_wellFormed") {
         let id = BridgeAXID.Memory.Process.refreshPreview
         try expect(id == "bridge.settings.memory.process.refreshPreview", "refreshPreview AX id well-formed")

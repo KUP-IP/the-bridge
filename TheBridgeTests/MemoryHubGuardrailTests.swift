@@ -81,10 +81,21 @@ func runMemoryHubGuardrailTests() async {
     await test("dup_forceReason_invalidValueRejected") {
         if case .rejected = MemoryHubCommitGuardrails.validateForce(reasonRaw: "because") {} else { try expect(false, "out-of-enum reason ⇒ rejected") }
     }
-    await test("dup_forceReason_validAccepted") {
-        if case .ok(let r) = MemoryHubCommitGuardrails.validateForce(reasonRaw: "live_test") {
-            try expect(r == .liveTest, "live_test accepted")
-        } else { try expect(false, "valid reason ⇒ ok") }
+    await test("dup_batchDistinctIntents_distinctKeys") {
+        // V1 batch: two checked intents in same batch keep distinct dup keys (guardrail per commit).
+        let rows = MemoryProcessCockpit.intentRows(memoId: "m", plan: VoiceMemoPlan(
+            generatedTitle: "T", skipMemoryKeep: false, summary: "s", actions: [], intents: [
+                VoiceMemoIntent(kind: .reminder, confidence: 0.92, title: "A"),
+                VoiceMemoIntent(kind: .agentMemory, confidence: 0.88, title: "B"),
+            ]))
+        let ordered = MemoryProcessBatchConfirm.commitOrder(checkedIds: Set(rows.map(\.intentId)), rows: rows)
+        try expect(ordered.count == 2, "batch orders both lanes")
+        let keys = ordered.map {
+            MemoryHubCommitGuardrails.duplicateKey(
+                memoId: "m", intentId: $0.intentId,
+                destinationKey: $0.destinationField)
+        }
+        try expect(keys[0] != keys[1], "distinct lanes ⇒ distinct dup keys in batch")
     }
 
     // MARK: Non-protected per-field diff

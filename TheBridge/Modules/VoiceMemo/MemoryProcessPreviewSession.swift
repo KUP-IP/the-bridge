@@ -19,6 +19,14 @@ public struct MemoryProcessPreviewBundle: Sendable, Equatable {
     public let picker: CockpitPickerState?
     public let selectedRowId: String?
     public let titleDraft: String?
+    /// V1 — multi-select intent tags for batch Confirm.
+    public let checkedIntentIds: [String]
+    /// V1 — transcript expand/collapse in center pane.
+    public let transcriptExpanded: Bool
+    /// V1 — per-intent registry row picks.
+    public let selectedRowIdByIntentId: [String: String]
+    /// V1 — per-intent registry picker state.
+    public let pickerByIntentId: [String: CockpitPickerState]
 
     public init(
         memoId: String,
@@ -30,7 +38,11 @@ public struct MemoryProcessPreviewBundle: Sendable, Equatable {
         intentDiffBadges: [String: String],
         picker: CockpitPickerState?,
         selectedRowId: String?,
-        titleDraft: String?
+        titleDraft: String?,
+        checkedIntentIds: [String] = [],
+        transcriptExpanded: Bool = false,
+        selectedRowIdByIntentId: [String: String] = [:],
+        pickerByIntentId: [String: CockpitPickerState] = [:]
     ) {
         self.memoId = memoId
         self.transcript = transcript
@@ -42,6 +54,10 @@ public struct MemoryProcessPreviewBundle: Sendable, Equatable {
         self.picker = picker
         self.selectedRowId = selectedRowId
         self.titleDraft = titleDraft
+        self.checkedIntentIds = checkedIntentIds
+        self.transcriptExpanded = transcriptExpanded
+        self.selectedRowIdByIntentId = selectedRowIdByIntentId
+        self.pickerByIntentId = pickerByIntentId
     }
 }
 

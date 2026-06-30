@@ -261,6 +261,9 @@ struct TheBridgeTestRunner {
         await runMemoryHubMemoTitleTests() // PKT-MEM-114 P1: progressive AI memo titles (run early)
         await runMemoryProcessPreviewSessionTests() // PKT-MEM-121: Process preview session cache (run early)
         await runTriageSessionTests() // PKT-MEM-122: triage session (run early)
+        await runMemoryProcessBatchConfirmTests() // PKT-MEM-123: batch confirm orchestrator
+        await runMemoryProcessBatchCommitIntegrationTests() // PKT-MEM-123: batch commit loop (stub router)
+        await runMemoryProcessLayoutAXTests() // PKT-MEM-123: V1 layout AX manifest
         // ============================================================
         // MARK: - SecurityGate Tests (v3: 3-tier model)
         // ============================================================

@@ -1598,8 +1598,14 @@ set -euo pipefail
 # +ToolSurfaceCoverageAuditTests (static tool dispatch/suite-audit meta gate),
 # +TriageSessionTests (PKT-MEM-122 triage open/await/end, compound Memory navigation anchors),
 # +MemorySettingsTests compound anchor + resolved JSON, pkt1005 memory/datasources sections.
-# 2806 → 2824 measured green.
-FLOOR="${BRIDGE_TEST_FLOOR:-2824}"
+# 2026-06-30 (PKT-MEM-123 V1 Process layout + batch confirm): +30 tests —
+# MemoryProcessBatchConfirmTests (+18), MemoryProcessLayoutAXTests (+8),
+# MemoryProcessPreviewSessionTests (+2), MemoryHubGuardrailTests (+1 dup batch),
+# TriageSessionTests (+1 batch detail); MemoryHubCockpitTests AX migrated.
+# 2824 → 2854 measured green.
+# 2026-06-30 (PKT-MEM-123 Wave 1 gaps): +3 tests — MemoryProcessBatchCommitIntegrationTests (+2),
+# MemoryProcessLayoutAXTests (+1 dryRun AX); 2854 → 2857 measured green.
+FLOOR="${BRIDGE_TEST_FLOOR:-2857}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

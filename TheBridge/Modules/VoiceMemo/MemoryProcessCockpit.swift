@@ -141,6 +141,21 @@ public enum MemoryProcessCockpit {
         return registry.contains { ($0.entityHint ?? "").isEmpty }
     }
 
+    /// Per-intent registry picker need (V1 batch Confirm + configure sheet).
+    public static func needsPicker(for row: CockpitIntentRow, allRows: [CockpitIntentRow]) -> Bool {
+        guard row.kind == .registryUpdate else { return false }
+        let registry = allRows.filter { $0.kind == .registryUpdate }
+        if registry.count > 1 { return true }
+        return (row.entityHint ?? "").isEmpty
+    }
+
+    /// Chip label for the V1 intent tag grid.
+    public static func tagLabel(for row: CockpitIntentRow) -> String {
+        let kind = MemoryHubCockpitLabels.intentKind(row.kind)
+        let star = row.isPrimary ? " ★" : ""
+        return "\(kind) \(Int(row.confidence * 100))%\(star)"
+    }
+
     /// Process↔Inbox mirror: the unresolved lanes for a memo, grouped for Process.
     /// These are the SAME pending review entries the Inbox renders (one source of truth),
     /// so resolving/dismissing in either view clears the mirror.

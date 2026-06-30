@@ -29,7 +29,7 @@ fi
 scenario UI-1 \
   "bridge_settings_navigate(section:Memory, anchor:process, focus:true)" \
   "Select memo via process/<memoId> anchor or memoRow AX id" \
-  "Assert bridge.settings.memory.process.intentTable populated after Understand" \
+  "Assert bridge.settings.memory.process.centerPane and intentTags populated after Understand" \
   "No scroll-area button index clicks"
 
 scenario UI-2 \

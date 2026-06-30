@@ -107,15 +107,22 @@ public enum SettingsUIValidationHarness {
                     BridgeAXID.Memory.tab("notion"),
                     BridgeAXID.Memory.tab("agent"),
                     BridgeAXID.Memory.tab("processing"),
-                    // PKT-MEM-106 0b Process cockpit zones (replace the pre-cockpit
-                    // process.list / process.preview surfaces).
+                    // PKT-MEM-123 V1 Process layout zones (three-pane + batch Confirm).
                     BridgeAXID.Memory.Process.memoList,
-                    BridgeAXID.Memory.Process.intentTable,
-                    BridgeAXID.Memory.Process.detailInspector,
-                    BridgeAXID.Memory.Process.activityStrip,
+                    BridgeAXID.Memory.Process.centerPane,
+                    BridgeAXID.Memory.Process.intentTags,
+                    BridgeAXID.Memory.Process.confirmButton,
+                    BridgeAXID.Memory.Process.confirmSummary,
+                    BridgeAXID.Memory.Process.transcriptExpand,
+                    BridgeAXID.Memory.Process.transcriptCollapse,
+                    BridgeAXID.Memory.Process.activityDrawer,
+                    BridgeAXID.Memory.Process.activityDrawerToggle,
+                    BridgeAXID.Memory.Process.activityDrawerCollapse,
+                    BridgeAXID.Memory.Process.registryConfigureSheet,
                     // PKT-MEM-114 P3b — title rename + manual cloud-title controls (inspector).
                     BridgeAXID.Memory.Process.titleRename,
                     BridgeAXID.Memory.Process.titleCloud,
+                    BridgeAXID.Memory.Process.dryRun,
                     BridgeAXID.Memory.Process.refreshPreview,
                     BridgeAXID.Memory.Process.triageBanner,
                     BridgeAXID.Memory.Process.triageEndSession,
