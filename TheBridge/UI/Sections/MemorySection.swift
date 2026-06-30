@@ -56,11 +56,12 @@ public struct MemorySection: View {
 
     /// Inbox status filter — matches notification deep-link intent (PKT-MEM-104 follow-up).
     public enum InboxFilter: String, CaseIterable, Sendable {
-        case all, noTranscript, routingFailed, lowConfidence
+        case all, awaitingAgent, noTranscript, routingFailed, lowConfidence
 
         var label: String {
             switch self {
             case .all: return "All"
+            case .awaitingAgent: return "Awaiting agent"
             case .noTranscript: return "No transcript"
             case .routingFailed: return "Routing failed"
             case .lowConfidence: return "Low confidence"
@@ -90,7 +91,18 @@ public struct MemorySection: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.clear)
-        .onAppear { reloadEntries() }
+        .onAppear {
+            reloadEntries()
+            MemoryHubUIState.setMemorySectionVisible(true)
+            MemoryHubUIState.setProcessTabSelected(selection == .process)
+        }
+        .onDisappear {
+            MemoryHubUIState.setMemorySectionVisible(false)
+            MemoryHubUIState.setProcessTabSelected(false)
+        }
+        .onChange(of: selection) { _, newSelection in
+            MemoryHubUIState.setProcessTabSelected(newSelection == .process)
+        }
         .onChange(of: anchor) { _, newAnchor in
             if let t = MemorySection.tab(for: newAnchor) { selection = t }
         }
@@ -188,9 +200,10 @@ public struct MemorySection: View {
         entries.filter { entry in
             switch inboxFilter {
             case .all: return true
-            case .noTranscript: return statusLabel(for: entry) == "No transcript"
-            case .routingFailed: return statusLabel(for: entry) == "Routing failed"
-            case .lowConfidence: return statusLabel(for: entry) == "Low confidence"
+            case .awaitingAgent: return entry.effectiveReviewTag == .awaitingAgent
+            case .noTranscript: return entry.effectiveReviewTag == .noTranscript
+            case .routingFailed: return entry.effectiveReviewTag == .routingFailed
+            case .lowConfidence: return entry.effectiveReviewTag == .lowConfidence
             }
         }
     }

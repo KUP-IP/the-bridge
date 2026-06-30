@@ -17,6 +17,8 @@ struct MemoryProcessingTab: View {
     @State private var providerKeyInput = ""
     @State private var providerKeyConfigured = false
     @State private var providerStatus: String?
+    @State private var mcpConnected = false
+    @State private var mcpClientLabel: String?
 
     var body: some View {
         ScrollView {
@@ -24,10 +26,19 @@ struct MemoryProcessingTab: View {
                 BridgeGlassCard {
                     VStack(alignment: .leading, spacing: 12) {
                         BridgeCardLabel("Curator routing")
-                        Text("Understand + Plan routing before Bridge-owned Execute. Auto prefers local Ollama when enabled.")
+                        Text("When an MCP client is connected, Auto defers Execute to the agent (`voice_memo_get` → `voice_memo_commit`). When alone: cloud → local Ollama → heuristics, then Bridge auto-execute.")
                             .font(BridgeTokens.Typeface.sub)
                             .foregroundStyle(BridgeTokens.fg3)
                             .fixedSize(horizontal: false, vertical: true)
+                        if mcpConnected {
+                            Text("Connected\(mcpClientLabel.map { ": \($0)" } ?? "") — Execute deferred in Auto mode")
+                                .font(BridgeTokens.Typeface.meta)
+                                .foregroundStyle(BridgeTokens.accent)
+                        } else {
+                            Text("No MCP client — autonomous processing when Auto is selected")
+                                .font(BridgeTokens.Typeface.meta)
+                                .foregroundStyle(BridgeTokens.fg4)
+                        }
                         Picker("Mode", selection: $curatorModeRaw) {
                             ForEach(VoiceMemoCuratorMode.allCases, id: \.rawValue) { mode in
                                 Text(mode.label).tag(mode.rawValue)
@@ -57,7 +68,15 @@ struct MemoryProcessingTab: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .accessibilityIdentifier(BridgeAXID.Memory.processingPane)
-        .onAppear(perform: loadProvider)
+        .onAppear {
+            loadProvider()
+            Task { await refreshMCPStatus() }
+        }
+    }
+
+    private func refreshMCPStatus() async {
+        mcpConnected = await MCPClientPresence.shared.hasConnectedClient
+        mcpClientLabel = await MCPClientPresence.shared.primaryClientName
     }
 
     private var providerCard: some View {

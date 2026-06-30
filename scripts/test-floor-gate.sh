@@ -1587,7 +1587,11 @@ set -euo pipefail
 # 2026-06-29 (Wave 3 FB bundle): +bridge_focus_settings, skill body-cache eviction on
 # Notion writes, ListTools registration gate (FB-4), CalendarISOParsing tests.
 # Combined measured 2783 passed / 0 failed (2773 + 10 Wave 3 FB). 2765 → 2783.
-FLOOR="${BRIDGE_TEST_FLOOR:-2783}"
+# 2026-06-30 (PKT-MEM-120 Memory Hub routing + quality + UX): +13 VoiceMemoMCPRoutingTests
+# (MCPClientPresence grace + test override, Auto+MCP Execute defer, awaiting-agent review
+# tags, agent_deferred activity receipt, notifier lane, MemoryHubUIState notification gate,
+# cockpit label helpers) +1 MemorySettingsTests notionRefresh AX id. 2783 → 2796.
+FLOOR="${BRIDGE_TEST_FLOOR:-2796}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

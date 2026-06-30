@@ -194,6 +194,8 @@ public enum BridgeAXID {
         public static let notionRow      = id("notion.row")
         /// Open-in-Notion control.
         public static let notionOpen     = id("notion.open")
+        /// Refresh Notion Memory rows from network.
+        public static let notionRefresh  = id("notion.refresh")
         /// Agent tab list container.
         public static let agentList      = id("agent.list")
         /// An agent memory row.

@@ -13,6 +13,16 @@ green at floor 2508 (0a 25 + 0b 26 + 0c 31 tests); the live suite is the on-devi
 | M5 | v3.8.3 / commit … | … | PASS/PARTIAL/FAIL | … | pending/done/partial | one registry primary; 2 suppressed distinct; picker/rowId append proof |
 | M8 | v3.8.3 / commit … | … | PASS/PARTIAL/FAIL | … | pending/done/partial | reminder primary; ≤4 suppressed distinct; duplicate block/force proof |
 
+## PKT-MEM-120 W1 merge gate (2026-06-30)
+
+Required **before** merging `feat/mem-120-routing-quality-ux`. Single-memo only.
+
+| Case | Build | Mode | MCP | Memo ID | Grade | Receipt refs | Notes |
+|------|-------|------|-----|---------|-------|--------------|-------|
+| W1-A | … | Auto | Cursor connected | … | | | defer — no autonomous write; commit via get/commit |
+| W1-B | … | Auto | none (quit Cursor) | … | | | autonomous execute or review per guardrails |
+| W1-C | … | Connected MCP agent | connected | … | | | matches W1-A defer behavior |
+
 ## Protocol (operator)
 
 1. **Build/relaunch:** `make test` → `make app` → `make install-copy` (or signing-backed `make install`) → `open -a "The Bridge"`.

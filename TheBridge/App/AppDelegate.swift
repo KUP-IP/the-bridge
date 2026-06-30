@@ -791,11 +791,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // V1-QUALITY-C2: Client identification callback — updates StatusBarController
         let onClientConnected: @MainActor @Sendable (String, String) -> Void = { name, version in
             statusBar.addClient(name: name, version: version)
+            Task { await MCPClientPresence.shared.recordConnect(name: name) }
         }
 
         // PKT-366 F13: Client disconnection callback — updates StatusBarController
         let onClientDisconnected: @MainActor @Sendable (String) -> Void = { name in
             statusBar.removeClient(name: name)
+            Task { await MCPClientPresence.shared.recordDisconnect(name: name) }
         }
 
         let args = CommandLine.arguments

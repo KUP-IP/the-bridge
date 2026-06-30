@@ -122,6 +122,7 @@ public enum SettingsUIValidationHarness {
                     BridgeAXID.Memory.inboxList,
                     BridgeAXID.Memory.dismiss,
                     BridgeAXID.Memory.notionList,
+                    BridgeAXID.Memory.notionRefresh,
                     BridgeAXID.Memory.agentList,
                     BridgeAXID.Memory.agentScopeFilter,
                     BridgeAXID.Memory.agentTypeFilter,

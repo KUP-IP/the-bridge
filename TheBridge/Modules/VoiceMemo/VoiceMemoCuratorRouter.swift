@@ -51,8 +51,16 @@ public enum VoiceMemoCuratorRouter {
         }
     }
 
-    /// Agent-deferred processing: transcribe + notify, no auto Execute.
-    public static func deferExecuteToAgent() -> Bool {
-        effectiveMode() == .agent
+    /// Agent-deferred processing: transcribe + queue for MCP commit, no Bridge auto Execute.
+    /// `.agent` always defers; `.auto` defers when an interactive MCP client is connected.
+    public static func deferExecuteToAgent() async -> Bool {
+        switch effectiveMode() {
+        case .agent:
+            return true
+        case .auto:
+            return await MCPClientPresence.shared.hasConnectedClient
+        case .heuristics, .local, .cloud:
+            return false
+        }
     }
 }

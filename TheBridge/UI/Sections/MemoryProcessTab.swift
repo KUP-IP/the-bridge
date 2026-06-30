@@ -34,6 +34,8 @@ struct MemoryProcessTab: View {
     @State private var cloudProvider: MemoryHubProvider?
     @State private var cloudBusy = false
     @State private var titleStatus: String?
+    @State private var intentDiffBadges: [String: String] = [:]
+    @State private var awaitingAgentMemoIds: Set<String> = []
 
     private var rows: [CockpitIntentRow] {
         guard let plan, let selectedId else { return [] }
@@ -123,6 +125,17 @@ struct MemoryProcessTab: View {
                 Text(MemoryHubCockpitLabels.transcriptSource(memo.transcriptSource, hasTranscript: memo.hasTranscript))
                     .font(BridgeTokens.Typeface.meta)
                     .foregroundStyle(BridgeTokens.fg4)
+                HStack(spacing: 6) {
+                    if awaitingAgentMemoIds.contains(memo.id) {
+                        BridgeBadge(MemoryHubCockpitLabels.awaitingAgentLabel(), tone: .info)
+                    }
+                    if selectedId == memo.id, let plan {
+                        BridgeBadge(
+                            MemoryHubCockpitLabels.provenanceShort(plan.provenance, degraded: plan.degraded),
+                            tone: plan.degraded ? .warn : .neutral
+                        )
+                    }
+                }
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -177,6 +190,9 @@ struct MemoryProcessTab: View {
                     Text(MemoryHubCockpitLabels.intentStatus(row.status))
                         .font(BridgeTokens.Typeface.meta)
                         .foregroundStyle(row.isPrimary ? BridgeTokens.accent : BridgeTokens.fg4)
+                    if let diff = intentDiffBadges[row.intentId] {
+                        BridgeBadge(MemoryHubCockpitLabels.diffBadgeLabel(diff), tone: .info)
+                    }
                 }
                 Text(row.destinationField)
                     .font(BridgeTokens.Typeface.meta)
@@ -429,6 +445,11 @@ struct MemoryProcessTab: View {
     private func reloadMemos() {
         memos = VoiceMemoProcessor.listUnprocessed()
         titleCache = MemoryHubMemoTitleStore.load()
+        awaitingAgentMemoIds = Set(
+            VoiceMemoReviewStore.pendingEntries()
+                .filter { $0.effectiveReviewTag == .awaitingAgent }
+                .map(\.memoId)
+        )
     }
 
     private func reloadActivity() {
@@ -472,6 +493,7 @@ struct MemoryProcessTab: View {
                 : nil
             let parsedPlan = parsePlan(from: planObj)
             plan = parsedPlan
+            reloadPlanDiffBadges(memoId: memo.id)
             // PKT-MEM-114 P2 — generate-on-select: cache the Tier-1 heuristic title.
             // edited-pinned put() preserves a prior human rename; read-only over the plan.
             let title = MemoryHubMemoTitler.heuristicTitle(plan: parsedPlan, transcript: t)
@@ -497,6 +519,16 @@ struct MemoryProcessTab: View {
         } catch {
             statusMessage = error.localizedDescription
         }
+    }
+
+    private func reloadPlanDiffBadges(memoId: String) {
+        let snaps = MemoryHubPlanSnapshotStore.load(memoId: memoId)
+        guard let heuristic = snaps.last(where: { $0.provenance == .heuristic }),
+              let enhanced = snaps.filter({ $0.isEnhanced }).max(by: { $0.version < $1.version }) else {
+            intentDiffBadges = [:]
+            return
+        }
+        intentDiffBadges = MemoryHubPlanSnapshotStore.diffBadges(from: heuristic, to: enhanced)
     }
 
     // MARK: PKT-MEM-114 P3b — title rename + manual cloud title

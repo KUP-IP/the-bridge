@@ -70,6 +70,7 @@ func runMemorySettingsTests() async {
         try expect(ids.contains(BridgeAXID.Memory.inboxList), "inbox list id")
         try expect(ids.contains(BridgeAXID.Memory.dismiss), "dismiss id")
         try expect(ids.contains(BridgeAXID.Memory.notionList), "notion list id")
+        try expect(ids.contains(BridgeAXID.Memory.notionRefresh), "notion refresh id")
         try expect(ids.contains(BridgeAXID.Memory.agentList), "agent list id")
         try expect(ids.contains(BridgeAXID.Memory.agentScopeFilter), "agent scope filter id")
         try expect(ids.contains(BridgeAXID.Memory.agentTypeFilter), "agent type filter id")

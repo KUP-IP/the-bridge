@@ -15,6 +15,11 @@ public final class MemoryNotionViewModel: ObservableObject {
 
     public init() {}
 
+    /// Force a network read (Settings → Memory → Notion Refresh).
+    public func refresh(limit: Int = defaultLimit) async {
+        await load(limit: limit)
+    }
+
     public func load(limit: Int = defaultLimit) async {
         busy = true
         defer { busy = false }

@@ -12,6 +12,14 @@ public struct MemoryNotionTab: View {
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: BridgeTokens.Space.cardGap) {
+                HStack {
+                    Spacer(minLength: 0)
+                    BridgeButton("Refresh", systemImage: "arrow.clockwise") {
+                        Task { await vm.refresh() }
+                    }
+                    .disabled(vm.busy)
+                    .accessibilityIdentifier(BridgeAXID.Memory.notionRefresh)
+                }
                 if !vm.status.isEmpty {
                     Text(vm.status)
                         .font(BridgeTokens.Typeface.sub)

@@ -174,20 +174,29 @@ public enum VoiceMemoProcessor {
         }
         plan = applySummary(to: plan, summary: llmSummary, transcript: transcript, recordingPath: recording.path)
 
-        if VoiceMemoCuratorRouter.deferExecuteToAgent() {
+        if await VoiceMemoCuratorRouter.deferExecuteToAgent() {
             if !options.dryRun {
+                let mode = VoiceMemoCuratorRouter.effectiveMode()
+                let reason = mode == .agent
+                    ? "curator mode agent — transcribed; awaiting connected agent commit"
+                    : "auto — MCP connected; awaiting agent commit"
                 queueReview(
                     recording: recording,
                     intent: VoiceMemoIntent(kind: .review, confidence: 0.5, title: plan.generatedTitle, body: plan.summary),
                     plan: plan,
-                    reason: "curator mode agent — transcribed; awaiting connected agent commit",
-                    reviewQueued: &reviewQueued
+                    reason: reason,
+                    reviewQueued: &reviewQueued,
+                    reviewTag: .awaitingAgent,
+                    provenance: plan.provenance.rawValue
                 )
+                recordAgentDeferred(recording: recording, plan: plan, reason: reason)
             }
             return VoiceMemoReceipt(
                 memoId: recording.id,
                 title: plan.generatedTitle,
-                skippedReason: "deferred to connected MCP agent"
+                skippedReason: "deferred to connected MCP agent",
+                provenance: plan.provenance,
+                degraded: plan.degraded
             )
         }
 
@@ -208,7 +217,8 @@ public enum VoiceMemoProcessor {
                     intent: suppressed,
                     plan: plan,
                     reason: "secondary intent suppressed — primary lane elected",
-                    reviewQueued: &reviewQueued
+                    reviewQueued: &reviewQueued,
+                    reviewTag: .suppressed
                 )
                 reviewQueuedForMemo = true
             }
@@ -578,8 +588,11 @@ public enum VoiceMemoProcessor {
         intent: VoiceMemoIntent,
         plan: VoiceMemoPlan,
         reason: String,
-        reviewQueued: inout Int
+        reviewQueued: inout Int,
+        reviewTag: VoiceMemoReviewTag? = nil,
+        provenance: String = "election"
     ) {
+        let tag = reviewTag ?? inferredReviewTag(reason: reason, confidence: intent.confidence)
         try? VoiceMemoReviewStore.enqueue(VoiceMemoReviewEntry(
             memoId: recording.id,
             memoTitle: plan.generatedTitle,
@@ -592,9 +605,40 @@ public enum VoiceMemoProcessor {
             entityKey: intent.entityKey,
             entityHint: intent.entityHint,
             destinationFields: intent.fields.isEmpty ? nil : intent.fields,
-            provenance: "election"
+            provenance: provenance,
+            reviewTag: tag.rawValue
         ))
         reviewQueued += 1
+    }
+
+    static func inferredReviewTag(reason: String, confidence: Double) -> VoiceMemoReviewTag {
+        VoiceMemoReviewTag.derive(from: VoiceMemoReviewEntry(
+            memoId: "",
+            memoTitle: "",
+            intentKind: "",
+            confidence: confidence,
+            reason: reason,
+            transcriptExcerpt: ""
+        ))
+    }
+
+    public static func recordAgentDeferred(
+        recording: VoiceMemoRecording,
+        plan: VoiceMemoPlan,
+        reason: String,
+        now: Date = Date()
+    ) {
+        let event = MemoryHubActivityEvent(
+            timestamp: ISO8601DateFormatter().string(from: now),
+            memoId: recording.id,
+            phase: .execute,
+            action: "agent_deferred",
+            status: plan.degraded ? "degraded" : "ok",
+            provenance: plan.provenance.rawValue,
+            actor: "curator",
+            detail: String(reason.prefix(240))
+        )
+        try? MemoryHubActivityLog.append(event, now: now)
     }
 
     static func resolvedRegistryFields(intent: VoiceMemoIntent, plan: VoiceMemoPlan) -> [String: String] {
