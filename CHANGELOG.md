@@ -6,7 +6,7 @@
 - **Registry** — `registry_create` initializes page bodies from markdown in one call (PR #66, +7 tests).
 - **Standing orders** — bundled v7.0.2 doctrine seeds fresh installs via `seedIfEmpty` (PR #68, PKT-1057, +3 tests).
 - **Hygiene** — close-agent AGENT_FEEDBACK path → `~/Developer/the-bridge/AGENT_FEEDBACK.md`.
-- test-floor **2755 → 2765** (measured green after v3.9.2 train merge). Build **68**.
+- test-floor **2755 → 2783** (2765 after v3.9.2 merge; +18 from PR #69/#70 commands + wave3 FB — measured green 2026-06-30). Build **68**.
 
 ## Unreleased — Unified Memory Wave 3 (surfacing + governance) — PKT-MEM-115 — 2026-06-26
 
