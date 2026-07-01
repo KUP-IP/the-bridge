@@ -427,6 +427,11 @@ public enum VoiceMemoParser {
     }
 
     /// Public wrapper for summarizer + tests.
+    public static func extractActionBulletsPublic(from text: String) -> [String] {
+        extractActionBullets(from: text)
+    }
+
+    /// Public wrapper for summarizer + tests.
     public static func firstSentencePublic(in text: String, maxLen: Int) -> String {
         firstSentence(in: text, maxLen: maxLen)
     }

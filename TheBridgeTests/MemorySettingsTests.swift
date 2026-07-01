@@ -31,6 +31,28 @@ func runMemorySettingsTests() async {
         try expect(legacy == .inbox, "voice-memos legacy anchor")
     }
 
+    await test("MemoryNavigationAnchor compound process/memoId and inbox filter") {
+        let proc = MemoryNavigationAnchor.resolve("process/memo-xyz")
+        try expect(proc.tab == .process, "process tab")
+        try expect(proc.memoId == "memo-xyz", "memo id")
+        let filt = MemoryNavigationAnchor.resolve("inbox/awaitingAgent")
+        try expect(filt.tab == .inbox, "inbox")
+        try expect(filt.inboxFilter == .awaitingAgent, "filter")
+        let activity = MemoryNavigationAnchor.resolve("activity")
+        try expect(activity.tab == .process, "activity → process")
+    }
+
+    await test("BridgeSettingsAutomation.memoryResolvedValue encodes tab and memoId") {
+        let val = await MainActor.run {
+            BridgeSettingsAutomation.memoryResolvedValue(anchor: "process/m1")
+        }
+        guard case .object(let obj) = val else {
+            throw TestError.assertion("expected object resolved payload")
+        }
+        try expect(obj["tab"] == .string("process"), "tab field")
+        try expect(obj["memoId"] == .string("m1"), "memoId field")
+    }
+
     await test("bridge_settings_navigate resolves Memory and voice-memos alias") {
         let memory = await MainActor.run {
             BridgeSettingsAutomation.resolveSectionWithAnchor("Memory")
@@ -70,6 +92,7 @@ func runMemorySettingsTests() async {
         try expect(ids.contains(BridgeAXID.Memory.inboxList), "inbox list id")
         try expect(ids.contains(BridgeAXID.Memory.dismiss), "dismiss id")
         try expect(ids.contains(BridgeAXID.Memory.notionList), "notion list id")
+        try expect(ids.contains(BridgeAXID.Memory.notionRefresh), "notion refresh id")
         try expect(ids.contains(BridgeAXID.Memory.agentList), "agent list id")
         try expect(ids.contains(BridgeAXID.Memory.agentScopeFilter), "agent scope filter id")
         try expect(ids.contains(BridgeAXID.Memory.agentTypeFilter), "agent type filter id")

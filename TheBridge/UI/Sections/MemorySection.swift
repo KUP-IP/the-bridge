@@ -56,11 +56,12 @@ public struct MemorySection: View {
 
     /// Inbox status filter — matches notification deep-link intent (PKT-MEM-104 follow-up).
     public enum InboxFilter: String, CaseIterable, Sendable {
-        case all, noTranscript, routingFailed, lowConfidence
+        case all, awaitingAgent, noTranscript, routingFailed, lowConfidence
 
         var label: String {
             switch self {
             case .all: return "All"
+            case .awaitingAgent: return "Awaiting agent"
             case .noTranscript: return "No transcript"
             case .routingFailed: return "Routing failed"
             case .lowConfidence: return "Low confidence"
@@ -90,12 +91,43 @@ public struct MemorySection: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Color.clear)
-        .onAppear { reloadEntries() }
+        .onAppear {
+            reloadEntries()
+            MemoryHubUIState.setMemorySectionVisible(true)
+            MemoryHubUIState.setProcessTabSelected(selection == .process)
+            applyNavigation(from: anchor ?? nav.anchor)
+            consumeNavigationAnchorIfNeeded()
+        }
+        .onDisappear {
+            MemoryHubUIState.setMemorySectionVisible(false)
+            MemoryHubUIState.setProcessTabSelected(false)
+        }
+        .onChange(of: selection) { _, newSelection in
+            MemoryHubUIState.setProcessTabSelected(newSelection == .process)
+        }
         .onChange(of: anchor) { _, newAnchor in
-            if let t = MemorySection.tab(for: newAnchor) { selection = t }
+            applyNavigation(from: newAnchor)
+            consumeNavigationAnchorIfNeeded()
         }
         .onChange(of: nav.anchor) { _, newAnchor in
-            if let t = MemorySection.tab(for: newAnchor) { selection = t }
+            applyNavigation(from: newAnchor)
+            consumeNavigationAnchorIfNeeded()
+        }
+    }
+
+    private func applyNavigation(from rawAnchor: String?) {
+        let res = MemoryNavigationAnchor.resolve(rawAnchor)
+        if let t = res.tab { selection = t }
+        if let f = res.inboxFilter { inboxFilter = f }
+        if res.memoId != nil {
+            Task { await BridgeSettingsAutomation.applyMemoryNavigationSideEffects(anchor: rawAnchor) }
+        }
+    }
+
+    /// Skills-pattern: consume sticky MCP anchor after one apply.
+    private func consumeNavigationAnchorIfNeeded() {
+        if nav.section == .memory, nav.anchor != nil {
+            SettingsNavigation.shared.go(.memory, anchor: nil)
         }
     }
 
@@ -173,12 +205,21 @@ public struct MemorySection: View {
 
     @ViewBuilder
     private var tabBody: some View {
-        switch selection {
-        case .process: MemoryProcessTab()
-        case .inbox: inboxTab
-        case .notion: MemoryNotionTab()
-        case .agent: MemoryAgentTab()
-        case .processing: MemoryProcessingTab()
+        // PKT-MEM-121 — keep Process mounted so preview @State survives sub-tab switches.
+        ZStack {
+            MemoryProcessTab()
+                .opacity(selection == .process ? 1 : 0)
+                .allowsHitTesting(selection == .process)
+                .accessibilityHidden(selection != .process)
+            Group {
+                switch selection {
+                case .process: EmptyView()
+                case .inbox: inboxTab
+                case .notion: MemoryNotionTab()
+                case .agent: MemoryAgentTab()
+                case .processing: MemoryProcessingTab()
+                }
+            }
         }
     }
 
@@ -188,9 +229,10 @@ public struct MemorySection: View {
         entries.filter { entry in
             switch inboxFilter {
             case .all: return true
-            case .noTranscript: return statusLabel(for: entry) == "No transcript"
-            case .routingFailed: return statusLabel(for: entry) == "Routing failed"
-            case .lowConfidence: return statusLabel(for: entry) == "Low confidence"
+            case .awaitingAgent: return entry.effectiveReviewTag == .awaitingAgent
+            case .noTranscript: return entry.effectiveReviewTag == .noTranscript
+            case .routingFailed: return entry.effectiveReviewTag == .routingFailed
+            case .lowConfidence: return entry.effectiveReviewTag == .lowConfidence
             }
         }
     }
@@ -463,26 +505,6 @@ public struct MemorySection: View {
     // MARK: - Deep-link anchor → tab
 
     public static func tab(for anchor: String?) -> Tab? {
-        guard let raw = anchor?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .replacingOccurrences(of: " ", with: "")
-            .replacingOccurrences(of: "_", with: "")
-            .replacingOccurrences(of: "-", with: ""),
-            !raw.isEmpty else { return nil }
-        switch raw {
-        case "process", "curator", "pipeline":
-            return .process
-        case "inbox", "review", "voicememos", "voicememo", "voice":
-            return .inbox
-        case "notion", "registry":
-            return .notion
-        case "agent", "sqlite", "remember":
-            return .agent
-        case "processing", "models", "routing":
-            return .processing
-        default:
-            return nil
-        }
+        MemoryNavigationAnchor.resolve(anchor).tab
     }
 }

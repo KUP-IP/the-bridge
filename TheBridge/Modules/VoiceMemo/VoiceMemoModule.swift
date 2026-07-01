@@ -16,6 +16,8 @@ public enum VoiceMemoModule {
         await router.register(makeTranscriptRefresh())
         await router.register(makeGet(on: router))
         await router.register(makeCommit(on: router))
+        await router.register(makeTriageOpen())
+        await router.register(makeTriageAwait())
     }
 
     private static func makeList(on router: ToolRouter) -> ToolRegistration {
@@ -307,6 +309,14 @@ public enum VoiceMemoModule {
                         "type": .string("string"),
                         "description": .string("Stable memo id or absolute path."),
                     ]),
+                    "understand": .object([
+                        "type": .string("boolean"),
+                        "description": .string("When true (default), run transcription + Understand + plan. When false, inspect cached transcript only."),
+                    ]),
+                    "provider": .object([
+                        "type": .string("string"),
+                        "description": .string("Optional curator override for Understand: local | cloud | auto | heuristics."),
+                    ]),
                 ]),
                 "required": .array([.string("memoId")]),
             ]),
@@ -367,6 +377,124 @@ public enum VoiceMemoModule {
                 relatedTools: ["voice_memo_get", "voice_memo_process", "registry_update", "memory_remember"]
             ),
             handler: { args in try await VoiceMemoProcessor.commit(args: args, router: router) }
+        )
+    }
+
+    // MARK: - PKT-MEM-122 triage session
+
+    private static func makeTriageOpen() -> ToolRegistration {
+        ToolRegistration(
+            name: "voice_memo_triage_open",
+            module: moduleName,
+            tier: .open,
+            description: """
+            Open an operator triage session for one voice memo: focuses Settings → Memory → Process, selects the memo, \
+            and returns a sessionHandle for voice_memo_triage_await. Requires a connected HTTP/SSE MCP client (stdio-only \
+            sessions cannot open triage). Bridge executes UI commits — do not call voice_memo_commit after a committed event.
+            """,
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "memoId": .object([
+                        "type": .string("string"),
+                        "description": .string("Stable memo id from voice_memo_list."),
+                    ]),
+                ]),
+                "required": .array([.string("memoId")]),
+            ]),
+            metadata: ToolMetadata(
+                title: "Voice Memo Triage Open",
+                whenToUse: ["agent defers commit to operator UI", "paired with voice_memo_triage_await"],
+                whenNotToUse: ["direct commit — use voice_memo_commit", "stdio MCP transport"],
+                relatedTools: ["voice_memo_triage_await", "voice_memo_get", "bridge_settings_navigate"]
+            ),
+            handler: { args in
+                guard case .object(let obj) = args,
+                      case .string(let memoId) = obj["memoId"],
+                      !memoId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    return .object([
+                        "error": .string("memoId is required (string)"),
+                        "code": .string("invalid_input"),
+                    ])
+                }
+                do {
+                    let opened = try await TriageSessionStore.shared.open(memoId: memoId)
+                    let anchor = "process/\(memoId)"
+                    await BridgeSettingsAutomation.navigate(to: .memory, anchor: anchor)
+                    await BridgeSettingsAutomation.applyMemoryNavigationSideEffects(anchor: anchor)
+                    _ = await BridgeSettingsAutomation.focusSettings(openIfNeeded: true)
+                    return .object([
+                        "sessionHandle": .string(opened.sessionId),
+                        "memoId": .string(memoId),
+                        "openerClientId": .string(opened.openerClientId),
+                    ])
+                } catch TriageSessionError.stdioOnlyOpener {
+                    return .object([
+                        "error": .string("Triage requires a connected HTTP/SSE MCP client (stdio-only opener rejected)."),
+                        "code": .string("stdio_only"),
+                    ])
+                } catch TriageSessionError.sessionAlreadyOpen(let mid) {
+                    return .object([
+                        "error": .string("Triage session already open for memo \(mid)."),
+                        "code": .string("session_already_open"),
+                        "memoId": .string(mid),
+                    ])
+                } catch {
+                    return .object([
+                        "error": .string(error.localizedDescription),
+                        "code": .string("triage_open_failed"),
+                    ])
+                }
+            }
+        )
+    }
+
+    private static func makeTriageAwait() -> ToolRegistration {
+        ToolRegistration(
+            name: "voice_memo_triage_await",
+            module: moduleName,
+            tier: .open,
+            description: """
+            Block until the operator completes triage in the UI (commit, end session, or timeout). Returns a structured event: \
+            committed (Bridge already ran commit — do NOT call voice_memo_commit), sessionEnded, or timeout. Default timeout 1800s.
+            """,
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "sessionHandle": .object([
+                        "type": .string("string"),
+                        "description": .string("Session id from voice_memo_triage_open."),
+                    ]),
+                    "timeoutSeconds": .object([
+                        "type": .string("integer"),
+                        "description": .string("Max wait in seconds (default 1800, max 1800)."),
+                    ]),
+                ]),
+                "required": .array([.string("sessionHandle")]),
+            ]),
+            metadata: ToolMetadata(
+                title: "Voice Memo Triage Await",
+                whenToUse: ["after voice_memo_triage_open while operator acts in Process UI"],
+                whenNotToUse: ["without an open session", "re-commit after committed event"],
+                relatedTools: ["voice_memo_triage_open", "voice_memo_get"]
+            ),
+            handler: { args in
+                guard case .object(let obj) = args,
+                      case .string(let handle) = obj["sessionHandle"],
+                      !handle.isEmpty else {
+                    return .object([
+                        "error": .string("sessionHandle is required (string)"),
+                        "code": .string("invalid_input"),
+                    ])
+                }
+                var timeout = 1800
+                if case .int(let t)? = obj["timeoutSeconds"] { timeout = t }
+                if case .double(let t)? = obj["timeoutSeconds"] { timeout = Int(t) }
+                let event = await TriageSessionStore.shared.awaitEvent(sessionId: handle, timeoutSeconds: timeout)
+                return .object([
+                    "event": TriageSessionMCP.eventValue(event),
+                ])
+            }
         )
     }
 }

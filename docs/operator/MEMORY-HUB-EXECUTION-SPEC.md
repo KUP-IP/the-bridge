@@ -1,6 +1,7 @@
 # Memory Hub — Validated Execution Spec (v1.1 draft)
 
-**Status:** Contract reflow locked 2026-06-25; Phase 0 (PKT-MEM-106) packaged for dispatch
+**Status:** Contract reflow locked 2026-06-25; Phase 0 (PKT-MEM-106) packaged for dispatch  
+**Amendment (PKT-MEM-120, 2026-06-30):** Autonomous batch Understand may use cloud automatically when provider enabled (frontier-first). Process-tab cloud enhancement remains **manual only**. Auto mode Execute defers to connected MCP agent when interactive session present — see [`packets/PKT-MEM-120-memory-hub-routing-quality-ux.md`](packets/PKT-MEM-120-memory-hub-routing-quality-ux.md).
 **Project:** The Bridge v3.8.3 vertical — Voice capture → triage → three memory surfaces  
 **SSOT for:** executor sub-agents · Settings UX · transcription ladder · review dispositions
 

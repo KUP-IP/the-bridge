@@ -175,15 +175,21 @@ func runMemoryHubCockpitTests() async {
 
     // MARK: Three-zone cockpit + primary override + per-intent commit
 
-    await test("cockpit_threeZones_present") {
-        // The three cockpit zones + activity strip are addressable, well-formed AX surfaces.
+    await test("cockpit_v1Zones_present") {
         let p = "bridge.settings.memory.process."
         try expect(BridgeAXID.Memory.Process.memoList == p + "memoList", "memo list zone")
-        try expect(BridgeAXID.Memory.Process.intentTable == p + "intentTable", "intent table zone")
-        try expect(BridgeAXID.Memory.Process.detailInspector == p + "detailInspector", "detail inspector zone")
-        try expect(BridgeAXID.Memory.Process.activityStrip == p + "activityStrip", "activity strip zone")
+        try expect(BridgeAXID.Memory.Process.centerPane == p + "centerPane", "center pane zone")
+        try expect(BridgeAXID.Memory.Process.intentTags == p + "intentTags", "intent tags zone")
+        try expect(BridgeAXID.Memory.Process.activityDrawer == p + "activityDrawer", "activity drawer zone")
         let rows = MemoryProcessCockpit.intentRows(memoId: "m", plan: makeCockpitPlan())
-        try expect(rows.count == 4, "intent table populated from the plan, got \(rows.count)")
+        try expect(rows.count == 4, "intent rows populated from plan, got \(rows.count)")
+    }
+
+    await test("cockpit_needsPicker_forPerIntent_multiRegistry") {
+        let rows = MemoryProcessCockpit.intentRows(memoId: "m", plan: makeCockpitPlan())
+        let reg = rows.first { $0.kind == .registryUpdate }!
+        try expect(MemoryProcessCockpit.needsPicker(for: reg, allRows: rows), "multi registry ⇒ per-intent picker")
+        try expect(MemoryProcessCockpit.tagLabel(for: reg).contains("%"), "tag label includes confidence")
     }
 
     await test("cockpit_intentTable_showsPrimaryMarkerAndColumns") {
@@ -239,16 +245,15 @@ func runMemoryHubCockpitTests() async {
     await test("axId_rowAndCommandHelpers_exactFormat") {
         let p = "bridge.settings.memory.process."
         try expect(BridgeAXID.Memory.Process.memoRow("memo-1") == p + "memoRow.memo-1", "memo row keyed by memoId")
-        try expect(BridgeAXID.Memory.Process.intentRow("intent_v1_abc") == p + "intentRow.intent_v1_abc", "intent row keyed by intentId")
+        try expect(BridgeAXID.Memory.Process.intentTagCheckbox("intent_v1_abc") == p + "intentTag.intent_v1_abc", "intent tag checkbox")
         try expect(BridgeAXID.Memory.Process.registryRow(entity: "session", rowId: "r1") == p + "registryRow.session.r1", "registry row")
-        try expect(BridgeAXID.Memory.Process.commit("intent_v1_abc") == p + "commit.intent_v1_abc", "commit command")
-        try expect(BridgeAXID.Memory.Process.primaryOverride("intent_v1_abc") == p + "primaryOverride.intent_v1_abc", "override command")
+        try expect(BridgeAXID.Memory.Process.confirmButton == p + "confirmButton", "confirm button")
     }
 
     await test("axHarness_memoryProcess_registeredEntries") {
         let memory = SettingsUIValidationHarness.expectedIdentifiers[.memory] ?? []
-        for zone in [BridgeAXID.Memory.Process.memoList, BridgeAXID.Memory.Process.intentTable,
-                     BridgeAXID.Memory.Process.detailInspector, BridgeAXID.Memory.Process.activityStrip] {
+        for zone in [BridgeAXID.Memory.Process.memoList, BridgeAXID.Memory.Process.centerPane,
+                     BridgeAXID.Memory.Process.intentTags, BridgeAXID.Memory.Process.activityDrawer] {
             try expect(memory.contains(zone), "manifest must register cockpit zone \(zone)")
         }
     }

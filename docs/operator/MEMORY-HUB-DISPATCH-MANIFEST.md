@@ -79,3 +79,20 @@
 ## Telemetry
 
 Sub-agent payloads to drain at Wave 1 closeout (AI LOG deferred — repo packets are SSOT for Cursor dispatch).
+
+---
+
+## Memory Hub Sprint — active integration (2026-06-30)
+
+**Master plan:** `.cursor/plans/memory_hub_sprint_e107afc7.plan.md`  
+**Integration branch:** `feat/mem-120-routing-quality-ux` · [PR #72](https://github.com/KUP-IP/the-bridge/pull/72)
+
+| Wave | Packet | Sub-plan | Status |
+|------|--------|----------|--------|
+| W1–W3 | [PKT-MEM-120](./packets/PKT-MEM-120-memory-hub-routing-quality-ux.md) | *(master plan §Wave 1–3)* | **Implemented** — floor 2796; W1-B live smoke pending |
+| W4 | [PKT-MEM-121](./packets/PKT-MEM-121-process-preview-session-cache.md) | `process_tab_preview_cache_7dd44de1.plan.md` | **QUEUE** (validated 2026-06-30) |
+| W5 | [PKT-MEM-122](./packets/PKT-MEM-122-operator-triage-session.md) | *(master plan §Wave 5)* | **QUEUE** (validated 2026-06-30) |
+
+**Validate #2 (2026-06-30):** Contract hardened — dispatch executor Wave A (121) → Wave B (122). Merge blocked on W1-B + W5-Triage live smoke.
+
+**Sprint rule:** Plan all sub-packets first; execute full sprint in one pass after planning complete. **C2C Rounds 8–12 locked 2026-06-30.** Merge gate: PKT-MEM-120 W1 smoke + PKT-MEM-121 checklist + PKT-MEM-122 live triage smoke.

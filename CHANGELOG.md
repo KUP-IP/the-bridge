@@ -1,12 +1,20 @@
 # Changelog
 
+## v3.9.3 — Memory Hub opt-in Understand + summary-first keeps — 2026-06-30
+
+- **Process UX (W1)** — memo select is inspect-only (`voice_memo_get understand:false`); **Process locally** / **Process with cloud** buttons run explicit Understand with activity-phase receipts.
+- **Intent inspector (W2)** — expand intent tags to full write preview (registry fields, agent memory, keep summary, reminder fields).
+- **Keep content (W3)** — structured summary + action items for Notion keeps; transcript UI-only (no default transcript append to Notion body).
+- **HITL** — scenario catalog, voice scripts, friction log under `docs/operator/live-evidence/`.
+- test-floor **2857 → 2863** (+6 MemoryProcessInspectUnderstandTests + opt-in AX). Build **69**.
+
 ## v3.9.2 — Ollama defaults + registry create-body + standing orders seed — 2026-06-29
 
 - **Ollama** — split routing vs summarization defaults; Qwen generate uses `think: false` + tuned context (PR #67).
 - **Registry** — `registry_create` initializes page bodies from markdown in one call (PR #66, +7 tests).
 - **Standing orders** — bundled v7.0.2 doctrine seeds fresh installs via `seedIfEmpty` (PR #68, PKT-1057, +3 tests).
 - **Hygiene** — close-agent AGENT_FEEDBACK path → `~/Developer/the-bridge/AGENT_FEEDBACK.md`.
-- test-floor **2755 → 2765** (measured green after v3.9.2 train merge). Build **68**.
+- test-floor **2755 → 2783** (2765 after v3.9.2 merge; +18 from PR #69/#70 commands + wave3 FB — measured green 2026-06-30). Build **68**.
 
 ## Unreleased — Unified Memory Wave 3 (surfacing + governance) — PKT-MEM-115 — 2026-06-26
 

@@ -1587,7 +1587,25 @@ set -euo pipefail
 # 2026-06-29 (Wave 3 FB bundle): +bridge_focus_settings, skill body-cache eviction on
 # Notion writes, ListTools registration gate (FB-4), CalendarISOParsing tests.
 # Combined measured 2783 passed / 0 failed (2773 + 10 Wave 3 FB). 2765 → 2783.
-FLOOR="${BRIDGE_TEST_FLOOR:-2783}"
+# 2026-06-30 (PKT-MEM-120 Memory Hub routing + quality + UX): +13 VoiceMemoMCPRoutingTests
+# (MCPClientPresence grace + test override, Auto+MCP Execute defer, awaiting-agent review
+# tags, agent_deferred activity receipt, notifier lane, MemoryHubUIState notification gate,
+# cockpit label helpers) +1 MemorySettingsTests notionRefresh AX id. 2783 → 2796.
+# 2026-06-30 (PKT-MEM-121 Process preview session cache): +10 MemoryProcessPreviewSessionTests
+# (LRU put/get, fingerprint mismatch, remove, invalidate, lastSelectedMemoId, picker round-trip,
+# getIfPresent, triage invalidation stub, refreshPreview AX id). 2796 → 2806.
+# 2026-06-30 (Memory Hub Sprint Finish): +VoiceMemoSuiteAuditTests (10 voice_memo_* invariants),
+# +ToolSurfaceCoverageAuditTests (static tool dispatch/suite-audit meta gate),
+# +TriageSessionTests (PKT-MEM-122 triage open/await/end, compound Memory navigation anchors),
+# +MemorySettingsTests compound anchor + resolved JSON, pkt1005 memory/datasources sections.
+# 2026-06-30 (PKT-MEM-123 V1 Process layout + batch confirm): +30 tests —
+# MemoryProcessBatchConfirmTests (+18), MemoryProcessLayoutAXTests (+8),
+# MemoryProcessPreviewSessionTests (+2), MemoryHubGuardrailTests (+1 dup batch),
+# TriageSessionTests (+1 batch detail); MemoryHubCockpitTests AX migrated.
+# 2824 → 2854 measured green.
+# 2026-06-30 (Memory Hub W1–W3 UX + HITL): +6 tests — MemoryProcessInspectUnderstandTests;
+# MemoryProcessLayoutAXTests (+1 opt-in AX); floor 2857 → 2863 measured green.
+FLOOR="${BRIDGE_TEST_FLOOR:-2863}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

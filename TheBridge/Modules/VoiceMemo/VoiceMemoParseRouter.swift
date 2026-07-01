@@ -50,14 +50,15 @@ public enum VoiceMemoParseRouter {
     }
 
     /// Walk the mode-ordered chain and return the winning plan with `provenance`
-    /// stamped (and `degraded` set per the rule above). Reads
-    /// `VoiceMemoCuratorRouter.effectiveMode()`.
+    /// stamped (and `degraded` set per the rule above). Pass `curatorMode` to
+    /// override Settings (Process locally / Process with cloud).
     public static func parse(
         transcript: String,
         fallbackTitle: String,
-        recordingPath: String? = nil
+        recordingPath: String? = nil,
+        curatorMode: VoiceMemoCuratorMode? = nil
     ) async -> VoiceMemoPlan {
-        let mode = VoiceMemoCuratorRouter.effectiveMode()
+        let mode = curatorMode ?? VoiceMemoCuratorRouter.effectiveMode()
         let chain = (providerOverride ?? { providers(for: $0) })(mode)
         return await walk(chain, transcript: transcript, fallbackTitle: fallbackTitle, recordingPath: recordingPath)
     }

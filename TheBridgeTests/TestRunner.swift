@@ -259,6 +259,12 @@ struct TheBridgeTestRunner {
         await runMemoryHubCockpitTests()  // PKT-MEM-106 0b: run early alongside 0a (same flake-avoidance)
         await runMemoryHubGuardrailTests() // PKT-MEM-106 0c: preview + guardrails + tabs (run early)
         await runMemoryHubMemoTitleTests() // PKT-MEM-114 P1: progressive AI memo titles (run early)
+        await runMemoryProcessPreviewSessionTests() // PKT-MEM-121: Process preview session cache (run early)
+        await runTriageSessionTests() // PKT-MEM-122: triage session (run early)
+        await runMemoryProcessBatchConfirmTests() // PKT-MEM-123: batch confirm orchestrator
+        await runMemoryProcessBatchCommitIntegrationTests() // PKT-MEM-123: batch commit loop (stub router)
+        await runMemoryProcessLayoutAXTests() // PKT-MEM-123: V1 layout AX manifest
+        await runMemoryProcessInspectUnderstandTests() // W1–W3: inspect/understand + intent preview
         // ============================================================
         // MARK: - SecurityGate Tests (v3: 3-tier model)
         // ============================================================
@@ -639,6 +645,7 @@ await runRegistryEdgeCaseTests()     // Data-Source Registry: adversarial edge c
 await runRegistryHydrationTests()    // Packet Runner v1 (FR-1/§8.3): packet-registry-v1 one-hop hydration envelope (primary+body+relations+provenance+warnings)
 await runMessagesModuleTests()
 await runMessagesSuiteAuditTests()   // Messages-suite every-angle-of-attack audit
+await runVoiceMemoSuiteAuditTests()  // Voice memo suite audit (PKT-MEM-122)
 await runMailModuleTests()           // PKT-961 (v3.7·H): mail_* Apple Mail module (mock seam; send-guard)
 // PKT-960 (v3.7·G): notes_* Apple Notes module (injectable NotesScriptRunner
 // mock seam; notes_delete is .request + confirm:'DELETE'). Registration PORTED
@@ -701,6 +708,7 @@ await runVoiceMemoParseChainTests()    // Voice Curator FRONTIER-FIRST (Phase 1 
 await runVoiceMemoCloudParseTests()    // Voice Curator FRONTIER-FIRST (Phase 1 W2): real cloud frontier parse (whole-transcript strict-JSON extraction)
 await runMemoryHubCockpitLabelsTests() // Voice Curator FRONTIER-FIRST (Phase 1 W3): cockpit human labels + provenance badge + commit-value preview
 await runVoiceCuratorPhase1RemediationTests() // Voice Curator FRONTIER-FIRST (Phase 1 W4): review remediation — durable cloud-send provenance + notifier lane + honest commit-write label
+await runVoiceMemoMCPRoutingTests() // PKT-MEM-120: Auto+MCP Execute defer, presence, awaiting-agent tags + notification gate
 // PKT-MEM-106 0a + 0b run early in runAllTests() (flake-avoidance) — not duplicated here.
 await runMemorySettingsTests()         // PKT-MEM-102: Memory Settings section + Inbox UI
 await runOllamaModuleTests()           // Local Ollama client + module (Wave 2a)
@@ -738,6 +746,7 @@ await runListRoutingSkillsMergeTests() // W2 D6: merged routing-skills listing
 await runSkillPathResolverTests()      // PKT-907: fetch_skill orchestrator (path / intent / file specialist / W3 summary)
 await runRoutingReliabilityTests()     // routing-reliability: SpecialistFilter doc-page exclusion + confidence→clarify + per-client overlay + routing footer + skillFetched telemetry
 await runToolAnnotationAuditTests() // PKT-803 (v2.3 · WS-B): annotation coverage audit
+await runToolSurfaceCoverageAuditTests() // sprint: every static tool referenced in tests
 await runTransportRouterTests()     // PKT-803 (v2.3 · WS-B): transport router default/env
 await runRemoteOAuthHTTPTests()     // PKT-800 (S1): RFC 9728 PRM + transport gating + route
 await runRemoteOAuthBearerTests()   // PKT-800 (S2): JWTKit bearer + ScopeGate + 401/WWW-Auth

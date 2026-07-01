@@ -43,57 +43,82 @@ func runCommandsModuleTests() async {
     }
 
     await test("commands_list + get round-trip via dispatch") {
-        try CommandStore.shared.resetForTesting()
-        _ = try CommandStore.shared.create(name: "Smoke", icon: .emoji("🔥"), body: "## Smoke\n\nBody text")
-        let (listText, _) = try await router.dispatchFormatted(toolName: "commands_list", arguments: .object([:]))
-        try expect(listText.contains("\"ok\":true") || listText.contains("\"ok\" : true"))
-        try expect(listText.contains("smoke"))
-        let (getText, _) = try await router.dispatchFormatted(
-            toolName: "commands_get",
-            arguments: .object(["slugOrName": .string("Smoke")])
-        )
-        try expect(getText.contains("Body text"))
+        try await withCommandsTestHome { _ in
+            try CommandStore.shared.resetForTesting()
+            _ = try CommandStore.shared.create(name: "Smoke", icon: .emoji("🔥"), body: "## Smoke\n\nBody text")
+            let (listText, _) = try await router.dispatchFormatted(toolName: "commands_list", arguments: .object([:]))
+            try expect(listText.contains("\"ok\":true") || listText.contains("\"ok\" : true"))
+            try expect(listText.contains("smoke"))
+            let (getText, _) = try await router.dispatchFormatted(
+                toolName: "commands_get",
+                arguments: .object(["slugOrName": .string("Smoke")])
+            )
+            try expect(getText.contains("Body text"))
+        }
     }
 
     await test("commands_get resolves slug by display name") {
-        try CommandStore.shared.resetForTesting()
-        _ = try CommandStore.shared.create(name: "Close-loop", icon: .emoji("✅"), body: "loop body")
-        let (text, _) = try await router.dispatchFormatted(
-            toolName: "commands_get",
-            arguments: .object(["slugOrName": .string("Close-loop")])
-        )
-        try expect(text.contains("loop body"))
+        try await withCommandsTestHome { _ in
+            try CommandStore.shared.resetForTesting()
+            _ = try CommandStore.shared.create(name: "Close-loop", icon: .emoji("✅"), body: "loop body")
+            let (text, _) = try await router.dispatchFormatted(
+                toolName: "commands_get",
+                arguments: .object(["slugOrName": .string("Close-loop")])
+            )
+            try expect(text.contains("loop body"))
+        }
     }
 
     await test("commands_search finds substring") {
-        try CommandStore.shared.resetForTesting()
-        _ = try CommandStore.shared.create(name: "Execute", icon: .emoji("⚡"), body: "x")
-        _ = try CommandStore.shared.create(name: "Reflow", icon: .emoji("🔁"), body: "y")
-        let (text, _) = try await router.dispatchFormatted(
-            toolName: "commands_search",
-            arguments: .object(["query": .string("exec")])
-        )
-        try expect(text.contains("execute"))
-        try expect(!text.contains("reflow"))
+        try await withCommandsTestHome { _ in
+            try CommandStore.shared.resetForTesting()
+            _ = try CommandStore.shared.create(name: "Execute", icon: .emoji("⚡"), body: "x")
+            _ = try CommandStore.shared.create(name: "Reflow", icon: .emoji("🔁"), body: "y")
+            let (text, _) = try await router.dispatchFormatted(
+                toolName: "commands_search",
+                arguments: .object(["query": .string("exec")])
+            )
+            try expect(text.contains("execute"))
+            try expect(!text.contains("reflow"))
+        }
     }
 
     await test("commands_create rejects duplicate slug") {
-        try CommandStore.shared.resetForTesting()
-        _ = try CommandStore.shared.create(name: "Dup", icon: .emoji("d"), body: "1")
-        let (text, _) = try await router.dispatchFormatted(
-            toolName: "commands_create",
-            arguments: .object(["name": .string("dup"), "body": .string("2")])
-        )
-        try expect(text.contains("duplicate_slug"))
+        try await withCommandsTestHome { _ in
+            try CommandStore.shared.resetForTesting()
+            _ = try CommandStore.shared.create(name: "Dup", icon: .emoji("d"), body: "1")
+            let (text, _) = try await router.dispatchFormatted(
+                toolName: "commands_create",
+                arguments: .object(["name": .string("dup"), "body": .string("2")])
+            )
+            try expect(text.contains("duplicate_slug"))
+        }
     }
 
     await test("commands_delete removes command") {
-        try CommandStore.shared.resetForTesting()
-        let c = try CommandStore.shared.create(name: "Gone", icon: .emoji("x"), body: "z")
-        _ = try await router.dispatchFormatted(
-            toolName: "commands_delete",
-            arguments: .object(["slug": .string(c.slug)])
-        )
-        try expect(try CommandStore.shared.get(slug: c.slug) == nil)
+        try await withCommandsTestHome { _ in
+            try CommandStore.shared.resetForTesting()
+            let c = try CommandStore.shared.create(name: "Gone", icon: .emoji("x"), body: "z")
+            _ = try await router.dispatchFormatted(
+                toolName: "commands_delete",
+                arguments: .object(["slug": .string(c.slug)])
+            )
+            try expect(try CommandStore.shared.get(slug: c.slug) == nil)
+        }
     }
+}
+
+// MARK: - tmp-home helper
+
+private func withCommandsTestHome(_ body: (URL) async throws -> Void) async throws {
+    let fm = FileManager.default
+    let tmp = fm.temporaryDirectory
+        .appendingPathComponent("CommandsModule-test-\(UUID().uuidString)", isDirectory: true)
+    try fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+    BridgePaths.overrideHomeForTesting(tmp)
+    defer {
+        BridgePaths.overrideHomeForTesting(nil)
+        try? fm.removeItem(at: tmp)
+    }
+    try await body(tmp)
 }

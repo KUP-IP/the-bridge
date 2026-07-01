@@ -18,7 +18,7 @@ import Foundation
 public enum AppVersion {
     /// Marketing version (CFBundleShortVersionString equivalent).
     /// Format: MAJOR.MINOR.PATCH (Semantic Versioning).
-    public static let marketing = "3.9.2"
+    public static let marketing = "3.9.3"
 
     /// Build number (CFBundleVersion equivalent).
     /// Monotonically increasing integer per release.
@@ -115,7 +115,7 @@ public enum AppVersion {
     ///   KeepReviewModel (KeepReviewStatus + KeepReviewMetadata + KeepSchemaContract +
     ///   KeepRequiredSchemaField). staticFeatureModuleToolCount 187 → 188. test-floor
     ///   2682 → 2744 (+62).
-    public static let build = "68"
+    public static let build = "69"
 
     /// Combined display string for UI and logs.
     public static var display: String { "\(marketing) (\(build))" }
@@ -238,7 +238,7 @@ public enum BridgeConstants {
     ///   (in-place AGENTS field update tool). 187 + 1 = 188.
     /// PKT-1061 Commands MCP (2026-06-29): +6 commands_* tools (list/get/search/create/update/delete). 188 + 6 = 194.
     /// Wave 3 FB (2026-06-29): + bridge_focus_settings (automation family). 194 + 1 = 195.
-    public static let staticFeatureModuleToolCount = 195
+    public static let staticFeatureModuleToolCount = 197
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

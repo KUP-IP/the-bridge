@@ -73,6 +73,8 @@ public struct VoiceMemoReviewEntry: Codable, Sendable, Equatable, Identifiable {
     public var rowId: String?
     public var destinationFields: [String: String]?
     public var provenance: String?
+    /// Structured filter tag (PKT-MEM-120). Legacy entries derive via `effectiveReviewTag`.
+    public var reviewTag: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -91,7 +93,8 @@ public struct VoiceMemoReviewEntry: Codable, Sendable, Equatable, Identifiable {
         entityHint: String? = nil,
         rowId: String? = nil,
         destinationFields: [String: String]? = nil,
-        provenance: String? = nil
+        provenance: String? = nil,
+        reviewTag: String? = nil
     ) {
         self.id = id
         self.memoId = memoId
@@ -110,6 +113,7 @@ public struct VoiceMemoReviewEntry: Codable, Sendable, Equatable, Identifiable {
         self.rowId = rowId
         self.destinationFields = destinationFields
         self.provenance = provenance
+        self.reviewTag = reviewTag
     }
 
     /// Anchor for TTL age — `statusChangedAt` when present, else `queuedAt`.

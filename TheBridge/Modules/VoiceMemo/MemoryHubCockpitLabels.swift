@@ -51,15 +51,6 @@ public enum MemoryHubCockpitLabels {
     }
 
     /// Which Understand-chain arm produced the plan → an inspector provenance badge.
-    /// When `degraded`, a higher-preference rung was available by config but returned
-    /// nil at runtime, so the operator is told the result is a fallback (reconnect /
-    /// add credits for full quality). Pure label — the badge tone lives in the view.
-    ///
-    /// `.local` (on-device Ollama LLM) and `.heuristic` (deterministic regex floor) get
-    /// DISTINCT labels: they are different quality tiers, so collapsing them would hide a
-    /// meaningful signal (W4). `.agent` provenance is RESERVED for the out-of-process commit
-    /// path — the in-process cockpit preview never stamps it (agent mode previews on the
-    /// heuristic floor), so this label only ever shows if a plan genuinely carries `.agent`.
     public static func provenanceBadge(_ provenance: ParseProvenance, degraded: Bool) -> String {
         if degraded {
             return "Parsed locally — degraded; reconnect or add credits for full quality"
@@ -71,6 +62,28 @@ public enum MemoryHubCockpitLabels {
         case .heuristic: return "Parsed locally (rules)"
         }
     }
+
+    /// Compact provenance chip for memo list rows.
+    public static func provenanceShort(_ provenance: ParseProvenance, degraded: Bool) -> String {
+        if degraded { return "Degraded" }
+        switch provenance {
+        case .cloud: return "Cloud"
+        case .local: return "Local"
+        case .heuristic: return "Rules"
+        case .agent: return "Agent"
+        }
+    }
+
+    public static func diffBadgeLabel(_ badge: String) -> String {
+        switch badge {
+        case "added": return "Added"
+        case "changed": return "Changed"
+        case "demoted": return "Demoted"
+        default: return badge.capitalized
+        }
+    }
+
+    public static func awaitingAgentLabel() -> String { "Awaiting agent" }
 
     /// Pre-await status line shown the instant a memo is selected, BEFORE `voice_memo_get`
     /// resolves its transcript. When the memo has no transcript yet, selecting it triggers
