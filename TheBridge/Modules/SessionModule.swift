@@ -127,12 +127,20 @@ public enum SessionModule {
             }
         ))
 
-        // session_info – open (V1-04)
+        // session_info – open (V1-04; PKT-1065B: explicit field scopes)
         await router.register(ToolRegistration(
             name: "session_info",
             module: moduleName,
             tier: .open,
-            description: "Return the current bridge session's uptime, connected client count, and audit log size.",
+            description: "Return this bridge PROCESS's diagnostics. IMPORTANT — scopes differ per field: "
+                + "`uptimeSeconds` is the whole bridge process's uptime (not a per-caller session). "
+                + "`connections`/`activeClients` count ONLY live HTTP (/mcp) + legacy SSE network sessions; "
+                + "a stdio-attached client (e.g. this local MCP connection) is NOT counted, so 0 clients is "
+                + "expected and normal when the only caller is on stdio — it does NOT contradict bridge_status. "
+                + "`toolCalls`/`auditLogSize` are the audit-log entry count accumulated since process start (or "
+                + "the last session_clear). This tool describes the LOCAL bridge process; `bridge_status` "
+                + "describes the CLOUD tunnel channel — the two are orthogonal. See the `scopes` field in the "
+                + "response for the authoritative per-field definitions.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([:]),
@@ -141,7 +149,10 @@ public enum SessionModule {
             handler: { _ in
                 let uptime = max(0, Date().timeIntervalSince(sessionStartTime))
                 let auditSize = await auditLog.count()
-                let diagnostics = await diagnosticsProvider?() ?? RuntimeDiagnostics(connections: 1, activeClients: 1)
+                // No diagnostics provider (e.g. stdio-only assembly / unit tests) means
+                // there is no HTTP/SSE server to enumerate network sessions — report 0,
+                // NOT a fabricated 1. The `scopes` field explains why 0 is correct.
+                let diagnostics = await diagnosticsProvider?() ?? RuntimeDiagnostics(connections: 0, activeClients: 0)
                 let hours = Int(uptime) / 3600
                 let minutes = (Int(uptime) % 3600) / 60
                 let seconds = Int(uptime) % 60
@@ -153,7 +164,18 @@ public enum SessionModule {
                     "connections": .int(diagnostics.connections),
                     "toolCalls": .int(auditSize),
                     "activeClients": .int(diagnostics.activeClients),
-                    "auditLogSize": .int(auditSize)
+                    "auditLogSize": .int(auditSize),
+                    // Explicit per-field scope so a caller never has to guess why, e.g.,
+                    // activeClients is 0 while bridge_status reports the tunnel online.
+                    "scopes": .object([
+                        "uptimeSeconds": .string("Whole bridge PROCESS uptime in seconds (not a per-caller session)."),
+                        "uptime": .string("Same as uptimeSeconds, formatted as 'Hh Mm Ss'."),
+                        "connections": .string("Count of live HTTP (/mcp) + legacy SSE network sessions. Excludes stdio callers."),
+                        "activeClients": .string("Same population as `connections`: HTTP + legacy SSE sessions only. A stdio-attached caller is NOT counted, so 0 is normal and does not conflict with bridge_status."),
+                        "toolCalls": .string("Audit-log entry count since process start or last session_clear. Equal to auditLogSize."),
+                        "auditLogSize": .string("Number of audit-log entries retained for this process (since start or last session_clear)."),
+                        "note": .string("session_info describes the LOCAL bridge process; bridge_status describes the CLOUD tunnel channel. They are independent — neither implies the other.")
+                    ])
                 ])
             }
         ))

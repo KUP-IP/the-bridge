@@ -1605,7 +1605,15 @@ set -euo pipefail
 # 2824 → 2854 measured green.
 # 2026-06-30 (Memory Hub W1–W3 UX + HITL): +6 tests — MemoryProcessInspectUnderstandTests;
 # MemoryProcessLayoutAXTests (+1 opt-in AX); floor 2857 → 2863 measured green.
-FLOOR="${BRIDGE_TEST_FLOOR:-2863}"
+# 2026-07-01 (PKT-1065B session_info/bridge_status semantics + connection alias):
+# +2 SessionModuleTests (explicit per-field `scopes`; 0-clients default when no
+# diagnostics provider) +5 ConnectionsModuleTests (notion:primary symbolic alias —
+# isPrimaryAlias, resolve-to-primary, exact-id-wins, unknown-id nil, no-primary nil).
+# Measured green off origin/main (9306800) = 2870 (2863 +7), failed=0. Note:
+# `make build` build-injects RemoteAccessIdentity.swift from local WorkOS env — that
+# file must be reverted before measuring/committing (fail-closed tests else fail).
+# FLOOR 2863 → 2870. Parallel unmerged branches reconcile at merge.
+FLOOR="${BRIDGE_TEST_FLOOR:-2870}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

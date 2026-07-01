@@ -148,6 +148,48 @@ func runSessionModuleTests() async {
         }
     }
 
+    // session_info: PKT-1065B explicit per-field scopes
+    await test("session_info includes explicit field scopes") {
+        let result = try await router.dispatch(
+            toolName: "session_info",
+            arguments: .object([:])
+        )
+        guard case .object(let dict) = result,
+              case .object(let scopes) = dict["scopes"] else {
+            throw TestError.assertion("Expected a 'scopes' object in session_info")
+        }
+        for key in ["uptimeSeconds", "connections", "activeClients", "toolCalls", "auditLogSize", "note"] {
+            try expect(scopes[key] != nil, "Missing scope documentation for '\(key)'")
+        }
+        // The scope note must explicitly disclaim conflict with bridge_status.
+        if case .string(let activeScope) = scopes["activeClients"] {
+            try expect(activeScope.contains("bridge_status"),
+                       "activeClients scope should reference bridge_status to explain the non-conflict")
+        } else {
+            throw TestError.assertion("activeClients scope should be a string")
+        }
+    }
+
+    // session_info: with NO diagnostics provider, network client counts are 0
+    // (not a fabricated 1) — a stdio-only caller is legitimately 0 clients.
+    await test("session_info reports 0 clients when no diagnostics provider is wired") {
+        let localGate = SecurityGate()
+        let localLog = AuditLog()
+        let localRouter = ToolRouter(securityGate: localGate, auditLog: localLog)
+        await SessionModule.register(on: localRouter, auditLog: localLog)
+        let result = try await localRouter.dispatch(
+            toolName: "session_info",
+            arguments: .object([:])
+        )
+        guard case .object(let dict) = result,
+              case .int(let connections) = dict["connections"],
+              case .int(let activeClients) = dict["activeClients"] else {
+            throw TestError.assertion("Expected connections and activeClients ints")
+        }
+        try expect(connections == 0, "Expected 0 connections with no provider, got \(connections)")
+        try expect(activeClients == 0, "Expected 0 activeClients with no provider, got \(activeClients)")
+    }
+
     // session_clear: requires confirm = true
     await test("session_clear rejects without confirm") {
         let result = try await router.dispatch(
