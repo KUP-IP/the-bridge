@@ -365,7 +365,45 @@ public enum VoiceMemoProcessor {
 
     static func executeMemoryKeep(_ intent: VoiceMemoIntent, plan: VoiceMemoPlan, transcript: String, router: ToolRouter) async throws -> String {
         let entityKey = intent.entityKey ?? "memory"
-        let fields = resolvedMemoryKeepFields(intent: intent, plan: plan)
+        return try await executeMemoryKeep(
+            entityKey: entityKey,
+            intent: intent,
+            plan: plan,
+            transcript: transcript,
+            router: router,
+            entity: await Self.loadRegistryEntity(key: entityKey)
+        )
+    }
+
+    /// Testable core: `entity` is the resolved registry binding for `entityKey`
+    /// (the property map that decides whether a PLAYERS relation can be
+    /// attached). Production resolves it from the shared config store; tests
+    /// inject a fixture entity so the attach/verify/graceful-BLOCKED branches
+    /// are exercised hermetically without live Notion.
+    @discardableResult
+    public static func executeMemoryKeep(
+        entityKey: String,
+        intent: VoiceMemoIntent,
+        plan: VoiceMemoPlan,
+        transcript: String,
+        router: ToolRouter,
+        entity: RegistryEntity?
+    ) async throws -> String {
+        var fields = resolvedMemoryKeepFields(intent: intent, plan: plan)
+
+        // PKT-1064 — attach the ORIGINATING Player relation to the new Memory
+        // row at create time. The Player is bound by property id through the
+        // registry contract, so the entity MUST expose a bound PLAYERS relation
+        // property. If it does not (absent/unbound binding), that is the
+        // "graceful BLOCKED" case: throw a descriptive error so the memo routes
+        // to REVIEW (queueReview in processOne) rather than being silently
+        // marked processed with no attribution. No crash.
+        guard let playersKey = Self.playersRelationKey(in: entity) else {
+            throw VoiceMemoError.playerRelationUnbound(entityKey)
+        }
+        let originatingPlayerId = Self.originatingPlayerId(for: intent)
+        fields[playersKey] = originatingPlayerId
+
         let createResult = try await router.dispatch(toolName: "registry_create", arguments: .object([
             "entity": .string(entityKey),
             "fields": .object(fields.mapValues { .string($0) }),
@@ -373,9 +411,87 @@ public enum VoiceMemoProcessor {
         guard let pageId = parseRegistryPageId(from: createResult) else {
             return "registry_create entity=\(entityKey) (memory_keep) — created but page id not parsed"
         }
+
+        // Verify the relation actually attached via a read-back. A create that
+        // reports success but drops the relation (schema mismatch, silent Notion
+        // no-op) must NOT be accepted as processed — throw so the memo routes to
+        // REVIEW with a visible assertion failure (packet Success Criteria).
+        try await Self.verifyPlayerAttached(
+            entityKey: entityKey,
+            pageId: pageId,
+            playersKey: playersKey,
+            expectedPlayerId: originatingPlayerId,
+            router: router
+        )
+
         // W3: summary + action items in Notion body — transcript remains UI-only (FR-005).
         try await appendSummaryBodyToNotionPage(pageId: pageId, plan: plan, fields: fields, router: router)
-        return "registry_create entity=\(entityKey) id=\(pageId) + summary body"
+        return "registry_create entity=\(entityKey) id=\(pageId) + player \(originatingPlayerId) + summary body"
+    }
+
+    /// Load the registry entity binding for `key` from the shared config store.
+    /// Returns nil when the store has no such entity (first run / unconfigured).
+    static func loadRegistryEntity(key: String) async -> RegistryEntity? {
+        await RegistryConfigStore.shared.loadOrSeed().entity(key)
+    }
+
+    /// The canonical field key of a BOUND `.relation` property whose Notion
+    /// column is "PLAYERS" on this entity, or nil when no such bound relation
+    /// exists (property absent from the map, or present but not yet bound to a
+    /// Notion property id). Matching is by the Notion display name (case- and
+    /// whitespace-insensitive) so a rename of the canonical key doesn't break it,
+    /// while an UNBOUND property still yields nil (can't write a relation with no
+    /// property id → graceful BLOCKED).
+    public static func playersRelationKey(in entity: RegistryEntity?) -> String? {
+        guard let entity else { return nil }
+        let match = entity.properties.first { prop in
+            prop.role == .relation
+                && prop.isBound
+                && prop.notionName.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "PLAYERS"
+        }
+        return match?.key
+    }
+
+    /// Default originating player = the primary user player (Isaiah, PLYR-5).
+    /// A future source-metadata owner override would slot in here; for Isaiah's
+    /// local Voice Memos library the default is authoritative (packet scope).
+    static let defaultOriginatingPlayerId = "dc8e8f3f-e607-4b5d-809e-ae289574f40c"
+
+    static func originatingPlayerId(for intent: VoiceMemoIntent) -> String {
+        // An explicit non-empty per-intent override wins; otherwise the primary
+        // user player. Kept deterministic — no ambiguous resolution (packet stop
+        // condition: originating Player must resolve deterministically).
+        if let explicit = intent.fields["originatingPlayer"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !explicit.isEmpty {
+            return explicit
+        }
+        return defaultOriginatingPlayerId
+    }
+
+    /// Read the just-created row back and assert the PLAYERS relation contains
+    /// the expected player id. Throws `playerRelationVerifyFailed` when the
+    /// relation is absent/empty/wrong on read-back.
+    static func verifyPlayerAttached(
+        entityKey: String,
+        pageId: String,
+        playersKey: String,
+        expectedPlayerId: String,
+        router: ToolRouter
+    ) async throws {
+        let getResult = try await router.dispatch(toolName: "registry_get", arguments: .object([
+            "entity": .string(entityKey),
+            "id": .string(pageId),
+            "forceRefresh": .bool(true),
+        ]))
+        guard case .object(let envelope) = getResult,
+              case .object(let props)? = envelope["properties"],
+              case .array(let ids)? = props[playersKey] else {
+            throw VoiceMemoError.playerRelationVerifyFailed(entityKey, pageId, expectedPlayerId)
+        }
+        let attached = ids.contains { if case .string(let s) = $0 { return s == expectedPlayerId } else { return false } }
+        if !attached {
+            throw VoiceMemoError.playerRelationVerifyFailed(entityKey, pageId, expectedPlayerId)
+        }
     }
 
     public static func executeRegistryUpdate(_ intent: VoiceMemoIntent, explicitRowId: String? = nil, router: ToolRouter) async throws -> String {
@@ -1077,6 +1193,13 @@ public enum VoiceMemoError: Error, LocalizedError {
     case invalidIntent(String)
     case registryMatchFailed(String, String?)
     case registryAmbiguous(String, String?, Int)
+    /// The Memory entity has no BOUND PLAYERS relation property, so the
+    /// originating Player cannot be attached — a graceful BLOCKED → REVIEW,
+    /// never a silent successful processed receipt (PKT-1064).
+    case playerRelationUnbound(String)
+    /// The row was created but the read-back did not show the expected Player
+    /// relation attached (PKT-1064 post-write verification).
+    case playerRelationVerifyFailed(String, String, String)
 
     public var errorDescription: String? {
         switch self {
@@ -1085,6 +1208,10 @@ public enum VoiceMemoError: Error, LocalizedError {
             return "no registry row matched entity=\(entity) hint=\(hint ?? "nil")"
         case .registryAmbiguous(let entity, let hint, let count):
             return "ambiguous registry target entity=\(entity) hint=\(hint ?? "nil") matched \(count) rows — select a rowId"
+        case .playerRelationUnbound(let entity):
+            return "entity ‘\(entity)’ has no bound PLAYERS relation property — cannot attach the originating Player; bind PLAYERS via registry_introspect, then reprocess (BLOCKED, queued for review)"
+        case .playerRelationVerifyFailed(let entity, let pageId, let player):
+            return "originating Player \(player) not present on created \(entity) row \(pageId) after read-back — attach verification failed (queued for review)"
         }
     }
 }

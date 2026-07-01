@@ -1605,7 +1605,15 @@ set -euo pipefail
 # 2824 → 2854 measured green.
 # 2026-06-30 (Memory Hub W1–W3 UX + HITL): +6 tests — MemoryProcessInspectUnderstandTests;
 # MemoryProcessLayoutAXTests (+1 opt-in AX); floor 2857 → 2863 measured green.
-FLOOR="${BRIDGE_TEST_FLOOR:-2863}"
+# 2026-07-01 (PKT-1064 originating-Player relation attach/verify): +7 tests —
+# VoiceMemoPlayerAttachTests (memo→Memory attaches default player at create, verify
+# read-back present, absent-PLAYERS graceful BLOCKED, unbound-PLAYERS BLOCKED, dropped
+# relation fails verify, explicit override wins, playersRelationKey rename-safe match).
+# Branched off origin/main where FLOOR=2863; measured integrated green = 2870 (2863 +7),
+# 0 failed. FLOOR raised to 2870. NOTE: PKT-1041 is a PARALLEL UNMERGED branch that
+# independently raises FLOOR to 2872 — reconcile the two raises at merge (this branch's
+# +7 and 1041's raise are additive over the same 2863 base).
+FLOOR="${BRIDGE_TEST_FLOOR:-2870}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

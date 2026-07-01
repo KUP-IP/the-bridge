@@ -709,6 +709,7 @@ await runVoiceMemoCloudParseTests()    // Voice Curator FRONTIER-FIRST (Phase 1 
 await runMemoryHubCockpitLabelsTests() // Voice Curator FRONTIER-FIRST (Phase 1 W3): cockpit human labels + provenance badge + commit-value preview
 await runVoiceCuratorPhase1RemediationTests() // Voice Curator FRONTIER-FIRST (Phase 1 W4): review remediation — durable cloud-send provenance + notifier lane + honest commit-write label
 await runVoiceMemoMCPRoutingTests() // PKT-MEM-120: Auto+MCP Execute defer, presence, awaiting-agent tags + notification gate
+await runVoiceMemoPlayerAttachTests() // PKT-1064: memo→Memory attaches + verifies the originating Player relation; absent/unbound PLAYERS → graceful BLOCKED
 // PKT-MEM-106 0a + 0b run early in runAllTests() (flake-avoidance) — not duplicated here.
 await runMemorySettingsTests()         // PKT-MEM-102: Memory Settings section + Inbox UI
 await runOllamaModuleTests()           // Local Ollama client + module (Wave 2a)
