@@ -45,6 +45,12 @@ func runMemoryProcessLayoutAXTests() async {
         try expect(BridgeAXID.Memory.Process.dryRun == p + "dryRun", "dry-run button")
     }
 
+    await test("axV1_optInUnderstand_exactConstants") {
+        try expect(BridgeAXID.Memory.Process.processLocal == p + "processLocal", "process locally")
+        try expect(BridgeAXID.Memory.Process.processCloud == p + "processCloud", "process cloud")
+        try expect(BridgeAXID.Memory.Process.processPrompt == p + "processPrompt", "process prompt")
+    }
+
     await test("axV1_harness_manifest_includesV1Zones") {
         let memory = SettingsUIValidationHarness.expectedIdentifiers[.memory] ?? []
         for zone in [

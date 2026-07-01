@@ -4,6 +4,20 @@
 **Harness:** `scripts/memory-hub-ui-scenarios.sh` · PKT-1005 memory section in `scripts/pkt1005-ui-validate.sh`  
 **Navigation contract:** `bridge_settings_navigate(section:Memory, anchor:…)` with compound anchors (`process/<memoId>`, `inbox/<filter>`, `activity` → process).
 
+## W0 HITL baseline (2026-06-30 — agent-driven, no voice)
+
+| Tier | ID | Result | Notes |
+|------|-----|--------|-------|
+| T0 | T0a | **PASS** | `make test` → 2863/2863 green; floor raised to 2863 |
+| T0 | T0b | **PASS** | `make install-copy` target available (operator relaunch for live UI) |
+| T0 | T0c | **PASS** | Bridge MCP handshake COMPLETE this session |
+| T0 | T0d | **PASS** | PKT-1005 harness includes processLocal/processCloud/processPrompt AX ids |
+| T1 | T1a | **PASS** | Three-pane layout unchanged (PKT-MEM-123 L1) |
+| T1 | T1b | **PASS** | Inspect-only select — no Understand on memo click (W1) |
+| T1 | T1c | **PASS** | Session cache tests green (`MemoryProcessPreviewSessionTests`) |
+
+**Next:** Tier 2 requires operator voice scripts in [MEMORY-HUB-VOICE-SCRIPTS.md](MEMORY-HUB-VOICE-SCRIPTS.md).
+
 ## V1 Process layout — live acceptance (REVIEW-FIRST)
 
 **Live run:** 2026-06-30 · `make install-copy` → v3.9.2 build 68 · memo `20251007 133129-0E0F965C.m4a-654734-1759861973` (short Apple transcript)  

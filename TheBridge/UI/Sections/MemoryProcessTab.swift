@@ -36,6 +36,7 @@ struct MemoryProcessTab: View {
     @State private var batchOutcomes: [String: MemoryProcessBatchConfirm.BatchCommitOutcome] = [:]
     @State private var showRegistrySheet = false
     @State private var registrySheetRows: [CockpitIntentRow] = []
+    @State private var expandedIntentIds: Set<String> = []
     @AppStorage("memory.process.activityDrawerOpen") private var activityDrawerOpen = false
 
     private enum ConfirmPhase { case idle, running, done }
@@ -164,7 +165,7 @@ struct MemoryProcessTab: View {
             overrideIntentId = nil
             confirmPhase = .idle
             batchOutcomes = [:]
-            Task { await loadPreview(for: memo, forceRefresh: false) }
+            Task { await loadInspect(for: memo, forceRefresh: false) }
         } label: {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -217,12 +218,18 @@ struct MemoryProcessTab: View {
                 }
                 if isLoading {
                     ProgressView(loadingLabel)
-                } else if let plan, selectedId != nil {
-                    titleBlock
-                    transcriptFadeBlock
-                    intentTagsSection(plan: plan)
-                    confirmSummaryStrip
-                    confirmButtonBlock
+                } else if selectedId != nil {
+                    if let plan {
+                        titleBlock
+                        transcriptFadeBlock
+                        intentTagsSection(plan: plan)
+                        confirmSummaryStrip
+                        confirmButtonBlock
+                    } else {
+                        titleBlock
+                        transcriptFadeBlock
+                        processPromptBlock
+                    }
                 } else {
                     Text("Select a memo to preview and commit intents.")
                         .font(BridgeTokens.Typeface.sub)
@@ -250,11 +257,43 @@ struct MemoryProcessTab: View {
                     MemoryHubTriageSessionBridge.invalidateForMemo(memoId: memoId)
                     confirmPhase = .idle
                     batchOutcomes = [:]
-                    Task { await loadPreview(for: memo, forceRefresh: true) }
+                    Task { await runUnderstand(for: memo, forceRefresh: true, provider: nil) }
                 }
                 .accessibilityIdentifier(BridgeAXID.Memory.Process.refreshPreview)
             }
         }
+    }
+
+    private var processPromptBlock: some View {
+        BridgeGlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                BridgeCardLabel("Process this memo?")
+                Text("Selection loads the transcript only. Choose how to run Understand — intents appear after processing completes.")
+                    .font(BridgeTokens.Typeface.sub)
+                    .foregroundStyle(BridgeTokens.fg3)
+                HStack(spacing: 10) {
+                    BridgeButton("Process locally", systemImage: "cpu") {
+                        guard let memoId = selectedId,
+                              let memo = memos.first(where: { $0.id == memoId }) else { return }
+                        Task { await runUnderstand(for: memo, forceRefresh: false, provider: "local") }
+                    }
+                    .accessibilityIdentifier(BridgeAXID.Memory.Process.processLocal)
+                    if cloudProvider != nil, MemoryHubProviderConfigStore.canRunCloud(cloudProvider!) {
+                        BridgeButton("Process with cloud", systemImage: "cloud") {
+                            guard let memoId = selectedId,
+                                  let memo = memos.first(where: { $0.id == memoId }) else { return }
+                            Task { await runUnderstand(for: memo, forceRefresh: false, provider: "cloud") }
+                        }
+                        .accessibilityIdentifier(BridgeAXID.Memory.Process.processCloud)
+                    } else {
+                        Text("Link a cloud provider in Processing to enable cloud Understand.")
+                            .font(BridgeTokens.Typeface.meta)
+                            .foregroundStyle(BridgeTokens.fg4)
+                    }
+                }
+            }
+        }
+        .accessibilityIdentifier(BridgeAXID.Memory.Process.processPrompt)
     }
 
     private var titleBlock: some View {
@@ -329,53 +368,96 @@ struct MemoryProcessTab: View {
         let checked = checkedIntentIds.contains(row.intentId)
         let locked = confirmPhase != .idle
         let outcome = batchOutcomes[row.intentId]
+        let expanded = expandedIntentIds.contains(row.intentId)
 
-        HStack(spacing: 4) {
-            if checkable {
-                Toggle(isOn: Binding(
-                    get: { checkedIntentIds.contains(row.intentId) },
-                    set: { on in
-                        if on { checkedIntentIds.insert(row.intentId) }
-                        else { checkedIntentIds.remove(row.intentId) }
-                        persistPreviewSession()
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 4) {
+                if checkable {
+                    Toggle(isOn: Binding(
+                        get: { checkedIntentIds.contains(row.intentId) },
+                        set: { on in
+                            if on { checkedIntentIds.insert(row.intentId) }
+                            else { checkedIntentIds.remove(row.intentId) }
+                            persistPreviewSession()
+                        }
+                    )) {
+                        Text(MemoryProcessCockpit.tagLabel(for: row))
+                            .font(BridgeTokens.Typeface.meta)
                     }
-                )) {
+                    .toggleStyle(.checkbox)
+                    .disabled(locked)
+                } else {
                     Text(MemoryProcessCockpit.tagLabel(for: row))
                         .font(BridgeTokens.Typeface.meta)
+                        .foregroundStyle(BridgeTokens.fg4)
+                    Text("(review)")
+                        .font(BridgeTokens.Typeface.meta)
+                        .foregroundStyle(BridgeTokens.warn)
                 }
-                .toggleStyle(.checkbox)
-                .disabled(locked)
-            } else {
-                Text(MemoryProcessCockpit.tagLabel(for: row))
-                    .font(BridgeTokens.Typeface.meta)
-                    .foregroundStyle(BridgeTokens.fg4)
-                Text("(review)")
-                    .font(BridgeTokens.Typeface.meta)
-                    .foregroundStyle(BridgeTokens.warn)
+                if plan != nil {
+                    Button {
+                        if expanded { expandedIntentIds.remove(row.intentId) }
+                        else { expandedIntentIds.insert(row.intentId) }
+                    } label: {
+                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 10))
+                            .foregroundStyle(BridgeTokens.fg4)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(expanded ? "Collapse write preview" : "Expand write preview")
+                }
+                if confirmPhase == .running, checked {
+                    ProgressView().controlSize(.small)
+                } else if let outcome {
+                    Image(systemName: outcome.ok ? "checkmark.circle.fill" : (outcome.needsManual ? "exclamationmark.circle" : "xmark.circle"))
+                        .foregroundStyle(outcome.ok ? BridgeTokens.ok : BridgeTokens.warn)
+                        .font(.system(size: 11))
+                }
+                if let diff = intentDiffBadges[row.intentId] {
+                    BridgeBadge(MemoryHubCockpitLabels.diffBadgeLabel(diff), tone: .info)
+                }
             }
-            if confirmPhase == .running, checked {
-                ProgressView().controlSize(.small)
-            } else if let outcome {
-                Image(systemName: outcome.ok ? "checkmark.circle.fill" : (outcome.needsManual ? "exclamationmark.circle" : "xmark.circle"))
-                    .foregroundStyle(outcome.ok ? BridgeTokens.ok : BridgeTokens.warn)
-                    .font(.system(size: 11))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(checkable && checked ? BridgeTokens.accent.opacity(0.12) : BridgeTokens.wellFill)
             }
-            if let diff = intentDiffBadges[row.intentId] {
-                BridgeBadge(MemoryHubCockpitLabels.diffBadgeLabel(diff), tone: .info)
+            .accessibilityIdentifier(BridgeAXID.Memory.Process.intentTagCheckbox(row.intentId))
+            if expanded, let plan {
+                intentInspectorBlock(row: row, plan: plan)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 6)
+                    .accessibilityIdentifier(BridgeAXID.Memory.Process.intentInspector(row.intentId))
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(checkable && checked ? BridgeTokens.accent.opacity(0.12) : BridgeTokens.wellFill)
-        }
-        .accessibilityIdentifier(BridgeAXID.Memory.Process.intentTagCheckbox(row.intentId))
     }
 
+    private func intentInspectorBlock(row: CockpitIntentRow, plan: VoiceMemoPlan) -> some View {
+        let lines = MemoryProcessCockpit.intentWritePreview(for: row, plan: plan)
+        return VStack(alignment: .leading, spacing: 4) {
+            ForEach(lines) { line in
+                HStack(alignment: .top, spacing: 6) {
+                    Text(line.label + ":")
+                        .font(BridgeTokens.Typeface.meta)
+                        .foregroundStyle(BridgeTokens.fg4)
+                        .frame(width: 120, alignment: .leading)
+                    Text(line.value)
+                        .font(BridgeTokens.Typeface.mono)
+                        .foregroundStyle(BridgeTokens.fg2)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .padding(.top, 4)
+        .padding(.leading, 8)
+    }
+
+    @ViewBuilder
     private var confirmSummaryStrip: some View {
-        let lines = MemoryProcessBatchConfirm.confirmSummaryLines(checkedIds: checkedIntentIds, rows: rows)
-        return Group {
+        if let plan {
+            let lines = MemoryProcessBatchConfirm.confirmSummaryLines(checkedIds: checkedIntentIds, rows: rows, plan: plan)
             if !lines.isEmpty {
                 BridgeGlassCard {
                     VStack(alignment: .leading, spacing: 6) {
@@ -388,7 +470,7 @@ struct MemoryProcessTab: View {
                                 Text(line.preview)
                                     .font(BridgeTokens.Typeface.mono)
                                     .foregroundStyle(BridgeTokens.fg2)
-                                    .lineLimit(3)
+                                    .lineLimit(4)
                             }
                         }
                     }
@@ -527,7 +609,7 @@ struct MemoryProcessTab: View {
     }
 
     @MainActor
-    private func loadPreview(for memo: VoiceMemoRecording, forceRefresh: Bool) async {
+    private func loadInspect(for memo: VoiceMemoRecording, forceRefresh: Bool) async {
         await MemoryProcessPreviewSession.shared.setLastSelectedMemoId(memo.id)
 
         if !forceRefresh, let cached = await cachedBundle(for: memo) {
@@ -535,14 +617,15 @@ struct MemoryProcessTab: View {
             return
         }
 
-        if forceRefresh {
-            await MemoryProcessPreviewSession.shared.invalidate(memoId: memo.id)
-        }
-
         isLoading = true
+        loadingLabel = "Loading memo…"
         statusMessage = MemoryHubCockpitLabels.selectStatus(hasTranscript: memo.hasTranscript)
-        loadingLabel = statusMessage ?? "Loading preview…"
         defer { isLoading = false }
+
+        cloudProvider = MemoryHubProviderConfigStore.load().first
+        titleDraft = MemoryHubMemoTitler.listDisplay(recording: memo, cached: titleCache[memo.id]).text
+        titleCache[memo.id] = MemoryHubMemoTitleStore.title(for: memo.id)
+
         guard let router = await JobsManager.shared.router_() else {
             statusMessage = "MCP server not ready."
             return
@@ -550,29 +633,73 @@ struct MemoryProcessTab: View {
         do {
             let result = try await router.dispatch(toolName: "voice_memo_get", arguments: .object([
                 "memoId": .string(memo.id),
+                "understand": .bool(false),
             ]))
+            guard case .object(let envelope) = result,
+                  case .object(let memoObj) = envelope["memo"],
+                  case .string(let t) = memoObj["transcript"] else {
+                statusMessage = "Could not parse inspect."
+                return
+            }
+            transcript = t
+            plan = nil
+            checkedIntentIds = []
+            expandedIntentIds = []
+            confirmPhase = .idle
+            batchOutcomes = [:]
+            statusMessage = t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? MemoryHubCockpitLabels.unresolvedTranscriptMessage()
+                : nil
+            persistPreviewSession()
+        } catch {
+            statusMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func runUnderstand(for memo: VoiceMemoRecording, forceRefresh: Bool, provider: String?) async {
+        await MemoryProcessPreviewSession.shared.setLastSelectedMemoId(memo.id)
+        if forceRefresh {
+            await MemoryProcessPreviewSession.shared.invalidate(memoId: memo.id)
+        }
+
+        isLoading = true
+        loadingLabel = provider == "cloud" ? "Understanding (cloud)…" : (provider == "local" ? "Understanding (local)…" : "Understanding…")
+        activityDrawerOpen = true
+        defer { isLoading = false }
+        reloadActivity()
+
+        guard let router = await JobsManager.shared.router_() else {
+            statusMessage = "MCP server not ready."
+            return
+        }
+        var args: [String: Value] = [
+            "memoId": .string(memo.id),
+            "understand": .bool(true),
+        ]
+        if let provider { args["provider"] = .string(provider) }
+        do {
+            let result = try await router.dispatch(toolName: "voice_memo_get", arguments: .object(args))
             guard case .object(let envelope) = result,
                   case .object(let memoObj) = envelope["memo"],
                   case .string(let t) = memoObj["transcript"],
                   case .object(let planObj) = envelope["plan"] else {
-                statusMessage = "Could not parse preview."
+                statusMessage = "Could not parse Understand result."
                 return
             }
             transcript = t
-            statusMessage = t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? MemoryHubCockpitLabels.unresolvedTranscriptMessage()
-                : nil
+            statusMessage = nil
             let parsedPlan = parsePlan(from: planObj)
             plan = parsedPlan
             reloadPlanDiffBadges(memoId: memo.id)
             let title = MemoryHubMemoTitler.heuristicTitle(plan: parsedPlan, transcript: t)
             MemoryHubMemoTitleStore.put(title, memoId: memo.id)
             titleCache[memo.id] = MemoryHubMemoTitleStore.title(for: memo.id)
-            titleStatus = nil
             titleDraft = MemoryHubMemoTitler.listDisplay(recording: memo, cached: titleCache[memo.id]).text
             cloudProvider = MemoryHubProviderConfigStore.load().first
             seedCheckedIntentsFromPlan()
             persistPreviewSession()
+            reloadActivity()
             if MemoryHubMemoTitler.localTitleEnabled() {
                 let memoId = memo.id
                 Task {
@@ -598,7 +725,7 @@ struct MemoryProcessTab: View {
               let memoId = await MemoryProcessPreviewSession.shared.lastSelectedMemoId,
               let memo = memos.first(where: { $0.id == memoId }) else { return }
         selectedId = memoId
-        await loadPreview(for: memo, forceRefresh: false)
+        await loadInspect(for: memo, forceRefresh: false)
     }
 
     @MainActor

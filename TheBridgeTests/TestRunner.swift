@@ -264,6 +264,7 @@ struct TheBridgeTestRunner {
         await runMemoryProcessBatchConfirmTests() // PKT-MEM-123: batch confirm orchestrator
         await runMemoryProcessBatchCommitIntegrationTests() // PKT-MEM-123: batch commit loop (stub router)
         await runMemoryProcessLayoutAXTests() // PKT-MEM-123: V1 layout AX manifest
+        await runMemoryProcessInspectUnderstandTests() // W1–W3: inspect/understand + intent preview
         // ============================================================
         // MARK: - SecurityGate Tests (v3: 3-tier model)
         // ============================================================

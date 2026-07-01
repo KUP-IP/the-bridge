@@ -373,8 +373,9 @@ public enum VoiceMemoProcessor {
         guard let pageId = parseRegistryPageId(from: createResult) else {
             return "registry_create entity=\(entityKey) (memory_keep) — created but page id not parsed"
         }
-        try await appendTranscriptToNotionPage(pageId: pageId, transcript: transcript, router: router)
-        return "registry_create entity=\(entityKey) id=\(pageId) + transcript appended"
+        // W3: summary + action items in Notion body — transcript remains UI-only (FR-005).
+        try await appendSummaryBodyToNotionPage(pageId: pageId, plan: plan, fields: fields, router: router)
+        return "registry_create entity=\(entityKey) id=\(pageId) + summary body"
     }
 
     public static func executeRegistryUpdate(_ intent: VoiceMemoIntent, explicitRowId: String? = nil, router: ToolRouter) async throws -> String {
@@ -542,6 +543,60 @@ public enum VoiceMemoProcessor {
         return id
     }
 
+    static func appendSummaryBodyToNotionPage(
+        pageId: String,
+        plan: VoiceMemoPlan,
+        fields: [String: String],
+        router: ToolRouter
+    ) async throws {
+        let summaryText = fields["summary"] ?? plan.summary
+        let trimmed = summaryText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var children: [[String: Any]] = [
+            [
+                "object": "block",
+                "type": "heading_2",
+                "heading_2": [
+                    "rich_text": [["type": "text", "text": ["content": "Summary"]]],
+                ],
+            ],
+        ]
+        for chunk in chunkText(trimmed, maxLen: 1900) {
+            children.append([
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": [
+                    "rich_text": [["type": "text", "text": ["content": chunk]]],
+                ],
+            ])
+        }
+        if !plan.actions.isEmpty {
+            children.append([
+                "object": "block",
+                "type": "heading_3",
+                "heading_3": [
+                    "rich_text": [["type": "text", "text": ["content": "Action items"]]],
+                ],
+            ])
+            for action in plan.actions.prefix(12) {
+                children.append([
+                    "object": "block",
+                    "type": "bulleted_list_item",
+                    "bulleted_list_item": [
+                        "rich_text": [["type": "text", "text": ["content": String(action.prefix(1900))]]],
+                    ],
+                ])
+            }
+        }
+        let data = try JSONSerialization.data(withJSONObject: children)
+        guard let json = String(data: data, encoding: .utf8) else { return }
+        _ = try await router.dispatch(toolName: "notion_blocks_append", arguments: .object([
+            "blockId": .string(pageId),
+            "children": .string(json),
+        ]))
+    }
+
+    /// Legacy transcript append — retained for explicit opt-in callers only.
     static func appendTranscriptToNotionPage(pageId: String, transcript: String, router: ToolRouter) async throws {
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -751,13 +806,151 @@ public enum VoiceMemoProcessor {
         guard let recording = recordings.first(where: { $0.id == memoId || $0.path == memoId }) else {
             throw VoiceMemoError.invalidIntent("memo not found: \(memoId)")
         }
-        let (transcript, plan) = try await buildPlan(for: recording, options: options)
+        let understand: Bool = {
+            guard case .object(let obj) = args, case .bool(let b)? = obj["understand"] else { return true }
+            return b
+        }()
+        let providerMode = stringArg(fromValue: args, "provider").flatMap { VoiceMemoCuratorMode(rawValue: $0.lowercased()) }
+
+        if understand {
+            let (transcript, plan) = try await buildPlan(for: recording, options: options, curatorMode: providerMode)
+            return .object([
+                "memo": memoValue(recording, transcript: transcript),
+                "plan": planValue(plan),
+                "understood": .bool(true),
+                "curatorMode": .string(VoiceMemoCuratorRouter.effectiveMode().rawValue),
+                "processed": .bool(VoiceMemoProcessedStore.isProcessed(id: recording.id)),
+            ])
+        }
+
+        let inspected = inspectTranscript(for: recording)
+        let transcript = inspected.text ?? ""
         return .object([
             "memo": memoValue(recording, transcript: transcript),
-            "plan": planValue(plan),
+            "understood": .bool(false),
+            "needsTranscript": .bool(transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty),
             "curatorMode": .string(VoiceMemoCuratorRouter.effectiveMode().rawValue),
             "processed": .bool(VoiceMemoProcessedStore.isProcessed(id: recording.id)),
         ])
+    }
+
+    /// Cheap inspect: cached sidecar / list preview only — no transcription ladder or Understand.
+    public static func inspectTranscript(for recording: VoiceMemoRecording) -> VoiceMemoTranscriptResolution {
+        if let cached = recording.transcript?.trimmingCharacters(in: .whitespacesAndNewlines), !cached.isEmpty {
+            return VoiceMemoTranscriptResolution(text: cached, source: recording.transcriptSource)
+        }
+        let audioURL = URL(fileURLWithPath: recording.path, isDirectory: false)
+        if let sidecar = VoiceMemoDiscovery.loadTranscriptSidecar(for: audioURL) {
+            let source = VoiceMemoDiscovery.loadTranscriptMeta(for: audioURL)?.source ?? .sidecar
+            return VoiceMemoTranscriptResolution(text: sidecar, source: source)
+        }
+        if BridgeDefaults.voiceMemoAppleTranscriptEffective,
+           let apple = AppleVoiceMemoTranscriptExtractor.extract(from: audioURL) {
+            return VoiceMemoTranscriptResolution(text: apple, source: .apple)
+        }
+        return VoiceMemoTranscriptResolution(text: nil, source: .none)
+    }
+
+    static func logUnderstandActivity(
+        memoId: String,
+        phase: MemoryHubActivityEvent.Phase,
+        action: String,
+        status: String,
+        provenance: String,
+        detail: String,
+        eventType: MemoryHubActivityEventType = .unknown
+    ) {
+        let event = MemoryHubActivityEvent(
+            timestamp: ISO8601DateFormatter().string(from: Date()),
+            memoId: memoId,
+            phase: phase,
+            eventType: eventType,
+            action: action,
+            status: status,
+            provenance: provenance,
+            actor: "operator",
+            detail: String(detail.prefix(240))
+        )
+        try? MemoryHubActivityLog.append(event)
+    }
+
+    static func buildPlan(
+        for recording: VoiceMemoRecording,
+        options: Options,
+        curatorMode: VoiceMemoCuratorMode? = nil
+    ) async throws -> (transcript: String, plan: VoiceMemoPlan) {
+        let memoId = recording.id
+        logUnderstandActivity(
+            memoId: memoId, phase: .transcribe, action: "understand_transcribe",
+            status: "running", provenance: curatorMode?.rawValue ?? VoiceMemoCuratorRouter.effectiveMode().rawValue,
+            detail: "Starting transcription ladder", eventType: .memoTranscribed
+        )
+        let audioURL = URL(fileURLWithPath: recording.path, isDirectory: false)
+        let resolved = try await VoiceMemoDiscovery.resolveTranscript(for: audioURL)
+        guard let transcript = resolved.text else {
+            throw VoiceMemoError.invalidIntent("no transcript for memo")
+        }
+        logUnderstandActivity(
+            memoId: memoId, phase: .transcribe, action: "understand_transcribe",
+            status: "ok", provenance: resolved.source.rawValue,
+            detail: MemoryHubActivityLog.transcriptEvidence(transcript), eventType: .memoTranscribed
+        )
+
+        logUnderstandActivity(
+            memoId: memoId, phase: .understand, action: "understand_parse",
+            status: "running", provenance: curatorMode?.rawValue ?? "auto",
+            detail: "Parsing intents", eventType: .providerCallStarted
+        )
+        var plan = await VoiceMemoParseRouter.parse(
+            transcript: transcript,
+            fallbackTitle: recording.title,
+            recordingPath: recording.path,
+            curatorMode: curatorMode
+        )
+        logUnderstandActivity(
+            memoId: memoId, phase: .understand, action: "understand_parse",
+            status: plan.degraded ? "degraded" : "ok", provenance: plan.provenance.rawValue,
+            detail: "\(plan.intents.count) intent(s)", eventType: .providerCallCompleted
+        )
+
+        let needsLLM = plan.intents.contains { $0.kind == .memoryKeep }
+            && VoiceMemoCuratorRouter.shouldSummarizeForMemoryKeep()
+        let summary: String
+        let actions: [String]
+        if needsLLM {
+            logUnderstandActivity(
+                memoId: memoId, phase: .plan, action: "understand_summarize",
+                status: "running", provenance: plan.provenance.rawValue,
+                detail: "Structured summary for memory_keep", eventType: .memoSummarized
+            )
+            let structured = await VoiceMemoSummarizer.structuredSummary(
+                transcript: transcript, fallbackTitle: recording.title
+            )
+            summary = structured.paragraph
+            actions = structured.actions
+            logUnderstandActivity(
+                memoId: memoId, phase: .plan, action: "understand_summarize",
+                status: "ok", provenance: plan.provenance.rawValue,
+                detail: "\(structured.actions.count) action(s)", eventType: .memoSummarized
+            )
+        } else {
+            summary = VoiceMemoParser.firstSentencePublic(in: transcript, maxLen: 280)
+            actions = VoiceMemoParser.extractActionBulletsPublic(from: transcript)
+        }
+        var updated = applySummary(to: plan, summary: summary, transcript: transcript, recordingPath: recording.path)
+        if !actions.isEmpty { updated.actions = actions }
+        plan = updated
+        logUnderstandActivity(
+            memoId: memoId, phase: .plan, action: "understand_ready",
+            status: "ok", provenance: plan.provenance.rawValue,
+            detail: "Plan ready for Confirm", eventType: .unknown
+        )
+        return (transcript, plan)
+    }
+
+    /// Backward-compatible overload used by process/commit paths.
+    static func buildPlan(for recording: VoiceMemoRecording, options: Options) async throws -> (transcript: String, plan: VoiceMemoPlan) {
+        try await buildPlan(for: recording, options: options, curatorMode: nil)
     }
 
     public static func commit(args: Value, router: ToolRouter) async throws -> Value {
@@ -830,32 +1023,6 @@ public enum VoiceMemoProcessor {
             "detail": .string(detail),
             "markedProcessed": .bool(markedProcessed),
         ])
-    }
-
-    static func buildPlan(for recording: VoiceMemoRecording, options: Options) async throws -> (transcript: String, plan: VoiceMemoPlan) {
-        let audioURL = URL(fileURLWithPath: recording.path, isDirectory: false)
-        let resolved = try await VoiceMemoDiscovery.resolveTranscript(for: audioURL)
-        guard let transcript = resolved.text else {
-            throw VoiceMemoError.invalidIntent("no transcript for memo")
-        }
-        // FRONTIER-FIRST Understand: walk the curator-mode provider chain
-        // (cloud → local → heuristic for .auto), stamping plan.provenance /
-        // .degraded. The summary step + everything downstream is unchanged.
-        var plan = await VoiceMemoParseRouter.parse(
-            transcript: transcript,
-            fallbackTitle: recording.title,
-            recordingPath: recording.path
-        )
-        let needsLLM = plan.intents.contains { $0.kind == .memoryKeep }
-            && VoiceMemoCuratorRouter.shouldSummarizeForMemoryKeep()
-        let summary: String
-        if needsLLM {
-            summary = await VoiceMemoSummarizer.summarize(transcript: transcript, fallbackTitle: recording.title)
-        } else {
-            summary = VoiceMemoParser.firstSentencePublic(in: transcript, maxLen: 280)
-        }
-        plan = applySummary(to: plan, summary: summary, transcript: transcript, recordingPath: recording.path)
-        return (transcript, plan)
     }
 
     static func memoValue(_ recording: VoiceMemoRecording, transcript: String) -> Value {

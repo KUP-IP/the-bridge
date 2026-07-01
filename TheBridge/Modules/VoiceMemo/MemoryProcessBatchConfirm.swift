@@ -84,12 +84,13 @@ public enum MemoryProcessBatchConfirm {
     /// One summary line per checked intent for the trust strip above Confirm.
     public static func confirmSummaryLines(
         checkedIds: Set<String>,
-        rows: [CockpitIntentRow]
+        rows: [CockpitIntentRow],
+        plan: VoiceMemoPlan
     ) -> [(intentId: String, label: String, preview: String)] {
         commitOrder(checkedIds: checkedIds, rows: rows).compactMap { row in
-            guard let preview = MemoryProcessCockpit.commitValuePreview(for: row) else { return nil }
             let label = MemoryProcessCockpit.commitWriteLabel(for: row) ?? "Will write"
-            let truncated = preview.count > 120 ? String(preview.prefix(117)) + "…" : preview
+            let preview = MemoryProcessCockpit.confirmPreviewText(for: row, plan: plan)
+            let truncated = preview.count > 200 ? String(preview.prefix(197)) + "…" : preview
             return (row.intentId, label, truncated)
         }
     }

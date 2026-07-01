@@ -111,10 +111,10 @@ func runMemoryProcessBatchConfirmTests() async {
             VoiceMemoIntent(kind: .reminder, confidence: 0.92, title: long),
         ])
         let rows = MemoryProcessCockpit.intentRows(memoId: "m", plan: plan)
-        let lines = MemoryProcessBatchConfirm.confirmSummaryLines(checkedIds: [rows.first!.intentId], rows: rows)
+        let lines = MemoryProcessBatchConfirm.confirmSummaryLines(checkedIds: [rows.first!.intentId], rows: rows, plan: plan)
         try expect(lines.count == 1, "one summary line")
         try expect(lines[0].preview.hasSuffix("…"), "truncated preview")
-        try expect(lines[0].preview.count <= 120, "preview capped")
+        try expect(lines[0].preview.count <= 200, "preview capped")
     }
 
     await test("batch_parseCommitResponse_needsManualNotSuccess") {

@@ -309,6 +309,14 @@ public enum VoiceMemoModule {
                         "type": .string("string"),
                         "description": .string("Stable memo id or absolute path."),
                     ]),
+                    "understand": .object([
+                        "type": .string("boolean"),
+                        "description": .string("When true (default), run transcription + Understand + plan. When false, inspect cached transcript only."),
+                    ]),
+                    "provider": .object([
+                        "type": .string("string"),
+                        "description": .string("Optional curator override for Understand: local | cloud | auto | heuristics."),
+                    ]),
                 ]),
                 "required": .array([.string("memoId")]),
             ]),

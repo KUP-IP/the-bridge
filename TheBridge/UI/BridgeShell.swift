@@ -264,6 +264,11 @@ public enum BridgeAXID {
             /// PKT-MEM-122 — agent triage session banner + end control.
             public static let triageBanner       = id("process.triageBanner")
             public static let triageEndSession   = id("process.triageEndSession")
+            /// W1 — opt-in Understand (inspect-only select until operator confirms).
+            public static let processLocal       = id("process.processLocal")
+            public static let processCloud       = id("process.processCloud")
+            public static let processPrompt      = id("process.processPrompt")
+            public static func intentInspector(_ intentId: String) -> String { id("process.intentInspector.\(intentId)") }
         }
     }
 }

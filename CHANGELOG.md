@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.9.3 — Memory Hub opt-in Understand + summary-first keeps — 2026-06-30
+
+- **Process UX (W1)** — memo select is inspect-only (`voice_memo_get understand:false`); **Process locally** / **Process with cloud** buttons run explicit Understand with activity-phase receipts.
+- **Intent inspector (W2)** — expand intent tags to full write preview (registry fields, agent memory, keep summary, reminder fields).
+- **Keep content (W3)** — structured summary + action items for Notion keeps; transcript UI-only (no default transcript append to Notion body).
+- **HITL** — scenario catalog, voice scripts, friction log under `docs/operator/live-evidence/`.
+- test-floor **2857 → 2863** (+6 MemoryProcessInspectUnderstandTests + opt-in AX). Build **69**.
+
 ## v3.9.2 — Ollama defaults + registry create-body + standing orders seed — 2026-06-29
 
 - **Ollama** — split routing vs summarization defaults; Qwen generate uses `think: false` + tuned context (PR #67).

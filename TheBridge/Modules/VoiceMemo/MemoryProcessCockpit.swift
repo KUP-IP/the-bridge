@@ -51,6 +51,17 @@ public struct CockpitPickerState: Sendable, Equatable {
     }
 }
 
+/// One labeled field in the per-intent write preview (W2 intent inspector).
+public struct IntentWritePreviewLine: Sendable, Equatable, Identifiable {
+    public let label: String
+    public let value: String
+    public var id: String { label + value.prefix(24) }
+    public init(label: String, value: String) {
+        self.label = label
+        self.value = value
+    }
+}
+
 public enum MemoryProcessCockpit {
 
     /// Build the intent-table rows for a memo. Exactly one row is marked primary:
@@ -168,6 +179,51 @@ public enum MemoryProcessCockpit {
     /// that will be appended — not the final stored value. Kept here next to the preview so
     /// the label and the writer's precedence cannot drift.
     static let appendOnlyRegistryFields: Set<String> = ["brief", "objective", "summary", "description"]
+
+    /// Full write contract for one intent (W2 — replaces truncated commitValuePreview in UI).
+    public static func intentWritePreview(for row: CockpitIntentRow, plan: VoiceMemoPlan) -> [IntentWritePreviewLine] {
+        switch row.kind {
+        case .memoryKeep:
+            let fields = row.fields.isEmpty
+                ? VoiceMemoParser.memoryKeepFields(
+                    title: row.title ?? plan.generatedTitle,
+                    summary: plan.summary,
+                    actions: plan.actions
+                )
+                : row.fields
+            return fields.keys.sorted().compactMap { key in
+                guard let value = fields[key], !value.isEmpty else { return nil }
+                return IntentWritePreviewLine(label: key, value: value)
+            }
+        case .registryUpdate:
+            return row.fields.keys.sorted().compactMap { key in
+                guard let value = row.fields[key], !value.isEmpty else { return nil }
+                let appendNote = appendOnlyRegistryFields.contains(key) ? " (append)" : ""
+                return IntentWritePreviewLine(label: "\(row.entityKey ?? "registry").\(key)\(appendNote)", value: value)
+            }
+        case .agentMemory:
+            var lines: [IntentWritePreviewLine] = []
+            if let scope = row.fields["scope"] { lines.append(IntentWritePreviewLine(label: "scope", value: scope)) }
+            let text = plan.summary.isEmpty ? (row.title ?? plan.generatedTitle) : plan.summary
+            lines.append(IntentWritePreviewLine(label: "agent memory text", value: String(text.prefix(500))))
+            return lines
+        case .reminder:
+            var lines: [IntentWritePreviewLine] = []
+            if let title = row.title { lines.append(IntentWritePreviewLine(label: "title", value: title)) }
+            if let due = row.dueISO8601 { lines.append(IntentWritePreviewLine(label: "due", value: due)) }
+            if let body = row.fields["notes"] ?? row.title { lines.append(IntentWritePreviewLine(label: "notes", value: body)) }
+            return lines
+        case .review:
+            return [IntentWritePreviewLine(label: "status", value: "Needs manual review — no auto-write")]
+        }
+    }
+
+    /// Single-line preview for Confirm summary strip (first meaningful line).
+    public static func confirmPreviewText(for row: CockpitIntentRow, plan: VoiceMemoPlan) -> String {
+        let lines = intentWritePreview(for: row, plan: plan)
+        if let first = lines.first { return "\(first.label): \(first.value)" }
+        return commitValuePreview(for: row) ?? row.destinationField
+    }
 
     /// The VALUE this row's preview shows. Mirrors the writer's source-of-text precedence per
     /// lane: registry lanes preview `fields[first-sorted-key]` (the field named in the
