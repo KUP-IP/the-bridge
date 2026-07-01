@@ -369,6 +369,17 @@ public final class StandingOrdersStore: @unchecked Sendable {
         )
     }
 
+    /// The manifest's recorded EXPECTED doctrine SHA-256 (full 64-hex), or nil
+    /// when the manifest is missing/unreadable. This is the `expectedHash` the
+    /// init-core compares against the freshly-computed doctrine hash.
+    public func manifestDoctrineHash() -> String? {
+        guard let data = try? Data(contentsOf: manifestURL),
+              let manifest = try? JSONDecoder().decode(SourceManifest.self, from: data) else {
+            return nil
+        }
+        return manifest.sources.handshakeDoctrine.sha256
+    }
+
     /// Write new markdown. If `expectedHash` is supplied and does not match
     /// the current file's hash, throws `.staleHash` without writing.
     @discardableResult
@@ -637,6 +648,14 @@ public struct StandingOrderSummary: Sendable, Equatable {
     public let scope: StandingOrderScope
     public let updatedAt: Date
     public let archived: Bool
+
+    public init(id: String, title: String, scope: StandingOrderScope, updatedAt: Date, archived: Bool) {
+        self.id = id
+        self.title = title
+        self.scope = scope
+        self.updatedAt = updatedAt
+        self.archived = archived
+    }
 }
 
 public enum StandingOrdersRecordError: Error, Equatable, Sendable {

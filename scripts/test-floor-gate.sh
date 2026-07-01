@@ -1605,7 +1605,14 @@ set -euo pipefail
 # 2824 → 2854 measured green.
 # 2026-06-30 (Memory Hub W1–W3 UX + HITL): +6 tests — MemoryProcessInspectUnderstandTests;
 # MemoryProcessLayoutAXTests (+1 opt-in AX); floor 2857 → 2863 measured green.
-FLOOR="${BRIDGE_TEST_FLOOR:-2863}"
+# 2026-07-01 (PKT-1065A · deterministic init-core + handshake receipt): +15 tests —
+# BridgeInitializeTests (manifest/metadata parse + hash verify, INCOMPLETE/DEGRADED/
+# COMPLETE classification, no-op supplemental found-but-ignored tri-state, init-state
+# vs capability-state separation, receipt Codable + MCP Value serialize, durable
+# per-handshake persistence + distinct evidence event, tool registration/tier/annotation).
+# Measured integrated green off origin/main = 2877 (0 failed). floor 2863 → 2877.
+# (Parallel unmerged branches reconcile at merge per the order-inversion rule.)
+FLOOR="${BRIDGE_TEST_FLOOR:-2877}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

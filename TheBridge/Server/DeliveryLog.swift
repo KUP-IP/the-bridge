@@ -40,6 +40,11 @@ public enum DeliveryEventKind: String, Sendable, Equatable, CaseIterable {
     case skillFetched
     /// A `memory_*` tool call (audit-only — memories surfaced telemetry).
     case memoryToolCall
+    /// A canonical `bridge_initialize` handshake (PKT-1065A). One distinct
+    /// evidence event per handshake, linked to the session by `sessionID`.
+    /// `uri` carries the handshakeId and `intent` the final init state so the
+    /// event stands alone as durable evidence without dereferencing the receipt.
+    case handshakeInitialized
 }
 
 /// One immutable telemetry event. `Sendable` so it can be built off-main and
@@ -343,6 +348,54 @@ public final class DeliveryLog {
             at: at
         )
         Task { @MainActor in DeliveryLog.shared.ingest(event) }
+    }
+
+    /// Record a canonical `bridge_initialize` handshake as ONE distinct
+    /// evidence event (PKT-1065A). `eventID` is injected so the persisted
+    /// receipt's `telemetryEventRef` and this event share one identity — each
+    /// handshake yields exactly one linkable evidence event. Linked to session
+    /// telemetry via `sessionID`. AUDIT ONLY — never gates dispatch.
+    public nonisolated func recordHandshakeInitialized(
+        eventID: UUID,
+        sessionID: String,
+        clientName: String?,
+        handshakeId: String,
+        finalState: String,
+        at: Date = Date()
+    ) {
+        let event = DeliveryEvent(
+            id: eventID,
+            sessionID: sessionID,
+            clientName: clientName,
+            kind: .handshakeInitialized,
+            uri: handshakeId,
+            intent: finalState,
+            at: at
+        )
+        Task { @MainActor in DeliveryLog.shared.ingest(event) }
+    }
+
+    /// Overload accepting a string event id (the receipt stores its
+    /// `telemetryEventRef` as a String). Parses to a `UUID` when possible so
+    /// the event's `id` matches the receipt ref; falls back to a fresh id for a
+    /// non-UUID string (the ref still travels in the receipt).
+    public nonisolated func recordHandshakeInitialized(
+        eventID: String,
+        sessionID: String,
+        clientName: String?,
+        handshakeId: String,
+        finalState: String,
+        at: Date = Date()
+    ) {
+        let uuid = UUID(uuidString: eventID) ?? UUID()
+        recordHandshakeInitialized(
+            eventID: uuid,
+            sessionID: sessionID,
+            clientName: clientName,
+            handshakeId: handshakeId,
+            finalState: finalState,
+            at: at
+        )
     }
 
     public nonisolated static func skillFetchFields(from arguments: Value?) -> (skill: String, intent: String?) {
