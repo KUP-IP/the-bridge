@@ -1605,7 +1605,10 @@ set -euo pipefail
 # 2824 → 2854 measured green.
 # 2026-06-30 (Memory Hub W1–W3 UX + HITL): +6 tests — MemoryProcessInspectUnderstandTests;
 # MemoryProcessLayoutAXTests (+1 opt-in AX); floor 2857 → 2863 measured green.
-FLOOR="${BRIDGE_TEST_FLOOR:-2863}"
+# 2026-07-01 (PKT-1041 registry_find): +9 tests — RegistryModuleTests (+7: exact/none/
+# multi/bound-id/AND/unknown-entity/empty-where), RegistryDataPathTests (+2: reader
+# offline-cache filter + scalar-number/relation-array match); floor 2863 → 2872 measured green.
+FLOOR="${BRIDGE_TEST_FLOOR:-2872}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

@@ -238,7 +238,9 @@ public enum BridgeConstants {
     ///   (in-place AGENTS field update tool). 187 + 1 = 188.
     /// PKT-1061 Commands MCP (2026-06-29): +6 commands_* tools (list/get/search/create/update/delete). 188 + 6 = 194.
     /// Wave 3 FB (2026-06-29): + bridge_focus_settings (automation family). 194 + 1 = 195.
-    public static let staticFeatureModuleToolCount = 197
+    /// PKT-1041 registry_find (2026-07-01): + registry_find (convergent resolve-before-write
+    ///   lookup — read-only predicate match over the registry_list read-through/offline path). 197 + 1 = 198.
+    public static let staticFeatureModuleToolCount = 198
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

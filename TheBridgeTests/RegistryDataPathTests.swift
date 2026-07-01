@@ -227,6 +227,56 @@ func runRegistryDataPathTests() async {
         }
     }
 
+    await test("Reader.find: predicate match; offline → filters cached rows") {
+        try await withTempHomeReg { cache in
+            let gw = FakeRegistryGateway()
+            await gw.setQueryRows([
+                widgetRow(id: "dddd0000000000000000000000000001", name: "Ana", status: "Active", count: 1),
+                widgetRow(id: "dddd0000000000000000000000000002", name: "Ben", status: "Done", count: 2),
+                widgetRow(id: "dddd0000000000000000000000000003", name: "Ana", status: "Done", count: 3),
+            ])
+            let reader = RegistryReader(gateway: gw, cache: cache)
+            // Live find populates the cache.
+            let exact = try await reader.find(entity: widgetEntity(), predicates: ["name": .string("Ben")])
+            try expect(exact.count == 1 && exact.first?.pageId == "dddd0000000000000000000000000002", "exact match by name")
+            let ambiguous = try await reader.find(entity: widgetEntity(), predicates: ["name": .string("Ana")])
+            try expect(ambiguous.count == 2, "two rows named Ana")
+            let none = try await reader.find(entity: widgetEntity(), predicates: ["name": .string("Zed")])
+            try expect(none.isEmpty, "no match → empty, no throw")
+            // AND across two predicates.
+            let both = try await reader.find(entity: widgetEntity(), predicates: ["name": .string("Ana"), "status": .string("Done")])
+            try expect(both.count == 1 && both.first?.pageId == "dddd0000000000000000000000000003", "AND narrows to one")
+            // Offline: list() serves the cached rows, so find still resolves.
+            await gw.setFail(true)
+            let offline = try await reader.find(entity: widgetEntity(), predicates: ["status": .string("Done")])
+            try expect(offline.count == 2, "offline find filters the cached list")
+        }
+    }
+
+    await test("Reader.find: scalar number match + array (relation) membership") {
+        try await withTempHomeReg { cache in
+            let gw = FakeRegistryGateway()
+            let related = NotionRow(id: "eeee0000000000000000000000000001", url: "u", lastEditedTime: "2026-06-17T10:00:00.000Z", cells: [
+                "Name": NotionCell(id: "p_name", type: "title", value: .string("Rel")),
+                "Status": NotionCell(id: "p_status", type: "status", value: .string("Active")),
+                "Count": NotionCell(id: "p_count", type: "number", value: .double(7)),
+                "Links": NotionCell(id: "p_links", type: "relation", value: .array([.string("relidaaa"), .string("relidbbb")])),
+            ])
+            await gw.setQueryRows([related])
+            var entity = widgetEntity()
+            entity.properties.append(RegistryProperty(key: "links", notionName: "Links", notionPropertyId: "p_links", type: "relation", role: .relation))
+            let reader = RegistryReader(gateway: gw, cache: cache)
+            // Number predicate compares against the codec's integral rendering (7.0 → "7").
+            let byNum = try await reader.find(entity: entity, predicates: ["count": .string("7")])
+            try expect(byNum.count == 1, "scalar number matched by string ‘7’")
+            // Relation array membership: match when any related id equals.
+            let byRel = try await reader.find(entity: entity, predicates: ["links": .string("relidbbb")])
+            try expect(byRel.count == 1, "relation array membership match")
+            let byRelMiss = try await reader.find(entity: entity, predicates: ["links": .string("nope")])
+            try expect(byRelMiss.isEmpty, "no relation member equals → no match")
+        }
+    }
+
     await test("Reader.project: rename-safe — matches by bound id, not name") {
         // The live row's Notion NAME changed ("Name" → "Renamed"), but the id is
         // the same. Projection must still find it via the bound id.

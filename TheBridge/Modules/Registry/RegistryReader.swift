@@ -136,6 +136,65 @@ public struct RegistryReader: Sendable {
         }
     }
 
+    // MARK: - Find (convergent lookup — resolve-before-write)
+
+    /// Resolve EXISTING rows by canonical field predicates BEFORE a blind
+    /// `create` — the convergence primitive that eliminates duplicate rows.
+    /// Read-only: matches `predicates` (canonical KEY → value) against the
+    /// entity's projected rows, which are keyed rename-safe by BOUND PROPERTY
+    /// ID (projection resolves each cell via `cell(for:)`, id-first), so a
+    /// Notion rename never breaks the match. Reuses `list` verbatim, so it
+    /// inherits the same read-through cache + offline fallback contract.
+    ///
+    /// Semantics: ALL predicates must match (AND). A row matches a predicate
+    /// when the projected value for that key equals the predicate value —
+    /// scalar values compared as case-insensitive strings; array values
+    /// (multi_select / relation / people) match when ANY element equals. An
+    /// absent key never matches. Zero matches is a valid, non-error result
+    /// (empty array). Ambiguous input naturally yields multiple rows.
+    public func find(entity: RegistryEntity, predicates: [String: Value], limit: Int = 100) async throws -> [CachedRow] {
+        let rows = try await list(entity: entity, limit: limit)
+        guard !predicates.isEmpty else { return rows }
+        return rows.filter { row in
+            guard case .object(let props) = row.properties else { return false }
+            return predicates.allSatisfy { key, wanted in
+                guard let have = props[key] else { return false }
+                return Self.valueMatches(have, wanted)
+            }
+        }
+    }
+
+    /// True when `have` (a projected cell value) satisfies the `wanted`
+    /// predicate value. Scalars compare as case-insensitive strings so
+    /// `"active"` matches a `.string("Active")` status; arrays match when ANY
+    /// element satisfies `wanted` (a relation/multi_select membership test).
+    static func valueMatches(_ have: Value, _ wanted: Value) -> Bool {
+        if case .array(let elems) = have {
+            return elems.contains { valueMatches($0, wanted) }
+        }
+        // If the predicate itself is an array, match when ANY wanted element hits.
+        if case .array(let wants) = wanted {
+            return wants.contains { valueMatches(have, $0) }
+        }
+        guard let h = scalarString(have), let w = scalarString(wanted) else { return false }
+        return h.compare(w, options: .caseInsensitive) == .orderedSame
+    }
+
+    /// Render a scalar `Value` to a comparable string; `nil` for containers.
+    private static func scalarString(_ v: Value) -> String? {
+        switch v {
+        case .string(let s): return s
+        case .int(let n): return String(n)
+        case .double(let d):
+            // Match the number codec's integral rendering (3.0 → "3").
+            if d == d.rounded() && abs(d) < 1e15 { return String(Int(d)) }
+            return String(d)
+        case .bool(let b): return b ? "true" : "false"
+        case .null: return nil
+        case .array, .object, .data: return nil
+        }
+    }
+
     // MARK: - Body (possess — Decision 2)
 
     /// Load an entity's page BODY on demand (the `possess`/`fetch_skill` verb).
