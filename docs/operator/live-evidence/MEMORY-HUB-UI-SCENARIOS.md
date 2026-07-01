@@ -18,6 +18,23 @@
 
 **Next:** Tier 2 requires operator voice scripts in [MEMORY-HUB-VOICE-SCRIPTS.md](MEMORY-HUB-VOICE-SCRIPTS.md).
 
+## T-Real — Operator Greg memo (2026-07-01 closeout)
+
+**Build:** v3.9.3 build 69 · **Memo:** `20260630 163652-575021F5.m4a-4856794-1782856025`  
+**Evidence:** [mem-closeout-2026-07-01.png](mem-closeout-2026-07-01.png) · [mem-closeout-plan.json](mem-closeout-plan.json) · [mem-closeout-registry-audit.json](mem-closeout-registry-audit.json)
+
+| Check | Result | Notes |
+|-------|--------|-------|
+| Bridge online | **PASS** | bridge_status online |
+| Memo + transcript | **PASS** | inspect-only + understand |
+| Understand plan | **PASS** | 2 intents, degraded local, <120s |
+| Intent tags in UI | **PASS** | AX: intentTags + 1 checkbox "Update record 86% ★" |
+| dryRun | **PASS** | No writes; agent-deferred skip documented (FR-012) |
+| Oracle O1–O2 registry | **FAIL** | → FR-008, PKT-MEM-128 |
+| Oracle O3 memory | **PARTIAL** | → FR-008 |
+| Oracle O4–O5 preview | **FAIL** | → FR-009, FR-011 |
+| **Pipeline verdict** | **WORKING** | Operator approved execute 2026-07-01; polish → packets 127–130 |
+
 ## V1 Process layout — live acceptance (REVIEW-FIRST)
 
 **Live run:** 2026-06-30 · `make install-copy` → v3.9.2 build 68 · memo `20251007 133129-0E0F965C.m4a-654734-1759861973` (short Apple transcript)  

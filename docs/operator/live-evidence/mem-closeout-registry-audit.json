@@ -1,0 +1,23 @@
+{
+  "capturedAt": "2026-07-01T15:00:00Z",
+  "schemaVersion": 1,
+  "boundEntityKeys": [
+    "skill",
+    "project",
+    "block",
+    "contact",
+    "session",
+    "telemetry",
+    "doc",
+    "memory",
+    "player",
+    "event"
+  ],
+  "closeoutAudit": {
+    "project": { "bound": true, "fullyBound": true, "hasSummary": true, "dataSourceId": "f6d6ae1d-bfb4-4494-be18-c46e87dea149" },
+    "contact": { "bound": true, "fullyBound": true, "hasBrief": true, "hasBody": false, "dataSourceId": "487dd1c7-37a4-4dcf-a2fa-6d0ddebee9a0", "note": "Serves client updates — no separate `client` entity key" },
+    "session": { "bound": true, "fullyBound": true, "displayName": "Sessions", "note": "PACKETS DS — entity key `session` not `packet`" },
+    "client": { "bound": false, "note": "Missing — operator may map Clients DS to `contact` or add `client` alias in PKT-MEM-127" }
+  },
+  "voiceRouterExpectation": "Parser should emit entityKey contact|project|session for Greg memo; currently emits memory only"
+}

@@ -1,0 +1,9 @@
+{
+  "tool": "bridge_status",
+  "capturedAt": "2026-07-01T15:00:00Z",
+  "ok": true,
+  "state": "online",
+  "up": true,
+  "macToolsAvailable": true,
+  "schemaVersion": 1
+}

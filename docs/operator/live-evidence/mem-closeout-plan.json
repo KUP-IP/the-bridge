@@ -1,0 +1,41 @@
+{
+  "memoId": "20260630 163652-575021F5.m4a-4856794-1782856025",
+  "capturedAt": "2026-07-01T15:00:00Z",
+  "understood": true,
+  "curatorMode": "auto",
+  "plan": {
+    "generatedTitle": "Consolidating meeting tools and voice memo strategy",
+    "summary": "The user is refining their workflow for capturing ideas and managing tasks, deciding to use Google Meet as the primary s",
+    "degraded": true,
+    "provenance": "local",
+    "skipMemoryKeep": false,
+    "actions": [
+      "Establish Google Meet as the primary meeting location for clients",
+      "Use Apple Voice Memos as the primary input for capturing ideas and self-dialogues",
+      "Develop an automated workflow where agents parse transcriptions into categorized queues",
+      "Create a survey-style interface or queue to process pending questions from various projects"
+    ],
+    "intents": [
+      {
+        "kind": "memory_keep",
+        "confidence": 0.95,
+        "entityKey": "memory",
+        "title": "Consolidating meeting tools and voice memo strategy"
+      },
+      {
+        "kind": "agent_memory",
+        "confidence": 0.95,
+        "title": "Consolidating meeting tools and voice memo strategy",
+        "fields": { "scope": "global" }
+      }
+    ]
+  },
+  "oracleResults": {
+    "O1_client_registry": "FAIL — no registry_update for Greg/client",
+    "O2_project_registry": "FAIL — no registry_update for specific project",
+    "O3_durable_memory": "PARTIAL — memory_keep + agent_memory present but collapsed to one title blob",
+    "O4_row_ids_in_preview": "FAIL — no registry intents",
+    "O5_dual_write_preview": "FAIL — not implemented",
+    "O6_reminder": "N/A — no explicit dated reminder in plan"
+  }
+}
