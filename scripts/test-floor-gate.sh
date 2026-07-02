@@ -1628,7 +1628,13 @@ set -euo pipefail
 # offline-cache filter + scalar-number/relation-array match). Branched off pre-1065A/B/C
 # main where its own measured green was 2872 (2863 +9); reconciled at merge onto
 # integrated floor 2901 → 2910 (2901 +9).
-FLOOR="${BRIDGE_TEST_FLOOR:-2910}"
+# 2026-07-02 (PKT-1064 originating-Player relation attach/verify): +7 tests —
+# VoiceMemoPlayerAttachTests (memo→Memory attaches default player at create, verify
+# read-back present, absent-PLAYERS graceful BLOCKED, unbound-PLAYERS BLOCKED, dropped
+# relation fails verify, explicit override wins, playersRelationKey rename-safe match).
+# Branched off pre-1065A/B/C/1041 main where its own measured green was 2870 (2863 +7);
+# reconciled at merge onto integrated floor 2910 → 2917 (2910 +7).
+FLOOR="${BRIDGE_TEST_FLOOR:-2917}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the
