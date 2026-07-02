@@ -1612,7 +1612,11 @@ set -euo pipefail
 # per-handshake persistence + distinct evidence event, tool registration/tier/annotation).
 # Measured integrated green off origin/main = 2877 (0 failed). floor 2863 → 2877.
 # (Parallel unmerged branches reconcile at merge per the order-inversion rule.)
-FLOOR="${BRIDGE_TEST_FLOOR:-2877}"
+# 2026-07-02 (PKT-1065C · intent-sensitive capability preflight + Reminders adapter):
+# +17 tests (CapabilityPreflightTests) stacked on PKT-1065A. Measured integrated green
+# = 2894 (0 failed). floor 2877 → 2894. Stacked on pkt-1065a-init-core; parallel unmerged
+# branches (1041/1064/1065b) reconcile at merge.
+FLOOR="${BRIDGE_TEST_FLOOR:-2894}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

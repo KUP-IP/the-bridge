@@ -19,6 +19,20 @@ public enum BridgeInitializeModule {
     public static let moduleName = "standing_orders"
     public static let toolName = "bridge_initialize"
 
+    /// Builds the intent-sensitive capability-preflight registry for a
+    /// handshake. Injectable so tests drive the Reminders adapter with the mock
+    /// seam. Default binds the live EventKit-backed reminders store.
+    public typealias PreflightProvider = @Sendable () -> CapabilityPreflightRegistry
+
+    /// Default preflight: the Reminders adapter over the live EventKit store.
+    /// The registry runs NO probe unless the opening intent requires it, so
+    /// building it here has no cost / side effects on a data-minimal handshake.
+    public static let defaultPreflightProvider: PreflightProvider = {
+        CapabilityPreflightRegistry(probes: [
+            RemindersCapabilityProbe(store: EventKitRemindersStore())
+        ])
+    }
+
     /// Resolves the live runtime context (connection + capability + clock) for a
     /// handshake. Injectable so ServerManager can bind live cloud state and tests
     /// can pin a deterministic instant. The default is a direct-loopback posture:
@@ -38,14 +52,17 @@ public enum BridgeInitializeModule {
 
     public static func register(
         on router: ToolRouter,
-        contextProvider: @escaping ContextProvider = defaultContextProvider
+        contextProvider: @escaping ContextProvider = defaultContextProvider,
+        preflightProvider: @escaping PreflightProvider = defaultPreflightProvider
     ) async {
-        await router.register(makeTool(contextProvider: contextProvider))
+        await router.register(makeTool(contextProvider: contextProvider,
+                                       preflightProvider: preflightProvider))
     }
 
     /// Factory for the `bridge_initialize` registration (exposed for tests).
     public static func makeTool(
-        contextProvider: @escaping ContextProvider = defaultContextProvider
+        contextProvider: @escaping ContextProvider = defaultContextProvider,
+        preflightProvider: @escaping PreflightProvider = defaultPreflightProvider
     ) -> ToolRegistration {
         ToolRegistration(
             name: toolName,
@@ -59,13 +76,27 @@ public enum BridgeInitializeModule {
                 + "(INCOMPLETE|DEGRADED|COMPLETE) is reported SEPARATELY from runtime capability "
                 + "state. Returns the full receipt { handshakeId, finalState, integrityResult, "
                 + "expectedHash, actualHash, routingRosterState, supplementalOrderCounts, "
-                + "capabilityState, telemetryEventRef, … }. Each call is one distinct evidence event.",
+                + "capabilityState, capabilityMatrix, routingRosterQuality, preflightIntent, "
+                + "operatorSummary, telemetryEventRef, … }. Each call is one distinct evidence event. "
+                + "Initialization is DATA-MINIMAL by default: pass an `intent` ONLY when the opening "
+                + "task needs a domain capability (e.g. reminders) — a domain probe then runs to report "
+                + "access + writable-list availability (and a BOUNDED content read only when the intent "
+                + "requires reminder content). With no intent, no domain probe runs.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "client": .object([
                         "type": .string("string"),
                         "description": .string("Optional client name (e.g. the MCP clientInfo.name) to attribute this handshake to.")
+                    ]),
+                    "intent": .object([
+                        "type": .string("string"),
+                        "description": .string("Optional opening intent. Free text (e.g. \"add a reminder\", "
+                            + "\"what's on my reminders\") or a canonical token (reminders.manage / "
+                            + "reminders.read). Governs the intent-sensitive capability preflight: a "
+                            + "reminders intent probes access + writable-list availability; a read/list "
+                            + "intent additionally performs a BOUNDED content read. Omit for a universal, "
+                            + "data-minimal handshake that runs NO domain probe.")
                     ])
                 ]),
                 "required": .array([])
@@ -90,8 +121,20 @@ public enum BridgeInitializeModule {
                     }
                     return nil
                 }()
+                let rawIntent: String? = {
+                    if case .object(let a) = arguments, case .string(let s)? = a["intent"] {
+                        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                        return t.isEmpty ? nil : t
+                    }
+                    return nil
+                }()
+                let intent = PreflightIntent.classify(rawIntent)
                 let context = await contextProvider(client)
-                let receipt = await BridgeInitializeService.run(context: context)
+                // Only build a preflight registry when an intent unlocks a probe
+                // — the universal, data-minimal path stays probe-free.
+                let preflight = intent == .none ? nil : preflightProvider()
+                let receipt = await BridgeInitializeService.run(
+                    context: context, intent: intent, preflight: preflight)
                 return receiptValue(receipt)
             }
         )
@@ -122,6 +165,10 @@ public enum BridgeInitializeModule {
             ]),
             "connectionState": .string(r.connectionState),
             "telemetryEventRef": .string(r.telemetryEventRef),
+            "routingRosterQuality": .string(r.routingRosterQuality.rawValue),
+            "preflightIntent": .string(r.preflightIntent.rawValue),
+            "capabilityNotes": .array(r.capabilityNotes.map { .string($0) }),
+            "operatorSummary": .string(r.operatorSummary),
             "capabilityState": .string(r.capabilityState.rawValue),
             "capabilityMatrix": .array(r.capabilityMatrix.map { entry in
                 var e: [String: Value] = [
