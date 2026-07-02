@@ -47,7 +47,7 @@ public enum ConnectionsModule {
                 "properties": .object([
                     "connectionId": .object([
                         "type": .string("string"),
-                        "description": .string("Connection id, for example notion:primary or stripe:default")
+                        "description": .string("Connection id like notion:<name> or stripe:default. The symbolic alias notion:primary resolves to the live primary Notion workspace (rename-safe).")
                     ])
                 ]),
                 "required": .array([.string("connectionId")])

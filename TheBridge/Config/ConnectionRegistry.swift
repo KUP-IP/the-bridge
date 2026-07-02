@@ -68,12 +68,53 @@ public actor ConnectionRegistry {
         }
     }
 
+    /// The reserved symbolic alias segment that resolves to a provider's LIVE
+    /// primary connection at call time (e.g. `notion:primary`). Rename-safe: it
+    /// always tracks whichever connection is currently primary rather than a
+    /// fixed name. An exact-id match always wins first, so a connection literally
+    /// named "primary" is never shadowed.
+    public static let primaryAliasSegment = "primary"
+
+    /// Whether the name segment of `id` is the reserved `primary` alias
+    /// (case-insensitive), e.g. `notion:primary`. Pure and testable.
+    public static func isPrimaryAlias(id: String) -> Bool {
+        let parts = id.split(separator: ":", maxSplits: 1)
+        guard parts.count == 2 else { return false }
+        return parts[1].lowercased() == primaryAliasSegment
+    }
+
+    /// Resolve `id` against a candidate set following alias rules:
+    /// an exact-id match always wins first (so a connection literally named
+    /// "primary" is never shadowed); otherwise, if `id`'s name segment is the
+    /// `primary` alias, return the candidate flagged primary. Pure and testable
+    /// (no live state), independent of provider.
+    public static func resolve<C>(
+        id: String,
+        in candidates: [C],
+        idOf: (C) -> String,
+        isPrimary: (C) -> Bool
+    ) -> C? {
+        if let exact = candidates.first(where: { idOf($0) == id }) {
+            return exact
+        }
+        if isPrimaryAlias(id: id) {
+            return candidates.first(where: isPrimary)
+        }
+        return nil
+    }
+
     public func getConnection(id: String, validateLive: Bool = true) async throws -> BridgeConnection {
         let provider = try parseProvider(from: id)
         switch provider {
         case .notion:
             let notionConnections = try await buildNotionConnections(validateLive: validateLive)
-            if let match = notionConnections.first(where: { $0.id == id }) {
+            // Exact-id-wins, then notion:primary → the live primary connection.
+            if let match = Self.resolve(
+                id: id,
+                in: notionConnections,
+                idOf: { $0.id },
+                isPrimary: { $0.isPrimary }
+            ) {
                 return match
             }
         case .stripe:

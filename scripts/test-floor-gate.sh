@@ -1616,7 +1616,14 @@ set -euo pipefail
 # +17 tests (CapabilityPreflightTests) stacked on PKT-1065A. Measured integrated green
 # = 2894 (0 failed). floor 2877 → 2894. Stacked on pkt-1065a-init-core; parallel unmerged
 # branches (1041/1064/1065b) reconcile at merge.
-FLOOR="${BRIDGE_TEST_FLOOR:-2894}"
+# 2026-07-02 (PKT-1065B · session_info/bridge_status semantics + connection alias): +7
+# tests — 2 SessionModuleTests (explicit per-field `scopes`; 0-clients default when no
+# diagnostics provider) + 5 ConnectionsModuleTests (notion:primary symbolic alias —
+# isPrimaryAlias, resolve-to-primary, exact-id-wins, unknown-id nil, no-primary nil).
+# Branched off origin/main (9306800) where its own measured green was 2870 (2863 +7);
+# independent of 1065A/C (ConnectionRegistry/ConnectionsModule/SessionModule, no file
+# overlap). Reconciled at merge onto integrated floor 2894 → 2901 (2894 +7).
+FLOOR="${BRIDGE_TEST_FLOOR:-2901}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

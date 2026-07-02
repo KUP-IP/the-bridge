@@ -75,4 +75,65 @@ func runConnectionsModuleTests() async {
             // Expected
         }
     }
+
+    // PKT-1065B: primary-connection symbolic alias resolution (pure, hermetic).
+    struct FakeConn { let id: String; let primary: Bool }
+    let fakeConns = [
+        FakeConn(id: "notion:default", primary: true),
+        FakeConn(id: "notion:work", primary: false)
+    ]
+
+    await test("isPrimaryAlias recognizes notion:primary (case-insensitive)") {
+        try expect(ConnectionRegistry.isPrimaryAlias(id: "notion:primary"), "notion:primary should be the alias")
+        try expect(ConnectionRegistry.isPrimaryAlias(id: "notion:PRIMARY"), "alias match should be case-insensitive")
+        try expect(!ConnectionRegistry.isPrimaryAlias(id: "notion:default"), "a real name is not the alias")
+        try expect(!ConnectionRegistry.isPrimaryAlias(id: "notion"), "id without a name segment is not the alias")
+    }
+
+    await test("resolve maps notion:primary to the live primary connection") {
+        let resolved = ConnectionRegistry.resolve(
+            id: "notion:primary",
+            in: fakeConns,
+            idOf: { $0.id },
+            isPrimary: { $0.primary }
+        )
+        try expect(resolved?.id == "notion:default", "notion:primary should resolve to the primary (notion:default), got \(resolved?.id ?? "nil")")
+    }
+
+    await test("resolve exact-id match wins over primary alias") {
+        // A connection literally named "primary" must not be shadowed by the alias.
+        let withLiteralPrimary = [
+            FakeConn(id: "notion:primary", primary: false),
+            FakeConn(id: "notion:default", primary: true)
+        ]
+        let resolved = ConnectionRegistry.resolve(
+            id: "notion:primary",
+            in: withLiteralPrimary,
+            idOf: { $0.id },
+            isPrimary: { $0.primary }
+        )
+        try expect(resolved?.id == "notion:primary" && resolved?.primary == false,
+                   "Exact id should win, resolving to the literally-named 'primary' connection")
+    }
+
+    await test("resolve returns nil for an unknown non-alias id") {
+        let resolved = ConnectionRegistry.resolve(
+            id: "notion:missing",
+            in: fakeConns,
+            idOf: { $0.id },
+            isPrimary: { $0.primary }
+        )
+        try expect(resolved == nil, "Unknown non-alias id should not resolve")
+    }
+
+    await test("resolve returns nil for primary alias when no primary exists") {
+        let noPrimary = [FakeConn(id: "notion:a", primary: false)]
+        let resolved = ConnectionRegistry.resolve(
+            id: "notion:primary",
+            in: noPrimary,
+            idOf: { $0.id },
+            isPrimary: { $0.primary }
+        )
+        try expect(resolved == nil, "primary alias should not resolve when nothing is primary")
+    }
 }
