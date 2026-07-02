@@ -719,6 +719,7 @@ await runSnippetsModuleTests()    // PKT-2135a9e9 (v2.3 · WS-D): snippets modul
 await runCommandsModuleTests()    // PKT-1061: CommandStore commands_* MCP surface
 await runStandingOrdersModuleTests() // PKT-931 (v3.7·B): standing_orders_* MCP tools
 await runBridgeInitializeTests()  // PKT-1065A: canonical bridge_initialize init-core + persisted handshake receipt
+await runCapabilityPreflightTests() // PKT-1065C: intent-sensitive capability preflight + Reminders adapter
 await runShortcutsModuleTests()   // PKT-959 (v3.7·F): shortcuts_* MCP tools (mock CLI seam)
 await runCommandsDataTests()      // cmd-w2: Commands data layer (CommandsManager + MentionResolver + cache)
 await runFetchSkillMarkdownTests() // cmd-w4: fetch_skill /markdown + shared MentionResolver

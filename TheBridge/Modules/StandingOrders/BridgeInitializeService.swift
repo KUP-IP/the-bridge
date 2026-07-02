@@ -83,12 +83,20 @@ public struct HandshakeReceipt: Codable, Sendable, Equatable {
     public let actualHash: String?
     public let integrityResult: String
     public let routingRosterState: String
+    /// Richer routing-roster quality (HEALTHY / SPARSE / EMPTY) — PKT-1065C.
+    public let routingRosterQuality: RoutingRosterQuality
     public let routingWarnings: [String]
     public let supplementalOrderCounts: SupplementalOrderCounts
     public let connectionState: String
     public let telemetryEventRef: String
     public let capabilityState: CapabilityState
     public let capabilityMatrix: [CapabilityEntry]
+    /// The opening intent that drove the capability preflight — `.none` on a
+    /// universal, data-minimal handshake (no domain probe ran). PKT-1065C.
+    public let preflightIntent: PreflightIntent
+    /// Operator-facing capability notes emitted by any probes that ran (empty
+    /// on a data-minimal handshake). PKT-1065C.
+    public let capabilityNotes: [String]
     public let finalState: StandingOrdersStore.InitializationState
 
     public init(
@@ -103,12 +111,15 @@ public struct HandshakeReceipt: Codable, Sendable, Equatable {
         actualHash: String?,
         integrityResult: String,
         routingRosterState: String,
+        routingRosterQuality: RoutingRosterQuality = .empty,
         routingWarnings: [String],
         supplementalOrderCounts: SupplementalOrderCounts,
         connectionState: String,
         telemetryEventRef: String,
         capabilityState: CapabilityState,
         capabilityMatrix: [CapabilityEntry],
+        preflightIntent: PreflightIntent = .none,
+        capabilityNotes: [String] = [],
         finalState: StandingOrdersStore.InitializationState
     ) {
         self.handshakeId = handshakeId
@@ -122,14 +133,21 @@ public struct HandshakeReceipt: Codable, Sendable, Equatable {
         self.actualHash = actualHash
         self.integrityResult = integrityResult
         self.routingRosterState = routingRosterState
+        self.routingRosterQuality = routingRosterQuality
         self.routingWarnings = routingWarnings
         self.supplementalOrderCounts = supplementalOrderCounts
         self.connectionState = connectionState
         self.telemetryEventRef = telemetryEventRef
         self.capabilityState = capabilityState
         self.capabilityMatrix = capabilityMatrix
+        self.preflightIntent = preflightIntent
+        self.capabilityNotes = capabilityNotes
         self.finalState = finalState
     }
+
+    /// The operator-facing rendering of this receipt (supplemental tri-state,
+    /// routing quality + warnings, capability axis + probe notes). PKT-1065C.
+    public var operatorSummary: String { OperatorSummary.render(self) }
 }
 
 /// The immutable runtime inputs the init-core needs but cannot derive itself.
@@ -205,7 +223,9 @@ public enum BridgeInitializeService {
         context: BridgeInitializeContext,
         supplemental: [StandingOrderSummary],
         handshakeId: String = UUID().uuidString,
-        telemetryEventRef: String
+        telemetryEventRef: String,
+        intent: PreflightIntent = .none,
+        probeResults: [CapabilityProbeResult] = []
     ) -> HandshakeReceipt {
         // 1–3: doctrine load + hash verify + integrity policy (init axis).
         try? StandingOrdersStore.shared.ensureInitializationContract()
@@ -220,14 +240,17 @@ public enum BridgeInitializeService {
         // The manifest's expected hash (nil when the manifest is missing).
         let expectedHash = StandingOrdersStore.shared.manifestDoctrineHash()
 
-        // 4: routing roster state + warnings (init axis — required source).
+        // 4: routing roster state + quality + warnings (init axis — required source).
         let routingIndex = SkillsModule.buildRoutingInstructions()
         let routingLoaded = !routingIndex.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let routingQuality = RoutingRosterQuality.assess(rendered: routingIndex)
         var routingWarnings: [String] = []
         var finalState = report.state
         if !routingLoaded {
             routingWarnings.append("Required routing roster is empty.")
             finalState = .incomplete
+        } else if routingQuality == .sparse {
+            routingWarnings.append("Routing roster is sparse — routing may be unreliable.")
         }
 
         // Supplemental order tri-state (found / operative / ignored).
@@ -252,12 +275,14 @@ public enum BridgeInitializeService {
             }
         }()
 
-        // Capability axis — SEPARATE from finalState.
-        let capState = capabilityState(
+        // Capability axis — SEPARATE from finalState. The BASE matrix is what a
+        // universal, data-minimal handshake carries (no domain probe). Domain
+        // probe entries are appended ONLY when an intent required them.
+        let baseCapState = capabilityState(
             connectionState: context.connectionState,
             macToolsAvailable: context.macToolsAvailable
         )
-        let matrix: [CapabilityEntry] = [
+        var matrix: [CapabilityEntry] = [
             CapabilityEntry(capability: "mac_tools", available: context.macToolsAvailable),
             CapabilityEntry(
                 capability: "cloud_channel",
@@ -269,6 +294,20 @@ public enum BridgeInitializeService {
             CapabilityEntry(capability: "doctrine_loaded", available: report.doctrineLoaded),
             CapabilityEntry(capability: "routing_roster", available: routingLoaded),
         ]
+
+        // Merge intent-driven probe results (entries + operator notes) into the
+        // capability axis. A required domain that came back unavailable
+        // downgrades an otherwise-FULL runtime to LIMITED for this intent —
+        // WITHOUT touching the initialization axis (finalState).
+        var capabilityNotes: [String] = []
+        var capState = baseCapState
+        for result in probeResults {
+            matrix.append(contentsOf: result.entries)
+            capabilityNotes.append(contentsOf: result.notes)
+            if !result.available && capState == .full {
+                capState = .limited
+            }
+        }
 
         return HandshakeReceipt(
             handshakeId: handshakeId,
@@ -282,12 +321,15 @@ public enum BridgeInitializeService {
             actualHash: actualHash,
             integrityResult: integrityResult,
             routingRosterState: routingLoaded ? "loaded" : "missing",
+            routingRosterQuality: routingQuality,
             routingWarnings: routingWarnings,
             supplementalOrderCounts: counts,
             connectionState: context.connectionState,
             telemetryEventRef: telemetryEventRef,
             capabilityState: capState,
             capabilityMatrix: matrix,
+            preflightIntent: intent,
+            capabilityNotes: capabilityNotes,
             finalState: finalState
         )
     }
@@ -299,18 +341,25 @@ public enum BridgeInitializeService {
     public static func run(
         context: BridgeInitializeContext,
         store: StandingOrdersRecordStore = .shared,
-        receiptStore: HandshakeReceiptStore = .shared
+        receiptStore: HandshakeReceiptStore = .shared,
+        intent: PreflightIntent = .none,
+        preflight: CapabilityPreflightRegistry? = nil
     ) async -> HandshakeReceipt {
         let supplemental = await store.list(includeArchived: true)
         let handshakeId = UUID().uuidString
         // The telemetry event id is bound INTO the receipt (each handshake =
         // one distinct evidence event), then the event is emitted below.
         let telemetryEventId = UUID().uuidString
+        // Intent-sensitive capability preflight — a domain probe runs ONLY when
+        // the opening intent requires it. `.none` (universal init) runs NONE.
+        let probeResults = await preflight?.run(intent: intent) ?? []
         let receipt = buildReceipt(
             context: context,
             supplemental: supplemental,
             handshakeId: handshakeId,
-            telemetryEventRef: telemetryEventId
+            telemetryEventRef: telemetryEventId,
+            intent: intent,
+            probeResults: probeResults
         )
         // Persist durably (best-effort; a write failure must not crash a
         // handshake — the receipt is still returned and telemetry still fires).
