@@ -100,14 +100,14 @@ func runRegistryModuleTests() async {
 
     // MARK: - Registration
 
-    await test("RegistryModule registers exactly 11 tools with expected names") {
+    await test("RegistryModule registers exactly 12 tools with expected names") {
         let router = ToolRouter(securityGate: SecurityGate(), auditLog: AuditLog())
         await RegistryModule.register(on: router)
         let tools = await router.registrations(forModule: "registry")
-        try expect(tools.count == 11, "expected 11 registry tools, got \(tools.count)")
+        try expect(tools.count == 12, "expected 12 registry tools, got \(tools.count)")
         let names = Set(tools.map { $0.name })
         try expect(names == ["registry_entities", "registry_add_entity", "registry_remove_entity", "registry_introspect",
-                             "registry_list", "registry_get", "registry_create", "registry_update", "registry_delete", "registry_possess",
+                             "registry_list", "registry_find", "registry_get", "registry_create", "registry_update", "registry_delete", "registry_possess",
                              "registry_hydrate"],
                    "tool names: \(names.sorted())")
     }
@@ -121,7 +121,7 @@ func runRegistryModuleTests() async {
         try expect(tier("registry_remove_entity") == .request, "remove_entity must be .request (destructive)")
         try expect(tier("registry_create") == .notify && tier("registry_update") == .notify && tier("registry_introspect") == .notify,
                    "writes are .notify")
-        try expect(tier("registry_get") == .open && tier("registry_list") == .open && tier("registry_entities") == .open && tier("registry_possess") == .open,
+        try expect(tier("registry_get") == .open && tier("registry_list") == .open && tier("registry_find") == .open && tier("registry_entities") == .open && tier("registry_possess") == .open,
                    "reads are .open")
     }
 
@@ -182,6 +182,122 @@ func runRegistryModuleTests() async {
         try await withRegistryModuleEnv(fake) {
             let out = try await RegistryModule.makeGet().handler(.object(["entity": .string("skill"), "id": .string("bbbb0000000000000000000000000001")]))
             try expect(obj(out)["title"] == .string("Gamma"), "got the row")
+        }
+    }
+
+    // MARK: - registry_find (convergent resolve-before-write)
+
+    await test("registry_find exact match → single row id") {
+        let fake = ModFakeGateway(schema: skillsSchema(), queryRows: [
+            skillRow(id: "ffff0000000000000000000000000001", name: "Alpha"),
+            skillRow(id: "ffff0000000000000000000000000002", name: "Beta"),
+        ])
+        try await withRegistryModuleEnv(fake) {
+            let out = try await RegistryModule.makeFind().handler(.object([
+                "entity": .string("skill"),
+                "where": .object(["name": .string("Alpha")]),
+            ]))
+            try expect(obj(out)["count"] == .int(1), "exactly one match")
+            guard case .array(let rows)? = obj(out)["rows"], let r0 = rows.first else { throw TestError.assertion("no rows") }
+            try expect(obj(r0)["id"] == .string("ffff0000000000000000000000000001"), "the correct row id")
+            try expect(obj(r0)["title"] == .string("Alpha"), "and its title")
+        }
+    }
+
+    await test("registry_find no match → empty result, NOT an error") {
+        let fake = ModFakeGateway(schema: skillsSchema(), queryRows: [
+            skillRow(id: "ffff0000000000000000000000000003", name: "Alpha"),
+        ])
+        try await withRegistryModuleEnv(fake) {
+            let out = try await RegistryModule.makeFind().handler(.object([
+                "entity": .string("skill"),
+                "where": .object(["name": .string("DoesNotExist")]),
+            ]))
+            try expect(obj(out)["count"] == .int(0), "zero matches")
+            guard case .array(let rows)? = obj(out)["rows"] else { throw TestError.assertion("rows missing") }
+            try expect(rows.isEmpty, "empty rows array, no throw")
+        }
+    }
+
+    await test("registry_find ambiguous → multiple row ids") {
+        let fake = ModFakeGateway(schema: skillsSchema(), queryRows: [
+            skillRow(id: "ffff0000000000000000000000000004", name: "Dup"),
+            skillRow(id: "ffff0000000000000000000000000005", name: "Dup"),
+            skillRow(id: "ffff0000000000000000000000000006", name: "Other"),
+        ])
+        try await withRegistryModuleEnv(fake) {
+            let out = try await RegistryModule.makeFind().handler(.object([
+                "entity": .string("skill"),
+                "where": .object(["name": .string("Dup")]),
+            ]))
+            try expect(obj(out)["count"] == .int(2), "two ambiguous matches")
+            guard case .array(let rows)? = obj(out)["rows"] else { throw TestError.assertion("rows missing") }
+            let ids = Set(rows.compactMap { r -> String? in if case .string(let s)? = obj(r)["id"] { return s } else { return nil } })
+            try expect(ids == ["ffff0000000000000000000000000004", "ffff0000000000000000000000000005"], "both dup ids: \(ids.sorted())")
+        }
+    }
+
+    await test("registry_find matches by BOUND property id after introspect (rename-safe)") {
+        // Introspect binds Notion 'Description' → canonical key 'summary'. A find
+        // predicate on 'summary' must match via the bound id, not the raw name.
+        let fake = ModFakeGateway(schema: skillsSchema(), queryRows: [
+            skillRow(id: "ffff0000000000000000000000000007", name: "Zeta"),   // summary = "desc of Zeta"
+        ])
+        try await withRegistryModuleEnv(fake) {
+            _ = try await RegistryModule.makeIntrospect().handler(.object(["entity": .string("skill")]))
+            // Case-insensitive scalar match on the id-resolved canonical key.
+            let out = try await RegistryModule.makeFind().handler(.object([
+                "entity": .string("skill"),
+                "where": .object(["summary": .string("DESC OF ZETA")]),
+            ]))
+            try expect(obj(out)["count"] == .int(1), "matched by bound id, case-insensitive")
+            guard case .array(let rows)? = obj(out)["rows"], let r0 = rows.first else { throw TestError.assertion("no rows") }
+            try expect(obj(r0)["id"] == .string("ffff0000000000000000000000000007"), "the Zeta row")
+        }
+    }
+
+    await test("registry_find AND semantics: all predicates must match") {
+        let fake = ModFakeGateway(schema: skillsSchema(), queryRows: [
+            skillRow(id: "ffff0000000000000000000000000008", name: "Multi"),   // status = "Stable"
+        ])
+        try await withRegistryModuleEnv(fake) {
+            let hit = try await RegistryModule.makeFind().handler(.object([
+                "entity": .string("skill"),
+                "where": .object(["name": .string("Multi"), "status": .string("Stable")]),
+            ]))
+            try expect(obj(hit)["count"] == .int(1), "both predicates satisfied → match")
+            let miss = try await RegistryModule.makeFind().handler(.object([
+                "entity": .string("skill"),
+                "where": .object(["name": .string("Multi"), "status": .string("Deprecated")]),
+            ]))
+            try expect(obj(miss)["count"] == .int(0), "one predicate fails → no match")
+        }
+    }
+
+    await test("registry_find unknown entity → invalidArguments error") {
+        let fake = ModFakeGateway(schema: skillsSchema())
+        try await withRegistryModuleEnv(fake) {
+            do {
+                _ = try await RegistryModule.makeFind().handler(.object([
+                    "entity": .string("ghost"),
+                    "where": .object(["name": .string("x")]),
+                ]))
+                throw TestError.assertion("expected unknown-entity error")
+            } catch let e as ToolRouterError {
+                if case .invalidArguments = e {} else { throw TestError.assertion("wrong error: \(e)") }
+            }
+        }
+    }
+
+    await test("registry_find empty/missing where → invalidArguments error") {
+        let fake = ModFakeGateway(schema: skillsSchema())
+        try await withRegistryModuleEnv(fake) {
+            do {
+                _ = try await RegistryModule.makeFind().handler(.object(["entity": .string("skill"), "where": .object([:])]))
+                throw TestError.assertion("expected empty-where error")
+            } catch let e as ToolRouterError {
+                if case .invalidArguments = e {} else { throw TestError.assertion("wrong error: \(e)") }
+            }
         }
     }
 

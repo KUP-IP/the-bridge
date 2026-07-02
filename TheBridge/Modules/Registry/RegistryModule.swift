@@ -134,6 +134,7 @@ public enum RegistryModule {
         await router.register(makeRemoveEntity())
         await router.register(makeIntrospect())
         await router.register(makeList())
+        await router.register(makeFind())
         await router.register(makeGet())
         await router.register(makeCreate())
         await router.register(makeUpdate())
@@ -304,6 +305,50 @@ public enum RegistryModule {
                 if case .int(let n)? = a["limit"] { limit = max(1, min(500, n)) }
                 let reader = RegistryReader(gateway: gateway())
                 let rows = try await reader.list(entity: entity, limit: limit)
+                return .object([
+                    "entity": .string(key),
+                    "count": .int(rows.count),
+                    "rows": .array(rows.map { rowValue($0, stale: $0.isExpired()) }),
+                ])
+            })
+    }
+
+    // MARK: - registry_find
+
+    /// Convergent lookup: resolve an EXISTING row by canonical field
+    /// predicate(s) BEFORE a blind `registry_create`, so an agent converges on
+    /// the live row instead of minting a duplicate. Read-only; reuses the
+    /// `registry_list` read-through + offline path. Matching is by BOUND
+    /// PROPERTY ID (rename-safe) — predicate keys are the entity's canonical
+    /// field keys, matched against the id-resolved projection. Zero matches is
+    /// a valid empty result, NOT an error; multiple matches surface the
+    /// ambiguity so the caller can disambiguate before writing.
+    public static func makeFind() -> ToolRegistration {
+        ToolRegistration(
+            name: "registry_find", module: moduleName, tier: .open,
+            description: "Find EXISTING registry rows by canonical field value(s) BEFORE creating — the resolve-before-write convergence primitive that avoids duplicate rows. Read-only, cache-backed, offline-tolerant. Pass `where` as a map of canonical field key → value (ALL must match, AND); values are matched rename-safe by the entity's bound property id, not the raw Notion name. Scalars compare case-insensitively; relation/multi-select fields match if any element equals. Returns matching rows (id + title + projected properties); no match → empty (not an error); multiple → ambiguous, all returned.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "entity": .object(["type": .string("string"), "description": .string("Entity key.")]),
+                    "where": .object(["type": .string("object"), "description": .string("Map of canonical field key → value to match (e.g. {\"name\":\"Alpha\"} or {\"status\":\"Active\",\"slug\":\"x\"}). ALL predicates must match.")]),
+                    "limit": .object(["type": .string("integer"), "description": .string("Max rows scanned/returned (default 100, max 500; paginates internally).")]),
+                ]),
+                "required": .array([.string("entity"), .string("where")]),
+            ]),
+            handler: { args in
+                guard case .object(let a) = args, let key = string(a, "entity") else {
+                    throw ToolRouterError.invalidArguments(toolName: "registry_find", reason: "missing ‘entity’")
+                }
+                guard case .object(let predicates)? = a["where"], !predicates.isEmpty else {
+                    throw ToolRouterError.invalidArguments(toolName: "registry_find", reason: "missing or empty ‘where’ — supply at least one field=value predicate")
+                }
+                let config = await loadConfig()
+                let entity = try requireEntity(key, in: config, tool: "registry_find")
+                var limit = 100
+                if case .int(let n)? = a["limit"] { limit = max(1, min(500, n)) }
+                let reader = RegistryReader(gateway: gateway())
+                let rows = try await reader.find(entity: entity, predicates: predicates, limit: limit)
                 return .object([
                     "entity": .string(key),
                     "count": .int(rows.count),

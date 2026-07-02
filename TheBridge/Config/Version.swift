@@ -240,7 +240,12 @@ public enum BridgeConstants {
     /// Wave 3 FB (2026-06-29): + bridge_focus_settings (automation family). 194 + 1 = 195.
     /// PKT-1065A (2026-07-01): + bridge_initialize (canonical init-core handshake +
     ///   persisted receipt; joins the existing standing_orders family, no new family). 197 + 1 = 198.
-    public static let staticFeatureModuleToolCount = 198
+    /// PKT-1041 registry_find (2026-07-01): + registry_find (convergent resolve-before-write
+    ///   lookup — read-only predicate match over the registry_list read-through/offline path).
+    ///   Branched independently off pre-1065A main (197 + 1 = 198 in isolation); reconciled at
+    ///   merge onto the already-integrated 198 (which already carries 1065A's bridge_initialize).
+    ///   198 + 1 = 199.
+    public static let staticFeatureModuleToolCount = 199
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

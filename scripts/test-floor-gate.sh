@@ -1623,7 +1623,12 @@ set -euo pipefail
 # Branched off origin/main (9306800) where its own measured green was 2870 (2863 +7);
 # independent of 1065A/C (ConnectionRegistry/ConnectionsModule/SessionModule, no file
 # overlap). Reconciled at merge onto integrated floor 2894 → 2901 (2894 +7).
-FLOOR="${BRIDGE_TEST_FLOOR:-2901}"
+# 2026-07-02 (PKT-1041 registry_find): +9 tests — RegistryModuleTests (+7: exact/none/
+# multi/bound-id/AND/unknown-entity/empty-where), RegistryDataPathTests (+2: reader
+# offline-cache filter + scalar-number/relation-array match). Branched off pre-1065A/B/C
+# main where its own measured green was 2872 (2863 +9); reconciled at merge onto
+# integrated floor 2901 → 2910 (2901 +9).
+FLOOR="${BRIDGE_TEST_FLOOR:-2910}"
 # v3.7.6 (2026-06-04): credential policy defaults flipped ON; +1 isEnabled default-ON test (1776→1777).
 # v3.7·A (2026-05-28): SkillsCacheReader/Writer pipeline tests landed.
 # +12 SkillsCacheTests covering the on-disk skills cache that closes the

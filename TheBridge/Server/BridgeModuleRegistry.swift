@@ -71,7 +71,7 @@ public enum BridgeModuleRegistry {
         await BridgeInitializeModule.register(on: router)  // PKT-1065A: canonical bridge_initialize handshake + persisted receipt (1 tool)
         await ShortcutsModule.register(on: router)
         await MemoryModule.register(on: router)
-        await RegistryModule.register(on: router)          // Data-Source Registry: generic CRUD + add/remove_entity + introspect + possess (10 tools)
+        await RegistryModule.register(on: router)          // Data-Source Registry: generic CRUD + add/remove_entity + introspect + possess + hydrate + find (12 tools)
         await VoiceMemoModule.register(on: router)       // Voice Memos curator: voice_memo_list + voice_memo_process (2 tools)
         await OllamaModule.register(on: router)          // Local Ollama: ollama_health + ollama_list_models (2 tools)
         await BridgeAutomationModule.register(on: router) // FB-AUTOMATION: bridge_settings_navigate
