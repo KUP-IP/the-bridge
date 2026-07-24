@@ -613,7 +613,7 @@ public actor ToolRouter {
         let decision = await securityGate.enforce(
             toolName: toolName,
             tier: effectiveTier,
-            neverAutoApprove: tool.neverAutoApprove,
+            neverAutoApprove: neverAutoApprove,
             arguments: arguments,
             module: tool.module
         )
@@ -662,9 +662,27 @@ public actor ToolRouter {
             ])
         }
 
-        // Execute handler
+        // Execute handler. A non-downgradable Request-tier approval mints a
+        // server-issued receipt bound to the exact arguments and scopes it to
+        // this handler invocation. Nested read-only dispatches inherit it; a
+        // caller cannot manufacture it through MCP arguments.
+        let exactApprovalReceipt: SecurityApprovalReceipt? =
+            effectiveTier == .request && neverAutoApprove
+            ? SecurityApprovalReceipt.issue(toolName: toolName, arguments: arguments, context: context)
+            : nil
         do {
-            let result = try await tool.handler(arguments)
+            let invokeHandler: @Sendable () async throws -> Value = {
+                try await tool.handler(arguments)
+            }
+            let result: Value
+            if let exactApprovalReceipt {
+                result = try await SecurityApprovalReceipt.$current.withValue(
+                    exactApprovalReceipt,
+                    operation: invokeHandler
+                )
+            } else {
+                result = try await invokeHandler()
+            }
             let governed = await isGoverned(context)
             let governanceNote: String?
             let returnedResult: Value

@@ -65,6 +65,12 @@ func runMessagesModuleTests() async {
         try expect(tool.tier == .request, "Expected request, got \(tool.tier.rawValue)")
     }
 
+    await test("messages_send is non-downgradable and requires fresh approval") {
+        let tools = await router.registrations(forModule: "messages")
+        let tool = tools.first(where: { $0.name == "messages_send" })!
+        try expect(tool.neverAutoApprove, "messages_send must not accept Always Allow or tier downgrades")
+    }
+
     // Functional tests — messages_search (requires chat.db access)
     await test("messages_search returns result structure") {
         do {

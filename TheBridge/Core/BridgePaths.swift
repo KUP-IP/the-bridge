@@ -61,6 +61,7 @@ public enum BridgePaths {
         case registryCache  = "registry-cache"  // per-entity read-through row cache
         case voiceMemos     = "voice-memos"     // Voice Memos curator manifest + state
         case memoryHub      = "memory-hub"      // Memory Hub: activity.jsonl, registry-cache/, plan-snapshots/
+        case messages       = "messages"        // recoverable Messages action ledger
     }
 
     // MARK: - Logs

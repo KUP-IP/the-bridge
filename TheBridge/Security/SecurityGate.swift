@@ -479,11 +479,15 @@ public actor SecurityGate {
         detail: String,
         neverAutoApprove: Bool
     ) async -> GateDecision {
-        let truncated = String(detail.prefix(120))
+        // Consequence tools marked neverAutoApprove must show the complete
+        // payload prepared by requestDetail. Other generic Request tools keep
+        // the compact notification treatment.
+        let approvalBody = neverAutoApprove ? detail : String(detail.prefix(120))
         let decision = await approvalManager.requestApproval(
             title: "The Bridge wants to \(toolName)",
-            body: truncated,
-            allowAlwaysAllowAction: !neverAutoApprove
+            body: approvalBody,
+            allowAlwaysAllowAction: !neverAutoApprove,
+            forceModalReview: neverAutoApprove && toolName == "messages_send"
         )
 
         switch decision {
@@ -527,12 +531,33 @@ public actor SecurityGate {
             return normalizeWhitespace(fallback)
         }
 
+        if toolName == "messages_send" {
+            func string(_ key: String) -> String? {
+                guard case .string(let value)? = dict[key] else { return nil }
+                return value
+            }
+            let recipient = string("recipient") ?? string("chatIdentifier") ?? "<missing target>"
+            let body = string("body") ?? ""
+            let bodyDigest = SecurityApprovalReceipt.digest(.string(body))
+            let thread = string("threadPageId") ?? "<ordinary send>"
+            let action = string("actionId") ?? "<ordinary send>"
+            let service = string("service") ?? "auto (iMessage with SMS fallback)"
+            return """
+            Recipient: \(recipient)
+            Service: \(service)
+            THREAD: \(thread)
+            Action ID: \(action)
+            Body approval digest (SHA-256): \(bodyDigest)
+            Message body:
+            \(body)
+            """
+        }
+
         let keyCandidatesByTool: [String: [String]] = [
             "shell_exec": ["command"],
             "cli_exec": ["command"],
             "run_script": ["scriptName"],
             "applescript_exec": ["script"],
-            "messages_send": ["recipient", "body"],
         ]
 
         let keyCandidates = keyCandidatesByTool[toolName] ?? ["command", "script", "scriptName"]
@@ -1041,10 +1066,14 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
     public func requestApproval(
         title: String,
         body: String,
-        allowAlwaysAllowAction: Bool = true
+        allowAlwaysAllowAction: Bool = true,
+        forceModalReview: Bool = false
     ) async -> ApprovalDecision {
         if isTestProcess {
             return .allow
+        }
+        if forceModalReview {
+            return await requestViaAlert(title: title, body: body)
         }
         // PKT-548: Diagnostic log to surface which approval path is chosen.
         // Helps diagnose cases where Request-tier tool calls fall back to NSAlert

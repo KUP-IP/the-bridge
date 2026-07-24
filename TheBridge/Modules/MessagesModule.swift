@@ -587,59 +587,133 @@ public enum MessagesModule {
         expectedBody: String,
         verifiedAt: Date = Date()
     ) -> MessagesDeliveryVerification {
-        var uniqueMatches: [Int: String?] = [:]
+        struct Match {
+            var rowId: Int
+            var messageGuid: String?
+            var chatGuid: String?
+            var messageDate: Date?
+            var service: String?
+        }
+        var uniqueMatches: [Int: Match] = [:]
+        let expectedHandle = ThreadMessagesIdentity.canonicalHandle(expectedTarget)
+        let expectedChat = expectedTarget.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard expectedHandle != nil || !expectedChat.isEmpty else {
+            return .init(status: .deliveryError, error: "expected target is empty")
+        }
         for row in rows {
             guard let rowId = row["ROWID"] as? Int,
                   (row["is_from_me"] as? Int) == 1,
                   extractText(row: row) == expectedBody else { continue }
-            let candidates = [row["handle_id"] as? String, row["chat_identifier"] as? String].compactMap { $0 }
-            guard candidates.contains(where: { deliveryTargetMatches(expected: expectedTarget, candidate: $0) }) else { continue }
-            uniqueMatches[rowId] = row["service"] as? String
+            let targetMatches: Bool
+            if let expectedHandle {
+                let candidateHandles = [
+                    row["handle_id"] as? String,
+                    row["chat_identifier"] as? String
+                ].compactMap { $0 }.compactMap(ThreadMessagesIdentity.canonicalHandle)
+                targetMatches = candidateHandles.contains(expectedHandle)
+            } else {
+                let chatCandidates = [
+                    row["chat_identifier"] as? String,
+                    row["chat_guid"] as? String,
+                    row["display_name"] as? String
+                ].compactMap { $0 }
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                targetMatches = chatCandidates.contains(expectedChat)
+            }
+            guard targetMatches else { continue }
+            let unixSeconds: Double? = {
+                if let value = row["message_unix_seconds"] as? Double { return value }
+                if let value = row["message_unix_seconds"] as? Int { return Double(value) }
+                return nil
+            }()
+            uniqueMatches[rowId] = Match(
+                rowId: rowId,
+                messageGuid: row["message_guid"] as? String,
+                chatGuid: row["chat_guid"] as? String,
+                messageDate: unixSeconds.map(Date.init(timeIntervalSince1970:)),
+                service: row["service"] as? String
+            )
         }
-        let matches = uniqueMatches.keys.sorted().map { (rowId: $0, service: uniqueMatches[$0] ?? nil) }
-        if matches.isEmpty {
-            return .init(status: .notFound)
-        }
+        let matches = uniqueMatches.values.sorted { $0.rowId < $1.rowId }
+        if matches.isEmpty { return .init(status: .notFound) }
         if matches.count > 1 {
-            return .init(status: .ambiguous, candidateRowIds: matches.map(\.rowId).sorted())
+            return .init(status: .ambiguous, candidateRowIds: matches.map(\.rowId))
         }
         let only = matches[0]
         return .init(
             status: .verified,
             messageRowId: only.rowId,
+            messageGuid: only.messageGuid,
+            chatGuid: only.chatGuid,
+            messageDate: only.messageDate,
             service: only.service,
             verifiedAt: verifiedAt,
             candidateRowIds: [only.rowId]
         )
     }
 
-    /// Poll chat.db for one exact outbound row. Zero and multiple matches are
-    /// both fail-closed outcomes; no heuristic chooses "the newest" row.
+    /// Poll chat.db for one exact local outbound record. Evidence is bounded
+    /// by the pre-send ROWID and Intent preparation timestamp; it does not
+    /// claim provider delivery or remote receipt.
     public static func verifyExactDelivery(
         target: String,
         body: String,
         afterId: Int,
+        preparedAt: Date,
         attempts: Int = 8,
-        interval: TimeInterval = 0.5
+        interval: TimeInterval = 0.5,
+        pageSize: Int = 250,
+        maxPages: Int = 20
     ) -> MessagesDeliveryVerification {
         let sql = """
-            SELECT m.ROWID, m.text, m.attributedBody, m.is_from_me, m.service,
-                   h.id AS handle_id, c.chat_identifier
+            SELECT m.ROWID, m.guid AS message_guid, m.text, m.attributedBody,
+                   m.is_from_me, m.service,
+                   (CAST(m.date AS REAL) / 1000000000.0 + 978307200.0) AS message_unix_seconds,
+                   h.id AS handle_id, c.chat_identifier, c.guid AS chat_guid,
+                   c.display_name
             FROM message m
             LEFT JOIN handle h ON m.handle_id = h.ROWID
             JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
             JOIN chat c ON c.ROWID = cmj.chat_id
             WHERE m.ROWID > ?1
               AND m.is_from_me = 1
+              AND (CAST(m.date AS REAL) / 1000000000.0 + 978307200.0) >= ?2
             ORDER BY m.ROWID ASC
-            LIMIT 50
+            LIMIT ?3
             """
         do {
+            let lowerBound = preparedAt.addingTimeInterval(-5).timeIntervalSince1970
             for attempt in 0..<max(1, attempts) {
-                let rows = try performQuery(sql, params: [String(afterId)])
-                let classified = classifyDeliveryCandidates(rows, expectedTarget: target, expectedBody: body)
+                var cursor = afterId
+                var allRows: [[String: Any]] = []
+                var exhausted = false
+                for page in 0..<max(1, maxPages) {
+                    let rows = try performQuery(sql, params: [
+                        String(cursor), String(lowerBound), String(max(1, pageSize))
+                    ])
+                    allRows.append(contentsOf: rows)
+                    if rows.count < pageSize {
+                        exhausted = true
+                        break
+                    }
+                    guard let next = rows.compactMap({ $0["ROWID"] as? Int }).max(), next > cursor else {
+                        return .init(status: .deliveryError, error: "chat.db verification pagination did not advance")
+                    }
+                    cursor = next
+                    if page == maxPages - 1 {
+                        return .init(status: .deliveryError, error: "chat.db verification exceeded the bounded \(pageSize * maxPages)-row window")
+                    }
+                }
+                let classified = classifyDeliveryCandidates(
+                    allRows,
+                    expectedTarget: target,
+                    expectedBody: body
+                )
                 if classified.status == .verified || classified.status == .ambiguous {
                     return classified
+                }
+                if !exhausted {
+                    return .init(status: .deliveryError, error: "chat.db verification window was not exhausted")
                 }
                 if attempt < attempts - 1 { Thread.sleep(forTimeInterval: interval) }
             }
@@ -647,25 +721,6 @@ public enum MessagesModule {
         } catch {
             return .init(status: .deliveryError, error: error.localizedDescription)
         }
-    }
-
-    private static func deliveryTargetMatches(expected: String, candidate: String) -> Bool {
-        let lhs = expected.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let rhs = candidate.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if lhs.contains("@") || rhs.contains("@") { return lhs == rhs }
-        let lhsDigits = lhs.filter(\.isNumber)
-        let rhsDigits = rhs.filter(\.isNumber)
-        if lhsDigits.count >= 7, rhsDigits.count >= 7 {
-            if lhsDigits == rhsDigits { return true }
-            if lhsDigits.count == 10, rhsDigits.count == 11, rhsDigits.hasPrefix("1") {
-                return lhsDigits == String(rhsDigits.dropFirst())
-            }
-            if rhsDigits.count == 10, lhsDigits.count == 11, lhsDigits.hasPrefix("1") {
-                return rhsDigits == String(lhsDigits.dropFirst())
-            }
-            return false
-        }
-        return lhs == rhs || rhs.contains(lhs)
     }
 
     private static func escapeAppleScriptString(_ value: String) -> String {
@@ -682,7 +737,8 @@ public enum MessagesModule {
         body: String,
         confirm: String,
         serviceOverride: String?,
-        afterId: Int
+        afterId: Int,
+        preparedAt: Date
     ) -> MessagesDeliveryAttempt {
         guard confirm == "SEND" else {
             return .init(
@@ -740,7 +796,7 @@ public enum MessagesModule {
 
         let first = execute(service: serviceType)
         if first.success {
-            let verification = verifyExactDelivery(target: recipient, body: body, afterId: afterId)
+            let verification = verifyExactDelivery(target: recipient, body: body, afterId: afterId, preparedAt: preparedAt)
             return .init(
                 invoked: true,
                 verification: verification,
@@ -752,7 +808,7 @@ public enum MessagesModule {
         if serviceType == "iMessage", serviceOverride == nil {
             let fallback = execute(service: "SMS")
             if fallback.success {
-                let verification = verifyExactDelivery(target: recipient, body: body, afterId: afterId)
+                let verification = verifyExactDelivery(target: recipient, body: body, afterId: afterId, preparedAt: preparedAt)
                 return .init(
                     invoked: true,
                     verification: verification,
@@ -810,8 +866,8 @@ public enum MessagesModule {
             if let select = property?["select"] as? [String: Any] { return select["name"] as? String }
             return nil
         }
-        func relationCount(_ name: String) -> Int {
-            (property(name)?["relation"] as? [[String: Any]])?.count ?? 0
+        func relationIds(_ name: String) -> [String] {
+            (property(name)?["relation"] as? [[String: Any]])?.compactMap { $0["id"] as? String } ?? []
         }
         func dateStart(_ name: String) -> String? {
             (property(name)?["date"] as? [String: Any])?["start"] as? String
@@ -820,6 +876,15 @@ public enum MessagesModule {
             value.replacingOccurrences(of: "-", with: "").lowercased()
         }
 
+        let contacts = relationIds("CONTACT")
+        let prospects = relationIds("PROSPECT")
+        let total = contacts.count + prospects.count
+        let linkedPerson: ThreadLinkedPersonSnapshot? = {
+            guard total == 1 else { return nil }
+            if let id = contacts.first { return .init(entity: "contact", pageId: id) }
+            if let id = prospects.first { return .init(entity: "prospect", pageId: id) }
+            return nil
+        }()
         let sourceId = (parent["data_source_id"] as? String) ?? (parent["database_id"] as? String) ?? ""
         return .init(
             pageId: pageId,
@@ -827,9 +892,54 @@ public enum MessagesModule {
             managerMode: optionName(property("Manager Mode")) ?? "",
             status: optionName(property("Status")),
             nextCheckIn: dateStart("Next Check-in"),
-            linkedPersonCount: relationCount("CONTACT") + relationCount("PROSPECT"),
+            linkedPerson: linkedPerson,
+            linkedPersonCount: total,
             markdown: markdown
         )
+    }
+
+    public static func enrichThreadSnapshot(
+        _ snapshot: ThreadMessagesSnapshot,
+        registryResult: Value
+    ) throws -> ThreadMessagesSnapshot {
+        guard let linked = snapshot.linkedPerson,
+              case .object(let row) = registryResult,
+              case .string(let entity)? = row["entity"],
+              case .string(let pageId)? = row["id"],
+              case .object(let properties)? = row["properties"] else {
+            throw ToolRouterError.invalidArguments(toolName: "messages_send", reason: "linked person registry read returned an unexpected shape")
+        }
+        func normalized(_ value: String) -> String {
+            value.replacingOccurrences(of: "-", with: "").lowercased()
+        }
+        guard entity == linked.entity, normalized(pageId) == linked.pageId else {
+            throw ToolRouterError.invalidArguments(toolName: "messages_send", reason: "linked person registry identity did not match the THREAD relation")
+        }
+        func string(_ key: String) -> String? {
+            guard let value = properties.first(where: { $0.key.caseInsensitiveCompare(key) == .orderedSame })?.value else { return nil }
+            switch value {
+            case .string(let raw): return raw.isEmpty ? nil : raw
+            case .object(let object):
+                if case .string(let start)? = object["start"] { return start }
+                return nil
+            default: return nil
+            }
+        }
+        var enriched = snapshot
+        enriched.linkedPerson = .init(
+            entity: entity,
+            pageId: pageId,
+            name: {
+                if case .string(let title)? = row["title"] { return title }
+                return string("name")
+            }(),
+            status: string("status"),
+            phone: string("phone"),
+            email: string("email"),
+            nextAction: string("nextAction"),
+            lastActivity: entity == "contact" ? string("lastContacted") : string("lastTouched")
+        )
+        return enriched
     }
 
     private static func appendSucceeded(_ result: Value) -> Bool {
@@ -1092,7 +1202,8 @@ public enum MessagesModule {
             name: "messages_send",
             module: moduleName,
             tier: .request,
-            description: "Send an iMessage/SMS to a recipient or an existing Messages chat. Requires confirm: 'SEND' (exact, uppercase). Returns exact local Messages ROWID evidence when verified. With threadPageId + actionId + approvalBasis, runs a recoverable THREAD Intent→send→Result transaction with no lifecycle-property mutation.",
+            neverAutoApprove: true,
+            description: "Send an iMessage/SMS after a fresh non-downgradable review of the complete target and body. Requires confirm:'SEND'. Returns exact local outbound-record evidence; it does not claim provider delivery. With threadPageId + actionId + descriptive approvalBasis, runs the recoverable one-to-one THREAD Intent→send→Result transaction with linked-person binding and no lifecycle-property writes.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -1103,7 +1214,7 @@ public enum MessagesModule {
                     "service": .object(["type": .string("string"), "description": .string("Optional: 'iMessage' or 'SMS'. Auto-detected from chat history if omitted. RCS recipients use 'SMS'.")]),
                     "threadPageId": .object(["type": .string("string"), "description": .string("Optional canonical THREAD page id. When supplied, messages_send runs the M1 recoverable Intent → send → Result receipt transaction; one-to-one recipient only.")]),
                     "actionId": .object(["type": .string("string"), "description": .string("Stable idempotency key for a THREAD action. Required with threadPageId.")]),
-                    "approvalBasis": .object(["type": .string("string"), "description": .string("Human-readable source of the explicit GO for this exact target and body. Required with threadPageId.")]),
+                    "approvalBasis": .object(["type": .string("string"), "description": .string("Descriptive note about the approval context. Required with threadPageId, but authority comes only from The Bridge's fresh server-issued approval receipt.")]),
                     "actor": .object(["type": .string("string"), "description": .string("Actor label recorded in the THREAD Intent receipt (default: The Bridge).")]),
                     "workspace": .object(["type": .string("string"), "description": .string("Optional Notion workspace connection for THREAD receipt reads and appends.")])
                 ]),
@@ -1145,6 +1256,14 @@ public enum MessagesModule {
                         "sent": .bool(false)
                     ])
                 }
+                guard let approvalReceipt = SecurityApprovalReceipt.current,
+                      approvalReceipt.validates(toolName: "messages_send", arguments: arguments) else {
+                    return .object([
+                        "error": .string("messages_send requires a fresh server-issued approval receipt bound to this exact target and body"),
+                        "sent": .bool(false),
+                        "deliveryInvoked": .bool(false)
+                    ])
+                }
 
                 if case .string(let threadPageId)? = args["threadPageId"] {
                     guard chatIdentifier == nil, let recipient else {
@@ -1182,9 +1301,24 @@ public enum MessagesModule {
                         approvalBasis: approvalBasis,
                         actor: actor,
                         confirm: confirm,
-                        serviceOverride: serviceOverride
+                        serviceOverride: serviceOverride,
+                        approvalReceiptId: approvalReceipt.receiptId,
+                        approvalArgumentsDigest: approvalReceipt.argumentsDigest,
+                        approvalPrincipal: approvalReceipt.governancePrincipal ?? approvalReceipt.transportSessionId,
+                        approvedAt: approvalReceipt.approvedAt
                     )
+                    let receiptStore: SQLiteThreadMessagesReceiptStore
+                    do {
+                        receiptStore = try SQLiteThreadMessagesReceiptStore.live()
+                    } catch {
+                        return ThreadMessagesReceiptResult(
+                            outcome: .blocked,
+                            actionId: actionId,
+                            error: "durable THREAD action ledger is unavailable: \(error.localizedDescription)"
+                        ).mcpValue()
+                    }
                     let dependencies = ThreadMessagesReceiptDependencies(
+                        store: receiptStore,
                         readThread: { pageId in
                             var pageArgs: [String: Value] = [
                                 "pageId": .string(pageId),
@@ -1203,7 +1337,19 @@ public enum MessagesModule {
                                 toolName: "notion_page_markdown_read",
                                 arguments: .object(markdownArgs)
                             )
-                            return try threadSnapshot(pageResult: pageResult, markdownResult: markdownResult)
+                            let snapshot = try threadSnapshot(pageResult: pageResult, markdownResult: markdownResult)
+                            guard snapshot.linkedPersonCount == 1, let linked = snapshot.linkedPerson else {
+                                return snapshot
+                            }
+                            let personResult = try await router.dispatch(
+                                toolName: "registry_get",
+                                arguments: .object([
+                                    "entity": .string(linked.entity),
+                                    "id": .string(linked.pageId),
+                                    "forceRefresh": .bool(true)
+                                ])
+                            )
+                            return try enrichThreadSnapshot(snapshot, registryResult: personResult)
                         },
                         appendMarkdown: { pageId, markdown in
                             var appendArgs: [String: Value] = [
@@ -1223,16 +1369,22 @@ public enum MessagesModule {
                             }
                         },
                         currentMaxMessageRowId: { try currentMaxMessageRowId() },
-                        reconcile: { target, approvedBody, afterId in
-                            verifyExactDelivery(target: target, body: approvedBody, afterId: afterId)
+                        reconcile: { target, approvedBody, afterId, preparedAt in
+                            verifyExactDelivery(
+                                target: target,
+                                body: approvedBody,
+                                afterId: afterId,
+                                preparedAt: preparedAt
+                            )
                         },
-                        send: { target, approvedBody, token, override, afterId in
+                        send: { target, approvedBody, token, override, afterId, preparedAt in
                             performOneToOneSend(
                                 recipient: target,
                                 body: approvedBody,
                                 confirm: token,
                                 serviceOverride: override,
-                                afterId: afterId
+                                afterId: afterId,
+                                preparedAt: preparedAt
                             )
                         }
                     )
@@ -1247,6 +1399,7 @@ public enum MessagesModule {
                         "SELECT MAX(ROWID) as max_id FROM message", params: []
                     )) ?? []
                     let preSendMaxId = (preRows.first?["max_id"] as? Int) ?? 0
+                    let preparedAt = Date()
 
                     let safeChatIdentifier = escapeAppleScriptString(chatIdentifier)
                     let safeBody = escapeAppleScriptString(body)
@@ -1287,10 +1440,13 @@ public enum MessagesModule {
                     let verification = verifyExactDelivery(
                         target: chatIdentifier,
                         body: body,
-                        afterId: preSendMaxId
+                        afterId: preSendMaxId,
+                        preparedAt: preparedAt
                     )
                     return .object([
-                        "sent": .bool(true),
+                        "sent": .bool(verification.verified),
+                        "deliveryInvoked": .bool(true),
+                        "providerDeliveryConfirmed": .bool(false),
                         "chatIdentifier": .string(chatIdentifier),
                         "bodyLength": .int(body.utf8.count),
                         "target": .string("chatIdentifier"),
@@ -1321,6 +1477,7 @@ public enum MessagesModule {
                     return nil
                 }()
                 let preSendMaxId: Int
+                let preparedAt = Date()
                 do {
                     preSendMaxId = try currentMaxMessageRowId()
                 } catch {
@@ -1336,10 +1493,13 @@ public enum MessagesModule {
                     body: body,
                     confirm: confirm,
                     serviceOverride: serviceOverride,
-                    afterId: preSendMaxId
+                    afterId: preSendMaxId,
+                    preparedAt: preparedAt
                 )
                 var result: [String: Value] = [
-                    "sent": .bool(attempt.invoked),
+                    "sent": .bool(attempt.verification.verified),
+                    "deliveryInvoked": .bool(attempt.invoked),
+                    "providerDeliveryConfirmed": .bool(false),
                     "recipient": .string(recipient),
                     "bodyLength": .int(body.utf8.count),
                     "service": attempt.service.map(Value.string) ?? .null,
@@ -1347,6 +1507,9 @@ public enum MessagesModule {
                     "verified": .bool(attempt.verification.verified),
                     "verificationStatus": .string(attempt.verification.status.rawValue),
                     "messageRowId": attempt.verification.messageRowId.map(Value.int) ?? .null,
+                    "messageGuid": attempt.verification.messageGuid.map(Value.string) ?? .null,
+                    "chatGuid": attempt.verification.chatGuid.map(Value.string) ?? .null,
+                    "messageDate": attempt.verification.messageDate.map { .string(ThreadMessagesReceiptJournal.iso($0)) } ?? .null,
                     "deliveryReference": attempt.verification.deliveryReference.map(Value.string) ?? .null,
                     "verifiedAt": attempt.verification.verifiedAt.map { .string(ISO8601DateFormatter().string(from: $0)) } ?? .null,
                     "candidateRowIds": .array(attempt.verification.candidateRowIds.map(Value.int))
