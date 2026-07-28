@@ -11,6 +11,8 @@ import TheBridgeLib
 
 private actor ModFakeGateway: RegistryNotionGateway {
     var schemaToReturn: DataSourceSchema
+    var schemasByDataSource: [String: DataSourceSchema] = [:]
+    private(set) var schemaCalls: [String] = []
     var queryRows: [NotionRow]
     var pages: [String: NotionRow]
     var failMarkdownWrite = false
@@ -25,7 +27,13 @@ private actor ModFakeGateway: RegistryNotionGateway {
     init(schema: DataSourceSchema, queryRows: [NotionRow] = [], pages: [String: NotionRow] = [:]) {
         self.schemaToReturn = schema; self.queryRows = queryRows; self.pages = pages
     }
-    func schema(dataSourceId: String, workspace: String?) async throws -> DataSourceSchema { schemaToReturn }
+    func schema(dataSourceId: String, workspace: String?) async throws -> DataSourceSchema {
+        schemaCalls.append(dataSourceId)
+        return schemasByDataSource[dataSourceId] ?? schemaToReturn
+    }
+    func setSchema(_ schema: DataSourceSchema, for dataSourceId: String) {
+        schemasByDataSource[dataSourceId] = schema
+    }
     func query(dataSourceId: String, workspace: String?, pageSize: Int, startCursor: String?) async throws -> (rows: [NotionRow], nextCursor: String?) {
         queryCalls += 1
         queryHistory.append((startCursor, pageSize))
@@ -94,6 +102,46 @@ private func projectSchema() -> DataSourceSchema {
     ])
 }
 
+private func genuineSessionSchema() -> DataSourceSchema {
+    DataSourceSchema(columnsByName: [
+        "Session Name": .init(id: "id_session_title", type: "title"),
+    ])
+}
+
+private func packetEntityPayload(
+    key: String,
+    displayName: String = "PACKETS",
+    dataSourceId: String
+) -> Value {
+    .object([
+        "key": .string(key),
+        "displayName": .string(displayName),
+        "dataSourceId": .string(dataSourceId),
+        "hasBody": .bool(true),
+        "properties": .array([
+            .object(["key": .string("name"), "notionName": .string("Packet Name"), "type": .string("title"), "role": .string("title")]),
+            .object(["key": .string("title"), "notionName": .string("Packet Title"), "type": .string("rich_text")]),
+            .object(["key": .string("objective"), "notionName": .string("Objective"), "type": .string("rich_text")]),
+            .object(["key": .string("sourceOfTruth"), "notionName": .string("Source of Truth"), "type": .string("rich_text")]),
+            .object(["key": .string("output"), "notionName": .string("Packet Output"), "type": .string("rich_text")]),
+            .object(["key": .string("project"), "notionName": .string("PROJECT"), "type": .string("relation"), "role": .string("relation")]),
+            .object(["key": .string("skills"), "notionName": .string("SKILLS"), "type": .string("relation"), "role": .string("relation")]),
+        ]),
+    ])
+}
+
+private func genuineSessionEntityPayload(dataSourceId: String = "session_ds") -> Value {
+    .object([
+        "key": .string("session"),
+        "displayName": .string("Sessions"),
+        "dataSourceId": .string(dataSourceId),
+        "hasBody": .bool(false),
+        "properties": .array([
+            .object(["key": .string("name"), "notionName": .string("Session Name"), "type": .string("title"), "role": .string("title")]),
+        ]),
+    ])
+}
+
 private func skillRow(id: String, name: String) -> NotionRow {
     NotionRow(id: CachedRow.normalize(id), url: "https://n/\(id)", lastEditedTime: "2026-06-17T10:00:00.000Z", cells: [
         "Skill Name": NotionCell(id: "id_title", type: "title", value: .string(name)),
@@ -146,16 +194,16 @@ func runRegistryModuleTests() async {
 
     // MARK: - Registration
 
-    await test("RegistryModule registers exactly 13 tools with expected names") {
+    await test("RegistryModule registers exactly 14 tools with expected names") {
         let router = ToolRouter(securityGate: SecurityGate(approvalProvider: TestSecurityApprovalProvider()), auditLog: AuditLog())
         await RegistryModule.register(on: router)
         let tools = await router.registrations(forModule: "registry")
-        try expect(tools.count == 13, "expected 13 registry tools, got \(tools.count)")
+        try expect(tools.count == 14, "expected 14 registry tools, got \(tools.count)")
         let names = Set(tools.map { $0.name })
         try expect(names == ["registry_entities", "registry_add_entity", "registry_remove_entity", "registry_introspect",
                              "registry_list", "registry_find", "registry_get", "registry_create", "registry_update",
                              "registry_resolve_and_update", "registry_delete", "registry_possess",
-                             "registry_hydrate"],
+                             "registry_hydrate", "packet_registry_preflight"],
                    "tool names: \(names.sorted())")
     }
 
@@ -169,7 +217,7 @@ func runRegistryModuleTests() async {
         try expect(tier("registry_create") == .notify && tier("registry_update") == .notify && tier("registry_introspect") == .notify
                    && tier("registry_resolve_and_update") == .notify,
                    "writes are .notify")
-        try expect(tier("registry_get") == .open && tier("registry_list") == .open && tier("registry_find") == .open && tier("registry_entities") == .open && tier("registry_possess") == .open,
+        try expect(tier("registry_get") == .open && tier("registry_list") == .open && tier("registry_find") == .open && tier("registry_entities") == .open && tier("registry_possess") == .open && tier("packet_registry_preflight") == .open,
                    "reads are .open")
     }
 
@@ -205,6 +253,149 @@ func runRegistryModuleTests() async {
             if case .array(let arr)? = obj(after)["entities"], let first = arr.first {
                 try expect(obj(first)["fullyBound"] == .bool(true), "binding persisted to config")
             } else { throw TestError.assertion("entities missing after introspect") }
+        }
+    }
+
+    await test("registry_remove_entity packet alias removes legacy binding and canonical cache") {
+        try await withRegistryModuleEnv(ModFakeGateway(schema: skillsSchema())) {
+            _ = try await RegistryModule.makeAddEntity().handler(.object([
+                "key": .string("session"),
+                "displayName": .string("Sessions"),
+                "dataSourceId": .string("packet_ds"),
+                "hasBody": .bool(true),
+                "properties": .array([
+                    .object(["key": .string("name"), "notionName": .string("Packet Name"), "type": .string("title"), "role": .string("title")]),
+                    .object(["key": .string("title"), "notionName": .string("Packet Title"), "type": .string("rich_text")]),
+                    .object(["key": .string("objective"), "notionName": .string("Objective"), "type": .string("rich_text")]),
+                    .object(["key": .string("sourceOfTruth"), "notionName": .string("Source of Truth"), "type": .string("rich_text")]),
+                    .object(["key": .string("output"), "notionName": .string("Packet Output"), "type": .string("rich_text")]),
+                    .object(["key": .string("project"), "notionName": .string("PROJECT"), "type": .string("relation"), "role": .string("relation")]),
+                    .object(["key": .string("skills"), "notionName": .string("SKILLS"), "type": .string("relation"), "role": .string("relation")]),
+                ]),
+            ]))
+            let pageId = "abc123"
+            try await RegistryRowCache.shared.write(CachedRow(
+                entity: "packet", pageId: pageId, title: "Cached", url: "u",
+                properties: .object([:]), lastEditedTime: "t",
+                writtenAt: Date(), ttlSeconds: 300))
+            try expect(await RegistryRowCache.shared.read(entity: "packet", pageId: pageId) != nil, "canonical cache primed")
+
+            let out = try await RegistryModule.makeRemoveEntity().handler(.object([
+                "entity": .string("packet"),
+            ]))
+            try expect(obj(out)["removed"] == .bool(true))
+            try expect(obj(out)["storedEntities"] == .array([.string("session")]), "legacy stored key reported")
+            try expect(await RegistryRowCache.shared.read(entity: "packet", pageId: pageId) == nil, "canonical cache evicted")
+
+            let after = try await RegistryModule.makeEntities().handler(.object([:]))
+            guard case .array(let entities)? = obj(after)["entities"] else {
+                throw TestError.assertion("entities missing")
+            }
+            try expect(!entities.contains { obj($0)["key"] == .string("session") }, "legacy binding removed")
+        }
+    }
+
+    await test("registry_remove_entity packet removes canonical and legacy packet bindings together") {
+        try await withRegistryModuleEnv(ModFakeGateway(schema: packetSchema())) {
+            _ = try await RegistryModule.makeAddEntity().handler(
+                packetEntityPayload(key: "packet", dataSourceId: "packet_ds"))
+            _ = try await RegistryModule.makeAddEntity().handler(
+                packetEntityPayload(key: "session", displayName: "Sessions", dataSourceId: "packet_ds"))
+
+            let pageId = "coexist-packet-cache"
+            try await RegistryRowCache.shared.write(CachedRow(
+                entity: "packet", pageId: pageId, title: "Cached", url: "u",
+                properties: .object([:]), lastEditedTime: "t",
+                writtenAt: Date(), ttlSeconds: 300))
+
+            let out = try await RegistryModule.makeRemoveEntity().handler(.object([
+                "entity": .string("packet"),
+            ]))
+            try expect(obj(out)["storedEntities"] == .array([.string("packet"), .string("session")]))
+            try expect(await RegistryRowCache.shared.read(entity: "packet", pageId: pageId) == nil)
+
+            let after = try await RegistryModule.makeEntities().handler(.object([:]))
+            guard case .array(let entities)? = obj(after)["entities"] else {
+                throw TestError.assertion("entities missing")
+            }
+            let keys = Set(entities.compactMap { value -> String? in
+                if case .string(let key)? = obj(value)["key"] { return key }
+                return nil
+            })
+            try expect(!keys.contains("packet") && !keys.contains("session"), "all packet identities removed")
+        }
+    }
+
+    await test("registry_remove_entity packet preserves genuine Sessions") {
+        try await withRegistryModuleEnv(ModFakeGateway(schema: packetSchema())) {
+            _ = try await RegistryModule.makeAddEntity().handler(
+                packetEntityPayload(key: "packet", dataSourceId: "packet_ds"))
+            _ = try await RegistryModule.makeAddEntity().handler(genuineSessionEntityPayload())
+
+            let out = try await RegistryModule.makeRemoveEntity().handler(.object([
+                "entity": .string("packet"),
+            ]))
+            try expect(obj(out)["storedEntities"] == .array([.string("packet")]))
+
+            let after = try await RegistryModule.makeEntities().handler(.object([:]))
+            guard case .array(let entities)? = obj(after)["entities"] else {
+                throw TestError.assertion("entities missing")
+            }
+            let keys = Set(entities.compactMap { value -> String? in
+                if case .string(let key)? = obj(value)["key"] { return key }
+                return nil
+            })
+            try expect(keys.contains("session") && !keys.contains("packet"), "genuine Sessions preserved")
+        }
+    }
+
+    await test("registry_remove_entity genuine session preserves canonical packet") {
+        try await withRegistryModuleEnv(ModFakeGateway(schema: genuineSessionSchema())) {
+            _ = try await RegistryModule.makeAddEntity().handler(
+                packetEntityPayload(key: "packet", dataSourceId: "packet_ds"))
+            _ = try await RegistryModule.makeAddEntity().handler(genuineSessionEntityPayload())
+
+            let out = try await RegistryModule.makeRemoveEntity().handler(.object([
+                "entity": .string("session"),
+            ]))
+            try expect(obj(out)["storedEntities"] == .array([.string("session")]))
+
+            let after = try await RegistryModule.makeEntities().handler(.object([:]))
+            guard case .array(let entities)? = obj(after)["entities"] else {
+                throw TestError.assertion("entities missing")
+            }
+            let keys = Set(entities.compactMap { value -> String? in
+                if case .string(let key)? = obj(value)["key"] { return key }
+                return nil
+            })
+            try expect(keys.contains("packet") && !keys.contains("session"), "canonical packet preserved")
+        }
+    }
+
+    await test("registry_introspect genuine session does not bind canonical packet") {
+        let fake = ModFakeGateway(schema: packetSchema())
+        await fake.setSchema(genuineSessionSchema(), for: "session_ds")
+        await fake.setSchema(packetSchema(), for: "packet_ds")
+        try await withRegistryModuleEnv(fake) {
+            _ = try await RegistryModule.makeAddEntity().handler(
+                packetEntityPayload(key: "packet", dataSourceId: "packet_ds"))
+            _ = try await RegistryModule.makeAddEntity().handler(genuineSessionEntityPayload())
+
+            let out = try await RegistryModule.makeIntrospect().handler(.object([
+                "entity": .string("session"),
+            ]))
+            try expect(obj(out)["fullyBound"] == .bool(true))
+            try expect(obj(out)["boundCount"] == .int(1))
+            try expect(await fake.schemaCalls == ["session_ds"], "direct Sessions data source introspected")
+
+            let after = try await RegistryModule.makeEntities().handler(.object([:]))
+            guard case .array(let entities)? = obj(after)["entities"] else {
+                throw TestError.assertion("entities missing")
+            }
+            let session = entities.first { obj($0)["key"] == .string("session") }
+            let packet = entities.first { obj($0)["key"] == .string("packet") }
+            try expect(session.map { obj($0)["fullyBound"] } == .bool(true), "Sessions binding persisted")
+            try expect(packet.map { obj($0)["fullyBound"] } == .bool(false), "packet binding untouched")
         }
     }
 

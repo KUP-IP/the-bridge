@@ -78,16 +78,19 @@ public struct PacketRegistryEnvelope: Sendable {
     public let relations: [String: [Value]]
     public let fetchedAt: String
     public let warnings: [String]
+    /// Bounded, additive mission-integrity evidence. The v1 envelope remains
+    /// unchanged; consumers that do not know this key can safely ignore it.
+    public let missionIntegrity: Value?
 
-    public init(primary: Primary, body: String, relations: [String: [Value]], fetchedAt: String, warnings: [String]) {
+    public init(primary: Primary, body: String, relations: [String: [Value]], fetchedAt: String, warnings: [String], missionIntegrity: Value? = nil) {
         self.primary = primary; self.body = body; self.relations = relations
-        self.fetchedAt = fetchedAt; self.warnings = warnings
+        self.fetchedAt = fetchedAt; self.warnings = warnings; self.missionIntegrity = missionIntegrity
     }
 
     public func asValue() -> Value {
         var rel: [String: Value] = [:]
         for slot in PacketRelationProjection.slots { rel[slot] = .array(relations[slot] ?? []) }
-        return .object([
+        var output: [String: Value] = [
             "schemaVersion": .string(Self.schemaVersion),
             "primary": .object([
                 "id": .string(primary.id),
@@ -99,7 +102,9 @@ public struct PacketRegistryEnvelope: Sendable {
             "relations": .object(rel),
             "provenance": .object(["fetchedAt": .string(fetchedAt), "source": .string("notion")]),
             "warnings": .array(warnings.map { .string($0) }),
-        ])
+        ]
+        if let missionIntegrity { output["missionIntegrity"] = missionIntegrity }
+        return .object(output)
     }
 
     /// Reformat a 32-hex dashless Notion id into canonical dashed UUID form

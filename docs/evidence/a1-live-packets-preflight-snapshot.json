@@ -1,0 +1,68 @@
+{
+  "capturedAt": "2026-07-28T17:11:04Z",
+  "sources": {
+    "dataSourceId": "078e7c9e-e53e-4c83-a893-af64f82b5123",
+    "schemaReadback": "notion_datasource_get after additive migration",
+    "bindingReadback": "registry_introspect(session): fullyBound=true, clean=true, boundCount=24",
+    "relationEvidence": "registry_hydrate(session|packet) one-hop projections plus live registry target data-source IDs"
+  },
+  "contractVersion": "packet-registry-v1",
+  "entities": [
+    {
+      "key": "session",
+      "displayName": "PACKETS",
+      "dataSourceId": "078e7c9e-e53e-4c83-a893-af64f82b5123",
+      "workspace": null,
+      "cacheTTLSeconds": 300,
+      "hasBody": true,
+      "properties": [
+        {"key":"name","notionName":"Packet Name","notionPropertyId":"title","type":"title","role":"title"},
+        {"key":"title","notionName":"Packet Title","notionPropertyId":"_zbO","type":"rich_text","role":"generic"},
+        {"key":"status","notionName":"Status","notionPropertyId":"y%3Cxv","type":"status","role":"status"},
+        {"key":"objective","notionName":"Objective","notionPropertyId":"jr~M","type":"rich_text","role":"generic"},
+        {"key":"sourceOfTruth","notionName":"Source of Truth","notionPropertyId":"ntM%3D","type":"rich_text","role":"generic"},
+        {"key":"executionClass","notionName":"Execution Class","notionPropertyId":"WHc%7D","type":"select","role":"generic"},
+        {"key":"project","notionName":"PROJECT","notionPropertyId":"NkiO","type":"relation","role":"relation"},
+        {"key":"skills","notionName":"SKILLS","notionPropertyId":"%5C%5Coj","type":"relation","role":"relation"},
+        {"key":"blockedBy","notionName":"Blocked by","notionPropertyId":"%3FS%3F%3F","type":"relation","role":"relation"},
+        {"key":"blocking","notionName":"Blocking","notionPropertyId":"qjgT","type":"relation","role":"relation"},
+        {"key":"missionRevision","notionName":"Mission Revision","notionPropertyId":"%5Crsz","type":"number","role":"generic"},
+        {"key":"missionHash","notionName":"Mission Hash","notionPropertyId":"ZV%7CI","type":"rich_text","role":"generic"},
+        {"key":"output","notionName":"Packet Output","notionPropertyId":"VyF%7C","type":"rich_text","role":"generic"}
+      ]
+    },
+    {
+      "key": "project",
+      "displayName": "Projects",
+      "dataSourceId": "f6d6ae1d-bfb4-4494-be18-c46e87dea149",
+      "workspace": null,
+      "cacheTTLSeconds": 300,
+      "hasBody": true,
+      "properties": []
+    },
+    {
+      "key": "skill",
+      "displayName": "Skills",
+      "dataSourceId": "b6ff6ea5-3917-4af7-9c36-278dc8bfb21f",
+      "workspace": null,
+      "cacheTTLSeconds": 21600,
+      "hasBody": true,
+      "properties": []
+    }
+  ],
+  "columns": [
+    {"name":"Packet Name","id":"title","type":"title","options":[],"relationDataSourceId":null},
+    {"name":"Packet Title","id":"_zbO","type":"rich_text","options":[],"relationDataSourceId":null},
+    {"name":"Status","id":"y%3Cxv","type":"status","options":["Backlog","QUEUE","REVIEW","BLOCKED","FOCUS","Done","Decline"],"relationDataSourceId":null},
+    {"name":"Objective","id":"jr~M","type":"rich_text","options":[],"relationDataSourceId":null},
+    {"name":"Source of Truth","id":"ntM%3D","type":"rich_text","options":[],"relationDataSourceId":null},
+    {"name":"Execution Class","id":"WHc%7D","type":"select","options":["AUTO","REVIEW-FIRST","MANUAL"],"relationDataSourceId":null},
+    {"name":"PROJECT","id":"NkiO","type":"relation","options":[],"relationDataSourceId":"f6d6ae1d-bfb4-4494-be18-c46e87dea149"},
+    {"name":"SKILLS","id":"%5C%5Coj","type":"relation","options":[],"relationDataSourceId":"b6ff6ea5-3917-4af7-9c36-278dc8bfb21f"},
+    {"name":"Blocked by","id":"%3FS%3F%3F","type":"relation","options":[],"relationDataSourceId":"078e7c9e-e53e-4c83-a893-af64f82b5123"},
+    {"name":"Blocking","id":"qjgT","type":"relation","options":[],"relationDataSourceId":"078e7c9e-e53e-4c83-a893-af64f82b5123"},
+    {"name":"Mission Revision","id":"%5Crsz","type":"number","options":[],"relationDataSourceId":null},
+    {"name":"Mission Hash","id":"ZV%7CI","type":"rich_text","options":[],"relationDataSourceId":null},
+    {"name":"Packet Output","id":"VyF%7C","type":"rich_text","options":[],"relationDataSourceId":null}
+  ]
+}

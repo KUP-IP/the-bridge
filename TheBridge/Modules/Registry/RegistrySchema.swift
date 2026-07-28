@@ -18,7 +18,14 @@ public struct DataSourceSchema: Sendable, Equatable {
     public struct Column: Sendable, Equatable {
         public let id: String
         public let type: String
-        public init(id: String, type: String) { self.id = id; self.type = type }
+        /// Status/select option names retained from Notion schema metadata.
+        public let options: [String]
+        /// Relation target data-source id when the column is a relation.
+        public let relationDataSourceId: String?
+        public init(id: String, type: String, options: [String] = [], relationDataSourceId: String? = nil) {
+            self.id = id; self.type = type; self.options = options
+            self.relationDataSourceId = relationDataSourceId
+        }
     }
 
     /// Keyed by Notion property display name.
@@ -29,6 +36,9 @@ public struct DataSourceSchema: Sendable, Equatable {
     }
 
     public func column(named name: String) -> Column? { columnsByName[name] }
+    public func column(withID id: String) -> (name: String, column: Column)? {
+        columnsByName.first { $0.value.id == id }.map { (name: $0.key, column: $0.value) }
+    }
     public var names: [String] { Array(columnsByName.keys).sorted() }
 }
 
@@ -120,7 +130,11 @@ public enum RegistryRowDecoder {
             guard let obj = raw as? [String: Any] else { continue }
             let id = (obj["id"] as? String) ?? ""
             let type = (obj["type"] as? String) ?? ""
-            cols[name] = DataSourceSchema.Column(id: id, type: type)
+            let optionObjects = ((obj[type] as? [String: Any])?["options"] as? [[String: Any]]) ?? []
+            let options = optionObjects.compactMap { $0["name"] as? String }.sorted()
+            let relation = obj["relation"] as? [String: Any]
+            let target = (relation?["data_source_id"] as? String) ?? (relation?["database_id"] as? String)
+            cols[name] = DataSourceSchema.Column(id: id, type: type, options: options, relationDataSourceId: target)
         }
         return DataSourceSchema(columnsByName: cols)
     }

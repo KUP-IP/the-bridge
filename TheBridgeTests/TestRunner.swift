@@ -152,6 +152,9 @@ struct TheBridgeTestRunner {
     // a live run loop (that was the teardown SIGTRAP / hang). `runAllTests()` is
     // `nonisolated` so its body inherits the detached (non-main) executor.
     static func main() {
+        if let snapshotExitCode = packetRegistryPreflightSnapshotExitCodeIfRequested() {
+            exit(snapshotExitCode)
+        }
         if let probeExitCode = calendarRegistryProcessProbeExitCodeIfRequested() {
             exit(probeExitCode)
         }
@@ -682,6 +685,7 @@ await runVoiceMemoListQueryTests()   // Voice Memo Reliability: list date/transc
 await runDataSourcesViewModelTests() // Data-Source Registry W4: Settings pane scenarios (propose→confirm, TTL, drift, errors) + BE↔FE alignment
 await runRegistryEdgeCaseTests()     // Data-Source Registry: adversarial edge cases (codec chunking, pagination, cache concurrency, config race, writer)
 await runRegistryHydrationTests()    // Packet Runner v1 (FR-1/§8.3): packet-registry-v1 one-hop hydration envelope (primary+body+relations+provenance+warnings)
+await runPacketRegistryContractTests() // A1 canonical packet registry, preflight, mission integrity
 await runMessagesModuleTests()
 await runThreadMessagesReceiptTests()  // THREAD Messages Receipt M1: exact ROWID + recoverable Intent/Result journal
 await runCallHistoryModuleTests()      // Bridge v4 Wave 1: calls_recent filters, schema/FDA errors, annotations

@@ -1,0 +1,10 @@
+{
+  "canonicalEntity" : "packet",
+  "contractVersion" : "packet-registry-v1",
+  "defectCount" : 0,
+  "defects" : [
+
+  ],
+  "result" : "PASS",
+  "snapshotPath" : "\/Users\/keepup\/Developer\/worktrees\/the-bridge\/a1-canonical-packet-registry\/docs\/evidence\/a1-live-packets-preflight-snapshot.json"
+}

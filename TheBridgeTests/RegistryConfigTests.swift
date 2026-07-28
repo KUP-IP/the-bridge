@@ -50,7 +50,7 @@ func runRegistryConfigTests() async {
             hasBody: legacy.hasBody
         )
         let canonicalConfig = RegistryConfig(entities: [canonical])
-        try expect(canonicalConfig.entity("session")?.key == "session")
+        try expect(canonicalConfig.entity("session")?.key == "packet", "session must share packet cache identity")
 
         var actualSession = legacy
         actualSession.displayName = "Sessions"

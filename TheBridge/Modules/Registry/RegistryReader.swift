@@ -40,7 +40,8 @@ public struct RegistryReader: Sendable {
         var out: [String: Value] = [:]
         var title = ""
         for prop in entity.properties {
-            guard let cell = row.cell(for: prop) else { continue }
+            guard out[prop.key] == nil,
+                  let cell = row.cell(for: prop) else { continue }
             out[prop.key] = cell.value
             if prop.role == .title, case .string(let s) = cell.value { title = s }
         }
@@ -271,12 +272,18 @@ public struct RegistryReader: Sendable {
             }
         }
 
+        var warnings: [String] = []
         var body = ""
-        if entity.hasBody { body = (try? await self.body(entity: entity, pageId: pageId)) ?? "" }
+        if entity.hasBody {
+            do {
+                body = try await self.body(entity: entity, pageId: pageId)
+            } catch {
+                warnings.append("primary body could not be fetched — mission evidence incomplete")
+            }
+        }
 
         // One-hop relation projection (fetch each distinct target once).
         var relations: [String: [Value]] = [:]
-        var warnings: [String] = []
         for (key, ids) in relationIds {
             guard let slot = PacketRelationProjection.slotForKey[key] else { continue }
             var items: [Value] = []
@@ -302,8 +309,46 @@ public struct RegistryReader: Sendable {
             title: primaryRow.title,
             lastEditedTime: primaryRow.lastEditedTime,
             properties: .object(primaryProps))
+        let stringProps = primaryProps.reduce(into: [String: String]()) { result, item in
+            if case .string(let value) = item.value { result[item.key] = value }
+        }
+        // Mission identity comes from the primary row's raw relation IDs, not
+        // from successfully projected target pages. A missing/archived target
+        // must not collapse to the same hash as an intentionally empty relation.
+        let relationIdentity = ["project", "skills", "blockedBy", "blocking"]
+            .reduce(into: [String: [String]]()) { result, key in
+                result[key] = relationIds[key] ?? []
+            }
+        let revision: Int? = {
+            switch primaryProps["missionRevision"] {
+            case .int(let value)?: return value > 0 ? value : nil
+            case .double(let value)?: return value.rounded() == value && value > 0 ? Int(value) : nil
+            default: return nil
+            }
+        }()
+        let storedHash: String? = {
+            if case .string(let value)? = primaryProps["missionHash"] { return value }
+            return nil
+        }()
+        let canonical = PacketMissionIntegrity.canonical(
+            title: primary.title, properties: stringProps,
+            relations: relationIdentity, body: body)
+        let conflicts = PacketMissionIntegrity.conflictFields(properties: stringProps, body: body)
+        let evidenceComplete = warnings.isEmpty
+        let consistency = PacketMissionIntegrity.classify(
+            storedRevision: revision, storedHash: storedHash, canonical: canonical,
+            properties: stringProps, body: body, evidenceComplete: evidenceComplete)
+        let evidence: Value = .object([
+            "classification": .string(consistency.rawValue),
+            "canonicalHash": .string(PacketMissionIntegrity.hash(canonical: canonical)),
+            "storedHash": storedHash.map(Value.string) ?? .null,
+            "revision": revision.map { .int($0) } ?? .null,
+            "conflictFields": .array(conflicts.map(Value.string)),
+            "evidenceComplete": .bool(evidenceComplete),
+        ])
         return PacketRegistryEnvelope(
             primary: primary, body: body, relations: relations,
-            fetchedAt: CachedRow.iso8601.string(from: now), warnings: warnings)
+            fetchedAt: CachedRow.iso8601.string(from: now), warnings: warnings,
+            missionIntegrity: evidence)
     }
 }

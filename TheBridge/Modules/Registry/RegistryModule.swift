@@ -212,6 +212,7 @@ public enum RegistryModule {
         await router.register(makeDelete())
         await router.register(makePossess())
         await router.register(makeHydrate())
+        await router.register(makePacketRegistryPreflight())
     }
 
     // MARK: - registry_entities
@@ -303,18 +304,31 @@ public enum RegistryModule {
                 }
                 let config = await loadConfig()
                 _ = try requireEntity(key, in: config, tool: "registry_remove_entity")   // 404 on unknown
+                let storedKeys = PacketRegistryContract.removalKeys(
+                    forRequestedKey: key, in: config)
                 // Guard the seeded Skills entity (entity #1 — the validating
                 // fold-in + the default a fresh install relies on): removing it
                 // needs an explicit confirm so an offhand call can't strip it.
                 var confirm = false
                 if case .bool(let b)? = a["confirm"] { confirm = b }
-                if key == RegistryEntity.seedEntityKey && !confirm {
+                if storedKeys.contains(RegistryEntity.seedEntityKey) && !confirm {
                     throw ToolRouterError.invalidArguments(
                         toolName: "registry_remove_entity",
                         reason: "‘\(key)’ is the seeded Skills entity — pass confirm:true to remove it")
                 }
-                _ = try await configStore().removeEntity(key: key)
-                return .object(["removed": .bool(true), "entity": .string(key)])
+                let result = try await configStore().removeEntities(keys: storedKeys)
+                if storedKeys.contains(where: { storedKey in
+                    config.entities.contains { entity in
+                        entity.key == storedKey && PacketRegistryContract.isPacketEntity(entity)
+                    }
+                }) {
+                    await RegistryRowCache.shared.evictAll(entity: "packet")
+                }
+                return .object([
+                    "removed": .bool(!result.removed.isEmpty),
+                    "entity": .string(key),
+                    "storedEntities": .array(result.removed.map(Value.string)),
+                ])
             })
     }
 
@@ -336,9 +350,19 @@ public enum RegistryModule {
                     throw ToolRouterError.invalidArguments(toolName: "registry_introspect", reason: "missing ‘entity’")
                 }
                 let config = await loadConfig()
-                let entity = try requireEntity(key, in: config, tool: "registry_introspect")
-                let schema = try await gateway().schema(dataSourceId: entity.dataSourceId, workspace: entity.workspace)
-                let result = RegistrySchemaBinder.bind(entity, to: schema)
+                _ = try requireEntity(key, in: config, tool: "registry_introspect")
+                // Persist bindings onto the directly addressed STORED row.
+                // `session` aliases packet only when no genuine Sessions row is
+                // present or the direct session row is itself PACKETS-shaped.
+                guard let storedEntity = PacketRegistryContract.storedEntity(
+                    forRequestedKey: key, in: config) else {
+                    throw ToolRouterError.invalidArguments(
+                        toolName: "registry_introspect",
+                        reason: "unknown stored entity ‘\(key)’")
+                }
+                let schema = try await gateway().schema(
+                    dataSourceId: storedEntity.dataSourceId, workspace: storedEntity.workspace)
+                let result = RegistrySchemaBinder.bind(storedEntity, to: schema)
                 // Atomic load→upsert→save on the shared actor (serialized).
                 _ = try? await configStore().upsertEntity(result.entity)
                 return .object([
@@ -832,6 +856,37 @@ public enum RegistryModule {
                 let reader = RegistryReader(gateway: gateway())
                 let envelope = try await reader.hydrate(entity: entity, pageId: id, forceRefresh: force)
                 return envelope.asValue()
+            })
+    }
+
+    // MARK: - packet_registry_preflight (read-only canonical contract gate)
+
+    public static func makePacketRegistryPreflight() -> ToolRegistration {
+        ToolRegistration(
+            name: "packet_registry_preflight", module: moduleName, tier: .open,
+            description: "Read-only validation of the canonical packet-registry-v1 binding against the live PACKETS schema. Never repairs bindings, persists config, mutates Notion, or evicts caches.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "contractVersion": .object(["type": .string("string"), "description": .string("Optional; only packet-registry-v1 is accepted.")]),
+                ]),
+            ]),
+            handler: { args in
+                guard case .object(let a) = args else {
+                    throw ToolRouterError.invalidArguments(toolName: "packet_registry_preflight", reason: "arguments must be an object")
+                }
+                let requested = stringIfPresent(a, "contractVersion")
+                guard requested == nil || requested == PacketRegistryContract.version else {
+                    throw ToolRouterError.invalidArguments(toolName: "packet_registry_preflight", reason: "unsupported contractVersion ‘\(requested ?? "")’")
+                }
+                // Deliberately use load(), not loadConfig()/seedIfMissing(): preflight
+                // is an observation and must not create registry.json on first run.
+                let config = try await configStore().load()
+                guard let entity = PacketRegistryContract.entity(from: config), !entity.dataSourceId.isEmpty else {
+                    return PacketRegistryPreflight.value(contractVersion: requested, config: config, schema: DataSourceSchema(columnsByName: [:]))
+                }
+                let schema = try await gateway().schema(dataSourceId: entity.dataSourceId, workspace: entity.workspace)
+                return PacketRegistryPreflight.value(contractVersion: requested, config: config, schema: schema)
             })
     }
 }

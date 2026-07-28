@@ -2431,3 +2431,5 @@ set -euo pipefail
 # Measured 3416 passed, 0 failed. FLOOR 3414 -> 3416.
 - 2026-07-27 · PKT-1212 B0 · `3416 → 3481` (+65): Stripe API-version/evidence transport, customer and invoice lifecycle, deterministic idempotency, indeterminate-effect recovery, and retained suite coverage.
 - 2026-07-28 · CI child-process harness hardening · `3481 → 3482` (+1): bounded calendar-registry child waits, executable forced-stall regression, and corrected CI watchdog ordering. Measured 3482 passed, 0 failed.
+
+- 2026-07-28 · Bridge Execution Integrity A1 · `3482 → 3518` (+36): canonical PACKETS registry aliasing, read-only schema preflight, live-schema metadata decoding, deterministic mission revision/hash integrity, code-fence-safe mission normalization, fail-closed incomplete evidence, canonical/legacy alias lifecycle cleanup with genuine Sessions coexistence, hydration evidence, public tool registration, and compatibility regression coverage. Measured 3518 passed, 0 failed.

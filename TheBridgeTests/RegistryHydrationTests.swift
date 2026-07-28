@@ -23,12 +23,14 @@ private actor HydrationGateway: RegistryNotionGateway {
     var pages: [String: NotionRow] = [:]
     var inaccessible: Set<String> = []
     var failNetwork = false
+    var failMarkdown = false
     private(set) var pageCalls = 0
     private(set) var markdownCalls = 0
 
     func put(_ r: NotionRow) { pages[CachedRow.normalize(r.id)] = r }
     func setInaccessible(_ ids: [String]) { inaccessible = Set(ids.map { CachedRow.normalize($0) }) }
     func setFail(_ v: Bool) { failNetwork = v }
+    func setFailMarkdown(_ v: Bool) { failMarkdown = v }
 
     func schema(dataSourceId: String, workspace: String?) async throws -> DataSourceSchema { DataSourceSchema(columnsByName: [:]) }
     func query(dataSourceId: String, workspace: String?, pageSize: Int, startCursor: String?) async throws -> (rows: [NotionRow], nextCursor: String?) { ([], nil) }
@@ -45,7 +47,7 @@ private actor HydrationGateway: RegistryNotionGateway {
     func archive(pageId: String, workspace: String?) async throws {}
     func markdown(pageId: String, workspace: String?) async throws -> String {
         markdownCalls += 1
-        if failNetwork { throw Err.offline }
+        if failNetwork || failMarkdown { throw Err.offline }
         return "# packet body \(pageId)"
     }
     func writeMarkdown(pageId: String, workspace: String?, markdown: String) async throws {
@@ -61,6 +63,8 @@ private func packetEntity(hasBody: Bool = true) -> RegistryEntity {
             RegistryProperty(key: "title", notionName: "Packet Name", notionPropertyId: "p_title", type: "title", role: .title),
             RegistryProperty(key: "status", notionName: "Status", notionPropertyId: "p_status", type: "status", role: .status),
             RegistryProperty(key: "executionClass", notionName: "Execution Class", notionPropertyId: "p_xc", type: "select"),
+            RegistryProperty(key: "missionRevision", notionName: "Mission Revision", notionPropertyId: "p_rev", type: "number"),
+            RegistryProperty(key: "missionHash", notionName: "Mission Hash", notionPropertyId: "p_hash", type: "rich_text"),
             RegistryProperty(key: "project", notionName: "PROJECT", notionPropertyId: "p_proj", type: "relation", role: .relation),
             RegistryProperty(key: "skills", notionName: "SKILLS", notionPropertyId: "p_skills", type: "relation", role: .relation),
             RegistryProperty(key: "blockedBy", notionName: "Blocked by", notionPropertyId: "p_bb", type: "relation", role: .relation),
@@ -71,9 +75,11 @@ private func packetEntity(hasBody: Bool = true) -> RegistryEntity {
 }
 
 private func packetRow(id: String, title: String, project: [String] = [], skills: [String] = [],
-                       blockedBy: [String] = [], edited: String = "2026-06-20T10:00:00.000Z") -> NotionRow {
+                       blockedBy: [String] = [], missionRevision: Int? = nil,
+                       missionHash: String? = nil,
+                       edited: String = "2026-06-20T10:00:00.000Z") -> NotionRow {
     func rel(_ pid: String, _ ids: [String]) -> NotionCell { NotionCell(id: pid, type: "relation", value: .array(ids.map { .string($0) })) }
-    return NotionRow(id: CachedRow.normalize(id), url: "https://n/\(id)", lastEditedTime: edited, cells: [
+    var cells: [String: NotionCell] = [
         "Packet Name": NotionCell(id: "p_title", type: "title", value: .string(title)),
         "Status": NotionCell(id: "p_status", type: "status", value: .string("QUEUE")),
         "Execution Class": NotionCell(id: "p_xc", type: "select", value: .string("AUTO")),
@@ -82,7 +88,16 @@ private func packetRow(id: String, title: String, project: [String] = [], skills
         "Blocked by": rel("p_bb", blockedBy),
         "Blocking": rel("p_bl", []),
         "EVENT": rel("p_evt", []),
-    ])
+    ]
+    if let missionRevision {
+        cells["Mission Revision"] = NotionCell(id: "p_rev", type: "number", value: .int(missionRevision))
+    }
+    if let missionHash {
+        cells["Mission Hash"] = NotionCell(id: "p_hash", type: "rich_text", value: .string(missionHash))
+    }
+    return NotionRow(
+        id: CachedRow.normalize(id), url: "https://n/\(id)",
+        lastEditedTime: edited, cells: cells)
 }
 
 private func targetRow(id: String, title: String, status: String, version: String? = nil, extraRelation: String? = nil) -> NotionRow {
@@ -152,6 +167,60 @@ func runRegistryHydrationTests() async {
             let env = try await RegistryReader(gateway: gw, cache: RegistryRowCache()).hydrate(entity: packetEntity(), pageId: pktID)
             try expect(env.relations["project"]?.isEmpty ?? true, "missing project omitted (no guessed row)")
             try expect(env.warnings.count == 1 && env.warnings[0].contains(projID), "exactly one warning naming the missing id")
+        }
+    }
+
+    await test("Hydrate/mission: inaccessible relation retains raw identity and fails closed") {
+        try await withTempHomeHydrate {
+            let gw = HydrationGateway()
+            let body = "# packet body \(pktID)"
+            let canonical = PacketMissionIntegrity.canonical(
+                title: "P",
+                properties: ["executionClass": "AUTO"],
+                relations: [
+                    "project": [projID], "skills": [],
+                    "blockedBy": [], "blocking": [],
+                ],
+                body: body)
+            let hash = PacketMissionIntegrity.hash(canonical: canonical)
+            await gw.put(packetRow(
+                id: pktID, title: "P", project: [projID],
+                missionRevision: 1, missionHash: hash))
+            // The relation remains on the primary row, but the target is absent.
+            let env = try await RegistryReader(
+                gateway: gw, cache: RegistryRowCache()).hydrate(
+                    entity: packetEntity(), pageId: pktID)
+            guard case .object(let evidence)? = env.missionIntegrity else {
+                throw TestError.assertion("mission evidence missing")
+            }
+            try expect(evidence["canonicalHash"] == .string(hash), "raw relation id participates in canonical hash")
+            try expect(evidence["evidenceComplete"] == .bool(false), "missing relation marks evidence incomplete")
+            try expect(evidence["classification"] == .string("HASH_MISMATCH"), "incomplete evidence cannot be consistent")
+            try expect(env.warnings.count == 1 && env.warnings[0].contains(projID), "missing target is named")
+        }
+    }
+
+    await test("Hydrate/mission: unavailable body cannot report consistent") {
+        try await withTempHomeHydrate {
+            let gw = HydrationGateway()
+            let canonical = PacketMissionIntegrity.canonical(
+                title: "P", properties: ["executionClass": "AUTO"],
+                relations: ["project": [], "skills": [], "blockedBy": [], "blocking": []],
+                body: "")
+            let hash = PacketMissionIntegrity.hash(canonical: canonical)
+            await gw.put(packetRow(
+                id: pktID, title: "P", missionRevision: 1, missionHash: hash))
+            await gw.setFailMarkdown(true)
+            let env = try await RegistryReader(
+                gateway: gw, cache: RegistryRowCache()).hydrate(
+                    entity: packetEntity(), pageId: pktID)
+            guard case .object(let evidence)? = env.missionIntegrity else {
+                throw TestError.assertion("mission evidence missing")
+            }
+            try expect(evidence["canonicalHash"] == .string(hash), "hash would otherwise match empty body")
+            try expect(evidence["evidenceComplete"] == .bool(false))
+            try expect(evidence["classification"] == .string("HASH_MISMATCH"))
+            try expect(env.warnings.contains { $0.contains("primary body") }, "body failure warned")
         }
     }
 

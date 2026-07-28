@@ -459,7 +459,7 @@ public enum BridgeConstants {
     ///   207 + 1 = 208.
     /// Closeout-A Views write (2026-07-20): +2
     ///   (notion_view_create + notion_view_update; notion family). 209 + 2 = 211.
-    public static let staticFeatureModuleToolCount = 211
+    public static let staticFeatureModuleToolCount = 212
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

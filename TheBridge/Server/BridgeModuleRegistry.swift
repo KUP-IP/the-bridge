@@ -74,7 +74,7 @@ public enum BridgeModuleRegistry {
         await DoctrineSyncModule.register(on: router)      // W1 broker: request-tier doctrine-core writer (1 tool)
         await ShortcutsModule.register(on: router)
         await MemoryModule.register(on: router)
-        await RegistryModule.register(on: router)          // Data-Source Registry: generic CRUD + add/remove_entity + introspect + possess + hydrate + find (12 tools)
+        await RegistryModule.register(on: router)          // Data-Source Registry: generic CRUD + hydration + read-only packet preflight (14 tools)
         await VoiceMemoModule.register(on: router)       // Voice Memos curator + review/triage/settings surface (12 tools)
         await OllamaModule.register(on: router)          // Local Ollama: ollama_health + ollama_list_models (2 tools)
         await BridgeAutomationModule.register(on: router) // FB-AUTOMATION: bridge_settings_navigate

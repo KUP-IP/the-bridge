@@ -209,43 +209,27 @@ public struct RegistryConfig: Codable, Sendable, Equatable {
         self.entities = try c.decodeIfPresent([RegistryEntity].self, forKey: .entities) ?? []
     }
 
-    /// Entity lookup by key.
+    /// Entity lookup by key. `packet` is canonical; `session` remains a
+    /// compatibility spelling only when the configured entity satisfies the
+    /// PACKETS contract. Both spellings return key `packet`, so cache and write
+    /// paths cannot fork. A genuine Sessions entity still resolves normally.
     public func entity(_ key: String) -> RegistryEntity? {
-        if let direct = entities.first(where: { $0.key == key }) { return direct }
-
-        // PACKETS was historically registered as `session` on some installs,
-        // while packet contracts and registry_hydrate call it `packet`.
-        // Prefer `packet`; preserve `session` as a compatibility alias only
-        // when the entity's display name proves it is the PACKETS source.
-        if key == "packet",
-           let legacy = entities.first(where: {
-               $0.key == "session" && $0.displayName.lowercased().contains("packet")
-           }) {
-            return RegistryEntity(
-                key: "packet",
-                displayName: legacy.displayName,
-                dataSourceId: legacy.dataSourceId,
-                workspace: legacy.workspace,
-                properties: legacy.properties,
-                cacheTTLSeconds: legacy.cacheTTLSeconds,
-                hasBody: legacy.hasBody
-            )
+        if key == "packet" {
+            return PacketRegistryContract.preferredStoredEntity(in: self)
+                .map(PacketRegistryContract.canonicalized)
         }
-        if key == "session",
-           let canonical = entities.first(where: {
-               $0.key == "packet" && $0.displayName.lowercased().contains("packet")
-           }) {
-            return RegistryEntity(
-                key: "session",
-                displayName: canonical.displayName,
-                dataSourceId: canonical.dataSourceId,
-                workspace: canonical.workspace,
-                properties: canonical.properties,
-                cacheTTLSeconds: canonical.cacheTTLSeconds,
-                hasBody: canonical.hasBody
-            )
+        if key == "session" {
+            if let direct = entities.first(where: { $0.key == "session" }) {
+                if PacketRegistryContract.isPacketEntity(direct),
+                   let packet = PacketRegistryContract.preferredStoredEntity(in: self) {
+                    return PacketRegistryContract.canonicalized(packet)
+                }
+                return direct
+            }
+            return PacketRegistryContract.preferredStoredEntity(in: self)
+                .map(PacketRegistryContract.canonicalized)
         }
-        return nil
+        return entities.first(where: { $0.key == key })
     }
 
     /// Upsert an entity by key (replace-in-place or append).
