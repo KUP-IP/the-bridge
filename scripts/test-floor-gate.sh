@@ -9,7 +9,18 @@
 # the floor OR any test fails.
 #
 # Full append-only FLOOR provenance: scripts/test-floor-gate-history.md
-FLOOR="${BRIDGE_TEST_FLOOR:-3556}"
+# 2026-08-06: 3556 → 3602 (+46) — Mail inbox management (mail_mailboxes /
+#   mail_triage / mail_move / mail_archive / mail_mark / mail_trash + identity
+#   harden + MailTriageSignals hermetic coverage). Measured green count after
+#   .build/debug/TheBridgeTests on feat/mail-inbox-management.
+# 2026-08-06: 3602 → 3605 (+3) — Red Team harden: silence→needsReview,
+#   batch ARCHIVE confirm, mutate-vs-verify receipts + account required.
+#   Measured green count after .build/debug/TheBridgeTests on
+#   feat/mail-inbox-management.
+# 2026-08-06: 3605 → 3613 (+8) — Red Team rework: drop noreply archiveHints,
+#   batch archive/move force Request+neverAutoApprove, Archive↔All Mail
+#   verify, succeeded=verified-only. Measured 3613 passed, 0 failed.
+FLOOR="${BRIDGE_TEST_FLOOR:-3613}"
 
 echo "🧪 test-floor-gate: building debug test executable + running suite (floor=${FLOOR})..."
 swift build -c debug --product TheBridgeTests

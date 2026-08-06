@@ -684,13 +684,18 @@ public actor ToolRouter {
         // Calendar–Registry private-smoke hatch: with sync env + AUTO_APPROVE=1,
         // downgrade Request→Notify for the attended automation window only.
         let registeredTier: SecurityTier
-        let neverAutoApprove: Bool
+        var neverAutoApprove: Bool
         if toolName == CalendarRegistryModule.toolName && CalendarRegistryFeature.autoApproveEnabled {
             registeredTier = .notify
             neverAutoApprove = false
         } else {
             registeredTier = tool.tier
             neverAutoApprove = tool.neverAutoApprove
+        }
+        // Mail organize Option A: batch (>1 id) archive/move forces human modal
+        // even though the tool stays registered as .notify for single-id UX.
+        if MailModule.forcesBatchHumanApproval(toolName: toolName, arguments: arguments) {
+            neverAutoApprove = true
         }
         let effectiveTier = ToolRouter.resolveEffectiveTier(
             toolName: toolName,
