@@ -144,6 +144,34 @@ public enum ToolSkillBindingRegistry {
             reason: "Email drafting belongs to relationship routing even though it is unsent."
         ),
         ToolSkillBinding(
+            toolName: "mail_move",
+            governingSkills: [
+                RoutingGovernanceSkill(slug: "mac-keepr", role: "Mail mailbox relocate mechanics"),
+            ],
+            reason: "Mailbox moves are local Mail organize actions under Mac tooling."
+        ),
+        ToolSkillBinding(
+            toolName: "mail_archive",
+            governingSkills: [
+                RoutingGovernanceSkill(slug: "mac-keepr", role: "Mail archive mechanics"),
+            ],
+            reason: "Archive is the preferred reversible Mail cleanup path."
+        ),
+        ToolSkillBinding(
+            toolName: "mail_mark",
+            governingSkills: [
+                RoutingGovernanceSkill(slug: "mac-keepr", role: "Mail status flag mechanics"),
+            ],
+            reason: "Read/flag toggles are reversible Mail state under Mac tooling."
+        ),
+        ToolSkillBinding(
+            toolName: "mail_trash",
+            governingSkills: [
+                RoutingGovernanceSkill(slug: "mac-keepr", role: "Mail trash mechanics"),
+            ],
+            reason: "Trash is a guarded Mail remove path; prefer archive for reversible cleanup."
+        ),
+        ToolSkillBinding(
             toolName: "calendar_create",
             governingSkills: [
                 RoutingGovernanceSkill(slug: "time-keepr", role: "scheduling intent and availability"),

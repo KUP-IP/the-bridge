@@ -471,7 +471,10 @@ public enum BridgeConstants {
     /// C0 runtime worktree ownership (2026-07-29): +2 tools
     ///   (worktree_claim + worktree_release; existing dev family). C0 is
     ///   default-ON only after opaque execution paths fail closed.
-    public static let staticFeatureModuleToolCount = 217
+    /// Mail inbox management (2026-08-06): +6 tools on existing mail family
+    ///   (mail_mailboxes, mail_triage, mail_move, mail_archive, mail_mark,
+    ///   mail_trash). 217 + 6 = 223.
+    public static let staticFeatureModuleToolCount = 223
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

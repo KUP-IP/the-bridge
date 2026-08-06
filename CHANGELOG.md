@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — Mail inbox management
+
+- **Mail organize surface** — Extends the Apple Mail family with identity-safe
+  inbox management: `mail_mailboxes`, `mail_triage` (advisory preserve /
+  candidateArchive / needsReview signals), `mail_move`, `mail_archive`,
+  `mail_mark`, and guarded `mail_trash` (`confirm:'DELETE'`, neverAutoApprove).
+  Mutations require Mail AppleScript `messageIds` (batch max 25), `account`,
+  and return `mutated` vs `verified`/`succeeded` receipts (`succeeded` =
+  verify-confirmed only). Single-id archive/move stays Notify-tier; batch
+  (>1 id) forces Request + neverAutoApprove (human modal) plus
+  `confirm:'ARCHIVE'|'MOVE'`. Triage never archives from silence or from
+  noreply@ alone; Archive verify accepts Gmail `All Mail` alias.
+  `planOnly`/`dryRun` is plan-only. Prefer archive over trash; empty-trash
+  out of scope. staticFeatureModuleToolCount 217 → 223.
+
 ## v4.0.2 (build 91) — routing-custody land + freshness renewal — 2026-08-03
 
 - **Land identity** — Monotonic main build after routing-custody WU0–WU2 plus

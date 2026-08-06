@@ -210,16 +210,22 @@ public enum ToolAnnotationCatalog {
         "skills_exposure_status": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
         "skills_exposure_reconcile": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "skills_exposure_denylist": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
-        // v3.7·H (PKT-961): Apple Mail family. list/read/search are read-only
-        // (.open → requiresConfirmation:false); draft is non-destructive but
-        // writing (.notify → creates an UNSENT draft, requiresConfirmation:false);
-        // send is the GUARDED tool (.request → requiresConfirmation:true, mirrors
-        // tier==.request). All openWorld (Mail.app is an external surface).
+        // v3.7·H (PKT-961) + inbox management harden: Apple Mail family.
+        // list/read/search/mailboxes/triage → read-only (.open).
+        // draft/mark → .notify; move/archive → .notify + handler batch confirm MOVE/ARCHIVE.
+        // send → .request + confirm SEND; trash → .request + confirm DELETE + neverAutoApprove.
+        // All openWorld (Mail.app is an external surface).
+        "mail_archive": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "mail_draft": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "mail_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "mail_mailboxes": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
+        "mail_mark": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
+        "mail_move": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "mail_read": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         "mail_search": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "mail_send": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: true),
+        "mail_trash": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: true, openWorld: true),
+        "mail_triage": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         // Sprint A · mcp-builder #2: manage_skill split into 5 primitives.
         // The 11-action polymorphism is preserved as a one-cycle alias.
         "skill_create": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
