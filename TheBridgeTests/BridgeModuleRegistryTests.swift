@@ -44,10 +44,11 @@ func runBridgeModuleRegistryTests() async {
                    "duplicate registrations: \(Dictionary(grouping: names, by: { $0 }).filter { $0.value.count > 1 }.keys.sorted())")
     }
 
-    await test("C0 claim and release tools are in the canonical static surface") {
+    await test("C0 ownership and governed Node tools are in the canonical static surface") {
         let enabled = Set(await (buildRouter()).allRegistrations().map(\.name))
         try expect(enabled.contains("worktree_claim"))
         try expect(enabled.contains("worktree_release"))
+        try expect(enabled.contains("node_test"))
         try expect(
             enabled.count == BridgeConstants.staticFeatureModuleToolCount,
             "enforced C0 surface must match the canonical count"

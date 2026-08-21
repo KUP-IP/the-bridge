@@ -63,6 +63,7 @@ public enum BridgeModuleRegistry {
         await GitModule.register(on: router)
         if worktreeOwnershipEnabled {
             await WorktreeOwnershipModule.register(on: router)
+            await NodeTestModule.register(on: router)       // U2: owner-bound foreground Node test execution
         }
         await CodeEditModule.register(on: router)
         await SpotlightModule.register(on: router)

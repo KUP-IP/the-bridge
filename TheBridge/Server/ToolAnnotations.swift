@@ -371,6 +371,7 @@ public enum ToolAnnotationCatalog {
         "session_clear": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "session_info": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "shell_exec": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: true, openWorld: true),
+        "node_test": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: true, openWorld: false),
         // Tool-Dev (PRJCT-2754): detached background execution (`bgprocess` family).
         // bg_run launches an arbitrary detached command — same destructive posture
         // as shell_exec (not read-only, can do anything, not idempotent since each

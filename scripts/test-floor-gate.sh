@@ -74,7 +74,11 @@
 # 2026-08-21: 3763 → 3767 (+4) — Cursor caret-origin ghost, ChatGPT.app
 #   Codex Chromium hint replace, Chrome keyDownAnsiA. Measured 3767
 #   passed, 0 failed on feat/v405-local-insert-ui.
-FLOOR="${BRIDGE_TEST_FLOOR:-3767}"
+# 2026-08-21: 3767 → 3775 (+8) — governed node_test: owner-bound
+#   trusted node:test imports, fixed permissions, bounded output/timeout,
+#   and post-run identity revalidation. Measured 3775 passed, 0 failed
+#   on codex/u2-governed-node-test-v2.
+FLOOR="${BRIDGE_TEST_FLOOR:-3775}"
 
 echo "🧪 test-floor-gate: building debug test executable + running suite (floor=${FLOOR})..."
 swift build -c debug --product TheBridgeTests

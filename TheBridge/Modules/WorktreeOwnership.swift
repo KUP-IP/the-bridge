@@ -1070,7 +1070,7 @@ public actor WorktreeOwnershipStore {
 
 public enum WorktreeOwnershipGuard {
     private static let directMutationTools: Set<String> = [
-        "git_apply_patch", "git_create_branch",
+        "git_apply_patch", "git_create_branch", "node_test",
         "file_edit", "file_write", "file_append", "file_move", "file_rename",
         "file_copy", "dir_create", "file_zip", "file_unzip", "run_script"
     ]
@@ -1257,6 +1257,8 @@ public enum WorktreeOwnershipGuard {
             return (compact([string(arguments["archivePath"])]), false)
         case "file_unzip":
             return (compact([string(arguments["destinationPath"])]), false)
+        case "node_test":
+            return (compact([string(arguments["workingDir"])]), true)
         default:
             return ([], false)
         }
@@ -1340,6 +1342,8 @@ public enum WorktreeOwnershipGuard {
             } else {
                 rawTargets = [workingDirectory]
             }
+        case "node_test":
+            rawTargets = compact([string(object["workingDir"])])
         case "run_script":
             rawTargets = []
         default:

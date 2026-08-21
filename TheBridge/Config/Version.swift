@@ -481,7 +481,9 @@ public enum BridgeConstants {
     /// Mail inbox management (2026-08-06): +6 tools on existing mail family
     ///   (mail_mailboxes, mail_triage, mail_move, mail_archive, mail_mark,
     ///   mail_trash). 217 + 6 = 223.
-    public static let staticFeatureModuleToolCount = 223
+    /// Governed Node tests (2026-08-21): +1 tool on existing dev family
+    ///   (node_test). 223 + 1 = 224.
+    public static let staticFeatureModuleToolCount = 224
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

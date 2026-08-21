@@ -669,6 +669,7 @@ await test("AuditEntry is Codable (JSON round-trip)") {
 // SKIPPED: checkAll() hangs in CLI — NSAppleScript probes need AppKit run loop
 // await runPermissionManagerTests()
 await runShellModuleTests()
+await runNodeTestModuleTests() // U2: owner-bound foreground Node test runner
 await runBgProcessModuleTests()   // Tool-Dev (PRJCT-2754): bg_run/bg_poll/bg_kill detached background execution (registration/tier/annotation + LIVE run→poll→exit round-trip + bg_kill SIGTERM)
 await runBgProcessRuntimeTests()  // v4 audit #3: BgProcessRuntime actor — kill cascade SIGTERM→SIGKILL, reconcileOrphans (dead→unknown / live-reattach / TTL sweep), finalizeExit signaled-not-killed, concurrency-safe start
 await runFileModuleTests()

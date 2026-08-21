@@ -2699,11 +2699,12 @@ func runWorktreeOwnershipTests() async {
         await GitModule.registerWave2(on: router)
         await GitModule.registerWave3(on: router, runtime: GitRuntime.shared)
         await WorktreeOwnershipModule.register(on: router)
+        await NodeTestModule.register(on: router)
         let registrations = await router.allRegistrations()
         let guarded = Set([
             "shell_exec", "run_script", "bg_run", "worktree_command_run", "file_edit", "file_write", "file_append",
             "file_move", "file_rename", "file_copy", "dir_create", "file_zip",
-            "file_unzip", "git_apply_patch", "git_create_branch"
+            "file_unzip", "git_apply_patch", "git_create_branch", "node_test"
         ])
         let byName = Dictionary(uniqueKeysWithValues: registrations.map { ($0.name, $0) })
         for name in guarded {
@@ -2724,6 +2725,6 @@ func runWorktreeOwnershipTests() async {
         try expect(claimAnnotation?.idempotentHint == true)
         try expect(releaseAnnotation?.idempotentHint == false)
         try expect(commandAnnotation?.requiresConfirmation == true)
-        try expect(BridgeConstants.staticFeatureModuleToolCount == 223)
+        try expect(BridgeConstants.staticFeatureModuleToolCount == 224)
     }
 }
