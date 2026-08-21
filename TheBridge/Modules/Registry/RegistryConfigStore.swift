@@ -147,9 +147,16 @@ public actor RegistryConfigStore {
     @discardableResult
     public func removeEntity(key: String) async throws -> RegistryConfig {
         var config = try load()
+        let removedKeys = PacketRegistryContract.removalKeys(forRequestedKey: key, in: config)
         guard config.removeEntity(key: key) else { return config }   // not present — no-op
         try save(config)
-        await RegistryRowCache.shared.evictAll(entity: key)
+        for removedKey in removedKeys {
+            await RegistryRowCache.shared.evictAll(entity: removedKey)
+        }
+        if removedKeys.contains("packet") || removedKeys.contains("session") {
+            await RegistryRowCache.shared.evictAll(entity: "packet")
+            await RegistryRowCache.shared.evictAll(entity: "session")
+        }
         return config
     }
 }

@@ -232,14 +232,41 @@ public enum RegistryModule {
     public static func makeEntities() -> ToolRegistration {
         ToolRegistration(
             name: "registry_entities", module: moduleName, tier: .open,
-            description: "List the configured data-source registry entities (entity → Notion data source + property map), including per-property binding status. Read-only; reads local config.",
-            inputSchema: .object(["type": .string("object"), "properties": .object([:])]),
-            handler: { _ in
+            description: "List the configured data-source registry entities (entity → Notion data source + property map), including per-property binding status. Read-only. Pass includePacketPreflight:true to also read the live PACKETS schema and report canonical-binding/schema drift without persisting or repairing anything.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "includePacketPreflight": .object([
+                        "type": .string("boolean"),
+                        "description": .string("Optional. Read the live PACKETS schema and include the read-only canonical identity/execution-schema preflight report. Never mutates registry config, cache, or Notion."),
+                    ]),
+                ]),
+            ]),
+            handler: { args in
                 let config = await loadConfig()
-                return .object([
+                var result: [String: Value] = [
                     "schemaVersion": .int(config.schemaVersion),
                     "entities": .array(config.entities.map { entityValue($0) }),
-                ])
+                ]
+                if case .object(let object) = args,
+                   case .bool(true)? = object["includePacketPreflight"] {
+                    guard let packet = PacketRegistryContract.preferredStoredEntity(in: config) else {
+                        result["packetPreflight"] = PacketRegistryPreflight.evaluate(
+                            config: config,
+                            schema: DataSourceSchema(columnsByName: [:])
+                        ).value
+                        return .object(result)
+                    }
+                    let schema = try await gateway().schema(
+                        dataSourceId: packet.dataSourceId,
+                        workspace: packet.workspace
+                    )
+                    result["packetPreflight"] = PacketRegistryPreflight.evaluate(
+                        config: config,
+                        schema: schema
+                    ).value
+                }
+                return .object(result)
             })
     }
 
@@ -291,8 +318,9 @@ public enum RegistryModule {
                     dataSourceId: dsId, workspace: string(a, "workspace"),
                     properties: props, cacheTTLSeconds: ttl, hasBody: hasBody)
                 // Atomic upsert on the shared actor (serialized).
-                _ = try await configStore().upsertEntity(entity)
-                return .object(["added": .bool(true), "entity": entityValue(entity)])
+                let saved = try await configStore().upsertEntity(entity)
+                let persisted = saved.entity(key) ?? entity
+                return .object(["added": .bool(true), "entity": entityValue(persisted)])
             })
     }
 

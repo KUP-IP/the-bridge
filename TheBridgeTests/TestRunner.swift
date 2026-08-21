@@ -675,6 +675,7 @@ await runFileModuleTests()
 await runSessionModuleTests()
 await runSessionPersistenceTests()   // ITEM [session]: MCP session durability across restart/install (persist + clean-shutdown marker + resumable reconnect)
 await runRegistryConfigTests()       // Data-Source Registry W1: config model + store (Skills = entity #1, bind-by-property-id)
+await runPacketRegistryPreflightTests() // A1: canonical PACKETS identity + read-only 34-column schema preflight
 await runRegistryRowCacheTests()     // Data-Source Registry W1: generalized per-entity read-through row cache (stale-while-revalidate + offline)
 await runRegistryPropertyCodecTests() // Data-Source Registry W2: Notion property codec (typed Value ↔ Notion JSON, decode/encode/isWritable)
 await runPageUpdateApplicationTests()  // issue #138: updatePage applied vs canonicalized vs rejected
