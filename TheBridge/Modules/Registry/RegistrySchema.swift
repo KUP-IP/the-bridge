@@ -18,7 +18,21 @@ public struct DataSourceSchema: Sendable, Equatable {
     public struct Column: Sendable, Equatable {
         public let id: String
         public let type: String
-        public init(id: String, type: String) { self.id = id; self.type = type }
+        /// Select/status option names retained from the live schema.
+        public let options: [String]
+        /// Relation target data-source id when this is a relation column.
+        public let relationDataSourceId: String?
+        public init(
+            id: String,
+            type: String,
+            options: [String] = [],
+            relationDataSourceId: String? = nil
+        ) {
+            self.id = id
+            self.type = type
+            self.options = options.sorted()
+            self.relationDataSourceId = relationDataSourceId
+        }
     }
 
     /// Keyed by Notion property display name.
@@ -29,6 +43,9 @@ public struct DataSourceSchema: Sendable, Equatable {
     }
 
     public func column(named name: String) -> Column? { columnsByName[name] }
+    public func column(withID id: String) -> (name: String, column: Column)? {
+        columnsByName.first { $0.value.id == id }.map { (name: $0.key, column: $0.value) }
+    }
     public var names: [String] { Array(columnsByName.keys).sorted() }
 }
 
@@ -120,7 +137,18 @@ public enum RegistryRowDecoder {
             guard let obj = raw as? [String: Any] else { continue }
             let id = (obj["id"] as? String) ?? ""
             let type = (obj["type"] as? String) ?? ""
-            cols[name] = DataSourceSchema.Column(id: id, type: type)
+            let typeConfig = obj[type] as? [String: Any]
+            let optionObjects = (typeConfig?["options"] as? [[String: Any]]) ?? []
+            let options = optionObjects.compactMap { $0["name"] as? String }
+            let relation = obj["relation"] as? [String: Any]
+            let relationTarget = (relation?["data_source_id"] as? String)
+                ?? (relation?["database_id"] as? String)
+            cols[name] = DataSourceSchema.Column(
+                id: id,
+                type: type,
+                options: options,
+                relationDataSourceId: relationTarget
+            )
         }
         return DataSourceSchema(columnsByName: cols)
     }

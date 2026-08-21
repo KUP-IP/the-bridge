@@ -50,7 +50,7 @@ func runRegistryConfigTests() async {
             hasBody: legacy.hasBody
         )
         let canonicalConfig = RegistryConfig(entities: [canonical])
-        try expect(canonicalConfig.entity("session")?.key == "session")
+        try expect(canonicalConfig.entity("session")?.key == "packet")
 
         var actualSession = legacy
         actualSession.displayName = "Sessions"
@@ -136,6 +136,22 @@ func runRegistryConfigTests() async {
         cfg.upsert(RegistryEntity(key: "contact", displayName: "Contacts",
                                   dataSourceId: "ds_c", properties: [], cacheTTLSeconds: 3600))
         try expect(cfg.entities.count == 2, "new key appended")
+    }
+
+    await test("Config.upsert: PACKETS session alias converges to one canonical persisted key") {
+        let legacy = RegistryEntity(
+            key: "session", displayName: "PACKETS", dataSourceId: "packets-ds",
+            properties: [RegistryProperty(key: "name", notionName: "Packet Name", type: "title")],
+            cacheTTLSeconds: 300, hasBody: true)
+        var cfg = RegistryConfig(entities: [legacy])
+        cfg.upsert(legacy)
+        try expect(cfg.entities.filter(PacketRegistryContract.isPacketEntity).count == 1)
+        try expect(cfg.entities.last?.key == "packet")
+        try expect(cfg.entity("session")?.key == "packet")
+
+        var legacyOnly = RegistryConfig(entities: [legacy])
+        try expect(legacyOnly.removeEntity(key: "packet"), "canonical request removes legacy persisted alias")
+        try expect(legacyOnly.entities.isEmpty)
     }
 
     // MARK: - Store

@@ -229,6 +229,28 @@ func runRegistryModuleTests() async {
         }
     }
 
+    await test("registry_entities packet preflight is opt-in and does not persist repairs") {
+        let fake = ModFakeGateway(schema: packetSchema())
+        try await withRegistryModuleEnv(fake) {
+            try await registerPacketEntity()
+            let storeURL = RegistryConfigStore.defaultURL()
+            let before = try Data(contentsOf: storeURL)
+
+            let out = try await RegistryModule.makeEntities().handler(.object([
+                "includePacketPreflight": .bool(true),
+            ]))
+            guard case .object(let preflight)? = obj(out)["packetPreflight"] else {
+                throw TestError.assertion("packetPreflight missing")
+            }
+            try expect(preflight["contractVersion"] == .string(PacketRegistryContract.version))
+            try expect(preflight["canonicalEntity"] == .string("packet"))
+            try expect(preflight["result"] == .string("DRIFT"), "three-column fixture must report the missing classified columns")
+
+            let after = try Data(contentsOf: storeURL)
+            try expect(after == before, "read-only preflight must not rewrite registry.json")
+        }
+    }
+
     await test("registry_introspect binds by name, persists, reports clean+fullyBound") {
         try await withRegistryModuleEnv(ModFakeGateway(schema: skillsSchema())) {
             let out = try await RegistryModule.makeIntrospect().handler(.object(["entity": .string("skill")]))

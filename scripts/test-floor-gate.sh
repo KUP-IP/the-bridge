@@ -74,7 +74,11 @@
 # 2026-08-21: 3763 → 3767 (+4) — Cursor caret-origin ghost, ChatGPT.app
 #   Codex Chromium hint replace, Chrome keyDownAnsiA. Measured 3767
 #   passed, 0 failed on feat/v405-local-insert-ui.
-FLOOR="${BRIDGE_TEST_FLOOR:-3767}"
+# 2026-08-21: 3767 → 3776 (+9) — canonical PACKETS identity, complete
+#   34-column read-only schema preflight, live-schema metadata retention, and
+#   config non-mutation proof. Measured 3776 passed, 0 failed on
+#   codex/a1-integrity-preflight-v2.
+FLOOR="${BRIDGE_TEST_FLOOR:-3776}"
 
 echo "🧪 test-floor-gate: building debug test executable + running suite (floor=${FLOOR})..."
 swift build -c debug --product TheBridgeTests
