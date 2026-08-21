@@ -390,7 +390,8 @@ public enum ThreadMessagesReceiptJournal {
         actionId: String,
         recipient: String,
         body: String,
-        person: ThreadLinkedPersonSnapshot
+        person: ThreadLinkedPersonSnapshot,
+        service: String?
     ) -> Bool {
         let intent = section(markdown, heading: intentHeading(actionId: actionId))
         let result = section(markdown, heading: resultHeading(actionId: actionId))
@@ -399,11 +400,44 @@ public enum ThreadMessagesReceiptJournal {
               let storedTarget = field("Target", in: source),
               let storedFingerprint = field("Approved body fingerprint", in: source),
               let storedEntity = field("Linked person entity", in: source),
-              let storedPersonId = field("Linked person ID", in: source) else { return false }
+              let storedPersonId = field("Linked person ID", in: source),
+              let storedService = field("Service", in: source),
+              let requestedService = MessagesService.parseStrict(service)?.rawValue else { return false }
         return ThreadMessagesIdentity.canonicalHandle(storedTarget) == ThreadMessagesIdentity.canonicalHandle(recipient)
             && storedFingerprint == fingerprint(body)
             && storedEntity == person.entity
             && storedPersonId.replacingOccurrences(of: "-", with: "").lowercased() == person.pageId
+            && storedService == requestedService
+    }
+
+    public static func resultMatchesExisting(
+        _ markdown: String,
+        actionId: String,
+        recipient: String,
+        body: String,
+        person: ThreadLinkedPersonSnapshot,
+        service: String?,
+        messageRowId: Int
+    ) -> Bool {
+        let result = section(markdown, heading: resultHeading(actionId: actionId))
+        guard !result.isEmpty,
+              let storedTarget = field("Target", in: result),
+              let storedFingerprint = field("Approved body fingerprint", in: result),
+              let storedEntity = field("Linked person entity", in: result),
+              let storedPersonId = field("Linked person ID", in: result),
+              let storedService = field("Service", in: result),
+              let storedRowId = field("Messages ROWID", in: result).flatMap(Int.init),
+              let requestedService = MessagesService.parseStrict(service)?.rawValue else { return false }
+        return ThreadMessagesIdentity.canonicalHandle(storedTarget) == ThreadMessagesIdentity.canonicalHandle(recipient)
+            && storedFingerprint == fingerprint(body)
+            && storedEntity == person.entity
+            && storedPersonId.replacingOccurrences(of: "-", with: "").lowercased() == person.pageId
+            && storedService == requestedService
+            && storedRowId == messageRowId
+    }
+
+    public static func resultLifecycleAfterFingerprint(_ markdown: String, actionId: String) -> String? {
+        field("Lifecycle after fingerprint", in: section(markdown, heading: resultHeading(actionId: actionId)))
     }
 
     public static func intentMarkdown(
@@ -430,6 +464,7 @@ public enum ThreadMessagesReceiptJournal {
         Linked person ID: \(person?.pageId ?? "")
         Target: \(singleLine(request.recipient))
         Channel: Messages
+        Service: \(singleLine(MessagesService.parseStrict(request.serviceOverride)?.rawValue ?? ""))
         Approved body fingerprint: \(fingerprint(request.body))
         Pre-send ROWID watermark: \(preSendWatermark)
         Lifecycle before fingerprint: \(snapshot.lifecycleFingerprint)
@@ -529,6 +564,12 @@ public enum ThreadMessagesReceiptEngine {
         guard let canonicalRecipient = ThreadMessagesIdentity.canonicalHandle(request.recipient) else {
             return blocked(request, "recipient must be one canonical email or E.164-style phone handle")
         }
+        guard let approvedService = MessagesService.parseStrict(request.serviceOverride) else {
+            return blocked(request, "THREAD M1 requires explicit service: 'iMessage' or 'SMS'")
+        }
+        if approvedService == .sms, canonicalRecipient.contains("@") {
+            return blocked(request, "THREAD M1 SMS requires a phone-number recipient")
+        }
 
         let initial: ThreadMessagesSnapshot
         do { initial = try await dependencies.readThread(request.threadPageId) }
@@ -566,7 +607,7 @@ public enum ThreadMessagesReceiptEngine {
         if record.stage == .complete {
             return resultFromRecord(record, request: request, outcome: .alreadyCompleted)
         }
-        if record.stage == .operatorReview || record.stage == .conflict {
+        if record.stage == .conflict {
             return .init(
                 outcome: .deliveryStateUnknown,
                 actionId: request.actionId,
@@ -579,6 +620,20 @@ public enum ThreadMessagesReceiptEngine {
                 service: record.service,
                 lifecycleUnchanged: record.lifecycleUnchanged,
                 error: record.lastError ?? "action requires operator review"
+            )
+        }
+
+        if record.stage == .claimed,
+           ThreadMessagesReceiptJournal.hasIntent(initial.markdown, actionId: request.actionId) {
+            record = await markReview(
+                record,
+                error: "THREAD Intent exists while the durable ledger is only claimed; refusing a duplicate Intent or possible resend",
+                dependencies: dependencies
+            )
+            return .init(
+                outcome: .deliveryStateUnknown,
+                actionId: request.actionId,
+                error: record.lastError
             )
         }
 
@@ -631,7 +686,8 @@ public enum ThreadMessagesReceiptEngine {
                         actionId: request.actionId,
                         recipient: request.recipient,
                         body: request.body,
-                        person: person
+                        person: person,
+                        service: request.serviceOverride
                       ) else { throw ThreadMessagesReceiptInternalError.readBackMissing }
                 record.preparedAt = preparedAt
                 record.preSendWatermark = watermark
@@ -653,12 +709,30 @@ public enum ThreadMessagesReceiptEngine {
 
         if record.stage == .localRecordVerified || record.stage == .resultPersisted {
             verification = verificationFromRecord(record)
-        } else if record.stage == .deliveryInvoking {
+            guard observedServiceMatches(verification!, approvedService: approvedService) else {
+                record = await markReview(
+                    record,
+                    error: "persisted local-record service does not match the explicitly approved service",
+                    dependencies: dependencies
+                )
+                return .init(outcome: .deliveryStateUnknown, actionId: request.actionId, error: record.lastError)
+            }
+        } else if record.stage == .deliveryInvoking || record.stage == .operatorReview {
             let reconciled = dependencies.reconcile(request.recipient, request.body, watermark, preparedAt)
             switch reconciled.status {
             case .verified:
+                guard observedServiceMatches(reconciled, approvedService: approvedService) else {
+                    record = await markReview(
+                        record,
+                        error: "reconciled local-record service does not match the explicitly approved service",
+                        dependencies: dependencies
+                    )
+                    return .init(outcome: .deliveryStateUnknown, actionId: request.actionId, error: record.lastError)
+                }
                 verification = reconciled
                 record = apply(reconciled, to: record)
+                record.service = approvedService.rawValue
+                record.lastError = nil
                 record.stage = .localRecordVerified
                 do { record = try await dependencies.store.save(record) }
                 catch { return blocked(request, "could not persist recovered local record evidence: \(error.localizedDescription)") }
@@ -707,9 +781,23 @@ public enum ThreadMessagesReceiptEngine {
             deliveryInvoked = attempt.invoked
             switch attempt.verification.status {
             case .verified:
+                guard observedServiceMatches(attempt.verification, approvedService: approvedService) else {
+                    record = await markReview(
+                        record,
+                        error: "delivery invoked but the observed local-record service did not match the explicitly approved service",
+                        dependencies: dependencies
+                    )
+                    return .init(
+                        outcome: .deliveryStateUnknown,
+                        actionId: request.actionId,
+                        deliveryInvoked: attempt.invoked,
+                        error: record.lastError
+                    )
+                }
                 verification = attempt.verification
                 record = apply(attempt.verification, to: record)
-                record.service = attempt.service ?? attempt.verification.service
+                record.service = approvedService.rawValue
+                record.lastError = nil
                 record.stage = .localRecordVerified
                 do { record = try await dependencies.store.save(record) }
                 catch {
@@ -778,20 +866,42 @@ public enum ThreadMessagesReceiptEngine {
 
         do {
             if record.stage != .resultPersisted {
-                try await dependencies.appendMarkdown(request.threadPageId, resultMarkdown)
-                let final = try await dependencies.readThread(request.threadPageId)
-                guard ThreadMessagesReceiptJournal.hasResult(final.markdown, actionId: request.actionId),
-                      ThreadMessagesReceiptJournal.requestMatchesExisting(
-                        final.markdown,
+                if let rowId = verification.messageRowId,
+                   ThreadMessagesReceiptJournal.hasResult(afterDelivery.markdown, actionId: request.actionId) {
+                    guard ThreadMessagesReceiptJournal.resultMatchesExisting(
+                        afterDelivery.markdown,
                         actionId: request.actionId,
                         recipient: request.recipient,
                         body: request.body,
-                        person: person
-                      ),
-                      ThreadMessagesReceiptJournal.resultRowId(final.markdown, actionId: request.actionId) == verification.messageRowId else {
-                    throw ThreadMessagesReceiptInternalError.readBackMissing
+                        person: person,
+                        service: request.serviceOverride,
+                        messageRowId: rowId
+                    ),
+                    ThreadMessagesReceiptJournal.resultLifecycleAfterFingerprint(
+                        afterDelivery.markdown,
+                        actionId: request.actionId
+                    ) == afterDelivery.lifecycleFingerprint else {
+                        throw ThreadMessagesReceiptInternalError.readBackMissing
+                    }
+                    record.lifecycleUnchanged = true
+                } else {
+                    try await dependencies.appendMarkdown(request.threadPageId, resultMarkdown)
+                    let final = try await dependencies.readThread(request.threadPageId)
+                    guard let rowId = verification.messageRowId,
+                          ThreadMessagesReceiptJournal.hasResult(final.markdown, actionId: request.actionId),
+                          ThreadMessagesReceiptJournal.resultMatchesExisting(
+                            final.markdown,
+                            actionId: request.actionId,
+                            recipient: request.recipient,
+                            body: request.body,
+                            person: person,
+                            service: request.serviceOverride,
+                            messageRowId: rowId
+                          ) else {
+                        throw ThreadMessagesReceiptInternalError.readBackMissing
+                    }
+                    record.lifecycleUnchanged = lifecycleUnchanged(initial, final)
                 }
-                record.lifecycleUnchanged = lifecycleUnchanged(initial, final)
                 record.stage = .resultPersisted
                 record = try await dependencies.store.save(record)
             }
@@ -836,6 +946,13 @@ public enum ThreadMessagesReceiptEngine {
             return "recipient is not an authorized phone or email on the THREAD-linked \(person.entity)"
         }
         return ""
+    }
+
+    private static func observedServiceMatches(
+        _ verification: MessagesDeliveryVerification,
+        approvedService: MessagesService
+    ) -> Bool {
+        verification.service == approvedService.rawValue
     }
 
     private static func validateSameAuthorization(

@@ -760,10 +760,10 @@ public enum MessagesModule {
             .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
-    /// One-to-one delivery primitive for ordinary messages_send and dormant
-    /// receipt-engine compatibility tests. The public tool handler contains every
-    /// THREAD-shaped request before this seam. It preserves the exact SEND token
-    /// guard and returns correlation evidence without mutating relationship state.
+    /// One-to-one delivery primitive for ordinary messages_send and the bounded
+    /// THREAD M1 receipt engine. It preserves the exact SEND token and explicit
+    /// service guards, invokes once with no fallback, and returns local-record
+    /// correlation evidence without mutating relationship state.
     public static func performOneToOneSend(
         recipient: String,
         body: String,
@@ -1302,7 +1302,7 @@ public enum MessagesModule {
             module: moduleName,
             tier: .request,
             neverAutoApprove: true,
-            description: "Send one explicitly selected iMessage or SMS after confirm:'SEND'. One-to-one requires service iMessage or SMS with no fallback. Bounded THREAD M1 sends require threadPageId, actionId, approvalBasis, exact recipient/body/service approval, durable receipts, and local verification. sent is dispatch success; chat.db matches are correlation-only. On-device approval is configurable (Settings → Security → Gates; default Always ask). Group, THREAD, remote, and job sends always prompt.",
+            description: "Send one exact iMessage or SMS after confirm:'SEND'. Require an explicit service; never fall back. Bounded THREAD M1 binds recipient/service/body, persists Intent/Result, and verifies one local outbound record—not provider delivery. Default is Always ask; remote, group, THREAD, and job sends always prompt.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -1321,10 +1321,10 @@ public enum MessagesModule {
             ]),
             metadata: ToolMetadata(
                 title: "Messages: Send",
-                whenToUse: ["sending an iMessage/SMS to a known phone or email — pass confirm:'SEND'",
-                            "sending to an existing group chat by chatIdentifier without creating separate 1:1 messages"],
-                whenNotToUse: ["recipient is a raw chatNNN group id; use chatIdentifier for existing chats or resolve via messages_participants",
-                               "you only have a contact name (resolve via contacts_resolve_handle first)"],
+                whenToUse: ["send to a known phone/email with confirm:'SEND'",
+                            "send to an existing group via chatIdentifier"],
+                whenNotToUse: ["raw chatNNN: resolve with messages_participants",
+                               "contact name only: use contacts_resolve_handle"],
                 relatedTools: ["messages_participants", "contacts_resolve_handle", "messages_chat"]
             ),
             handler: { arguments in

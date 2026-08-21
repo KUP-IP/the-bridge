@@ -241,30 +241,31 @@ func runMessagesModuleTests() async {
     }
 
 
-    await test("messages_send contains every THREAD transaction argument before ordinary validation") {
+    await test("partial THREAD transaction arguments fail before any M1 side-effect seam") {
         let keys = ["threadPageId", "actionId", "approvalBasis", "actor", "workspace"]
         for key in keys {
-            let result = try await router.dispatch(
-                toolName: "messages_send",
-                arguments: .object([key: .string("hostile-value")])
-            )
-            guard case .object(let object) = result else {
-                throw TestError.assertion("contained result must be an object for \(key)")
+            do {
+                _ = try await router.dispatch(
+                    toolName: "messages_send",
+                    arguments: .object([key: .string("hostile-value")])
+                )
+                throw TestError.assertion("partial THREAD argument unexpectedly executed for \(key)")
+            } catch is ToolRouterError {
+                // Required body/confirm/target validation fails before the M1 branch.
             }
-            try expect(object["code"] == .string("THREAD_MESSAGES_CONTAINED"), "\(key) must trigger stable containment code")
-            try expect(object["deliveryInvoked"] == .bool(false), "contained \(key) must not invoke delivery")
-            try expect(object["consequencePossible"] == .bool(false), "contained \(key) must have no consequence")
         }
     }
 
-    await test("THREAD containment guard is structurally before every M1 side-effect seam") {
+    await test("THREAD approval receipt guard is structurally before every M1 side-effect seam") {
         let testsURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let sourceURL = testsURL.deletingLastPathComponent()
             .appendingPathComponent("TheBridge/Modules/MessagesModule.swift")
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
-        guard let guardIndex = source.range(of: "\"code\": .string(\"THREAD_MESSAGES_CONTAINED\")")?.lowerBound else {
-            throw TestError.assertion("containment code missing")
+        guard let guardIndex = source.range(of: "approvalReceipt.validates(toolName: \"messages_send\", arguments: arguments)")?.lowerBound,
+              let branchIndex = source.range(of: "if case .string(let threadPageId)? = args[\"threadPageId\"]")?.lowerBound else {
+            throw TestError.assertion("M1 approval or branch guard missing")
         }
+        try expect(guardIndex < branchIndex, "exact-arguments approval must precede M1 routing")
         for seam in [
             "SQLiteThreadMessagesReceiptStore.live()",
             "toolName: \"notion_page_read\"",
@@ -274,27 +275,18 @@ func runMessagesModuleTests() async {
             guard let seamIndex = source.range(of: seam)?.lowerBound else {
                 throw TestError.assertion("expected M1 seam missing: \(seam)")
             }
-            try expect(guardIndex < seamIndex, "containment must precede \(seam)")
+            try expect(guardIndex < seamIndex, "exact approval must precede \(seam)")
         }
     }
 
-    await test("messages_send contains mixed THREAD arguments before receipt or ledger construction") {
-        let result = try await router.dispatch(
-            toolName: "messages_send",
-            arguments: .object([
-                "recipient": .string("+15551234567"),
-                "body": .string("must not send"),
-                "confirm": .string("SEND"),
-                "service": .string("iMessage"),
-                "threadPageId": .string("thread-page"),
-                "actionId": .string("action-1"),
-                "approvalBasis": .string("test")
-            ])
-        )
-        guard case .object(let object) = result else { throw TestError.assertion("expected containment object") }
-        try expect(object["code"] == .string("THREAD_MESSAGES_CONTAINED"))
-        try expect(object["providerDeliveryConfirmed"] == .bool(false))
-        try expect(object["correlatedLocalRecord"] == .bool(false))
+    await test("messages_send source exposes only the bounded M1 lane and internal journal context") {
+        let testsURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let sourceURL = testsURL.deletingLastPathComponent()
+            .appendingPathComponent("TheBridge/Modules/MessagesModule.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        try expect(!source.contains("THREAD_MESSAGES_CONTAINED"), "stale blanket containment remains in the active handler")
+        try expect(source.contains("Bounded THREAD M1"), "tool description must identify the narrow M1 lane")
+        try expect(source.contains("context: .localDefault"), "internal receipt append must not demand an impossible nested route receipt")
     }
 
     final class InvocationProbe: @unchecked Sendable {
