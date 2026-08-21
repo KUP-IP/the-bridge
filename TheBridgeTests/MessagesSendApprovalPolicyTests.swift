@@ -194,12 +194,17 @@ func runMessagesSendApprovalPolicyTests() async {
             await MessagesModule.register(on: router)
             let result = try await router.dispatch(
                 toolName: "messages_send",
-                arguments: .object(["threadPageId": .string("hostile")])
+                arguments: .object([
+                    "recipient": .string("+15551234567"),
+                    "body": .string("diagnostic-only invalid-service probe"),
+                    "confirm": .string("SEND"),
+                    "service": .string("auto")
+                ])
             )
             guard case .object(let object) = result else {
-                throw TestError.assertion("contained result must be an object")
+                throw TestError.assertion("invalid-service result must be an object")
             }
-            try expect(object["code"] == .string("THREAD_MESSAGES_CONTAINED"))
+            try expect(object["sent"] == .bool(false))
             try expect(object["approvalMode"] == .string("session"),
                        "diagnostics must surface the live approval mode")
         }

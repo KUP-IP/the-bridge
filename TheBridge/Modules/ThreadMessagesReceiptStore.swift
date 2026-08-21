@@ -32,7 +32,11 @@ public enum ThreadMessagesActionStage: String, Codable, Sendable, CaseIterable {
     fileprivate func permits(_ next: Self) -> Bool {
         if self == next { return true }
         if next == .operatorReview || next == .conflict { return true }
-        if self == .operatorReview || self == .conflict || self == .complete { return false }
+        // An operator-review record may advance only through independently
+        // reconciled local-record evidence. It cannot skip directly to a
+        // journal or terminal stage.
+        if self == .operatorReview { return next == .localRecordVerified }
+        if self == .conflict || self == .complete { return false }
         guard let current = rank, let target = next.rank else { return false }
         return target >= current
     }
@@ -232,7 +236,7 @@ public actor SQLiteThreadMessagesReceiptStore: ThreadMessagesReceiptStoring {
                 guard existing.manifestFingerprint == manifestFingerprint else {
                     throw ThreadMessagesReceiptStoreError.idempotencyConflict(idempotencyKey)
                 }
-                if existing.stage == .complete || existing.stage == .operatorReview || existing.stage == .conflict {
+                if existing.stage == .complete || existing.stage == .conflict {
                     try exec("COMMIT;")
                     return existing
                 }

@@ -122,7 +122,8 @@ private final class ThreadReceiptHarness: @unchecked Sendable {
 private func receiptRequest(
     actionId: String = "act-1",
     recipient: String = "+16055550123",
-    body: String = "Approved body"
+    body: String = "Approved body",
+    service: String? = "iMessage"
 ) -> ThreadMessagesReceiptRequest {
     .init(
         threadPageId: "thread-page",
@@ -131,6 +132,7 @@ private func receiptRequest(
         body: body,
         approvalBasis: "Fresh Bridge approval prompt",
         confirm: "SEND",
+        serviceOverride: service,
         approvalReceiptId: "approval-1",
         approvalArgumentsDigest: "digest-1",
         approvalPrincipal: "session-1",
@@ -354,6 +356,139 @@ func runThreadMessagesReceiptTests() async {
         try expect(harness.sendCount == 0)
     }
 
+    await test("missing explicit service blocks before THREAD read, Intent, claim, or send") {
+        let harness = try ThreadReceiptHarness()
+        let result = await ThreadMessagesReceiptEngine.execute(
+            request: receiptRequest(actionId: "missing-service-1", service: nil),
+            dependencies: harness.dependencies()
+        )
+        try expect(result.outcome == .blocked)
+        try expect(result.error?.contains("explicit service") == true)
+        try expect(harness.readCount == 0)
+        try expect(harness.appendCount == 0)
+        try expect(harness.sendCount == 0)
+    }
+
+    await test("observed local-record service mismatch fails closed after one invocation") {
+        let harness = try ThreadReceiptHarness()
+        harness.sendResult = .init(
+            invoked: true,
+            verification: .init(
+                status: .verified,
+                messageRowId: 42,
+                messageGuid: "msg-guid-42",
+                chatGuid: "chat-guid-2",
+                messageDate: Date(timeIntervalSince1970: 190),
+                service: "SMS",
+                verifiedAt: Date(timeIntervalSince1970: 200)
+            ),
+            service: "iMessage"
+        )
+        let result = await ThreadMessagesReceiptEngine.execute(
+            request: receiptRequest(actionId: "service-mismatch-1"),
+            dependencies: harness.dependencies()
+        )
+        try expect(result.outcome == .deliveryStateUnknown)
+        try expect(result.error?.contains("service") == true)
+        try expect(harness.sendCount == 1)
+        try expect(harness.appendCount == 1, "Result must not be written for mismatched service evidence")
+    }
+
+    await test("claimed ledger plus existing Intent blocks duplicate Intent and possible resend") {
+        let harness = try ThreadReceiptHarness()
+        let request = receiptRequest(actionId: "claimed-intent-1")
+        let snapshot = harness.snapshot(pageId: request.threadPageId)
+        guard let person = snapshot.linkedPerson,
+              let target = ThreadMessagesIdentity.canonicalHandle(request.recipient) else {
+            throw TestError.assertion("seed identity missing")
+        }
+        harness.markdown += ThreadMessagesReceiptJournal.intentMarkdown(
+            request: request,
+            snapshot: snapshot,
+            preparedAt: Date(timeIntervalSince1970: 180),
+            preSendWatermark: 40
+        )
+        let claimed = try await harness.store.claim(
+            idempotencyKey: ThreadMessagesReceiptJournal.actionKey(
+                threadPageId: request.threadPageId,
+                actionId: request.actionId
+            ),
+            manifestFingerprint: ThreadMessagesReceiptJournal.manifestFingerprint(
+                request: request,
+                person: person,
+                canonicalRecipient: target
+            ),
+            operationId: "seed-claimed-intent",
+            leaseOwner: "seed",
+            leaseToken: "seed-token",
+            leaseDuration: 60
+        )
+        _ = try await harness.store.release(claimed)
+
+        let result = await ThreadMessagesReceiptEngine.execute(
+            request: request,
+            dependencies: harness.dependencies()
+        )
+        try expect(result.outcome == .deliveryStateUnknown)
+        try expect(result.error?.contains("duplicate Intent") == true)
+        try expect(harness.appendCount == 0)
+        try expect(harness.sendCount == 0)
+    }
+
+    await test("operatorReview reconciles a matching existing Result without resend or duplicate append") {
+        let harness = try ThreadReceiptHarness()
+        let request = receiptRequest(actionId: "operator-recover-1")
+        harness.sendResult = .init(
+            invoked: true,
+            verification: .init(status: .notFound),
+            service: "iMessage"
+        )
+        let first = await ThreadMessagesReceiptEngine.execute(
+            request: request,
+            dependencies: harness.dependencies()
+        )
+        try expect(first.outcome == .deliveryStateUnknown)
+        try expect(harness.sendCount == 1)
+        try expect(harness.appendCount == 1)
+
+        let verification = MessagesDeliveryVerification(
+            status: .verified,
+            messageRowId: 41,
+            messageGuid: "msg-guid-41",
+            chatGuid: "chat-guid-1",
+            messageDate: Date(timeIntervalSince1970: 190),
+            service: "iMessage",
+            verifiedAt: Date(timeIntervalSince1970: 200)
+        )
+        harness.reconcileResult = verification
+        let after = harness.snapshot(pageId: request.threadPageId)
+        harness.markdown += ThreadMessagesReceiptJournal.resultMarkdown(
+            request: request,
+            snapshotAfter: after,
+            verification: verification,
+            service: "iMessage",
+            completedAt: Date(timeIntervalSince1970: 200),
+            lifecycleUnchanged: true,
+            recoveryNote: "Exact one-row operator-review reconciliation; no resend performed."
+        )
+
+        let second = await ThreadMessagesReceiptEngine.execute(
+            request: request,
+            dependencies: harness.dependencies()
+        )
+        try expect(second.outcome == .verified)
+        try expect(second.messageRowId == 41)
+        try expect(harness.sendCount == 1, "operatorReview recovery must never resend")
+        try expect(harness.appendCount == 1, "matching Result must be adopted without a duplicate append")
+        let stored = try await harness.store.get(
+            idempotencyKey: ThreadMessagesReceiptJournal.actionKey(
+                threadPageId: request.threadPageId,
+                actionId: request.actionId
+            )
+        )
+        try expect(stored?.stage == .complete)
+    }
+
     await test("Intent append failure blocks external delivery") {
         let harness = try ThreadReceiptHarness()
         harness.failAppendNumber = 1
@@ -435,7 +570,7 @@ func runThreadMessagesReceiptTests() async {
             messageGuid: "msg-101",
             chatGuid: "chat-101",
             messageDate: Date(timeIntervalSince1970: 190),
-            service: "SMS",
+            service: "iMessage",
             verifiedAt: Date(timeIntervalSince1970: 200)
         )
         let result = await ThreadMessagesReceiptEngine.execute(request: request, dependencies: harness.dependencies())

@@ -760,10 +760,10 @@ public enum MessagesModule {
             .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
-    /// One-to-one delivery primitive for ordinary messages_send and dormant
-    /// receipt-engine compatibility tests. The public tool handler contains every
-    /// THREAD-shaped request before this seam. It preserves the exact SEND token
-    /// guard and returns correlation evidence without mutating relationship state.
+    /// One-to-one delivery primitive for ordinary messages_send and the bounded
+    /// THREAD M1 receipt engine. It preserves the exact SEND token and explicit
+    /// service guards, invokes once with no fallback, and returns local-record
+    /// correlation evidence without mutating relationship state.
     public static func performOneToOneSend(
         recipient: String,
         body: String,
@@ -1302,7 +1302,7 @@ public enum MessagesModule {
             module: moduleName,
             tier: .request,
             neverAutoApprove: true,
-            description: "Send one explicitly selected iMessage or SMS after confirm:'SEND'. One-to-one requires service iMessage or SMS with no fallback. THREAD args return THREAD_MESSAGES_CONTAINED. sent is dispatch success; chat.db matches are correlation-only. On-device approval is configurable (Settings → Security → Gates; default Always ask). Group, THREAD, remote, and job sends always prompt.",
+            description: "Send one exact iMessage or SMS after confirm:'SEND'. Require an explicit service; never fall back. Bounded THREAD M1 binds recipient/service/body, persists Intent/Result, and verifies one local outbound record—not provider delivery. Default is Always ask; remote, group, THREAD, and job sends always prompt.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -1311,42 +1311,25 @@ public enum MessagesModule {
                     "body": .object(["type": .string("string"), "description": .string("Message body text")]),
                     "confirm": .object(["type": .string("string"), "description": .string("Must be exactly 'SEND' to proceed")]),
                     "service": .object(["type": .string("string"), "enum": .array([.string("iMessage"), .string("SMS")]), "description": .string("Required for ordinary one-to-one sends. Exact value only: 'iMessage' or 'SMS'. No auto-detection, RCS mapping, or fallback.")]),
-                    "threadPageId": .object(["type": .string("string"), "description": .string("Contained THREAD transaction argument. Any supplied value returns THREAD_MESSAGES_CONTAINED before side effects.")]),
-                    "actionId": .object(["type": .string("string"), "description": .string("Contained THREAD transaction argument. Any supplied value returns THREAD_MESSAGES_CONTAINED before side effects.")]),
-                    "approvalBasis": .object(["type": .string("string"), "description": .string("Contained THREAD transaction argument. Any supplied value returns THREAD_MESSAGES_CONTAINED before side effects.")]),
-                    "actor": .object(["type": .string("string"), "description": .string("Contained THREAD transaction argument. Any supplied value returns THREAD_MESSAGES_CONTAINED before side effects.")]),
-                    "workspace": .object(["type": .string("string"), "description": .string("Contained THREAD transaction argument. Any supplied value returns THREAD_MESSAGES_CONTAINED before side effects.")])
+                    "threadPageId": .object(["type": .string("string"), "description": .string("Canonical THREAD page ID for the bounded one-to-one M1 transaction.")]),
+                    "actionId": .object(["type": .string("string"), "description": .string("Stable idempotency action ID for the bounded M1 transaction.")]),
+                    "approvalBasis": .object(["type": .string("string"), "description": .string("Fresh operator approval basis bound to exact recipient, service, and body.")]),
+                    "actor": .object(["type": .string("string"), "description": .string("Actor recorded in THREAD M1 receipts.")]),
+                    "workspace": .object(["type": .string("string"), "description": .string("Optional Notion workspace connection for THREAD receipt reads and writes.")])
                 ]),
                 "required": .array([.string("body"), .string("confirm")])
             ]),
             metadata: ToolMetadata(
                 title: "Messages: Send",
-                whenToUse: ["sending an iMessage/SMS to a known phone or email — pass confirm:'SEND'",
-                            "sending to an existing group chat by chatIdentifier without creating separate 1:1 messages"],
-                whenNotToUse: ["recipient is a raw chatNNN group id; use chatIdentifier for existing chats or resolve via messages_participants",
-                               "you only have a contact name (resolve via contacts_resolve_handle first)"],
+                whenToUse: ["send to a known phone/email with confirm:'SEND'",
+                            "send to an existing group via chatIdentifier"],
+                whenNotToUse: ["raw chatNNN: resolve with messages_participants",
+                               "contact name only: use contacts_resolve_handle"],
                 relatedTools: ["messages_participants", "contacts_resolve_handle", "messages_chat"]
             ),
             handler: { arguments in
                 guard case .object(let args) = arguments else {
                     throw ToolRouterError.invalidArguments(toolName: "messages_send", reason: "arguments must be an object")
-                }
-                let threadTransactionArguments: Set<String> = [
-                    "threadPageId", "actionId", "approvalBasis", "actor", "workspace"
-                ]
-                let suppliedThreadArguments = args.keys.filter(threadTransactionArguments.contains).sorted()
-                if !suppliedThreadArguments.isEmpty {
-                    return .object([
-                        "code": .string("THREAD_MESSAGES_CONTAINED"),
-                        "status": .string("contained"),
-                        "reason": .string("THREAD Messages execution is held pending a separately approved reactivation contract."),
-                        "suppliedThreadArguments": .array(suppliedThreadArguments.map(Value.string)),
-                        "sent": .bool(false),
-                        "deliveryInvoked": .bool(false),
-                        "consequencePossible": .bool(false),
-                        "correlatedLocalRecord": .bool(false),
-                        "providerDeliveryConfirmed": .bool(false)
-                    ])
                 }
                 guard case .string(let body) = args["body"],
                       case .string(let confirm) = args["confirm"] else {
@@ -1478,9 +1461,14 @@ public enum MessagesModule {
                                 "markdown": .string(markdown)
                             ]
                             if let workspace { appendArgs["workspace"] = .string(workspace) }
+                            // This append is an internal step of an already route-admitted,
+                            // exactly approved M1 transaction. Dispatch without the outer remote
+                            // client identity so the nested call does not demand a second,
+                            // impossible-to-forward route receipt.
                             let result = try await router.dispatch(
                                 toolName: "notion_blocks_append",
-                                arguments: .object(appendArgs)
+                                arguments: .object(appendArgs),
+                                context: .localDefault
                             )
                             guard appendSucceeded(result) else {
                                 throw ToolRouterError.invalidArguments(
