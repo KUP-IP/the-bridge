@@ -19,6 +19,7 @@ private func makeDevRouter() async -> ToolRouter {
     let router = ToolRouter(securityGate: SecurityGate(approvalProvider: TestSecurityApprovalProvider()), auditLog: AuditLog())
 
     await DevModule.register(on: router)
+    await NodeTestModule.register(on: router)
     await GhModule.register(on: router)
     await GitModule.register(on: router)
     await WorktreeOwnershipModule.register(on: router)
@@ -58,7 +59,7 @@ func runDevSuiteAuditTests() async {
         // git_worktree split (alias kept):
         "git_worktree", "git_worktree_list", "git_worktree_add", "git_worktree_remove",
         "git_create_branch", 
-        "worktree_claim", "worktree_release", "worktree_command_run",
+        "worktree_claim", "worktree_release", "worktree_command_run", "node_test",
         "code_search",
         // file_edit merge:
         "file_edit",
@@ -171,7 +172,7 @@ func runDevSuiteAuditTests() async {
         let mutating = ["gh_pr_merge",
                         "gh_issue_close", "git_apply_patch", 
                         "git_create_branch",
-                        "file_zip", "file_unzip", "http_fetch"]
+                        "file_zip", "file_unzip", "http_fetch", "node_test"]
         for name in mutating {
             guard let a = ToolAnnotationCatalog.annotations(for: name) else {
                 throw TestError.assertion("\(name) has no annotation")
