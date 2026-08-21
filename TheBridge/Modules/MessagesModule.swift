@@ -1461,9 +1461,14 @@ public enum MessagesModule {
                                 "markdown": .string(markdown)
                             ]
                             if let workspace { appendArgs["workspace"] = .string(workspace) }
+                            // This append is an internal step of an already route-admitted,
+                            // exactly approved M1 transaction. Dispatch without the outer remote
+                            // client identity so the nested call does not demand a second,
+                            // impossible-to-forward route receipt.
                             let result = try await router.dispatch(
                                 toolName: "notion_blocks_append",
-                                arguments: .object(appendArgs)
+                                arguments: .object(appendArgs),
+                                context: .localDefault
                             )
                             guard appendSucceeded(result) else {
                                 throw ToolRouterError.invalidArguments(
