@@ -4,7 +4,7 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 ## Project Overview
 
-TheBridge is a native macOS menu bar app (Swift 6.2, macOS 26+, Apple Silicon) that runs an MCP (Model Context Protocol) server. The current source version is **4.0.0** (build **82**). It registers **205 static feature-module tools** (`BridgeConstants.staticFeatureModuleToolCount`) across **31 module families** (`BridgeConstants.staticFeatureModuleFamilyCount`) over Streamable HTTP, legacy SSE, and stdio, routing every call through a security gate with an append-only audit log. Conditional tools such as `bridge_status` are outside that static count, and client listings may be filtered by enabled feature groups. The former builtin `echo` and Stripe/payment surfaces are no longer registered.
+TheBridge is a native macOS menu bar app (Swift 6.2, macOS 26+, Apple Silicon) that runs an MCP (Model Context Protocol) server. The current source version is **4.0.5** (build **94**). It registers **223 static feature-module tools** (`BridgeConstants.staticFeatureModuleToolCount`) across **32 module families** (`BridgeConstants.staticFeatureModuleFamilyCount`) over Streamable HTTP, legacy SSE, and stdio, routing every call through a security gate with an append-only audit log. Conditional tools such as `bridge_status` are outside that static count, and client listings may be filtered by enabled feature groups. The former builtin `echo` and Stripe/payment surfaces are no longer registered.
 
 Bundle ID: `kup.solutions.the-bridge` (legacy: `kup.solutions.notion-bridge`, `solutions.kup.keepr`)
 
@@ -94,7 +94,7 @@ tools or a separately reviewed target contract instead.
 Set the Notion API token (resolution priority order):
 1. `NOTION_API_TOKEN` environment variable
 2. `NOTION_API_KEY` environment variable (legacy)
-3. `~/.config/notion-bridge/config.json` — key: `notion_api_token`
+3. `~/.config/the-bridge/config.json` — key: `notion_api_token` (the legacy `~/.config/notion-bridge/config.json` path is migration input only)
 
 **Cursor MCP (avoid duplicates):** use a **single** global MCP entry in `~/.cursor/mcp.json` named **`Bridge MCP`** (JSON key), pointing at your Streamable HTTP URL (and `Authorization: Bearer` when required). Do **not** add a workspace-scoped duplicate — remove it under Cursor **Settings → MCP** if present, then restart Cursor.
 
@@ -120,7 +120,7 @@ Trunk = `origin/main`. Branches are short-lived and **rebased onto current main 
 
 ### Release flow (the v3.7.x → 3.8.x pattern)
 
-**Versioning (operator rule, 2026-06-15):** each **published install (release)** bumps the marketing version **+1 patch** — NOT per branch merge; several task branches can merge to main and ship together as one install increment (bump only at release/ship-prep). Segments are **single-digit and roll at 9** — never double digits. Patch 9 → `X.(Y+1).0`; minor 9 → `(X+1).0.0` (so `3.8.9 → 3.9.0`, `3.9.9 → 4.0.0`). From the current `3.9.9`, **the next published version is `4.0.0`**, the sale-ready "V4" destination. The `3.7.10`–`3.7.12` double-digit patches were pre-rule legacy. `CFBundleVersion` (build) is monotonic +1, independent of the marketing roll. Override only when Isaiah specifies.
+**Versioning (operator rule, 2026-06-15):** each **published install (release)** bumps the marketing version **+1 patch** — NOT per branch merge; several task branches can merge to main and ship together as one install increment (bump only at release/ship-prep). Segments are **single-digit and roll at 9** — never double digits. Patch 9 → `X.(Y+1).0`; minor 9 → `(X+1).0.0` (so `4.0.9 → 4.1.0`, `4.9.9 → 5.0.0`). From the current `4.0.5`, **the next published version is `4.0.6`**. The `3.7.10`–`3.7.12` double-digit patches were pre-rule legacy. `CFBundleVersion` (build) is monotonic +1, independent of the marketing roll. Override only when Isaiah specifies.
 
 1. `git switch -c release/vX.Y.Z origin/main` (off current main).
 2. One atomic version commit: `Version.swift` (marketing + build) **and** root `Info.plist` (`CFBundleShortVersionString` + `CFBundleVersion`) in the SAME commit (see `### Version surfaces`), plus the `CHANGELOG.md` entry.
@@ -203,7 +203,7 @@ Enable **Keychain credentials** in Settings to expose the `credential_*` MCP too
 
 ### Notion Token Configuration
 
-`NotionTokenResolver` (`TheBridge/Notion/NotionClient.swift`) handles token resolution at runtime. To update the token from the UI, call `NotionTokenResolver.writeToken(_:)` (writes to `~/.config/notion-bridge/config.json`) and post `Notification.Name.notionTokenDidChange` to trigger re-validation. Token format must start with `ntn_` or `secret_` and be ≥20 characters.
+`NotionTokenResolver` (`TheBridge/Notion/NotionClient.swift`) handles token resolution at runtime. To update the token from the UI, call `NotionTokenResolver.writeToken(_:)` (writes to `~/.config/the-bridge/config.json`) and post `Notification.Name.notionTokenDidChange` to trigger re-validation. Token format must start with `ntn_` or `secret_` and be ≥20 characters.
 
 ### Swift 6 Concurrency Notes
 

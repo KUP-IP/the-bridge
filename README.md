@@ -4,9 +4,9 @@
 
 The Bridge exposes your local Mac and connected services as Model Context Protocol (MCP) tools over **Streamable HTTP**, **legacy SSE**, and **stdio** — locally on `127.0.0.1` for clients like Claude Code, Cursor, and Notion agents, and **securely from the cloud** (claude.ai and ChatGPT custom connectors) through a customer-owned Cloudflare Tunnel with OAuth. Built in Swift 6.2 for macOS 26+ on Apple Silicon, it is designed to be always-on, auto-launched, and safe enough for daily operator use.
 
-**205 static feature-module tools** across **31 module families** · **3 transports + cloud connector** (Claude web · ChatGPT) · **3-tier security model** with on-device approvals · **Liquid Glass UI**
+**223 static feature-module tools** across **32 module families** · **3 transports + cloud connector** (Claude web · ChatGPT) · **3-tier security model** with on-device approvals · **Liquid Glass UI**
 
-**Latest published release:** [v4.0.0](https://github.com/KUP-IP/the-bridge/releases/tag/v4.0.0) (July 2026). The current source version is 4.0.0 (build 82). Existing installs auto-update via Sparkle.
+**Latest published release:** [v4.0.5](https://github.com/KUP-IP/the-bridge/releases/tag/v4.0.5) (August 2026). The current source version is 4.0.5 (build 94). Existing installs auto-update via Sparkle.
 
 **Product page:** https://kup.solutions/notion-bridge
 
@@ -29,7 +29,7 @@ Current commercial posture:
 
 ## Current product surface
 
-The Bridge registers **205 static feature-module tools across 31 module families**, surfaced collapsibly in **Settings → Tools**. Conditional tools such as cloud status are outside that static count, and the displayed list can be smaller when a feature group is disabled. Highlights below; the full live registry is in-app.
+The Bridge registers **223 static feature-module tools across 32 module families**, surfaced collapsibly in **Settings → Tools**. Conditional tools such as cloud status are outside that static count, and the displayed list can be smaller when a feature group is disabled. Highlights below; the full live registry is in-app.
 
 | Module | Tools | Notes |
 |---|---:|---|
@@ -46,7 +46,7 @@ The Bridge registers **205 static feature-module tools across 31 module families
 | CredentialModule | 4 | Keychain-backed credential storage |
 | SkillsModule | 3 | `fetch_skill`, `list_routing_skills`, `manage_skill` |
 | ConnectionsModule | 5 | connection inventory, health, validation |
-| **Total** | **205 static** | Across 31 feature-module families. The former builtin `echo` and Stripe/payment surfaces are removed; conditional tools are counted separately. The table highlights selected families, while **Settings → Tools** shows the full live registry. |
+| **Total** | **223 static** | Across 32 feature-module families. The former builtin `echo` and Stripe/payment surfaces are removed; conditional tools are counted separately. The table highlights selected families, while **Settings → Tools** shows the full live registry. |
 
 Core product traits:
 - Native macOS menu-bar app with onboarding, settings, and a status popover
@@ -74,7 +74,7 @@ Core product traits:
 
 ```bash
 git clone https://github.com/KUP-IP/the-bridge.git
-cd Notion-bridge
+cd the-bridge
 make app
 ```
 
@@ -101,8 +101,10 @@ The app bundle is written to `.build/TheBridge.app`.
 Primary configuration path:
 
 ```text
-~/.config/notion-bridge/config.json
+~/.config/the-bridge/config.json
 ```
+
+The legacy `~/.config/notion-bridge/config.json` location is read only as migration input.
 
 The Bridge supports:
 - Notion workspace connections
@@ -151,7 +153,7 @@ Use stdio when connecting local clients such as Claude Code or Cursor directly t
 
 #### Using Bridge with Antigravity
 
-Google Antigravity enforces a strict 100-tool limit per MCP server, whereas The Bridge registers 205 static feature-module tools. To use Bridge with Antigravity, we have curated a subset of ~84 tools to stay under the limit.
+Google Antigravity enforces a strict 100-tool limit per MCP server, whereas The Bridge registers 223 static feature-module tools. To use Bridge with Antigravity, we have curated a subset of ~84 tools to stay under the limit.
 
 You can launch the Bridge process with a `--multi-instance` flag (bypasses single-instance GUI guard) and `--allow-tools` flag pointing to the Antigravity allowlist:
 

@@ -10,7 +10,7 @@ A macOS menu-bar app that exposes the Mac + a Notion workspace to AI agents over
   executable wraps it. Tests are a custom harness (`TheBridgeTests`), NOT XCTest.
 - **MCP server:** `Server/SSEServer` (`SSETransport.swift`) serves `/mcp`, `/sse`,
   `/health`, job callbacks. Tools register via `Server/BridgeModuleRegistry.swift`
-  (205 static feature-module tools across 31 families; conditional tools are counted
+  (223 static feature-module tools across 32 families; conditional tools are counted
   separately) → `ToolRouter` → `MCPToolFactory`.
 - **Tools:** `ToolRegistration {name, module, tier, inputSchema (MCP Value), handler}`.
   Every live tool MUST have a `ToolAnnotationCatalog` entry — `ToolAnnotationAuditTests`
@@ -22,7 +22,8 @@ A macOS menu-bar app that exposes the Mac + a Notion workspace to AI agents over
   drain on launch/wake/cloud-online) — the reuse template for any offline outbox.
 - **Paths/config:** `Core/BridgePaths` (`~/Library/Application Support/The Bridge/…`,
   `overrideHomeForTesting` for hermetic tests), `Config/ConfigManager`
-  (`~/.config/notion-bridge/config.json`), `Core/BridgeDefaults` (UserDefaults keys).
+  (`~/.config/the-bridge/config.json`; the prior path is migration input only),
+  `Core/BridgeDefaults` (UserDefaults keys).
 - **UI:** SwiftUI Settings under `UI/Sections/*`, `SettingsSection` enum in
   `UI/SettingsWindow.swift`, design tokens in `UI/BridgeTokens.swift`.
 

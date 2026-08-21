@@ -7,9 +7,9 @@
 //
 // VERSIONING (operator rule, 2026-06-15): +1 patch per PUBLISHED INSTALL
 // (release), NOT per branch — several task branches can merge to main and ship
-// together as one install increment. Single-digit segments roll at 9 (3.8.9→
-// 3.9.0, 3.9.9→4.0.0), never double digits. THIS install is 3.8.0; next is 3.8.1 (3.7.10–3.7.12
-// were pre-rule legacy). 4.0.0 = sale-ready "V4", reached incrementally. Build
+// together as one install increment. Single-digit segments roll at 9 (4.0.9→
+// 4.1.0, 4.9.9→5.0.0), never double digits. This source is 4.0.5; the next
+// published install is 4.0.6. The 3.7.10–3.7.12 releases were pre-rule legacy. Build
 // (CFBundleVersion) monotonic +1. See AGENTS.md "Release flow" + versioning memory.
 
 import Foundation

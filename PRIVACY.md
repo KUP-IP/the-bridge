@@ -126,7 +126,7 @@ If you are located in the European Economic Area (EEA), the following applies un
 
 - **Right of access** — We hold no personal data about you. Your purchase data is held by Lemon Squeezy (our Merchant of Record) under their own privacy policy.
 - **Right to erasure** — Uninstalling The Bridge removes all locally stored configuration, audit logs, and cached data. No data persists on our servers because we operate none.
-- **Right to data portability** — Your configuration file (`~/.config/notion-bridge/config.json`) and audit logs are stored in standard formats on your Mac and are fully portable.
+- **Right to data portability** — Your configuration file (`~/.config/the-bridge/config.json`) and audit logs are stored in standard formats on your Mac and are fully portable. The prior `~/.config/notion-bridge/config.json` location is retained only as migration input.
 - **Right to object** — You can disable Sparkle auto-update checks in Settings to stop the only outbound connection initiated by the Software itself.
 - **Right to lodge a complaint** — You may contact your local Data Protection Authority.
 
