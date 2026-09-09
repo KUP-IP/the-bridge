@@ -496,13 +496,16 @@ extension SkillsModule {
             )
         }
 
-        let skill: SkillConfig?
-        if let idArg {
-            skill = lookupSkill(pageId: idArg) ?? await lookupCachedSpecialist(pageId: idArg)
+        let skill: SkillConfig? = if let idArg {
+            if let configured = lookupSkill(pageId: idArg) {
+                configured
+            } else {
+                await lookupCachedSpecialist(pageId: idArg)
+            }
         } else if let nameArg {
-            skill = await lookupSkill(named: nameArg)
+            await lookupSkill(named: nameArg)
         } else {
-            skill = nil
+            nil
         }
         guard let skill else {
             if let idArg {
