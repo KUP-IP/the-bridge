@@ -80,7 +80,10 @@ public enum ConfirmPanelSyncBridge: Sendable {
     nonisolated(unsafe) public static var sync: (@MainActor () -> Void)?
 
     public static func requestSync() {
-        let work = {
+        // Explicit Void return: a bare `Task { }` closure is inferred as
+        // `() -> Task<Void?, Never>`, which does not match
+        // `DispatchQueue.main.async(execute:)` (`DispatchWorkItem` / `() -> Void`).
+        let work: () -> Void = {
             Task { @MainActor in
                 sync?()
             }
