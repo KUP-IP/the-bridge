@@ -233,12 +233,14 @@ func runFetchSkillNotionFilesTests() async {
     }
 
     await test("#254: materializeBytes rejects '.' / '..' names") {
-        do {
-            _ = try SkillFileCatalog.materializeBytes(skillUUID: pageId, fileName: "..", data: Data("x".utf8))
-            throw TestError.assertion("expected invalidFileName for ..")
-        } catch let error as SkillFileMaterializeError {
-            guard case .invalidFileName = error else {
-                throw TestError.assertion("expected invalidFileName, got \(error)")
+        for name in [".", ".."] {
+            do {
+                _ = try SkillFileCatalog.materializeBytes(skillUUID: pageId, fileName: name, data: Data("x".utf8))
+                throw TestError.assertion("expected invalidFileName for \(name)")
+            } catch let error as SkillFileMaterializeError {
+                guard case .invalidFileName = error else {
+                    throw TestError.assertion("expected invalidFileName, got \(error)")
+                }
             }
         }
     }

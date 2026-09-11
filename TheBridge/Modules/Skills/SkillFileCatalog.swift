@@ -256,6 +256,12 @@ public enum SkillFileCatalog {
     public static func sanitizedFileName(_ name: String) -> String? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
+        // Foundation `URL(fileURLWithPath:)` resolves "." / ".." against cwd,
+        // so `lastPathComponent` becomes the current/parent directory name
+        // instead of the traversal token. Reject those raw names first
+        // (#254 invalidFileName contract). Path-y names like
+        // `../../etc/passwd` still collapse to lastPathComponent.
+        if trimmed == "." || trimmed == ".." { return nil }
         let base = URL(fileURLWithPath: trimmed).lastPathComponent
         guard !base.isEmpty, base != ".", base != ".." else { return nil }
         if base.contains("\0") { return nil }
