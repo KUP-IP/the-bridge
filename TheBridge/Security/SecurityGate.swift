@@ -1346,7 +1346,9 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
     /// Always-Allow Notify sticky. Writes per-tool and, when `module` is
     /// non-empty, per-module. Call only from explicit Always Allow
     /// (Confirm surface / NC `ALWAYS_ALLOW` / request-tier `.alwaysAllow`).
-    static func persistNotifySticky(
+    /// Public so the standalone test harness (no `@testable`) can exercise
+    /// the refuse path; `NotifyStickyGate.allowsPersist` still owns eligibility.
+    public static func persistNotifySticky(
         toolName: String,
         module: String,
         source: NotifyStickyDecisionSource
