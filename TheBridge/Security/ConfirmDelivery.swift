@@ -61,15 +61,36 @@ public enum ConfirmDelivery {
         case groupBridgeBannersDocumentOSMirroring
     }
 
-    /// Always Allow on the compact banner must not be a silent/background
-    /// action. A Focus / content-extension / first-action misfire on an
-    /// unlocked Mac was rewriting notify stickies without a tap (#264 LIVE).
-    public static let alwaysAllowRequiresForeground = true
+    /// ALWAYS_ALLOW must not be the unique `.foreground` action. PR #269
+    /// added `.foreground` here so a "silent background" tap could not
+    /// persist; Time Sensitive + LSUIElement activation then invoked that
+    /// unique foreground action with no tap (#264 LIVE on 2bd375aa).
+    public static let alwaysAllowRequiresForeground = false
     public static let alwaysAllowRequiresAuthentication = true
     public static let alwaysAllowNotificationActionOptions: UNNotificationActionOptions = [
-        .authenticationRequired,
-        .foreground
+        .authenticationRequired
     ]
+
+    /// Shared compact-banner specs (Allow first; Always Allow is not unique foreground).
+    public static var confirmBannerActions: [ConfirmBannerActionSpec] {
+        [
+            ConfirmBannerActionSpec(
+                identifier: NotificationApprovalManager.allowActionIdentifier,
+                title: "Allow",
+                options: []
+            ),
+            ConfirmBannerActionSpec(
+                identifier: NotificationApprovalManager.alwaysAllowActionIdentifier,
+                title: "Always Allow",
+                options: alwaysAllowNotificationActionOptions
+            ),
+            ConfirmBannerActionSpec(
+                identifier: NotificationApprovalManager.cancelActionIdentifier,
+                title: "Cancel",
+                options: [.destructive]
+            ),
+        ]
+    }
 
     /// LSUIElement windows hide on deactivate. Settings, a visible Confirm
     /// window, **or an in-flight Request** keeps `.regular`. WindowTracker
@@ -101,16 +122,31 @@ public enum ConfirmDelivery {
 /// against a WindowServer surface (`canPresentPanel` is false in TheBridgeTests).
 public enum ConfirmFrontApplicator {
     #if canImport(AppKit)
+    /// LSUIElement: become `.regular` and unhide **before** creating a window.
+    /// Creating the panel while still `.accessory` yields `NSApp.windows == 0`
+    /// (#262 LIVE on 2bd375aa / PR #269).
     @MainActor
-    public static func apply(to panel: NSPanel, app: NSApplication? = NSApp) {
-        guard ConfirmDelivery.usesRegularActivationPolicy, let app else {
-            panel.orderFrontRegardless()
-            return
-        }
+    public static func prepareApp(_ app: NSApplication? = NSApp) {
+        guard ConfirmDelivery.usesRegularActivationPolicy, let app else { return }
         if app.activationPolicy() != .regular {
             app.setActivationPolicy(.regular)
         }
-        app.activate(ignoringOtherApps: ConfirmDelivery.activatesApplication)
+        if app.isHidden {
+            app.unhide(nil)
+        }
+        if ConfirmDelivery.activatesApplication {
+            app.activate(ignoringOtherApps: true)
+        }
+    }
+
+    @MainActor
+    public static func apply(to panel: NSPanel, app: NSApplication? = NSApp) {
+        prepareApp(app)
+        guard ConfirmDelivery.usesRegularActivationPolicy else {
+            panel.orderFrontRegardless()
+            return
+        }
+        panel.isFloatingPanel = false
         panel.level = .statusBar
         panel.hidesOnDeactivate = ConfirmDelivery.hidesOnDeactivate
         panel.becomesKeyOnlyIfNeeded = !ConfirmDelivery.becomesKey
@@ -118,7 +154,7 @@ public enum ConfirmFrontApplicator {
             panel.makeKeyAndOrderFront(nil)
         }
         panel.orderFrontRegardless()
-        if ConfirmDelivery.activatesApplication {
+        if ConfirmDelivery.activatesApplication, let app {
             app.requestUserAttention(.criticalRequest)
         }
     }

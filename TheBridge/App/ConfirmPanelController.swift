@@ -28,6 +28,7 @@ public final class ConfirmPanelController: ConfirmPanelPresenting {
     public static func registerAsPresenter() {
         ConfirmPanelHost.shared.presenter = shared
         ConfirmPanelHost.shared.bindToSurface()
+        ConfirmPanelSyncBridge.sync = { ConfirmPanelController.shared.sync() }
     }
 
     public func syncConfirmPanel() {
@@ -51,6 +52,10 @@ public final class ConfirmPanelController: ConfirmPanelPresenting {
 
     public func present(prompts: [PendingApprovalPrompt]) {
         guard Self.canPresentPanel else { return }
+        // LSUIElement: policy + unhide + activate BEFORE the window exists.
+        // Creating an NSPanel while still `.accessory` never joins
+        // `NSApp.windows` (#262 LIVE on 2bd375aa).
+        ConfirmFrontApplicator.prepareApp()
         let host = NSHostingController(rootView: ConfirmPanelView(prompts: prompts))
         let fitting = host.view.fittingSize
         let size = NSSize(width: max(fitting.width, 400), height: max(fitting.height, 220))
@@ -95,11 +100,13 @@ public final class ConfirmPanelController: ConfirmPanelPresenting {
             defer: false
         )
         panel.title = Self.windowTitle
-        panel.isFloatingPanel = true
+        // Not a floating utility panel — those are omitted from NSApp.windows
+        // / AX while the process is LSUIElement (#262 LIVE).
+        panel.isFloatingPanel = false
         panel.level = .statusBar
         panel.hidesOnDeactivate = ConfirmDelivery.hidesOnDeactivate
         panel.becomesKeyOnlyIfNeeded = !ConfirmDelivery.becomesKey
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .managed]
         panel.isReleasedWhenClosed = false
         panel.defaultButtonCell = nil
         return panel

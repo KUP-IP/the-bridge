@@ -82,11 +82,18 @@ public enum SecurityApprovalDecision: Sendable, Equatable {
 
 /// Why a Notify sticky was written. Only explicit Always Allow sources
 /// may persist (#264). Compact-banner first action, default button,
-/// Allow, Deny, timeout, launch, and session start are not sources.
+/// Allow, Deny, timeout, launch, session start, pending escalate, and
+/// implicit Time Sensitive / LSUIElement foreground are not sources.
 public enum NotifyStickyDecisionSource: String, Sendable, Equatable {
     case confirmSurface = "confirm_surface"
     case notificationAlwaysAllow = "notification_always_allow"
     case requestApproval = "request_approval"
+    /// Time Sensitive + unique `.foreground` ALWAYS_ALLOW misfire (#264 LIVE).
+    case implicitForeground = "implicit_foreground"
+    /// Request escalate / `awaiting_approval` — must never persist.
+    case pendingEscalate = "pending_escalate"
+    /// AppKit default-button / Return / performClick — not a tap.
+    case defaultButton = "default_button"
 }
 
 public struct NotifyStickyPersistRecord: Sendable, Equatable {
@@ -1201,14 +1208,15 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
 
     private func registerCategories() {
         guard let center else { return }
-        // #264: Allow first (visible compact-banner button). A first-action /
-        // Focus / LSUIElement misfire must be one-shot Allow — never Always
-        // Allow, which would rewrite Notify stickies. Always Allow remains the
-        // second compact action (macOS shows the first two without expanding).
+        // #264: Allow first. ALWAYS_ALLOW is auth-only — it must not be the
+        // unique `.foreground` action (PR #269 LIVE: Time Sensitive invoked
+        // that unique foreground action with no tap). Always Allow remains
+        // the second compact action.
+        let specs = ConfirmDelivery.confirmBannerActions
         let allowAction = UNNotificationAction(
             identifier: Self.allowActionIdentifier,
-            title: "Allow",
-            options: []
+            title: specs.first(where: { $0.identifier == Self.allowActionIdentifier })?.title ?? "Allow",
+            options: specs.first(where: { $0.identifier == Self.allowActionIdentifier })?.options ?? []
         )
         let alwaysAllowAction = UNNotificationAction(
             identifier: Self.alwaysAllowActionIdentifier,
@@ -1338,11 +1346,17 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
     /// Always-Allow Notify sticky. Writes per-tool and, when `module` is
     /// non-empty, per-module. Call only from explicit Always Allow
     /// (Confirm surface / NC `ALWAYS_ALLOW` / request-tier `.alwaysAllow`).
-    static func persistNotifySticky(
+    /// Public so the standalone test harness (no `@testable`) can exercise
+    /// the refuse path; `NotifyStickyGate.allowsPersist` still owns eligibility.
+    public static func persistNotifySticky(
         toolName: String,
         module: String,
         source: NotifyStickyDecisionSource
     ) {
+        guard NotifyStickyGate.allowsPersist(source: source) else {
+            print("[SecurityGate] Refusing notify sticky persist from \(source.rawValue)")
+            return
+        }
         let perTool = BridgeDefaults.tierOverrides
         var toolDict = UserDefaults.standard.dictionary(forKey: perTool) as? [String: String] ?? [:]
         toolDict[toolName] = SecurityTier.notify.rawValue
@@ -1618,10 +1632,14 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
                    ),
                    let toolName = userInfo["toolName"] as? String {
                     let module = userInfo["module"] as? String ?? ""
+                    let source = NotifyStickyGate.sourceForNotificationAction(
+                        identifier: response.actionIdentifier,
+                        categoryActions: ConfirmDelivery.confirmBannerActions
+                    ) ?? .notificationAlwaysAllow
                     Self.persistNotifySticky(
                         toolName: toolName,
                         module: module,
-                        source: .notificationAlwaysAllow
+                        source: source
                     )
                 }
                 let title = response.notification.request.content.title

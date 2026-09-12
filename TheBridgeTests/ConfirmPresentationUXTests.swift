@@ -122,10 +122,12 @@ func runConfirmPresentationUXTests() async {
         try expect(
             ConfirmPresentation.shouldPersistNotifySticky(forNotificationActionIdentifier: "ALWAYS_ALLOW")
         )
-        try expect(ConfirmDelivery.alwaysAllowRequiresForeground)
+        try expect(ConfirmDelivery.alwaysAllowRequiresForeground == false,
+                   "ALWAYS_ALLOW must not be unique .foreground — that was the 2bd375aa sticky misfire")
         try expect(ConfirmDelivery.alwaysAllowRequiresAuthentication)
         try expect(
-            ConfirmDelivery.alwaysAllowNotificationActionOptions.contains(.foreground)
+            ConfirmDelivery.alwaysAllowNotificationActionOptions.contains(.foreground) == false,
+            "PR #269 unique-foreground ALWAYS_ALLOW is the #264 LIVE trigger"
         )
         try expect(
             ConfirmDelivery.alwaysAllowNotificationActionOptions.contains(.authenticationRequired)

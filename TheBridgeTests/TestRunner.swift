@@ -760,6 +760,7 @@ await runSecurityAuditTests()
 await runReadOnlyTierAuditTests()
 await runSecurityGateUXTests()        // fb-securitygate: coalescing + module-scoped Always-Allow + timeout seam
 await runConfirmPresentationUXTests() // #262 assertive Confirm + Time Sensitive registration (hermetic)
+await runConfirmLiveFailContractTests() // #262/#264 LIVE fail on 2bd375aa: LSUIElement plan + sticky gate
 await runToolTierResolutionTests()    // fb-securitygate-revoke-ui: module-aware effective tier + source + revoke
 
 

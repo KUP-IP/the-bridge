@@ -35,7 +35,12 @@ public struct ConfirmAlwaysAllowControl: View {
             )
             .contentShape(Rectangle())
             .onTapGesture { action() }
-            .accessibilityAddTraits(.isButton)
+            // Do not add `.isButton` — AppKit promotes the first accessibility
+            // button to `defaultButtonCell` after layout and can performClick
+            // it on LSUIElement activate (#264 LIVE).
+            .accessibilityAction(named: Text(ConfirmPresentation.alwaysAllowTitle)) {
+                action()
+            }
             .accessibilityIdentifier("confirm-always-allow")
             .accessibilityLabel(ConfirmPresentation.alwaysAllowTitle)
     }

@@ -207,7 +207,7 @@ final class NotificationViewController: NSViewController, UNNotificationContentE
         let header = makeHeader(icon: "🔒", title: "Needs your OK — \(toolName)")
         let leadIn = makeBodyLabel("\(toolName) wants to run:")
         let codeBlock = makeCodeBlock(text: argumentsSummary)
-        let alwaysHint = makeBodyLabel("Always Allow is the primary action — next time this tool runs as Notify.")
+        let alwaysHint = makeBodyLabel("Always Allow is on the Confirm panel — tap it only if you want Notify next time.")
 
         let stack = verticalStack(spacing: 6, views: [header, leadIn, codeBlock, alwaysHint])
         container.addSubview(accent)

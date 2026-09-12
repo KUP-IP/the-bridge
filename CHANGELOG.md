@@ -13,7 +13,24 @@
   into `~/Library/Application Support/The Bridge/skill-files/<uuid>/` for
   `file_read`. Notion is a catalog/mirror, not binary SSOT. File-source
   SKILL.md (`buildFileSkillResult`) is unchanged. `staticFeatureModuleToolCount`
-  **239 → 240**. Floor **4038 → 4058** (+20). Not Installed or Released.
+  **239 → 240**. Floor **4047 → 4067** (+20 stacked on #271). Not Installed or Released.
+- **Confirm LSUIElement force-front + sticky gate (beyond PR #269)** —
+  Installed main `2bd375aa` (PR #269) still failed the live
+  `standing_orders_delete` probe: `#263` `awaiting_approval` held, but
+  Confirm never appeared (`TheBridge windows=0`) and
+  `tierOverrides` / `moduleTierOverrides` rewrote to notify with no
+  Always Allow tap. Two remaining causes: (1) the panel was created
+  while the process was still LSUIElement `.accessory`, so it never
+  joined `NSApp.windows` / AX; (2) PR #269 put `.foreground` on
+  `ALWAYS_ALLOW`, making it the unique foreground category action —
+  Time Sensitive + activate invoked it without a tap, persisted
+  stickies, and cleared the surface. Fix: prepare `.regular` + unhide
+  + activate **before** creating the window; direct
+  `ConfirmPanelSyncBridge` sync; Always Allow is auth-only (not unique
+  foreground); `persistNotifySticky` refuses implicit / escalate /
+  default-button sources. `#263` pending return is unchanged. Source
+  Tested only — no install. Floor **4038 → 4047** (+9). CI must
+  re-measure (this host cannot compile macOS 26).
 - **Confirm auto-front + notify-sticky LIVE fail (#262 / #264 on f1c71cc7)** —
   Remote Request `standing_orders_delete` still returned `awaiting_approval`
   (#263) but the Confirm NSPanel never auto-fronted and
