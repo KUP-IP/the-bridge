@@ -15,10 +15,13 @@ compact-banner order) are separate.
    a SwiftUI `Button`, so it cannot become AppKit's default). It is
    **not** the Return-key default — that misfire is #264 / PR #267 /
    the f1c71cc7 LIVE follow-up.
-2. The panel **activates The Bridge** (`LSUIElement` → `.regular` while
-   Confirm is visible **or a Request is still pending**), becomes key,
-   and orders front at status-bar level. ATTENTION badge / Dashboard
-   section are backups, not the only surface.
+2. The panel **activates The Bridge** (`LSUIElement` → `.regular`
+   **before the window is created**, then unhide + activate, then
+   orderFront). Creating the panel while still `.accessory` yields
+   `NSApp.windows == 0` (LIVE fail on `2bd375aa`). ATTENTION badge /
+   Dashboard section are backups, not the only surface.
+   Compact `ALWAYS_ALLOW` is **not** `.foreground` — unique-foreground
+   Always Allow was invoked by Time Sensitive with no tap (#264 LIVE).
 3. A **Time Sensitive** User Notification posts as a Focus-breaking banner
    (`UNNotificationInterruptionLevel.timeSensitive`, thread
    `bridge.confirm`). Banner tap / swipe-away opens the same panel (does

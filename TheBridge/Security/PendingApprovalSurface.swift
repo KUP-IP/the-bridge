@@ -136,6 +136,9 @@ public final class PendingApprovalSurface: @unchecked Sendable {
     private func postChange() {
         let post = {
             NotificationCenter.default.post(name: .pendingApprovalSurfaceDidChange, object: nil)
+            // Direct presenter sync — do not rely only on NC observers
+            // (`MainActor.assumeIsolated` / AppDelegate Task hop).
+            ConfirmPanelSyncBridge.requestSync()
         }
         if Thread.isMainThread {
             post()

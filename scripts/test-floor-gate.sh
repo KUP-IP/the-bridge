@@ -198,7 +198,12 @@
 #   observer Task hop raced `second escalate re-asserts presented`.
 #   Observer now MainActor.assumeIsolated; test asserts on one hop.
 #   Floor is the measured green count after that race fix.
-FLOOR="${BRIDGE_TEST_FLOOR:-4038}"
+# 2026-09-08: 4038 → 4047 (+9) — #262/#264 LIVE fail on 2bd375aa / PR #269.
+#   LSUIElement force-front plan (policy before create) + sticky gate
+#   refuses unique-foreground / pending-escalate / default-button persist.
+#   +9 ConfirmLiveFailContractTests. CI must re-measure (Linux host cannot
+#   compile macOS 26).
+FLOOR="${BRIDGE_TEST_FLOOR:-4047}"
 
 echo "🧪 test-floor-gate: building debug test executable + running suite (floor=${FLOOR})..."
 swift build -c debug --product TheBridgeTests

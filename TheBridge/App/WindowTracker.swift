@@ -79,6 +79,12 @@ public final class WindowTracker {
     /// and toggle activation policy accordingly. Confirm must keep `.regular`
     /// (#262) — accessory LSUIElement windows hide on deactivate.
     public func evaluatePolicy() {
+        let pendingConfirmCount = PendingApprovalSurface.shared.pendingCount
+        // Become regular *before* looking for / creating the panel. Accessory
+        // creation is why live `TheBridge windows=0` (#262 on 2bd375aa).
+        if pendingConfirmCount > 0 {
+            ConfirmFrontApplicator.prepareApp()
+        }
         let hasVisibleSettings = NSApp.windows.contains { window in
             window.isVisible && !window.isMiniaturized && isSettingsWindow(window)
         }
@@ -86,7 +92,6 @@ public final class WindowTracker {
             window.isVisible && !window.isMiniaturized
                 && ConfirmDelivery.isConfirmWindowTitle(window.title)
         }
-        let pendingConfirmCount = PendingApprovalSurface.shared.pendingCount
         // Panel can lose the first orderFront (LSUIElement / Task hop).
         // Re-sync while a Request is still pending so the body returns.
         if pendingConfirmCount > 0 && !hasVisibleConfirm && !isRecoveringConfirm {
