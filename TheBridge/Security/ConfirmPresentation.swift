@@ -79,22 +79,25 @@ public enum ConfirmPresentation {
     /// an Always Allow tap (#264 LIVE on f1c71cc7).
     public static let alwaysAllowIsDefaultCapableControl = false
 
-    /// Notify stickies persist only for the explicit ALWAYS_ALLOW action.
-    /// Compact first action (Allow), default tap, and dismiss must not.
+    /// UN never persists Notify. Time Sensitive / LSUIElement can invoke
+    /// ALWAYS_ALLOW with no tap (LIVE on b8045b61). Always Allow persist
+    /// is Confirm-surface tap only (`applySurfaceDecision`).
     public static func shouldPersistNotifySticky(
         forNotificationActionIdentifier identifier: String
     ) -> Bool {
-        identifier == NotificationApprovalManager.alwaysAllowActionIdentifier
+        _ = identifier
+        return false
     }
 
-    /// SECURITY_APPROVAL actions only. Unknown / default / dismiss
-    /// present the body — they must not grant and must not Deny.
+    /// SECURITY_APPROVAL actions only. Unknown / default / dismiss /
+    /// banner Always Allow present the body — they must not grant, must
+    /// not Deny, and must not persist. Allow / Cancel still resolve.
     public static func outcome(forNotificationActionIdentifier identifier: String) -> ConfirmNotificationOutcome {
         switch identifier {
         case NotificationApprovalManager.allowActionIdentifier:
             return .resolve(.allow)
         case NotificationApprovalManager.alwaysAllowActionIdentifier:
-            return .resolve(.alwaysAllow)
+            return .presentBody
         case NotificationApprovalManager.cancelActionIdentifier:
             return .resolve(.deny)
         case UNNotificationDefaultActionIdentifier,
@@ -116,8 +119,8 @@ public protocol ConfirmPanelPresenting: AnyObject {
     func syncConfirmPanel()
 }
 
-/// In-process Confirm body. AppKit presents a sticky NSPanel from this
-/// state; tests assert presentation without a WindowServer panel.
+/// In-process Confirm body. AppKit presents a sticky Confirm window from
+/// this state; tests assert presentation without a WindowServer window.
 @MainActor
 @Observable
 public final class ConfirmPanelHost {
@@ -157,6 +160,15 @@ public final class ConfirmPanelHost {
             // EnableCloudAccessFlow's auth callback.
             MainActor.assumeIsolated {
                 self?.handleSurfaceChange()
+            }
+        }
+        NotificationCenter.default.addObserver(
+            forName: .pendingApprovalSurfacePresentBody,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.handlePresentBodyRequest()
             }
         }
     }

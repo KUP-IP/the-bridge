@@ -61,15 +61,17 @@ public enum ConfirmDelivery {
         case groupBridgeBannersDocumentOSMirroring
     }
 
-    /// ALWAYS_ALLOW must not be the unique `.foreground` action. PR #269
-    /// added `.foreground` here so a "silent background" tap could not
-    /// persist; Time Sensitive + LSUIElement activation then invoked that
-    /// unique foreground action with no tap (#264 LIVE on 2bd375aa).
+    /// ALWAYS_ALLOW must not be `.foreground`. PR #269 unique-foreground
+    /// was auto-invoked; PR #271 removed `.foreground` but still persisted
+    /// UN ALWAYS_ALLOW as "explicit" (#264 LIVE on b8045b61). Banner
+    /// Always Allow only opens the Confirm body — it never persists.
     public static let alwaysAllowRequiresForeground = false
     public static let alwaysAllowRequiresAuthentication = true
     public static let alwaysAllowNotificationActionOptions: UNNotificationActionOptions = [
         .authenticationRequired
     ]
+    /// UN `didReceive` must not write notify stickies for any action.
+    public static let notificationActionsPersistNotifySticky = false
 
     /// Shared compact-banner specs (Allow first; Always Allow is not unique foreground).
     public static var confirmBannerActions: [ConfirmBannerActionSpec] {
@@ -140,22 +142,35 @@ public enum ConfirmFrontApplicator {
     }
 
     @MainActor
-    public static func apply(to panel: NSPanel, app: NSApplication? = NSApp) {
+    public static func apply(to window: NSWindow, app: NSApplication? = NSApp) {
         prepareApp(app)
+        if let panel = window as? NSPanel {
+            panel.isFloatingPanel = false
+            panel.becomesKeyOnlyIfNeeded = !ConfirmDelivery.becomesKey
+        }
         guard ConfirmDelivery.usesRegularActivationPolicy else {
-            panel.orderFrontRegardless()
+            window.orderFrontRegardless()
             return
         }
-        panel.isFloatingPanel = false
-        panel.level = .statusBar
-        panel.hidesOnDeactivate = ConfirmDelivery.hidesOnDeactivate
-        panel.becomesKeyOnlyIfNeeded = !ConfirmDelivery.becomesKey
+        window.level = .statusBar
+        window.hidesOnDeactivate = ConfirmDelivery.hidesOnDeactivate
         if ConfirmDelivery.becomesKey {
-            panel.makeKeyAndOrderFront(nil)
+            window.makeKeyAndOrderFront(nil)
         }
-        panel.orderFrontRegardless()
+        window.orderFrontRegardless()
         if ConfirmDelivery.activatesApplication, let app {
             app.requestUserAttention(.criticalRequest)
+        }
+    }
+
+    /// AX / `NSApp.windows` listing used after create. Accessory or
+    /// same-turn creates stay invisible (LIVE windows=0).
+    @MainActor
+    public static func confirmWindowIsListed(_ app: NSApplication? = NSApp) -> Bool {
+        guard let app else { return false }
+        return app.windows.contains { window in
+            window.isVisible && !window.isMiniaturized
+                && ConfirmDelivery.isConfirmWindowTitle(window.title)
         }
     }
     #endif

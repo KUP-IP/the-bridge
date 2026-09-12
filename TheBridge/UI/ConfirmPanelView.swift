@@ -1,9 +1,10 @@
 // ConfirmPanelView.swift — sticky Confirm body (Deny / Allow / Always Allow)
 // TheBridge · UI
 //
-// Hosted in a dedicated NSPanel (`ConfirmPanelController`) so LSUIElement
-// MenuBarExtra popover failure cannot hide the actions. Same submit path
-// as the SECURITY_APPROVAL notification (`PendingApprovalSurface.submit`).
+// Hosted in a dedicated Confirm window (`ConfirmPanelController`) so
+// LSUIElement MenuBarExtra popover failure cannot hide the actions. Same
+// submit path as the SECURITY_APPROVAL notification
+// (`PendingApprovalSurface.submit`).
 //
 // #262: Always Allow is the visual primary (full-width + hint). It is not
 // the keyboard default — #264 / PR #267 owns Return-key / compact-banner

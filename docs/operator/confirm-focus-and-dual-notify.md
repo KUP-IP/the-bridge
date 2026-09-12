@@ -16,12 +16,15 @@ compact-banner order) are separate.
    **not** the Return-key default — that misfire is #264 / PR #267 /
    the f1c71cc7 LIVE follow-up.
 2. The panel **activates The Bridge** (`LSUIElement` → `.regular`
-   **before the window is created**, then unhide + activate, then
-   orderFront). Creating the panel while still `.accessory` yields
-   `NSApp.windows == 0` (LIVE fail on `2bd375aa`). ATTENTION badge /
-   Dashboard section are backups, not the only surface.
-   Compact `ALWAYS_ALLOW` is **not** `.foreground` — unique-foreground
-   Always Allow was invoked by Time Sensitive with no tap (#264 LIVE).
+   **before the window is created**, then unhide + activate, then a
+   **WindowServer yield**, then create + orderFront). Creating the
+   window on the same run-loop turn as the policy flip still yields
+   `NSApp.windows == 0` (LIVE fail on `b8045b61` / PR #271). ATTENTION
+   badge / Dashboard section are backups, not the only surface.
+   Compact `ALWAYS_ALLOW` is **not** `.foreground` and **does not
+   persist** — Time Sensitive invoked it with no tap even after
+   unique-foreground was removed (#264 LIVE). Banner Always Allow
+   only opens the Confirm body; persist is the panel tap.
 3. A **Time Sensitive** User Notification posts as a Focus-breaking banner
    (`UNNotificationInterruptionLevel.timeSensitive`, thread
    `bridge.confirm`). Banner tap / swipe-away opens the same panel (does
