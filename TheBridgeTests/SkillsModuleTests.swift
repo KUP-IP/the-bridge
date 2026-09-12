@@ -23,9 +23,9 @@ func runSkillsModuleTests() async {
     // MARK: - Tool Registration (fetch_skill, list_routing_skills, manage_skill)
     // ============================================================
 
-    await test("SkillsModule registers 11 tools including Runtime Exposure controls") {
+    await test("SkillsModule registers 12 tools including Runtime Exposure controls") {
         let tools = await router.registrations(forModule: "skills")
-        try expect(tools.count == 11, "Expected 11 skills tools, got \(tools.count)")
+        try expect(tools.count == 12, "Expected 12 skills tools, got \(tools.count)")
     }
 
     await test("Sprint A · #2: 5 skill_* split primitives are registered") {
@@ -139,6 +139,20 @@ func runSkillsModuleTests() async {
         let tool = tools.first(where: { $0.name == "fetch_skill" })
         try expect(tool != nil, "fetch_skill not found")
         try expect(tool!.tier == .open, "fetch_skill should be .open, got \(tool!.tier)")
+    }
+
+    await test("Tool skill_materialize_file is registered at open tier") {
+        let tools = await router.registrations(forModule: "skills")
+        let tool = tools.first(where: { $0.name == "skill_materialize_file" })
+        try expect(tool != nil, "Missing skill_materialize_file")
+        try expect(tool!.tier == .open, "skill_materialize_file should be .open, got \(tool!.tier)")
+        guard case .object(let schema) = tool!.inputSchema,
+              case .object(let props)? = schema["properties"] else {
+            throw TestError.assertion("skill_materialize_file schema missing properties")
+        }
+        try expect(props["id"] != nil && props["name"] != nil, "addresses a skill like fetch_skill")
+        try expect(props["fileName"] != nil && props["notionFileId"] != nil,
+                   "selects a catalog entry by name or Notion file id")
     }
 
     // ============================================================

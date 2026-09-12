@@ -88,6 +88,9 @@ private func skillsSchema() -> DataSourceSchema {
         "Runtime Exposure": .init(id: "id_runtime_exposure", type: "select"),
         "Domain": .init(id: "id_domain", type: "select"),
         "Specialist": .init(id: "id_spec", type: "relation"),
+        "Files & media": .init(id: "id_files", type: "files"),
+        "Google Drive File": .init(id: "id_gdrive", type: "files"),
+        "Manager": .init(id: "id_manager", type: "relation"),
     ])
 }
 
@@ -273,9 +276,10 @@ func runRegistryModuleTests() async {
     await test("registry_introspect binds by name, persists, reports clean+fullyBound") {
         try await withRegistryModuleEnv(ModFakeGateway(schema: skillsSchema())) {
             let out = try await RegistryModule.makeIntrospect().handler(.object(["entity": .string("skill")]))
-            try expect(obj(out)["fullyBound"] == .bool(true), "all 11 properties bound")
+            try expect(obj(out)["fullyBound"] == .bool(true), "all seed properties bound")
             try expect(obj(out)["clean"] == .bool(true), "no unmatched drift")
-            try expect(obj(out)["boundCount"] == .int(11), "11 bound")
+            try expect(obj(out)["boundCount"] == .int(RegistryEntity.skillsSeed().properties.count),
+                       "seed property count bound")
             // Persisted: a fresh entities call now shows fullyBound true.
             let after = try await RegistryModule.makeEntities().handler(.object([:]))
             if case .array(let arr)? = obj(after)["entities"], let first = arr.first {

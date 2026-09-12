@@ -243,6 +243,14 @@ public enum SkillsModule {
             slice instead of the whole body — use this when you need one part of a \
             large skill and want to stay under token caps. No match → compact heading \
             index + a `section-not-found` annotation.
+
+            FILES: when the SKILLS row has a Files & media (or Google Drive File) \
+            property, the envelope includes `files: [{ name, kind, notionFileId?, \
+            localPath?, sha256?, role? }]`. An empty array is honest. Call \
+            skill_materialize_file to copy a Notion-hosted binary into \
+            ~/Library/Application Support/The Bridge/skill-files/<uuid>/ for file_read. \
+            Notion is not binary SSOT — when the body names a Mac folder, `assetRoot` \
+            is included so you do not scrape /Users paths from prose.
             """,
             inputSchema: .object([
                 "type": .string("object"),
@@ -783,6 +791,7 @@ public enum SkillsModule {
         await registerListRoutingSkills(on: router)
         await registerSkillSplitPrimitives(on: router)
         await registerExposurePrimitives(on: router)
+        await registerSkillFilePrimitives(on: router)
     }
 
 }

@@ -88,6 +88,14 @@ func runRegistryConfigTests() async {
         try expect(skill.property("summary")?.notionName == "Description",
                    "summary maps to Notion 'Description'")
         try expect(skill.property("nope") == nil, "unknown key → nil")
+        try expect(skill.property("files")?.notionName == "Files & media",
+                   "files maps to Notion 'Files & media'")
+        try expect(skill.property("files")?.type == "files", "files type")
+        try expect(skill.property("googleDriveFile")?.notionName == "Google Drive File",
+                   "googleDriveFile maps to Notion 'Google Drive File'")
+        try expect(skill.property("manager")?.notionName == "Manager",
+                   "manager maps to Notion 'Manager'")
+        try expect(skill.property("manager")?.role == .relation, "manager is a relation")
     }
 
     await test("Seed: property ids are UNBOUND (Decision 5 — never shipped)") {
@@ -121,6 +129,36 @@ func runRegistryConfigTests() async {
         let p = RegistryProperty(key: "x", notionName: "X", type: "rich_text")
         try expect(!p.bound(to: "").isBound, "empty id → unbound")
         try expect(p.bound(to: "prop_1").isBound, "non-empty id → bound")
+    }
+
+    await test("Config.mergeSkillSeedProperties: appends files/googleDriveFile/manager without duplicating") {
+        var old = RegistryEntity.skillsSeed()
+        old.properties.removeAll { ["files", "googleDriveFile", "manager"].contains($0.key) }
+        try expect(old.property("files") == nil, "pre-#254 seed has no files key")
+        var cfg = RegistryConfig(entities: [old])
+        try expect(cfg.mergeSkillSeedProperties(), "missing seed keys are appended")
+        let merged = cfg.entity("skill")!
+        try expect(merged.property("files")?.notionName == "Files & media")
+        try expect(merged.property("googleDriveFile")?.type == "files")
+        try expect(merged.property("manager")?.role == .relation)
+        try expect(merged.property("specialist") != nil, "existing keys survive")
+        try expect(!cfg.mergeSkillSeedProperties(), "second pass is a no-op")
+    }
+
+    await test("Store.load: older skill entity picks up new seed properties") {
+        try await withTempRegistryStore { store, url in
+            var old = RegistryEntity.skillsSeed()
+            old.properties.removeAll { $0.key == "files" || $0.key == "googleDriveFile" || $0.key == "manager" }
+            try await store.save(RegistryConfig(entities: [old]))
+            let loaded = try await store.load()
+            try expect(loaded.entity("skill")?.property("files") != nil,
+                       "load merges Files & media onto an older skill entity")
+            try expect(loaded.entity("skill")?.property("manager") != nil,
+                       "load merges Manager")
+            // Persisted so a subsequent load does not depend on in-memory merge.
+            let onDisk = try JSONDecoder().decode(RegistryConfig.self, from: Data(contentsOf: url))
+            try expect(onDisk.entity("skill")?.property("files") != nil, "merge is written through")
+        }
     }
 
     // MARK: - upsert

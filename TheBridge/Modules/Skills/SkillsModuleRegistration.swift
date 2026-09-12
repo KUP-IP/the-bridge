@@ -587,6 +587,54 @@ extension SkillsModule {
         ))
     }
 
+    /// #254: copy a Notion-hosted skill attachment onto the local cache.
+    static func registerSkillFilePrimitives(on router: ToolRouter) async {
+        await router.register(ToolRegistration(
+            name: "skill_materialize_file",
+            module: moduleName,
+            tier: .open,
+            description: """
+            Copy one Notion-hosted Files & media attachment from a configured skill \
+            onto the local skill-files cache so file_read can open it.
+
+            IDENTITY: same as fetch_skill — prefer `id` (Notion UUID), else `name`. \
+            Select the file with `fileName` or `notionFileId` from the fetch_skill \
+            `files` catalog.
+
+            Writes ~/Library/Application Support/The Bridge/skill-files/<uuid>/<name>. \
+            Notion is a catalog/mirror, not binary SSOT. When fetch_skill returns \
+            `assetRoot` (e.g. ~/Desktop/Brand Master), that local folder remains SSOT; \
+            this tool only materializes Notion-hosted binaries. External / Google Drive \
+            URLs are not downloaded.
+            """,
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "id": .object([
+                        "type": .string("string"),
+                        "description": .string("Skill Notion UUID (dashed or compact). Authoritative when both id and name are supplied.")
+                    ]),
+                    "name": .object([
+                        "type": .string("string"),
+                        "description": .string("Configured skill name when the UUID is not known.")
+                    ]),
+                    "fileName": .object([
+                        "type": .string("string"),
+                        "description": .string("Attachment name from fetch_skill files[].name")
+                    ]),
+                    "notionFileId": .object([
+                        "type": .string("string"),
+                        "description": .string("Notion file id from fetch_skill files[].notionFileId when present")
+                    ])
+                ]),
+                "required": .array([])
+            ]),
+            handler: { args in
+                try await Self.handleMaterializeSkillFile(args)
+            }
+        ))
+    }
+
     /// Unpack a Value argument expected to be an object literal. Returns
     /// empty dict on non-object input (the handler's own validation will
     /// then surface a meaningful error).

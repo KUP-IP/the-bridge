@@ -2,6 +2,18 @@
 
 ## Unreleased — hotfix on 4.0.7 / build 96 (not a published install)
 
+- **Skill files catalog + materialize (#254)** — Registry Skills seed now
+  binds `files` (Files & media), `googleDriveFile` (Google Drive File),
+  and `manager`. Existing `registry.json` skill rows pick up missing
+  seed keys on load (ids unbound until introspect). `fetch_skill` adds
+  `files: [{ name, kind, notionFileId?, localPath?, sha256?, role? }]`
+  when that property exists — empty array is honest; omit is not — and
+  `assetRoot` when the body names a Mac folder (`~/Desktop/Brand Master`).
+  New open-tier `skill_materialize_file` copies a Notion-hosted attachment
+  into `~/Library/Application Support/The Bridge/skill-files/<uuid>/` for
+  `file_read`. Notion is a catalog/mirror, not binary SSOT. File-source
+  SKILL.md (`buildFileSkillResult`) is unchanged. `staticFeatureModuleToolCount`
+  **239 → 240**. Floor **4047 → 4067** (+20 stacked on #271). Not Installed or Released.
 - **Confirm LSUIElement force-front + sticky gate (beyond PR #269)** —
   Installed main `2bd375aa` (PR #269) still failed the live
   `standing_orders_delete` probe: `#263` `awaiting_approval` held, but

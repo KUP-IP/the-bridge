@@ -252,7 +252,11 @@ extension SkillsModule {
             url: url,
             markdownJSONOrText: markdownJSONOrText,
             titleLookup: titleLookup,
-            flattenedProperties: .object(flattenProperties(pageProperties))
+            flattenedProperties: .object(flattenProperties(pageProperties)),
+            filesCatalog: SkillFileCatalog.fromRawPageProperties(
+                pageProperties,
+                skillUUID: skill.notionPageId
+            )
         )
     }
 
@@ -271,7 +275,8 @@ extension SkillsModule {
         url: String,
         markdownJSONOrText: String,
         titleLookup: MentionResolver.TitleLookup,
-        flattenedProperties: Value
+        flattenedProperties: Value,
+        filesCatalog: SkillFileCatalogResult? = nil
     ) async -> Value {
         let markdown = looksLikeMarkdownJSON(markdownJSONOrText)
             ? skillMarkdownString(fromMarkdownJSON: markdownJSONOrText)
@@ -306,6 +311,19 @@ extension SkillsModule {
         // cache-hit path it is the verbatim persisted flatten. No
         // pre-existing key is touched.
         resultObj["properties"] = flattenedProperties
+        // #254: files catalog when a Files & media (or Google Drive File)
+        // property exists — empty array is honest; omit is not. assetRoot
+        // is included only when prose names a Mac folder.
+        let catalog = filesCatalog ?? SkillFileCatalog.fromFlattenedProperties(
+            flattenedProperties,
+            skillUUID: skill.notionPageId
+        )
+        if catalog.propertyPresent {
+            resultObj["files"] = .array(catalog.files.map(\.envelopeValue))
+        }
+        if let root = SkillFileCatalog.assetRoot(fromMarkdown: resolved) {
+            resultObj["assetRoot"] = .string(root)
+        }
         return .object(resultObj)
     }
 

@@ -51,6 +51,7 @@ public enum BridgePaths {
         case skillsCache    = "skills-cache"    // Notion-synced routing-skill cache
         case skillsBodyCache = "skills-body-cache" // persistent per-skill BODY cache
         case skillsExposure = "skills-exposure" // verified exposure generations + reconciliation receipts
+        case skillFiles     = "skill-files"     // materialized Notion skill attachments (not binary SSOT)
         case standingOrders = "standing-orders"
         case jobs           = "jobs"
         case bgProcess      = "bg-process"

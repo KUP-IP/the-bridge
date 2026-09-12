@@ -270,6 +270,25 @@ public struct RegistryConfig: Codable, Sendable, Equatable {
         entities.removeAll { keys.contains($0.key) }
         return entities.count != before
     }
+
+    /// Append any Skills-seed properties this config's `skill` entity does
+    /// not already declare by canonical key. Existing operator bindings
+    /// (ids, types, names) are left untouched. Returns true when the
+    /// property map grew — callers persist so an installed registry.json
+    /// picks up `files` / `googleDriveFile` / `manager` without a re-seed.
+    @discardableResult
+    public mutating func mergeSkillSeedProperties() -> Bool {
+        guard var skill = entity(RegistryEntity.seedEntityKey),
+              skill.key == RegistryEntity.seedEntityKey else {
+            return false
+        }
+        let existing = Set(skill.properties.map(\.key))
+        let extras = RegistryEntity.skillsSeed().properties.filter { !existing.contains($0.key) }
+        guard !extras.isEmpty else { return false }
+        skill.properties.append(contentsOf: extras)
+        upsert(skill)
+        return true
+    }
 }
 
 // MARK: - Default seed (Skills as entity #1 — Decision 7)
@@ -321,6 +340,14 @@ public extension RegistryEntity {
                 RegistryProperty(key: "runtimeExposure", notionName: "Runtime Exposure", type: "select"),
                 RegistryProperty(key: "domain", notionName: "Domain", type: "select"),
                 RegistryProperty(key: "specialist", notionName: "Specialist", type: "relation", role: .relation),
+                // #254: Files & media is the KEEP OS SKILLS attachment column
+                // (typed-collection-required). Bind by property id so fetch_skill
+                // can catalog Notion-hosted binaries without treating Notion as
+                // the binary SSOT. googleDriveFile is the sibling Drive column
+                // retained on SKILLS; manager is the parent-routing relation.
+                RegistryProperty(key: "files", notionName: "Files & media", type: "files"),
+                RegistryProperty(key: "googleDriveFile", notionName: "Google Drive File", type: "files"),
+                RegistryProperty(key: "manager", notionName: "Manager", type: "relation", role: .relation),
             ],
             // Skills are stable, body-heavy reference content → 6h, matching
             // the Memory volatility tier (Decision 4 left Skills' TTL open).

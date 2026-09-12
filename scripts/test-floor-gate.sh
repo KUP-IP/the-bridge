@@ -203,7 +203,14 @@
 #   refuses unique-foreground / pending-escalate / default-button persist.
 #   +9 ConfirmLiveFailContractTests. CI must re-measure (Linux host cannot
 #   compile macOS 26).
-FLOOR="${BRIDGE_TEST_FLOOR:-4047}"
+# 2026-09-12: 4047 → 4067 (+20) — #254 skill files catalog + materialize
+#   stacked onto main after #271. Registry Skills seed binds files /
+#   googleDriveFile / manager; fetch_skill files[] + optional assetRoot;
+#   skill_materialize_file copies Notion-hosted binaries into
+#   skill-files/<uuid>/. +17 FetchSkillNotionFilesTests +2
+#   RegistryConfigTests +1 SkillsModuleTests. Linux host cannot compile
+#   macOS 26; CI must re-measure.
+FLOOR="${BRIDGE_TEST_FLOOR:-4067}"
 
 echo "🧪 test-floor-gate: building debug test executable + running suite (floor=${FLOOR})..."
 swift build -c debug --product TheBridgeTests
