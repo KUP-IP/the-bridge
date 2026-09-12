@@ -110,11 +110,13 @@ public enum ConfirmSurfaceSync {
 
     /// Drive `runtime` through `forceSurfacePlan`. Yield hops via `hop`
     /// (live: next main-queue turn; tests: sync `{ $0() }` or a recorder).
+    /// `hop` is `@escaping` because the yield recursion captures it inside
+    /// the work closure (`-strict-concurrency=complete`).
     @MainActor
     public static func run(
         pendingPromptCount: Int,
         runtime: ConfirmSurfaceRuntime,
-        hop: (@escaping @MainActor () -> Void) -> Void = { work in
+        hop: @escaping (@escaping @MainActor () -> Void) -> Void = { work in
             scheduleAfterWindowServerYield(work)
         }
     ) {
@@ -130,7 +132,7 @@ public enum ConfirmSurfaceSync {
     private static func applyRemaining(
         _ commands: ArraySlice<ConfirmSurfaceCommand>,
         runtime: ConfirmSurfaceRuntime,
-        hop: (@escaping @MainActor () -> Void) -> Void
+        hop: @escaping (@escaping @MainActor () -> Void) -> Void
     ) {
         var rest = commands
         while let command = rest.first {
@@ -138,8 +140,9 @@ public enum ConfirmSurfaceSync {
             runtime.apply(command)
             if command == .yieldForWindowServer {
                 let remaining = Array(rest)
-                hop {
-                    applyRemaining(remaining[...], runtime: runtime, hop: hop)
+                let resume = hop
+                resume {
+                    applyRemaining(remaining[...], runtime: runtime, hop: resume)
                 }
                 return
             }

@@ -61,7 +61,7 @@ public final class ConfirmPanelController: ConfirmPanelPresenting {
     /// `{ work in work() }` so `probe.windows` is asserted after create.
     public func present(
         prompts: [PendingApprovalPrompt],
-        hop: (@escaping @MainActor () -> Void) -> Void = { work in
+        hop: @escaping (@escaping @MainActor () -> Void) -> Void = { work in
             ConfirmSurfaceSync.scheduleAfterWindowServerYield(work)
         }
     ) {
