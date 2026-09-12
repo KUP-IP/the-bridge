@@ -55,6 +55,41 @@ private func seedMeta(_ meta: BgProcessJobMeta, baseDir: URL) throws {
     try data.write(to: dir.appendingPathComponent("meta.json"), options: .atomic)
 }
 
+/// True when `pid` is no longer a live (non-zombie) process.
+///
+/// `kill(pid, 0)` stays 0 for zombies until the runtime watcher `waitpid`s.
+/// On a loaded CI runner that DispatchSource can sit behind the 6s poll the
+/// original cascade test used, so treat a `Z` state as already dead.
+private func processIsGone(_ pid: Int32) -> Bool {
+    if Darwin.kill(pid, 0) != 0 { return true }
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: "/bin/ps")
+    task.arguments = ["-p", String(pid), "-o", "state="]
+    let pipe = Pipe()
+    task.standardOutput = pipe
+    task.standardError = FileHandle.nullDevice
+    do {
+        try task.run()
+        task.waitUntilExit()
+    } catch {
+        return false
+    }
+    let state = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .uppercased() ?? ""
+    return state.contains("Z")
+}
+
+/// Poll until `predicate` is true or `seconds` of wall time elapse.
+private func waitUntil(seconds: TimeInterval, _ predicate: () async throws -> Bool) async rethrows -> Bool {
+    let deadline = Date().addingTimeInterval(seconds)
+    while Date() < deadline {
+        if try await predicate() { return true }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+    }
+    return false
+}
+
 /// A PID that is guaranteed dead: spawn `/usr/bin/true`, wait for it to exit and
 /// be reaped, then return its (now-defunct) pid. kill(pid, 0) on it returns ESRCH.
 private func reapedDeadPid() -> Int32 {
@@ -173,31 +208,28 @@ func runBgProcessRuntimeTests() async {
     // 4) kill cascade escalates SIGTERM → SIGKILL on a TERM-ignoring child.
     await test("kill cascade: a TERM-ignoring child is escalated to SIGKILL after the grace period") {
         try await rtWithTemp(killGracePeriodSec: 1) { rt, _ in
-            // Child traps (ignores) SIGTERM and would otherwise sleep 30s.
-            let meta = try await rt.start(command: "trap '' TERM; sleep 30")
+            // Group SIGTERM kills /bin/sleep even when the shell ignores TERM.
+            // A one-shot `sleep 30` then lets bash exit before the grace timer
+            // (racing finalizeExit vs SIGKILL) and can leave a zombie that
+            // kill(pid, 0) still sees. Loop so the shell stays alive until
+            // the product escalates — the cascade itself is unchanged.
+            let meta = try await rt.start(command: "trap '' TERM; while :; do sleep 30; done")
             let id = meta.id
             let pid = meta.pid
-            try? await Task.sleep(nanoseconds: 300_000_000) // let the trap install
+            try? await Task.sleep(nanoseconds: 500_000_000) // let the trap + first sleep install
             try expect(Darwin.kill(pid, 0) == 0, "child should be alive before kill")
 
             // Soft kill (SIGTERM). The trap swallows it, so the 1s-grace timer
-            // must escalate to SIGKILL.
+            // must escalate to SIGKILL. The timer is DispatchQueue.global()
+            // asyncAfter — under CI load that can slip well past 1s.
             _ = try await rt.kill(id: id, force: false)
 
-            // Wait out the grace + a margin, then the process group must be gone.
-            var gone = false
-            for _ in 0..<60 { // up to ~6s
-                if Darwin.kill(pid, 0) != 0 { gone = true; break }
-                try? await Task.sleep(nanoseconds: 100_000_000)
-            }
+            let gone = await waitUntil(seconds: 25) { processIsGone(pid) }
             try expect(gone, "TERM-ignoring child must be SIGKILLed after the grace period")
 
             // meta should reflect the escalation: killSignal == SIGKILL.
-            var sawSigkill = false
-            for _ in 0..<30 {
-                let m = try await rt.status(id: id)
-                if m.killSignal == SIGKILL { sawSigkill = true; break }
-                try? await Task.sleep(nanoseconds: 100_000_000)
+            let sawSigkill = try await waitUntil(seconds: 10) {
+                try await rt.status(id: id).killSignal == SIGKILL
             }
             try expect(sawSigkill, "escalation must record killSignal == SIGKILL in meta")
         }
