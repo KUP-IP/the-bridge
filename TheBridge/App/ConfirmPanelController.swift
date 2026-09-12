@@ -15,7 +15,10 @@ import SwiftUI
 public final class ConfirmPanelController: ConfirmPanelPresenting {
     public static let shared = ConfirmPanelController()
 
-    public static let windowTitle = "The Bridge — Confirm"
+    /// `nonisolated` so `ConfirmDelivery.isConfirmWindowTitle` and the
+    /// StatusBar NSEvent monitor can read it off the main actor under
+    /// `-strict-concurrency=complete`.
+    public nonisolated static let windowTitle = "The Bridge — Confirm"
     /// Confirm never assigns an AppKit default button. Always Allow must
     /// not fire on Return / Focus delivery (#264).
     public nonisolated static let assignsDefaultButton = false
@@ -54,11 +57,19 @@ public final class ConfirmPanelController: ConfirmPanelPresenting {
         }
     }
 
-    public func present(prompts: [PendingApprovalPrompt]) {
+    /// Live callers omit `hop` (next-turn WindowServer yield). Tests pass
+    /// `{ work in work() }` so `probe.windows` is asserted after create.
+    public func present(
+        prompts: [PendingApprovalPrompt],
+        hop: (@escaping @MainActor () -> Void) -> Void = { work in
+            ConfirmSurfaceSync.scheduleAfterWindowServerYield(work)
+        }
+    ) {
         let runtime = ConfirmSurfaceSession.makeRuntime(prompts)
         ConfirmSurfaceSync.run(
             pendingPromptCount: prompts.count,
-            runtime: runtime
+            runtime: runtime,
+            hop: hop
         )
     }
 

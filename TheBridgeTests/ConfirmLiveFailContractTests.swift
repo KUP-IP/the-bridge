@@ -105,17 +105,21 @@ func runConfirmLiveFailContractTests() async {
             let probe = ConfirmWindowServerProbe(policy: .accessory)
             ConfirmSurfaceSession.makeRuntime = { _ in probe }
             defer { ConfirmSurfaceSession.resetForTesting() }
-            ConfirmPanelController.shared.present(prompts: [
-                PendingApprovalPrompt(
-                    id: "ws-present-1",
-                    title: "The Bridge wants to standing_orders_delete",
-                    body: "id=ws-present",
-                    toolName: "standing_orders_delete",
-                    module: "standing_orders",
-                    allowAlwaysAllow: true,
-                    origin: .remote
-                )
-            ])
+            ConfirmPanelController.shared.present(
+                prompts: [
+                    PendingApprovalPrompt(
+                        id: "ws-present-1",
+                        title: "The Bridge wants to standing_orders_delete",
+                        body: "id=ws-present",
+                        toolName: "standing_orders_delete",
+                        module: "standing_orders",
+                        allowAlwaysAllow: true,
+                        origin: .remote
+                    )
+                ],
+                // Sync hop so this turn sees create after yield (default hop is async).
+                hop: { work in work() }
+            )
             try expect(probe.executed.contains(.setRegularActivationPolicy))
             try expect(probe.executed.contains(.yieldForWindowServer),
                        "present() must not skip the WindowServer yield (PR #271 live miss)")
