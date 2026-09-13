@@ -1,17 +1,17 @@
 // NotifyStickyGate.swift — persist Notify only on explicit Always Allow
 // TheBridge · Security
 //
-// #264 LIVE FAIL on installed 2bd375aa (PR #269): clean-prefs
+// #264 LIVE FAIL on installed b8045b61 (PR #271): clean-prefs
 // `standing_orders_delete` rewrote `tierOverrides` + `moduleTierOverrides`
-// to notify without an Always Allow tap. PR #269 added
-// `.foreground` + `.authenticationRequired` on `ALWAYS_ALLOW` so a
-// "silent background" action could not persist. That made ALWAYS_ALLOW
-// the **unique foreground** category action. Time Sensitive delivery +
-// LSUIElement activation then invoked it (no tap) → persist + surface
-// clear → Confirm gone (`windows=0`).
+// to notify without an Always Allow tap. PR #271 refused unique-foreground
+// ALWAYS_ALLOW, then removed `.foreground` so the live category classified
+// as `.notificationAlwaysAllow` (explicit persist). Time Sensitive +
+// LSUIElement activate still invoked ALWAYS_ALLOW with no tap → persist
+// + surface clear → Confirm gone (`windows=0`).
 //
-// This gate is the hermetic sticky contract. `persistNotifySticky` refuses
-// implicit / escalate / default-button sources even if a caller passes them.
+// UN cannot prove a tap. Banner ALWAYS_ALLOW is implicit. Persist only
+// from Confirm-surface tap (`.confirmSurface`) or the gate's explicit
+// `.alwaysAllow` provider return (`.requestApproval`).
 
 import Foundation
 import UserNotifications
@@ -36,11 +36,12 @@ public enum NotifyStickyGate {
     public static let cancelActionIdentifier = "CANCEL_ACTION"
 
     /// Sources that may write per-tool + module Notify.
+    /// UN / Time Sensitive / default-button / pending escalate never qualify.
     public static func allowsPersist(source: NotifyStickyDecisionSource) -> Bool {
         switch source {
-        case .confirmSurface, .notificationAlwaysAllow, .requestApproval:
+        case .confirmSurface, .requestApproval:
             return true
-        case .implicitForeground, .pendingEscalate, .defaultButton:
+        case .notificationAlwaysAllow, .implicitForeground, .pendingEscalate, .defaultButton:
             return false
         }
     }
@@ -52,7 +53,7 @@ public enum NotifyStickyGate {
         return ids.count == 1 ? ids[0] : nil
     }
 
-    /// PR #269 layout that caused the LIVE sticky rewrite.
+    /// PR #269 layout that caused the first LIVE sticky rewrite.
     public static var pr269UniqueForegroundLayout: [ConfirmBannerActionSpec] {
         [
             ConfirmBannerActionSpec(
@@ -73,16 +74,15 @@ public enum NotifyStickyGate {
         ]
     }
 
-    /// Classify a UN action. Unique-foreground ALWAYS_ALLOW is implicit.
+    /// Classify a UN action. Banner ALWAYS_ALLOW is never a proven tap —
+    /// unique-foreground or not (LIVE on b8045b61 after unique-foreground
+    /// was removed).
     public static func sourceForNotificationAction(
         identifier: String,
         categoryActions: [ConfirmBannerActionSpec]
     ) -> NotifyStickyDecisionSource? {
         guard identifier == alwaysAllowActionIdentifier else { return nil }
-        if uniqueForegroundActionIdentifier(actions: categoryActions)
-            == alwaysAllowActionIdentifier {
-            return .implicitForeground
-        }
-        return .notificationAlwaysAllow
+        _ = categoryActions
+        return .implicitForeground
     }
 }
