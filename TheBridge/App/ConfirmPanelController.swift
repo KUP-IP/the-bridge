@@ -1,11 +1,12 @@
-// ConfirmPanelController.swift — sticky NSPanel for the Confirm body
+// ConfirmPanelController.swift — sticky Confirm window for the Confirm body
 // TheBridge · App
 //
 // MenuBarExtra `.window` on an LSUIElement app is not a reliable Confirm
 // host (PR #260 live-fail: popover window count 0, 0 AXButtons). #262
-// fronts this panel on escalate (activate + `.regular`, status-bar level,
-// becomes key). It stays until Deny / Allow / Always Allow or the surface
-// empties. Always Allow is never the AppKit default button (#264).
+// fronts this window on escalate (activate + `.regular` **then a
+// WindowServer yield**, then create). Same-turn create after
+// `setActivationPolicy` is omitted from `NSApp.windows` (LIVE on
+// b8045b61). Always Allow is never the AppKit default button (#264).
 
 import AppKit
 import SwiftUI
@@ -14,12 +15,18 @@ import SwiftUI
 public final class ConfirmPanelController: ConfirmPanelPresenting {
     public static let shared = ConfirmPanelController()
 
+    /// `nonisolated` so `ConfirmDelivery.isConfirmWindowTitle` and the
+    /// StatusBar NSEvent monitor can read it off the main actor under
+    /// `-strict-concurrency=complete`.
     public nonisolated static let windowTitle = "The Bridge — Confirm"
     /// Confirm never assigns an AppKit default button. Always Allow must
     /// not fire on Return / Focus delivery (#264).
     public nonisolated static let assignsDefaultButton = false
+    /// Live `present` must drive `ConfirmSurfaceSync.run` (yield before
+    /// create). Tests fail if this is false or if a parallel path creates.
+    public nonisolated static let surfacesViaForceSurfacePlan = true
 
-    private var panel: NSPanel?
+    private var panel: NSWindow?
 
     public init() {}
 
@@ -35,7 +42,7 @@ public final class ConfirmPanelController: ConfirmPanelPresenting {
         sync()
     }
 
-    /// True when a Confirm panel is on-screen (tests inspect host state;
+    /// True when a Confirm window is on-screen (tests inspect host state;
     /// this is the AppKit mirror for the live app).
     public var isPanelVisible: Bool {
         panel?.isVisible == true
@@ -50,36 +57,20 @@ public final class ConfirmPanelController: ConfirmPanelPresenting {
         }
     }
 
-    public func present(prompts: [PendingApprovalPrompt]) {
-        guard Self.canPresentPanel else { return }
-        // LSUIElement: policy + unhide + activate BEFORE the window exists.
-        // Creating an NSPanel while still `.accessory` never joins
-        // `NSApp.windows` (#262 LIVE on 2bd375aa).
-        ConfirmFrontApplicator.prepareApp()
-        let host = NSHostingController(rootView: ConfirmPanelView(prompts: prompts))
-        let fitting = host.view.fittingSize
-        let size = NSSize(width: max(fitting.width, 400), height: max(fitting.height, 220))
-        host.view.frame = NSRect(origin: .zero, size: size)
-        host.view.wantsLayer = true
-
-        let panel = self.panel ?? makePanel(size: size)
-        panel.title = Self.windowTitle
-        panel.contentView = host.view
-        panel.setContentSize(size)
-        position(panel, size: size)
-        panel.defaultButtonCell = nil
-        ConfirmFrontApplicator.apply(to: panel)
-        self.panel = panel
-        NotificationCenter.default.post(name: .confirmPanelDidChange, object: nil)
-        // SwiftUI's first Button becomes AppKit's default after layout and
-        // overwrites `defaultButtonCell = nil`. Always Allow is no longer a
-        // Button (#264); still re-clear + re-front on the next turn so
-        // LSUIElement cannot swallow the first orderFront (#262).
-        DispatchQueue.main.async { [weak panel] in
-            guard let panel else { return }
-            panel.defaultButtonCell = nil
-            ConfirmFrontApplicator.apply(to: panel)
+    /// Live callers omit `hop` (next-turn WindowServer yield). Tests pass
+    /// `{ work in work() }` so `probe.windows` is asserted after create.
+    public func present(
+        prompts: [PendingApprovalPrompt],
+        hop: @escaping (@escaping @MainActor () -> Void) -> Void = { work in
+            ConfirmSurfaceSync.scheduleAfterWindowServerYield(work)
         }
+    ) {
+        let runtime = ConfirmSurfaceSession.makeRuntime(prompts)
+        ConfirmSurfaceSync.run(
+            pendingPromptCount: prompts.count,
+            runtime: runtime,
+            hop: hop
+        )
     }
 
     public func dismiss() {
@@ -88,40 +79,77 @@ public final class ConfirmPanelController: ConfirmPanelPresenting {
         NotificationCenter.default.post(name: .confirmPanelDidChange, object: nil)
     }
 
-    private func makePanel(size: NSSize) -> NSPanel {
-        // Key-capable titled panel (not `.nonactivatingPanel`). Accessory
-        // LSUIElement windows hide on deactivate — #262 fronts this as a
-        // regular, key window at status-bar level. Always Allow is never
-        // an AppKit default button (#264 / PR #267).
-        let panel = NSPanel(
+    /// Create / reuse the window. Only after `ConfirmSurfaceSync` has
+    /// flipped policy and yielded. Re-reads the surface so a hop after
+    /// UN misfire / resolve does not resurrect an empty Confirm.
+    func materialize(prompts: [PendingApprovalPrompt]) {
+        guard Self.canPresentPanel else { return }
+        let live = PendingApprovalSurface.shared.snapshot()
+        let cards = live.isEmpty ? prompts : live
+        guard ConfirmDelivery.shouldPresentPanel(pendingPromptCount: live.count) else {
+            dismiss()
+            return
+        }
+        let host = NSHostingController(rootView: ConfirmPanelView(prompts: cards))
+        let fitting = host.view.fittingSize
+        let size = NSSize(width: max(fitting.width, 400), height: max(fitting.height, 220))
+        host.view.frame = NSRect(origin: .zero, size: size)
+        host.view.wantsLayer = true
+
+        let window = self.panel ?? makeWindow(size: size)
+        window.title = Self.windowTitle
+        window.contentView = host.view
+        window.setContentSize(size)
+        position(window, size: size)
+        window.defaultButtonCell = nil
+        self.panel = window
+        NotificationCenter.default.post(name: .confirmPanelDidChange, object: nil)
+    }
+
+    func frontExisting() {
+        guard let window = panel else { return }
+        window.defaultButtonCell = nil
+        ConfirmFrontApplicator.apply(to: window)
+        NotificationCenter.default.post(name: .confirmPanelDidChange, object: nil)
+        if Self.canPresentPanel && !ConfirmFrontApplicator.confirmWindowIsListed() {
+            ConfirmSurfaceSync.scheduleAfterWindowServerYield { [weak self] in
+                guard let self, let window = self.panel else { return }
+                ConfirmFrontApplicator.prepareApp()
+                window.defaultButtonCell = nil
+                ConfirmFrontApplicator.apply(to: window)
+            }
+        }
+    }
+
+    private func makeWindow(size: NSSize) -> NSWindow {
+        // Key-capable titled window (not NSPanel / `.nonactivatingPanel`).
+        // LSUIElement NSPanels are still omitted from NSApp.windows / AX
+        // after a same-turn `.regular` flip (#262 LIVE on b8045b61).
+        let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.titled],
+            styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
-        panel.title = Self.windowTitle
-        // Not a floating utility panel — those are omitted from NSApp.windows
-        // / AX while the process is LSUIElement (#262 LIVE).
-        panel.isFloatingPanel = false
-        panel.level = .statusBar
-        panel.hidesOnDeactivate = ConfirmDelivery.hidesOnDeactivate
-        panel.becomesKeyOnlyIfNeeded = !ConfirmDelivery.becomesKey
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .managed]
-        panel.isReleasedWhenClosed = false
-        panel.defaultButtonCell = nil
-        return panel
+        window.title = Self.windowTitle
+        window.level = .statusBar
+        window.hidesOnDeactivate = ConfirmDelivery.hidesOnDeactivate
+        window.collectionBehavior = [.canJoinAllSpaces, .managed]
+        window.isReleasedWhenClosed = false
+        window.defaultButtonCell = nil
+        return window
     }
 
-    private func position(_ panel: NSPanel, size: NSSize) {
+    private func position(_ window: NSWindow, size: NSSize) {
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
         let origin = NSPoint(
             x: screen.maxX - size.width - 16,
             y: screen.maxY - size.height - 8
         )
-        panel.setFrameOrigin(origin)
+        window.setFrameOrigin(origin)
     }
 
-    /// Real NSPanel only in the bundled app — never in TheBridgeTests.
+    /// Real Confirm window only in the bundled app — never in TheBridgeTests.
     /// `nonisolated` so SecurityGateUXTests can read it off the main actor
     /// under `-strict-concurrency=complete`.
     public nonisolated static var canPresentPanel: Bool {
@@ -130,5 +158,39 @@ public final class ConfirmPanelController: ConfirmPanelPresenting {
             return false
         }
         return Bundle.main.bundleURL.pathExtension.lowercased() == "app"
+    }
+}
+
+/// AppKit adapter driven by `ConfirmSurfaceSync.run`.
+@MainActor
+public final class ConfirmAppKitSurfaceRuntime: ConfirmSurfaceRuntime {
+    let prompts: [PendingApprovalPrompt]
+
+    public init(prompts: [PendingApprovalPrompt]) {
+        self.prompts = prompts
+    }
+
+    public var currentPolicy: ConfirmActivationPolicy {
+        if let app = NSApp, app.activationPolicy() == .regular {
+            return .regular
+        }
+        return .accessory
+    }
+
+    public var hasVisibleConfirmWindow: Bool {
+        ConfirmFrontApplicator.confirmWindowIsListed()
+    }
+
+    public func apply(_ command: ConfirmSurfaceCommand) {
+        switch command {
+        case .setRegularActivationPolicy, .unhideApp, .activateIgnoringOtherApps:
+            ConfirmFrontApplicator.prepareApp()
+        case .yieldForWindowServer:
+            break
+        case .createOrReusePanel:
+            ConfirmPanelController.shared.materialize(prompts: prompts)
+        case .applyFront:
+            ConfirmPanelController.shared.frontExisting()
+        }
     }
 }

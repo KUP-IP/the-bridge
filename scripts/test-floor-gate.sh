@@ -203,7 +203,7 @@
 #   refuses unique-foreground / pending-escalate / default-button persist.
 #   +9 ConfirmLiveFailContractTests. CI must re-measure (Linux host cannot
 #   compile macOS 26).
-FLOOR="${BRIDGE_TEST_FLOOR:-4047}"
+FLOOR="${BRIDGE_TEST_FLOOR:-4051}"
 
 echo "🧪 test-floor-gate: building debug test executable + running suite (floor=${FLOOR})..."
 swift build -c debug --product TheBridgeTests

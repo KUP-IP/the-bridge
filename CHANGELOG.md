@@ -2,6 +2,27 @@
 
 ## Unreleased — hotfix on 4.0.7 / build 96 (not a published install)
 
+- **Confirm WindowServer yield + UN Always Allow is not a persist
+  (beyond PR #271)** — Installed main `b8045b61` (PR #271) still failed
+  the live `standing_orders_delete` probe: `#263` `awaiting_approval`
+  held, but Confirm never auto-fronted (`TheBridge windows=0`) and
+  `tierOverrides` / `moduleTierOverrides` rewrote to notify with no
+  Always Allow tap. Two remaining live channels hermetic 271 tests
+  never drove: (1) `prepareApp` + NSPanel create on the **same
+  run-loop turn** — WindowServer still treats that as LSUIElement
+  accessory, so the window never joins `NSApp.windows` / AX;
+  (2) after unique-foreground was removed, UN `ALWAYS_ALLOW` classified
+  as `.notificationAlwaysAllow` (explicit persist) and
+  `didReceive` wrote both override keys + cleared the surface.
+  Fix: live presenter **must** execute `ConfirmSurfaceSync.run`
+  (policy → unhide → activate → **yield** → create → front) against
+  a `ConfirmWindowServerProbe`-modeled join rule; Confirm is an
+  `NSWindow` (not NSPanel); UN Always Allow is `presentBody` and
+  `persistNotifySticky` refuses `.notificationAlwaysAllow`. Persist
+  remains Confirm-surface tap / request-tier `.alwaysAllow` provider
+  return only. `#263` pending return is unchanged. Source Tested
+  only — no install. Floor **4047 → 4051** (+4). CI must re-measure
+  (this host cannot compile macOS 26).
 - **Confirm LSUIElement force-front + sticky gate (beyond PR #269)** —
   Installed main `2bd375aa` (PR #269) still failed the live
   `standing_orders_delete` probe: `#263` `awaiting_approval` held, but

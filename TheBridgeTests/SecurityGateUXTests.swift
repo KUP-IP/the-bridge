@@ -804,7 +804,8 @@ func runSecurityGateUXTests() async {
         )
         try expect(
             ConfirmPresentation.outcome(forNotificationActionIdentifier: "ALWAYS_ALLOW")
-                == .resolve(.alwaysAllow)
+                == .presentBody,
+            "banner Always Allow opens Confirm — UN cannot prove a tap"
         )
         try expect(
             ConfirmPresentation.outcome(forNotificationActionIdentifier: "CANCEL_ACTION")
@@ -862,6 +863,8 @@ func runSecurityGateUXTests() async {
         )
         try expect(
             ConfirmPresentation.shouldPersistNotifySticky(forNotificationActionIdentifier: "ALWAYS_ALLOW")
+                == false,
+            "UN ALWAYS_ALLOW must not persist Notify"
         )
     }
 

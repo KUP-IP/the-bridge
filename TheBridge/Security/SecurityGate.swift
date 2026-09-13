@@ -1345,9 +1345,10 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
 
     /// Always-Allow Notify sticky. Writes per-tool and, when `module` is
     /// non-empty, per-module. Call only from explicit Always Allow
-    /// (Confirm surface / NC `ALWAYS_ALLOW` / request-tier `.alwaysAllow`).
-    /// Public so the standalone test harness (no `@testable`) can exercise
-    /// the refuse path; `NotifyStickyGate.allowsPersist` still owns eligibility.
+    /// (Confirm surface tap / request-tier `.alwaysAllow` provider return).
+    /// UN `ALWAYS_ALLOW` is not a source — Time Sensitive can invoke it
+    /// with no tap (LIVE on b8045b61). Public so the standalone harness
+    /// can exercise the refuse path.
     public static func persistNotifySticky(
         toolName: String,
         module: String,
@@ -1520,6 +1521,56 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
         }
     }
 
+    /// Confirm UN action path used by `userNotificationCenter(_:didReceive:)`.
+    /// Tests call this directly — constructing `UNNotificationResponse` is
+    /// not possible in the hermetic harness. UN ALWAYS_ALLOW must not
+    /// persist or clear the surface (LIVE on b8045b61).
+    public func handleConfirmNotificationAction(
+        actionIdentifier: String,
+        notificationIdentifier: String,
+        categoryIdentifier: String,
+        title: String,
+        body: String,
+        userInfo: [AnyHashable: Any]
+    ) {
+        switch ConfirmPresentation.outcome(forNotificationActionIdentifier: actionIdentifier) {
+        case .presentBody:
+            NotificationCenter.default.post(name: .pendingApprovalSurfacePresentBody, object: nil)
+            return
+        case .resolve(let decision):
+            let promptKey = peekCoalesceKey(identifier: notificationIdentifier)
+            applyNotificationDecision(
+                identifier: notificationIdentifier,
+                coalesceKey: promptKey,
+                decision: decision
+            )
+            // Belt: UN never writes notify stickies, even if outcome is
+            // ever remapped to `.alwaysAllow`.
+            if decision == .alwaysAllow,
+               ConfirmPresentation.shouldPersistNotifySticky(
+                forNotificationActionIdentifier: actionIdentifier
+               ),
+               ConfirmDelivery.notificationActionsPersistNotifySticky,
+               let toolName = userInfo["toolName"] as? String {
+                let module = userInfo["module"] as? String ?? ""
+                let source = NotifyStickyGate.sourceForNotificationAction(
+                    identifier: actionIdentifier,
+                    categoryActions: ConfirmDelivery.confirmBannerActions
+                ) ?? .implicitForeground
+                Self.persistNotifySticky(
+                    toolName: toolName,
+                    module: module,
+                    source: source
+                )
+            }
+            PendingApprovalSurface.shared.removeMatching(
+                title: title,
+                body: body,
+                allowAlwaysAllow: categoryIdentifier != Self.categoryIdentifierNoAlways
+            )
+        }
+    }
+
     #if canImport(AppKit)
     /// Fail-closed modal mapping. The first/default button is Deny; only an
     /// explicit second-button response grants approval. Return, Escape, window
@@ -1612,46 +1663,16 @@ public final class NotificationApprovalManager: NSObject, @unchecked Sendable, U
         let isConfirm = category == Self.categoryIdentifier
             || category == Self.categoryIdentifierNoAlways
         if isConfirm {
-            switch ConfirmPresentation.outcome(forNotificationActionIdentifier: response.actionIdentifier) {
-            case .presentBody:
-                // Banner tap / swipe-away / unknown: open the Confirm body.
-                // Do not Deny and do not clear the badge.
-                NotificationCenter.default.post(name: .pendingApprovalSurfacePresentBody, object: nil)
-                completionHandler()
-                return
-            case .resolve(let decision):
-                let promptKey = peekCoalesceKey(identifier: identifier)
-                applyNotificationDecision(
-                    identifier: identifier,
-                    coalesceKey: promptKey,
-                    decision: decision
-                )
-                if decision == .alwaysAllow,
-                   ConfirmPresentation.shouldPersistNotifySticky(
-                    forNotificationActionIdentifier: response.actionIdentifier
-                   ),
-                   let toolName = userInfo["toolName"] as? String {
-                    let module = userInfo["module"] as? String ?? ""
-                    let source = NotifyStickyGate.sourceForNotificationAction(
-                        identifier: response.actionIdentifier,
-                        categoryActions: ConfirmDelivery.confirmBannerActions
-                    ) ?? .notificationAlwaysAllow
-                    Self.persistNotifySticky(
-                        toolName: toolName,
-                        module: module,
-                        source: source
-                    )
-                }
-                let title = response.notification.request.content.title
-                let body = response.notification.request.content.body
-                PendingApprovalSurface.shared.removeMatching(
-                    title: title,
-                    body: body,
-                    allowAlwaysAllow: category != Self.categoryIdentifierNoAlways
-                )
-                completionHandler()
-                return
-            }
+            handleConfirmNotificationAction(
+                actionIdentifier: response.actionIdentifier,
+                notificationIdentifier: identifier,
+                categoryIdentifier: category,
+                title: response.notification.request.content.title,
+                body: response.notification.request.content.body,
+                userInfo: userInfo
+            )
+            completionHandler()
+            return
         }
 
         let decision: ApprovalDecision
