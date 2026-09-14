@@ -9,7 +9,7 @@
   Stale body-cache / in-memory envelopes that still flatten Files & media
   to `[]` overlay a fresh getPage catalog when online, and the body cache
   persists that catalog. Kind/host allowlist residuals are unchanged.
-  Notion is still not binary SSOT. Floor **4071 → 4080** (+9). Not Installed
+  Notion is still not binary SSOT. Floor **4071 → 4079** (+8). Not Installed
   or Released.
 - **Skill files catalog + materialize (#254)** — Registry Skills seed now
   binds `files` (Files & media), `googleDriveFile` (Google Drive File),
