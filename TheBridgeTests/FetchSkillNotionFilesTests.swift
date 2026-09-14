@@ -330,6 +330,184 @@ func runFetchSkillNotionFilesTests() async {
         }
     }
 
+    await test("#276: hostedAttachmentId is the last UUID in the S3 path, not the space id") {
+        let space = "f0e5e646-cfef-422a-9826-a50bb9887d7f"
+        let attachment = "eb6e0f28-33e0-4d49-b2c3-c20d4231bf04"
+        let url = "https://prod-files-secure.s3.us-west-2.amazonaws.com/\(space)/\(attachment)/pr270-materialize-fixture.txt?X-Amz-Algorithm=AWS4-HMAC-SHA256"
+        try expect(
+            SkillFileCatalog.hostedAttachmentId(fromDownloadURL: url) == attachment,
+            "got \(String(describing: SkillFileCatalog.hostedAttachmentId(fromDownloadURL: url)))"
+        )
+        try expect(SkillFileCatalog.hostedAttachmentId(fromDownloadURL: "https://s3.example/logo.png") == nil)
+    }
+
+    func liveHostedFile(
+        name: String = "pr270-materialize-fixture.txt",
+        attachmentId: String = "eb6e0f28-33e0-4d49-b2c3-c20d4231bf04"
+    ) -> [String: Any] {
+        let space = "f0e5e646-cfef-422a-9826-a50bb9887d7f"
+        return [
+            "name": name,
+            "type": "file",
+            "file": [
+                "url": "https://prod-files-secure.s3.us-west-2.amazonaws.com/\(space)/\(attachmentId)/\(name)?X-Amz-Expires=3600",
+                "expiry_time": "2099-01-01T00:00:00Z"
+            ]
+        ]
+    }
+
+    await test("#276: live GET files item without id still catalogs notionFileId from the S3 path") {
+        let attachment = "eb6e0f28-33e0-4d49-b2c3-c20d4231bf04"
+        let catalog = SkillFileCatalog.fromRawPageProperties([
+            "Files & media": filesProp([liveHostedFile(attachmentId: attachment)])
+        ], skillUUID: pageId)
+        try expect(catalog.propertyPresent)
+        try expect(catalog.files.count == 1, "got \(catalog.files.count)")
+        try expect(catalog.files[0].name == "pr270-materialize-fixture.txt")
+        try expect(catalog.files[0].kind == "notion_hosted")
+        try expect(catalog.files[0].notionFileId == attachment,
+                   "live Notion file objects have no top-level id; identity is the attachment UUID")
+    }
+
+    await test("#276: fetch_skill envelope from live-shaped Files & media is non-empty with identity") {
+        let attachment = "eb6e0f28-33e0-4d49-b2c3-c20d4231bf04"
+        let result = await build(props: [
+            "Files & media": filesProp([liveHostedFile(attachmentId: attachment)])
+        ])
+        let files = try filesArray(result)
+        try expect(files.count == 1)
+        guard case .object(let f) = files[0] else {
+            throw TestError.assertion("file entry must be an object")
+        }
+        try expect(f["name"] == .string("pr270-materialize-fixture.txt"))
+        try expect(f["kind"] == .string("notion_hosted"))
+        try expect(f["notionFileId"] == .string(attachment))
+        try expect(f["downloadURL"] == nil, "ephemeral URLs must not leak")
+        let env = try envelope(result)
+        guard case .object(let props)? = env["properties"],
+              case .array(let names)? = props["Files & media"] else {
+            throw TestError.assertion("properties Files & media must be a name array, got \(env["properties"].map { "\($0)" } ?? "nil")")
+        }
+        try expect(names == [.string("pr270-materialize-fixture.txt")],
+                   "honest properties projection, got \(names)")
+    }
+
+    await test("#276: overlay fills stale empty files[] and empty Files & media from a fresh getPage blob") {
+        let stale = await build(props: [
+            "Files & media": filesProp([]),
+            "Status": ["type": "status", "status": ["name": "Active", "id": "s1"]]
+        ])
+        let staleEnv = try envelope(stale)
+        guard case .array(let before)? = staleEnv["files"] else {
+            throw TestError.assertion("stale envelope must already emit files: []")
+        }
+        try expect(before.isEmpty)
+        let attachment = "eb6e0f28-33e0-4d49-b2c3-c20d4231bf04"
+        let overlaid = SkillFileCatalog.overlay(
+            envelope: stale,
+            rawProperties: [
+                "Files & media": filesProp([liveHostedFile(attachmentId: attachment)]),
+                "Status": ["type": "status", "status": ["name": "Active", "id": "s1"]]
+            ],
+            skillUUID: pageId
+        )
+        let files = try filesArray(overlaid)
+        try expect(files.count == 1)
+        guard case .object(let f) = files[0] else {
+            throw TestError.assertion("expected object")
+        }
+        try expect(f["notionFileId"] == .string(attachment))
+        try expect(f["downloadURL"] == nil)
+        let env = try envelope(overlaid)
+        guard case .object(let props)? = env["properties"],
+              case .array(let names)? = props["Files & media"] else {
+            throw TestError.assertion("overlay must populate properties Files & media")
+        }
+        try expect(names == [.string("pr270-materialize-fixture.txt")])
+        guard case .string(let status)? = props["Status"] else {
+            throw TestError.assertion("overlay must not wipe unrelated properties")
+        }
+        try expect(status == "Active")
+    }
+
+    await test("#276: file_upload.id is notionFileId when GET has no hosted file URL") {
+        let catalog = SkillFileCatalog.fromRawPageProperties([
+            "Files & media": filesProp([
+                [
+                    "name": "logo.png",
+                    "type": "file_upload",
+                    "file_upload": ["id": "43833259-72ae-404e-8441-b6577f3159b4"]
+                ]
+            ])
+        ], skillUUID: pageId)
+        try expect(catalog.files[0].notionFileId == "43833259-72ae-404e-8441-b6577f3159b4")
+        try expect(catalog.files[0].name == "logo.png")
+        try expect(catalog.files[0].kind == "notion_hosted")
+    }
+
+    await test("#276: explicit file id wins over the S3 attachment UUID") {
+        let catalog = SkillFileCatalog.fromRawPageProperties([
+            "Files & media": filesProp([
+                [
+                    "name": "logo.png",
+                    "type": "file",
+                    "id": "file-abc",
+                    "file": [
+                        "url": "https://prod-files-secure.s3.us-west-2.amazonaws.com/f0e5e646-cfef-422a-9826-a50bb9887d7f/eb6e0f28-33e0-4d49-b2c3-c20d4231bf04/logo.png",
+                        "expiry_time": "2099-01-01T00:00:00Z"
+                    ]
+                ]
+            ])
+        ], skillUUID: pageId)
+        try expect(catalog.files[0].notionFileId == "file-abc")
+    }
+
+    await test("#276: body-cache hit uses persisted files catalog when flatten is still empty") {
+        let attachment = "eb6e0f28-33e0-4d49-b2c3-c20d4231bf04"
+        let cached = CachedSkillBody(
+            pageId: pageId,
+            slug: "brand-manager",
+            version: "1.0.0",
+            status: "Active",
+            maturity: "Stable",
+            markdown: "hello body",
+            title: "Brand Manager",
+            url: "https://www.notion.so/p1",
+            properties: .object([
+                "Slug": .string("brand-manager"),
+                "Version": .string("1.0.0"),
+                "Status": .string("Active"),
+                "Maturity": .string("Stable"),
+                "Files & media": .array([])
+            ]),
+            files: .array([
+                .object([
+                    "name": .string("pr270-materialize-fixture.txt"),
+                    "kind": .string("notion_hosted"),
+                    "notionFileId": .string(attachment)
+                ])
+            ]),
+            filesPropertyPresent: true,
+            lastEditedTime: "2026-09-14T00:00:00.000Z",
+            writtenAt: Date(),
+            ttlHours: 24,
+            callCount: 1
+        )
+        let result = await SkillsModule.buildPlainCacheHitEnvelopeForTesting(
+            name: "brand-manager",
+            cachedBody: cached
+        )
+        let files = try filesArray(result)
+        try expect(files.count == 1, "persisted catalog must not be rebuilt from the empty flatten")
+        guard case .object(let f) = files[0] else {
+            throw TestError.assertion("expected object")
+        }
+        try expect(f["name"] == .string("pr270-materialize-fixture.txt"))
+        try expect(f["notionFileId"] == .string(attachment),
+                   "cache-hit must keep identity, not name-only flatten")
+        try expect(f["downloadURL"] == nil)
+    }
+
     await test("#254: skill_materialize_file unknown skill is a structured miss (not Notion)") {
         let result = try await router.dispatch(
             toolName: "skill_materialize_file",

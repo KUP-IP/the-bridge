@@ -26,6 +26,8 @@
 //     "title":          "<page title>",
 //     "url":            "<page url>",
 //     "properties":     { ... flattened envelope `properties` map ... },
+//     "files":          [ { name, kind, notionFileId?, ... } ],  // optional, #276
+//     "filesPropertyPresent": true,
 //     "lastEditedTime": "<getPage JSON last_edited_time>",
 //     "writtenAt":      "2026-06-11T10:00:00Z",  // ISO-8601, UTC
 //     "ttlHours":       24,
@@ -70,6 +72,13 @@ public struct CachedSkillBody: Codable, Sendable, Equatable {
     /// a `Value` so the cache-served envelope's `properties` key is
     /// byte-identical to the network path without re-running the flatten.
     public let properties: Value
+    /// Persisted `fetch_skill` `files[]` array (envelope objects). Nil on
+    /// legacy cache rows written before #276. Empty array +
+    /// `filesPropertyPresent` is honest when Files & media exists.
+    public let files: Value?
+    /// True when a Files & media / Google Drive File property existed at
+    /// cache write. Ignored when `files` is nil (legacy).
+    public let filesPropertyPresent: Bool
     /// `last_edited_time` from the getPage JSON. The freshness anchor for
     /// stale-while-revalidate: a changed value means the body is stale.
     public let lastEditedTime: String
@@ -93,6 +102,8 @@ public struct CachedSkillBody: Codable, Sendable, Equatable {
         title: String,
         url: String,
         properties: Value,
+        files: Value? = nil,
+        filesPropertyPresent: Bool = false,
         lastEditedTime: String,
         writtenAt: Date,
         ttlHours: Int = 24,
@@ -108,6 +119,8 @@ public struct CachedSkillBody: Codable, Sendable, Equatable {
         self.title = title
         self.url = url
         self.properties = properties
+        self.files = files
+        self.filesPropertyPresent = filesPropertyPresent
         self.lastEditedTime = lastEditedTime
         self.writtenAt = writtenAt
         self.ttlHours = ttlHours
@@ -116,7 +129,7 @@ public struct CachedSkillBody: Codable, Sendable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion, pageId, slug, version, status, maturity
-        case markdown, title, url, properties, lastEditedTime
+        case markdown, title, url, properties, files, filesPropertyPresent, lastEditedTime
         case writtenAt, ttlHours, callCount
     }
 
@@ -128,6 +141,8 @@ public struct CachedSkillBody: Codable, Sendable, Equatable {
         self.title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
         self.url = try c.decodeIfPresent(String.self, forKey: .url) ?? ""
         self.properties = try c.decodeIfPresent(Value.self, forKey: .properties) ?? .object([:])
+        self.files = try c.decodeIfPresent(Value.self, forKey: .files)
+        self.filesPropertyPresent = try c.decodeIfPresent(Bool.self, forKey: .filesPropertyPresent) ?? false
         self.slug = try c.decodeIfPresent(String.self, forKey: .slug)
             ?? Self.propertyString("Slug", in: properties)
         self.version = try c.decodeIfPresent(String.self, forKey: .version)
@@ -155,6 +170,8 @@ public struct CachedSkillBody: Codable, Sendable, Equatable {
         try c.encode(title, forKey: .title)
         try c.encode(url, forKey: .url)
         try c.encode(properties, forKey: .properties)
+        try c.encodeIfPresent(files, forKey: .files)
+        try c.encode(filesPropertyPresent, forKey: .filesPropertyPresent)
         try c.encode(lastEditedTime, forKey: .lastEditedTime)
         try c.encode(Self.iso8601.string(from: writtenAt), forKey: .writtenAt)
         try c.encode(ttlHours, forKey: .ttlHours)
@@ -167,7 +184,9 @@ public struct CachedSkillBody: Codable, Sendable, Equatable {
             schemaVersion: schemaVersion, pageId: pageId, slug: slug,
             version: version, status: status, maturity: maturity,
             markdown: markdown, title: title, url: url,
-            properties: properties, lastEditedTime: lastEditedTime,
+            properties: properties, files: files,
+            filesPropertyPresent: filesPropertyPresent,
+            lastEditedTime: lastEditedTime,
             writtenAt: writtenAt, ttlHours: ttlHours, callCount: n
         )
     }
@@ -196,6 +215,11 @@ public struct CachedSkillBody: Codable, Sendable, Equatable {
     /// Canonical dashed UUID for agent-facing envelopes.
     public var uuid: String {
         Self.canonicalUUID(pageId)
+    }
+
+    /// Files catalog persisted at cache write. Nil means a pre-#276 row.
+    public var restoredFilesCatalog: SkillFileCatalogResult? {
+        SkillFileCatalog.fromPersisted(files: files, propertyPresent: filesPropertyPresent)
     }
 
     public static func canonicalUUID(_ pageId: String) -> String {

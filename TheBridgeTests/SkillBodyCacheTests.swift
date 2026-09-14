@@ -50,11 +50,15 @@ private func sampleBody(
     lastEditedTime: String = "2026-06-11T10:00:00.000Z",
     writtenAt: Date = Date(timeIntervalSince1970: 1_700_000_000),
     ttlHours: Int = 24,
-    callCount: Int = 1
+    callCount: Int = 1,
+    files: Value? = nil,
+    filesPropertyPresent: Bool = false
 ) -> CachedSkillBody {
     CachedSkillBody(
         pageId: pageId, markdown: markdown, title: title, url: url,
-        properties: properties, lastEditedTime: lastEditedTime,
+        properties: properties, files: files,
+        filesPropertyPresent: filesPropertyPresent,
+        lastEditedTime: lastEditedTime,
         writtenAt: writtenAt, ttlHours: ttlHours, callCount: callCount
     )
 }
@@ -87,10 +91,39 @@ func runSkillBodyCacheTests() async {
             try expect(got.title == entry.title, "title mismatch")
             try expect(got.url == entry.url, "url mismatch")
             try expect(got.properties == entry.properties, "properties mismatch")
+            try expect(got.files == entry.files, "files catalog mismatch")
+            try expect(got.filesPropertyPresent == entry.filesPropertyPresent,
+                       "filesPropertyPresent mismatch")
             try expect(got.lastEditedTime == entry.lastEditedTime, "lastEditedTime mismatch")
             try expect(got.callCount == entry.callCount, "callCount mismatch")
             try expect(abs(got.writtenAt.timeIntervalSince(entry.writtenAt)) < 0.001,
                        "writtenAt mismatch")
+        }
+    }
+
+    await test("#276: body-cache persists files catalog identity") {
+        try await withTempHomeBody { _ in
+            let store = SkillBodyCacheStore()
+            let attachment = "eb6e0f28-33e0-4d49-b2c3-c20d4231bf04"
+            let entry = sampleBody(
+                files: .array([
+                    .object([
+                        "name": .string("pr270-materialize-fixture.txt"),
+                        "kind": .string("notion_hosted"),
+                        "notionFileId": .string(attachment)
+                    ])
+                ]),
+                filesPropertyPresent: true
+            )
+            try await store.write(entry)
+            guard let got = await store.read(pageId: entry.pageId) else {
+                throw TestError.assertion("expected a cached body")
+            }
+            try expect(got.filesPropertyPresent, "files property must persist")
+            let catalog = got.restoredFilesCatalog
+            try expect(catalog?.files.count == 1, "got \(String(describing: catalog?.files.count))")
+            try expect(catalog?.files.first?.notionFileId == attachment)
+            try expect(catalog?.files.first?.name == "pr270-materialize-fixture.txt")
         }
     }
 

@@ -508,8 +508,10 @@ public enum SkillsModule {
                         "hint": .string("Review Runtime Exposure and the latest reconciliation receipt in Settings → Skills.")
                     ])
                 case .cached(let cached):
+                    let refreshed = await Self.refreshSkillFilesCatalog(cached, pageId: fetchPageId)
+                    await cache.set(cacheKey, content: refreshed)
                     let cachedResult = await MemoryRoutingAppendix.attach(
-                        to: cached,
+                        to: refreshed,
                         parent: name,
                         intent: intentArg
                     )
@@ -527,35 +529,30 @@ public enum SkillsModule {
                 // returns one server-rendered document in a single call.
                 _ = includeNested; _ = maxBlocks; _ = maxDepth
 
-                // body-cache: ZERO-NETWORK plain-hit fast path.
+                // body-cache: markdown-from-cache plain-hit fast path.
                 //
                 // A PLAIN request — no path, no intent, no section, not a
-                // depth-guard — resolves to the parent page itself: the live
-                // path's `dispatchNotionSpecialist` would take its bare-parent
-                // fast path (no specialist swap, no sibling enumeration → no
-                // routingFooter / annotation keys), so the served envelope is
-                // exactly `buildSkillResult(parent body)`. We can therefore
-                // build that envelope ENTIRELY from the persisted body cache
-                // (keyed by the parent page id, since no specialist is
-                // resolved) WITHOUT ever constructing a NotionClient — so a
-                // warm plain fetch succeeds offline, as fast as a local file.
-                //
-                // The lookup + envelope build run BEFORE `try NotionClient()`.
-                // Selector requests (path / intent / section / depth-guard)
-                // skip this and fall through to the live path below, where
-                // they still benefit from the cached body inside the `do`.
+                // depth-guard — resolves to the parent page itself. Body
+                // markdown is served from the persisted cache with no
+                // getPageMarkdown. Files & media is overlaid from a cheap
+                // getPage when NotionClient is available so an attach after
+                // the cache write is not stuck as files: []. Offline
+                // (client construction / getPage failure) keeps the cached
+                // catalog. Selector requests skip this and fall through.
                 let isPlainRequest = parsedPath.child == nil
                     && intentArg == nil
                     && sectionArg == nil
                     && !parsedPath.depthExceeded
                 if isPlainRequest,
                    let cachedBody = await SkillBodyCacheStore.shared.read(pageId: pageIdRaw) {
-                    // Build the envelope with ZERO network — no client is
-                    // constructed or awaited on this branch.
+                    // Build the envelope from the cached markdown. Files
+                    // catalog may refresh via getPage (see overlay above);
+                    // markdown stays zero-network.
                     var result = await Self.buildPlainCacheHitEnvelope(
                         skill: skillConfig,
                         cachedBody: cachedBody
                     )
+                    result = await Self.refreshSkillFilesCatalog(result, pageId: pageIdRaw)
                     result = Self.attachingRoutingAuthorityEvidence(
                         to: result,
                         slug: cachedBody.slug,
@@ -740,12 +737,18 @@ public enum SkillsModule {
                         // envelope's `properties` builder exactly.
                         let lastEdited = specialistDispatch.resolvedSpecialist?.lastEditedTime
                             ?? (pageJSON["last_edited_time"] as? String ?? "")
+                        let catalog = SkillFileCatalog.fromRawPageProperties(
+                            envelopeProperties,
+                            skillUUID: envelopePageId
+                        )
                         let entry = CachedSkillBody(
                             pageId: envelopePageId,
                             markdown: rawMarkdown,
                             title: envelopeTitle,
                             url: envelopeURL,
                             properties: .object(Self.flattenProperties(envelopeProperties)),
+                            files: SkillFileCatalog.persistedFiles(from: catalog),
+                            filesPropertyPresent: catalog.propertyPresent,
                             lastEditedTime: lastEdited,
                             writtenAt: Date(),
                             ttlHours: BridgeDefaults.skillsCacheTTLHoursEffective,

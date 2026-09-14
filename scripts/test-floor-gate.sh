@@ -213,7 +213,13 @@
 #   skill-files/<uuid>/. +17 FetchSkillNotionFilesTests +2
 #   RegistryConfigTests +1 SkillsModuleTests. Linux host cannot compile
 #   macOS 26; CI must re-measure.
-FLOOR="${BRIDGE_TEST_FLOOR:-4071}"
+# 2026-09-14: 4071 → 4080 (+9) — #276 fetch_skill Files & media catalog
+#   identity. Live GET file objects have no top-level id; notionFileId
+#   comes from file_upload.id or the S3 attachment UUID. Overlay refreshes
+#   stale empty flatten; body cache persists the catalog. +8
+#   FetchSkillNotionFilesTests +1 SkillBodyCacheTests. Linux host cannot
+#   compile macOS 26; CI must re-measure.
+FLOOR="${BRIDGE_TEST_FLOOR:-4080}"
 
 echo "🧪 test-floor-gate: building debug test executable + running suite (floor=${FLOOR})..."
 swift build -c debug --product TheBridgeTests
