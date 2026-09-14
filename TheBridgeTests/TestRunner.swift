@@ -836,6 +836,7 @@ await runSkillIconAndKindTests()    // WS-3/WS-4: Skill emoji icon (Codable + ex
 await runSkillSourceTests()         // W2 D2: SkillSource enum + legacy notionPageId backward-compat
 await runFilesystemSkillIndexTests() // W2 D3: SKILL.md filesystem index actor
 await runFetchSkillFileSourceTests() // W2 D5: file-source fetch_skill envelope shape
+await runFetchSkillNotionFilesTests() // #254: Notion Files & media catalog + local materialize (not SKILL.md file-source)
 await runListRoutingSkillsMergeTests() // W2 D6: merged routing-skills listing
 await runSkillPathResolverTests()      // PKT-907: fetch_skill orchestrator (path / intent / file specialist / W3 summary)
 await runRoutingReliabilityTests()     // routing-reliability: SpecialistFilter doc-page exclusion + confidence→clarify + per-client overlay + routing footer + skillFetched telemetry

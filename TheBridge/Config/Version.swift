@@ -503,7 +503,11 @@ public enum BridgeConstants {
     /// FOCUS calendar free/busy v0 (2026-09-06): +1
     ///   (calendar_free_busy; existing calendar family, read-only EventKit
     ///   overlap check, Isaiah GO). 238 + 1 = 239.
-    public static let staticFeatureModuleToolCount = 239
+    /// Skill files materialize (#254, 2026-09-08): +1
+    ///   (skill_materialize_file; existing skills family). Copies a
+    ///   Notion-hosted Files & media attachment into skill-files/<uuid>/
+    ///   for file_read. Notion is not binary SSOT. 239 + 1 = 240.
+    public static let staticFeatureModuleToolCount = 240
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

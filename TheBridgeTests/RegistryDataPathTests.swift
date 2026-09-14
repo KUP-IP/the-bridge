@@ -155,6 +155,9 @@ func runRegistryDataPathTests() async {
             "Runtime Exposure": .init(id: "id_runtime_exposure", type: "select"),
             "Domain": .init(id: "id_domain", type: "select"),
             "Specialist": .init(id: "id_spec", type: "relation"),
+            "Files & media": .init(id: "id_files", type: "files"),
+            "Google Drive File": .init(id: "id_gdrive", type: "files"),
+            "Manager": .init(id: "id_manager", type: "relation"),
         ])
         let r = RegistrySchemaBinder.bind(.skillsSeed(), to: schema)
         try expect(r.isClean, "all matched")

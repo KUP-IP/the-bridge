@@ -72,7 +72,9 @@ public actor RegistryConfigStore {
             throw RegistryConfigError.corrupt("\(error)")
         }
         var config = decoded
-        if config.canonicalizePacketAliases() {
+        let packets = config.canonicalizePacketAliases()
+        let seedProps = config.mergeSkillSeedProperties()
+        if packets || seedProps {
             try writeAtomic(config)
         }
         return config
