@@ -236,6 +236,7 @@ public actor SkillBodyCacheStore {
         let markdownData = try await client.getPageMarkdown(pageId: pageId)
         let rawMarkdown = SkillsModule.skillMarkdownString(fromMarkdownJSON: markdownData)
         let flattened = Value.object(SkillsModule.flattenProperties(props))
+        let catalog = SkillFileCatalog.fromRawPageProperties(props, skillUUID: pageId)
 
         return CachedSkillBody(
             pageId: pageId,
@@ -243,6 +244,8 @@ public actor SkillBodyCacheStore {
             title: title,
             url: url,
             properties: flattened,
+            files: SkillFileCatalog.persistedFiles(from: catalog),
+            filesPropertyPresent: catalog.propertyPresent,
             lastEditedTime: lastEdited,
             writtenAt: Date(),
             ttlHours: BridgeDefaults.skillsCacheTTLHoursEffective,

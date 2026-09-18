@@ -367,7 +367,8 @@ extension SkillsModule {
             url: cachedBody.url,
             markdownJSONOrText: cachedBody.markdown,
             titleLookup: titleLookup,
-            flattenedProperties: cachedBody.properties
+            flattenedProperties: cachedBody.properties,
+            filesCatalog: cachedBody.restoredFilesCatalog
         )
         let identified = annotateDoctrineIdentity(
             envelope,
@@ -385,6 +386,32 @@ extension SkillsModule {
             matchReason: nil
         )
         return annotateEnvelope(identified, parentName: skill.name, dispatch: emptyDispatch)
+    }
+
+    /// Overlay a fresh getPage Files & media catalog onto a cached
+    /// fetch_skill envelope. Offline / client-construction failure keeps
+    /// the cached projection. Does not fetch markdown.
+    static func refreshSkillFilesCatalog(_ envelope: Value, pageId: String) async -> Value {
+        let trimmed = pageId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              CachedSkillBody.isNotionUUID(CachedSkillBody.normalize(trimmed)) else {
+            return envelope
+        }
+        guard let client = try? NotionClient() else { return envelope }
+        do {
+            let data = try await client.getPage(pageId: trimmed)
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let props = json["properties"] as? [String: Any] else {
+                return envelope
+            }
+            return SkillFileCatalog.overlay(
+                envelope: envelope,
+                rawProperties: props,
+                skillUUID: trimmed
+            )
+        } catch {
+            return envelope
+        }
     }
 
     /// Add the stable Notion-primary identity contract to a fetched doctrine

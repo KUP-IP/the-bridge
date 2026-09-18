@@ -118,6 +118,94 @@ public enum SkillFileCatalog {
 
     // MARK: - Parse
 
+    /// Stable identity for a Notion-hosted file object. Live GET `files`
+    /// items (Notion-Version 2026-03-11) often have no top-level `id`.
+    /// The attachment UUID lives in the signed S3 path
+    /// `/{spaceId}/{attachmentId}/{filename}`. `file_upload.id` is the
+    /// write-path identity. Name-only matching is a fallback, not the
+    /// catalog contract.
+    public static func notionFileId(fromRawFile raw: [String: Any]) -> String? {
+        if let id = stringValue(raw["id"]), !id.isEmpty { return id }
+        if let id = stringValue(raw["file_id"]), !id.isEmpty { return id }
+        if let file = raw["file"] as? [String: Any],
+           let id = stringValue(file["id"]), !id.isEmpty {
+            return id
+        }
+        if let upload = raw["file_upload"] as? [String: Any],
+           let id = stringValue(upload["id"]), !id.isEmpty {
+            return id
+        }
+        if let file = raw["file"] as? [String: Any],
+           let url = stringValue(file["url"]),
+           let attached = hostedAttachmentId(fromDownloadURL: url) {
+            return attached
+        }
+        if let url = stringValue(raw["url"]),
+           let attached = hostedAttachmentId(fromDownloadURL: url) {
+            return attached
+        }
+        return nil
+    }
+
+    /// Last UUID path component of a Notion-hosted download URL (the
+    /// attachment id, not the workspace/space id). Nil when the URL has
+    /// no UUID. Parsing identity is not a host-allowlist change.
+    public static func hostedAttachmentId(fromDownloadURL urlString: String) -> String? {
+        guard let url = URL(string: urlString) else { return nil }
+        let parts = url.path.split(separator: "/").map(String.init)
+        let uuids = parts.filter { CachedSkillBody.isNotionUUID($0.replacingOccurrences(of: "-", with: "")) }
+        return uuids.last
+    }
+
+    /// Rebuild a catalog from a body-cache persisted `files` array (envelope
+    /// objects: name/kind/notionFileId/localPath/sha256/role). Nil `files`
+    /// means a legacy cache row: caller should use flattened properties.
+    public static func fromPersisted(files: Value?, propertyPresent: Bool) -> SkillFileCatalogResult? {
+        guard let files else { return nil }
+        guard case .array(let arr) = files else {
+            return SkillFileCatalogResult(files: [], propertyPresent: propertyPresent)
+        }
+        let entries = arr.compactMap(entry(fromEnvelope:))
+        return SkillFileCatalogResult(files: entries, propertyPresent: propertyPresent)
+    }
+
+    public static func persistedFiles(from catalog: SkillFileCatalogResult) -> Value {
+        .array(catalog.files.map(\.envelopeValue))
+    }
+
+    /// Patch an already-built fetch_skill envelope so `files[]` and the
+    /// Files & media (and Drive) properties match a fresh getPage blob.
+    /// Used when in-memory / body cache still holds a pre-attach empty
+    /// flatten. Does not change kind/host policy.
+    public static func overlay(
+        envelope: Value,
+        rawProperties: [String: Any],
+        skillUUID: String
+    ) -> Value {
+        guard case .object(var dict) = envelope else { return envelope }
+        let catalog = fromRawPageProperties(rawProperties, skillUUID: skillUUID)
+        if catalog.propertyPresent {
+            dict["files"] = .array(catalog.files.map(\.envelopeValue))
+        } else {
+            dict.removeValue(forKey: "files")
+        }
+        if case .object(var props) = dict["properties"] {
+            let flat = SkillsModule.flattenProperties(rawProperties)
+            for name in allFilePropertyNames {
+                if let pair = flat.first(where: { $0.key.caseInsensitiveCompare(name) == .orderedSame }) {
+                    props[pair.key] = pair.value
+                }
+            }
+            projectCatalogNamesIfFlattenEmpty(
+                props: &props,
+                catalog: catalog,
+                rawProperties: rawProperties
+            )
+            dict["properties"] = .object(props)
+        }
+        return .object(dict)
+    }
+
     /// Parse the verbatim getPage `properties` blob. Captures Notion file ids
     /// and ephemeral download URLs for a subsequent materialize.
     public static func fromRawPageProperties(
@@ -162,8 +250,8 @@ public enum SkillFileCatalog {
     }
 
     /// Rebuild a catalog from the already-flattened envelope `properties`
-    /// map (cache-hit path). Names only — Notion file ids are recovered on
-    /// materialize via a fresh getPage.
+    /// map (cache-hit path, legacy rows without a persisted files array).
+    /// Names only. Prefer `fromPersisted` when the body cache has one.
     public static func fromFlattenedProperties(
         _ properties: Value,
         skillUUID: String
@@ -189,6 +277,11 @@ public enum SkillFileCatalog {
                 names = []
             }
             for fileName in names {
+                if fromDriveColumn, isBareNotionUUID(fileName) {
+                    // Google Drive File is a relation on current SKILLS DS
+                    // rows. Flatten stores page ids, not file names.
+                    continue
+                }
                 var entry = SkillFileEntry(
                     name: fileName,
                     kind: fromDriveColumn ? "google_drive" : kindGuess(name: fileName, url: fileName)
@@ -364,6 +457,87 @@ public enum SkillFileCatalog {
 
     // MARK: - Private
 
+    private static func stringValue(_ raw: Any?) -> String? {
+        guard let s = raw as? String else { return nil }
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func isBareNotionUUID(_ value: String) -> Bool {
+        CachedSkillBody.isNotionUUID(value.replacingOccurrences(of: "-", with: ""))
+            && !value.contains(".") && !value.lowercased().hasPrefix("http")
+    }
+
+    private static func entry(fromEnvelope value: Value) -> SkillFileEntry? {
+        guard case .object(let o) = value,
+              case .string(let name)? = o["name"], !name.isEmpty else {
+            return nil
+        }
+        let kind: String = {
+            if case .string(let k)? = o["kind"], !k.isEmpty { return k }
+            return "notion_hosted"
+        }()
+        func opt(_ key: String) -> String? {
+            guard case .string(let s)? = o[key], !s.isEmpty else { return nil }
+            return s
+        }
+        return SkillFileEntry(
+            name: name,
+            kind: kind,
+            notionFileId: opt("notionFileId"),
+            localPath: opt("localPath"),
+            sha256: opt("sha256"),
+            role: opt("role")
+        )
+    }
+
+    private static func projectCatalogNamesIfFlattenEmpty(
+        props: inout [String: Value],
+        catalog: SkillFileCatalogResult,
+        rawProperties: [String: Any]
+    ) {
+        guard catalog.propertyPresent else { return }
+        let hostedNames = catalog.files
+            .filter { $0.kind != "google_drive" }
+            .map { Value.string($0.name) }
+        let driveNames = catalog.files
+            .filter { $0.kind == "google_drive" }
+            .map { Value.string($0.name) }
+
+        func existingKey(in names: [String]) -> String? {
+            props.keys.first { key in
+                names.contains { $0.caseInsensitiveCompare(key) == .orderedSame }
+            }
+        }
+        func flattenIsEmpty(for names: [String]) -> Bool {
+            guard let key = existingKey(in: names), let value = props[key] else { return true }
+            switch value {
+            case .array(let arr): return arr.isEmpty
+            case .string(let s): return s.isEmpty
+            default: return true
+            }
+        }
+
+        if !hostedNames.isEmpty, flattenIsEmpty(for: filesPropertyNames) {
+            let key = existingKey(in: filesPropertyNames)
+                ?? propertyKey(named: filesPropertyNames, in: rawProperties)
+                ?? "Files & media"
+            props[key] = .array(hostedNames)
+        }
+        if !driveNames.isEmpty, flattenIsEmpty(for: googleDrivePropertyNames) {
+            let key = existingKey(in: googleDrivePropertyNames)
+                ?? propertyKey(named: googleDrivePropertyNames, in: rawProperties)
+                ?? "Google Drive File"
+            props[key] = .array(driveNames)
+        }
+    }
+
+    private static func propertyKey(named names: [String], in properties: [String: Any]) -> String? {
+        properties.keys.first { key in
+            names.contains { $0.caseInsensitiveCompare(key) == .orderedSame }
+        }
+    }
+
     private static func property(named name: String, in properties: [String: Any]) -> [String: Any]? {
         if let exact = properties[name] as? [String: Any] { return exact }
         for (key, raw) in properties where key.caseInsensitiveCompare(name) == .orderedSame {
@@ -386,14 +560,12 @@ public enum SkillFileCatalog {
         if url == nil, let file = raw["file"] as? [String: Any] {
             url = file["url"] as? String
         }
-        var name = (raw["name"] as? String) ?? ""
+        var name = stringValue(raw["name"]) ?? ""
         if name.isEmpty, let url {
             name = URL(string: url)?.lastPathComponent ?? url
         }
         guard !name.isEmpty else { return nil }
-        let fileId = (raw["id"] as? String)
-            ?? (raw["file_id"] as? String)
-            ?? ((raw["file"] as? [String: Any])?["id"] as? String)
+        let fileId = notionFileId(fromRawFile: raw)
         let kind: String
         if fromDriveColumn {
             kind = "google_drive"

@@ -2,6 +2,15 @@
 
 ## Unreleased — hotfix on 4.0.7 / build 96 (not a published install)
 
+- **fetch_skill Files & media catalog identity (#276).** Live Notion GET
+  file objects (2026-03-11) have a name and signed URL, not a top-level
+  `id`. `fetch_skill` now projects `notionFileId` from `file_upload.id` or
+  the attachment UUID in the hosted S3 path so materialize is not name-only.
+  Stale body-cache / in-memory envelopes that still flatten Files & media
+  to `[]` overlay a fresh getPage catalog when online, and the body cache
+  persists that catalog. Kind/host allowlist residuals are unchanged.
+  Notion is still not binary SSOT. Floor **4071 → 4079** (+8). Not Installed
+  or Released.
 - **Skill files catalog + materialize (#254)** — Registry Skills seed now
   binds `files` (Files & media), `googleDriveFile` (Google Drive File),
   and `manager`. Existing `registry.json` skill rows pick up missing
