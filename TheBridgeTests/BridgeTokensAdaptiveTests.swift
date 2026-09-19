@@ -285,4 +285,34 @@ func runBridgeTokensAdaptiveTests() async {
         try expect(BridgeTokens.Elevation.inset.shadow == nil && BridgeTokens.Elevation.inset.edge == nil,
                    "inset rung: recessed, no drop shadow / edge")
     }
+
+    // 12. #283 Settings-shell foundation — collapsed rail + flat content cards.
+    await test("#283: sidebar collapsed/expanded widths and standard window") {
+        try expect(BridgeTokens.Space.sidebarCollapsedW == 52,
+                   "sidebarCollapsedW \(BridgeTokens.Space.sidebarCollapsedW)")
+        try expect(BridgeTokens.Space.sidebarW == 188, "sidebarW must stay 188")
+        try expect(BridgeTokens.Space.sidebarExpandDelta == 136,
+                   "expand delta \(BridgeTokens.Space.sidebarExpandDelta)")
+        try expect(BridgeTokens.Space.settingsWindowW == 1080, "standard width")
+        try expect(BridgeTokens.Space.settingsWindowH == 880, "standard height")
+    }
+
+    await test("#283: weave placement is outer shell, never content pane") {
+        try expect(BridgeTokens.Weave.placement == .outerShell,
+                   "placement \(BridgeTokens.Weave.placement)")
+        try expect(BridgeTokens.Weave.placement != .contentPane,
+                   "weave must not be placed under content panes")
+    }
+
+    await test("#283: ContentCard is hairline-or-single-shadow, not dual") {
+        try expect(BridgeTokens.ContentCard.shadowLayerCount == 1,
+                   "content cards carry exactly one shadow layer")
+        try expect(BridgeTokens.ContentCard.softShadow.radius == 8,
+                   "soft shadow radius \(BridgeTokens.ContentCard.softShadow.radius)")
+        try expect(BridgeTokens.ContentCard.radius == BridgeTokens.Radius.card,
+                   "content card radius tracks Radius.card")
+        // Legacy glass dual-shadow ladder is unchanged for Dashboard chrome.
+        try expect(BridgeTokens.shadowE1.a.radius != BridgeTokens.shadowE1.b.radius,
+                   "legacy Elevation.card dual shadow must remain two distinct layers")
+    }
 }

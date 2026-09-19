@@ -1,14 +1,15 @@
-// BridgeShell.swift — Settings-window shell chrome for The Bridge (v4).
-// The "stage" window surface (solid canvas + carbon-fibre weave), the section-
-// nav sidebar, the titlebar + footbar, and the custom vector glyphs (bow /
-// crossed tools / two gears / key). Reconciled to the v4 geometry + material
-// system in design/the-bridge-design-system/project — the `.bw-*` shell rules
-// in bridge-ui.css + the Settings.html layout + tokens.css — the SSOT.
+// BridgeShell.swift — Settings-window shell chrome for The Bridge (v4 / #283).
+// The "stage" window surface (solid canvas + carbon-fibre weave on the OUTER
+// SHELL only), the collapsible section-nav (icon rail ↔ labeled rail), the
+// opaque content pane, the titlebar + footbar, and the custom vector glyphs.
+// Reconciled to the v4 geometry + material system plus the #283 Part 1
+// restraint contract (weave not under panes; flat cards live in BridgeThemeV2).
 //
 // All geometry comes from BridgeTokens.Space/Radius and all color/material from
 // the W1 tokens (Weave / glassControl / bevelControl / hairline / fg* / ok …);
 // nothing here hardcodes a covered palette value or chrome dimension.
 
+import AppKit
 import SwiftUI
 
 // MARK: - PKT-1005 (Pillar C): stable AX-identifier convention
@@ -35,6 +36,12 @@ public enum BridgeAXID {
 
     /// The section H1 title in the titlebar — `bridge.settings.title`.
     public static let titleBar = "\(root).title"
+
+    /// Sidebar collapse/expand control — `bridge.settings.chrome.sidebar.toggle`.
+    public static let sidebarToggle = "\(root).chrome.sidebar.toggle"
+
+    /// Opaque content pane (no carbon weave) — `bridge.settings.chrome.content.pane`.
+    public static let contentPane = "\(root).chrome.content.pane"
 
     /// A per-section control id — `bridge.settings.<caseName>.<control>`.
     public static func control(_ section: SettingsSection, _ control: String) -> String {
@@ -342,27 +349,98 @@ public enum BridgeAXID {
 
 // MARK: - The stage (the window surface: solid canvas + carbon-fibre weave)
 
-/// The Settings-window surface, full-bleed behind every glass card. This is the
-/// SSOT `.bw-window` ground verbatim: `background-color: var(--canvas)` +
-/// `background-image: var(--weave)` — a SOLID fill (carbon in dark, titanium in
-/// light) with the faint carbon-fibre weave layered as texture, NO gradient.
-/// Color enters the UI only through small accents (blue/gold) + the signals.
+/// The Settings-window OUTER SHELL surface. Canvas + carbon-fibre weave sit
+/// behind titlebar / sidebar / footbar only. Content panes (`BridgeContentPane`)
+/// paint an opaque `bgRaised` fill on top so the weave never reads under cards
+/// (#283). This is the SSOT `.bw-window` ground: solid fill (carbon in dark,
+/// titanium in light) + weave as texture, NO gradient. Color enters the UI
+/// only through small accents (blue/gold) + the signals.
 ///
-/// Note on the `Elevation.window` rung: in the locked design the *window shell*
-/// is canvas + weave (NOT a `--glass-window` fill); the window's 14pt rounding,
-/// `--edge-window` border, e4 shadow and window blur are drawn by the host
-/// `NSWindow` chrome (SettingsWindow.swift), not painted here — so no glass fill
-/// is applied to the stage. `Elevation.window` is reserved for any genuinely
-/// floating in-app modal/popover surface.
+/// Note on the `Elevation.window` rung: the *window shell* is canvas + weave
+/// (NOT a `--glass-window` fill); the window's 14pt rounding, `--edge-window`
+/// border, e4 shadow and window blur are drawn by the host `NSWindow` chrome
+/// (SettingsWindow.swift), not painted here. `Elevation.window` is reserved
+/// for genuinely floating in-app modal/popover surfaces.
 public struct BridgeStage: View {
     public init() {}
 
     public var body: some View {
         ZStack {
             BridgeTokens.bgCanvas
+            // Weave.placement is `.outerShell` — content panes cover this.
             BridgeCarbonWeave()
         }
         .ignoresSafeArea()
+    }
+}
+
+/// Opaque Settings content pane. Solid raised fill, no carbon weave, no glass
+/// sheen. Later slices compose cards on this ground via `BridgeContentCard`.
+public struct BridgeContentPane<Content: View>: View {
+    private let content: Content
+    public init(@ViewBuilder content: () -> Content) { self.content = content() }
+
+    public var body: some View {
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(BridgeTokens.ContentCard.fill)
+            .accessibilityIdentifier(BridgeAXID.contentPane)
+    }
+}
+
+/// Settings-shell geometry contract (#283). Standard window is the collapsed
+/// (icon-rail) size; expanding the labeled rail may grow width. Zero scroll
+/// of SHELL chrome when collapsed — sidebar rows + title + foot fit in
+/// `settingsWindowH` without a sidebar ScrollView.
+public enum SettingsShellLayout {
+    public static func sidebarWidth(expanded: Bool) -> CGFloat {
+        expanded ? BridgeTokens.Space.sidebarW : BridgeTokens.Space.sidebarCollapsedW
+    }
+
+    public static func contentSize(sidebarExpanded: Bool) -> CGSize {
+        CGSize(
+            width: BridgeTokens.Space.settingsWindowW
+                + (sidebarExpanded ? BridgeTokens.Space.sidebarExpandDelta : 0),
+            height: BridgeTokens.Space.settingsWindowH
+        )
+    }
+
+    /// Titlebar + footbar — the horizontal chrome bands.
+    public static var chromeBandHeight: CGFloat {
+        BridgeTokens.Space.titleBar + BridgeTokens.Space.footBar
+    }
+
+    /// Sidebar column height at the collapsed (icon-rail) density: one row
+    /// per section + the collapse toggle, 1pt gaps, 6/10 vertical padding.
+    /// Must stay below `settingsWindowH − chromeBandHeight` so the rail
+    /// never scrolls at the standard window size.
+    public static var collapsedSidebarColumnHeight: CGFloat {
+        let rows = CGFloat(SettingsSection.allCases.count)
+        let gaps = max(0, rows - 1)
+        let toggleRow: CGFloat = BridgeTokens.Space.navItemH + 8
+        return 6 + BridgeTokens.Space.s3
+            + rows * BridgeTokens.Space.navItemH
+            + gaps
+            + toggleRow
+    }
+
+    public static var collapsedFitsWithoutScroll: Bool {
+        chromeBandHeight + collapsedSidebarColumnHeight <= BridgeTokens.Space.settingsWindowH
+    }
+
+    /// Grow the Settings window when the labeled rail expands. Collapse
+    /// never shrinks — the operator may have resized.
+    @MainActor
+    public static func applyWindowGrowth(sidebarExpanded: Bool) {
+        guard sidebarExpanded else { return }
+        guard let window = NSApp.windows.first(where: { $0.title == "The Bridge Settings" }) else {
+            return
+        }
+        let target = contentSize(sidebarExpanded: true)
+        let current = window.contentRect(forFrameRect: window.frame).size
+        if current.width + 0.5 < target.width {
+            window.setContentSize(NSSize(width: target.width, height: max(current.height, target.height)))
+        }
     }
 }
 
@@ -487,11 +565,20 @@ struct BridgeIconShape: Shape {
 /// The locked design's left section-nav. Replaces the native
 /// NavigationSplitView sidebar so we control the glass + custom icons while
 /// keeping `nav.section` as the single selection source (deep-link safe).
+///
+/// #283: Codex / Cursor / Claude Code collapse — icon rail ↔ labeled rail.
+/// Collapsed width is `Space.sidebarCollapsedW` (52); expanded is
+/// `Space.sidebarW` (188). Rows are a VStack (no ScrollView) so the rail
+/// cannot scroll at the standard window size.
 public struct BridgeSectionNav: View {
     @Binding public var selection: SettingsSection
+    @Binding public var isExpanded: Bool
     @State private var reviewBadgeCount: Int = MemoryReviewBadgeCounter.shared.pendingCount
 
-    public init(selection: Binding<SettingsSection>) { self._selection = selection }
+    public init(selection: Binding<SettingsSection>, isExpanded: Binding<Bool>) {
+        self._selection = selection
+        self._isExpanded = isExpanded
+    }
 
     public var body: some View {
         VStack(spacing: 1) {
@@ -499,23 +586,26 @@ public struct BridgeSectionNav: View {
                 BridgeSectionNavItem(
                     section: section,
                     isSelected: section == selection,
+                    isExpanded: isExpanded,
                     badgeCount: section == .memory ? reviewBadgeCount : 0,
                     action: { selection = section }
                 )
             }
             Spacer(minLength: 0)   // `.bw-side-spacer` — pin rows to the top
+            sidebarToggle
         }
-        // `.bw-sidebar`: padding 6px 10px 10px, 188pt wide, over the inset
-        // `--well` fill with a `--hair-faint` trailing rule (SSOT bridge-ui.css).
+        // `.bw-sidebar`: padding 6px 10px 10px, over the inset `--well` fill
+        // with a `--hair-faint` trailing rule. Width follows expand state.
         .padding(.top, 6)
         .padding(.bottom, BridgeTokens.Space.s3)        // 10
-        .padding(.horizontal, BridgeTokens.Space.s3)    // 10
-        .frame(width: BridgeTokens.Space.sidebarW)      // 188
+        .padding(.horizontal, isExpanded ? BridgeTokens.Space.s3 : 8)
+        .frame(width: SettingsShellLayout.sidebarWidth(expanded: isExpanded))
         .frame(maxHeight: .infinity, alignment: .top)
         .background(BridgeTokens.wellFill)
         .overlay(alignment: .trailing) {
             Rectangle().fill(BridgeTokens.hairlineFaint).frame(width: 0.5)
         }
+        .animation(.easeInOut(duration: 0.18), value: isExpanded)
         // Restore the keyboard navigation NavigationSplitView's List gave us
         // for free: Up/Down arrows move `selection` to the previous/next
         // SettingsSection. Clamps at the ends (no wrap); mouse clicking and
@@ -532,6 +622,34 @@ public struct BridgeSectionNav: View {
         .onReceive(NotificationCenter.default.publisher(for: .voiceMemoReviewDidChange)) { _ in
             refreshReviewBadge()
         }
+    }
+
+    private var sidebarToggle: some View {
+        Button {
+            isExpanded.toggle()
+        } label: {
+            HStack(spacing: isExpanded ? 9 : 0) {
+                Image(systemName: isExpanded ? "sidebar.leading" : "sidebar.left")
+                    .font(.system(size: 13))
+                    .frame(width: 15, height: 15)
+                    .foregroundStyle(BridgeTokens.fg3)
+                if isExpanded {
+                    Text("Collapse")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(BridgeTokens.fg3)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+            }
+            .padding(.horizontal, isExpanded ? 9 : 0)
+            .frame(maxWidth: .infinity, alignment: isExpanded ? .leading : .center)
+            .frame(height: BridgeTokens.Space.navItemH)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(isExpanded ? "Collapse sidebar" : "Expand sidebar")
+        .accessibilityLabel(isExpanded ? "Collapse sidebar" : "Expand sidebar")
+        .accessibilityIdentifier(BridgeAXID.sidebarToggle)
     }
 
     private func refreshReviewBadge() {
@@ -558,6 +676,7 @@ public struct BridgeSectionNav: View {
 struct BridgeSectionNavItem: View {
     let section: SettingsSection
     let isSelected: Bool
+    var isExpanded: Bool = true
     var badgeCount: Int = 0
     let action: () -> Void
     @State private var hovering = false
@@ -567,36 +686,46 @@ struct BridgeSectionNavItem: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 9) {   // `.bw-nav` gap: 9px
-                icon
-                    .frame(width: 15, height: 15)   // `.bw-nav svg` 15×15
-                    .opacity(isSelected ? 1 : 0.9)  // svg opacity .9 → 1 on `.on`
-                    // Selected glyph picks up the royal-blue link ink
-                    // (`.bw-nav.on svg { color: var(--accent-link) }`).
-                    .foregroundStyle(isSelected ? BridgeTokens.accentLink : BridgeTokens.fg3)
-                Text(section.displayName)
-                    // `.bw-nav` text: 13 / medium, fg-3 → fg-1 (hover/selected).
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(textColor)
-                    .lineLimit(1)
-                if badgeCount > 0 {
-                    Text("\(badgeCount)")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(BridgeTokens.fg1)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(BridgeTokens.warnText.opacity(0.22), in: Capsule())
-                        .overlay(Capsule().strokeBorder(BridgeTokens.warnText.opacity(0.45), lineWidth: 0.5))
-                        .accessibilityLabel("\(badgeCount) pending review")
+            HStack(spacing: isExpanded ? 9 : 0) {   // `.bw-nav` gap: 9px when labeled
+                ZStack(alignment: .topTrailing) {
+                    icon
+                        .frame(width: 15, height: 15)   // `.bw-nav svg` 15×15
+                        .opacity(isSelected ? 1 : 0.9)
+                        .foregroundStyle(isSelected ? BridgeTokens.accentLink : BridgeTokens.fg3)
+                    if !isExpanded && badgeCount > 0 {
+                        Circle()
+                            .fill(BridgeTokens.warn)
+                            .frame(width: 6, height: 6)
+                            .offset(x: 3, y: -3)
+                            .accessibilityHidden(true)
+                    }
                 }
-                Spacer(minLength: 0)
+                if isExpanded {
+                    Text(section.displayName)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(textColor)
+                        .lineLimit(1)
+                    if badgeCount > 0 {
+                        Text("\(badgeCount)")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundStyle(BridgeTokens.fg1)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(BridgeTokens.warnText.opacity(0.22), in: Capsule())
+                            .overlay(Capsule().strokeBorder(BridgeTokens.warnText.opacity(0.45), lineWidth: 0.5))
+                            .accessibilityLabel("\(badgeCount) pending review")
+                    }
+                    Spacer(minLength: 0)
+                }
             }
-            .padding(.horizontal, 9)   // `.bw-nav` padding: 0 9px
+            .padding(.horizontal, isExpanded ? 9 : 0)
+            .frame(maxWidth: .infinity, alignment: isExpanded ? .leading : .center)
             .frame(height: BridgeTokens.Space.navItemH)   // 30
             .background(rowBackground)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(isExpanded ? "" : section.displayName)
         .onHover { hovering = $0 }
         .animation(.easeInOut(duration: 0.15), value: isSelected)   // --fast .15s
         .animation(.easeInOut(duration: 0.15), value: hovering)
@@ -626,17 +755,14 @@ struct BridgeSectionNavItem: View {
         (isSelected || hovering) ? BridgeTokens.fg1 : BridgeTokens.fg3
     }
 
-    /// `.bw-nav` background ladder. Selected = the raised neutral control thumb
-    /// per the LOCKED SSOT (`.bw-nav.on { background: var(--glass-control);
-    /// box-shadow: var(--bevel-control); border: .5px solid var(--hair); }`) —
-    /// the accent stays reserved for primary actions/links/focus (the glyph
-    /// alone carries the accent-link tint). Hover = the faint `--hover` wash.
+    /// `.bw-nav` background ladder. Selected = a flat control fill + hairline
+    /// (#283: no bevel stacking on shell chrome). Hover = the faint `--hover`
+    /// wash. The glyph alone carries the accent-link tint.
     @ViewBuilder private var rowBackground: some View {
         let shape = RoundedRectangle(cornerRadius: rowRadius, style: .continuous)
         if isSelected {
             shape
                 .fill(BridgeTokens.glassControl)
-                .bridgeBevel(BridgeTokens.bevelControl, radius: rowRadius)
                 .overlay(shape.strokeBorder(BridgeTokens.hairline, lineWidth: 0.5))
         } else if hovering {
             shape.fill(BridgeTokens.hoverFill)

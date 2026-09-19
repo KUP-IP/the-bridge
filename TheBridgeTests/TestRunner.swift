@@ -777,6 +777,7 @@ await runSyntheticInputModuleTests()   // PKT-747 (v2.2 · 3.3)
 await runMouseClickModuleTests()        // PKT-765 (v2.2 · 3.3.1)
 await runBridgeAutomationModuleTests()  // FB-AUTOMATION: bridge_settings_navigate + bridge_focus_settings + axPath/frontmost-guard
 await runSettingsAXIdentifierTests()    // PKT-1005: BridgeAXID convention + SettingsUIValidationHarness (Pillar C/D)
+await runSettingsShellFoundationTests() // #283: Settings shell tokens + collapsible rail + flat cards
 await runCGEventModuleTests()           // PKT-765 (v2.2 · 3.3.1)
 await runPasteboardHistoryModuleTests() // PKT-765 (v2.2 · 3.3.1)
 await runJobsModuleTests()

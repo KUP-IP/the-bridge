@@ -46,9 +46,12 @@ public enum SettingsUIValidationHarness {
         var map: [SettingsSection: [String]] = [:]
         for section in SettingsSection.allCases {
             // Shared chrome present for every section + the section root.
+            // #283 adds the sidebar toggle + opaque content pane.
             var ids: [String] = [
                 BridgeAXID.navRow(section),
                 BridgeAXID.titleBar,
+                BridgeAXID.sidebarToggle,
+                BridgeAXID.contentPane,
                 BridgeAXID.control(section, "root"),
             ]
             // Per-section inner-control ids. Skills was the Pillar-C priority

@@ -39,14 +39,60 @@ public enum NotionPalette {
 
 // MARK: - Glass surfaces
 
-/// Reusable Liquid Glass card — the e1 "workhorse container" (`.glass-card`).
+/// Settings content card — the reusable #283 primitive later slices compose.
 ///
-/// v4: repainted entirely through the W1 `BridgeTokens.Elevation.card` rung, so
-/// the four depth ingredients (surface fill + sheen · directional bevel · edge
-/// hairline · dual drop shadow) are token-driven and adapt to carbon/titanium
-/// for free. A faint top-edge specular `rim` strip is layered for the
-/// thick-glass read. The public initializer is byte-for-byte unchanged —
-/// downstream pages keep calling `BridgeGlassCard(cornerRadius:padding:)`.
+/// Depth is **one cue**: `.hairline` (default) or `.softShadow`. Never a
+/// bevel, never dual ambient+contact shadows, never a specular rim stacked
+/// on top. Fill is the opaque `ContentCard.fill` so carbon weave cannot
+/// show through.
+public struct BridgeContentCard<Content: View>: View {
+    public enum Depth: String, Sendable {
+        case hairline
+        case softShadow
+    }
+
+    private let content: Content
+    private let cornerRadius: CGFloat
+    private let padding: CGFloat
+    private let depth: Depth
+
+    public init(
+        cornerRadius: CGFloat = BridgeTokens.ContentCard.radius,
+        padding: CGFloat = 14,
+        depth: Depth = .hairline,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.content = content()
+        self.cornerRadius = cornerRadius
+        self.padding = padding
+        self.depth = depth
+    }
+
+    public var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let card = content
+            .padding(padding)
+            .background(BridgeTokens.ContentCard.fill, in: shape)
+            .overlay {
+                if depth == .hairline {
+                    shape.strokeBorder(BridgeTokens.ContentCard.edge, lineWidth: 0.5)
+                }
+            }
+            .clipShape(shape)
+        Group {
+            if depth == .softShadow {
+                card.bridgeSoftShadow(BridgeTokens.ContentCard.softShadow)
+            } else {
+                card
+            }
+        }
+    }
+}
+
+/// Settings page card — same public initializer as the pre-#283 glass card
+/// so existing panes keep calling `BridgeGlassCard(cornerRadius:padding:)`
+/// without a content rewrite. Chrome is now the flat `BridgeContentCard`
+/// (hairline, no bevel / dual shadow / rim stack).
 public struct BridgeGlassCard<Content: View>: View {
     private let content: Content
     private let cornerRadius: CGFloat
@@ -63,36 +109,15 @@ public struct BridgeGlassCard<Content: View>: View {
     }
 
     public var body: some View {
-        let rung = BridgeTokens.Elevation.card
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        return content
-            .padding(padding)
-            // Ingredient 1 — surface fill (opaque base + top→bottom sheen).
-            .background(rung.fill?.paint(in: shape))
-            // Ingredient 3 — elevation EDGE hairline (.5px, materials.css `.glass-card`).
-            .overlay(rung.edge.map { shape.strokeBorder($0, lineWidth: 0.5) })
-            // Ingredient 2 — directional bevel (top rim-light + bottom occlusion).
-            .bridgeBevel(rung.bevel, radius: cornerRadius)
-            // Specular top-edge rim strip (`--rim`, top 1.5px) — sells thick glass.
-            .overlay(
-                shape
-                    .inset(by: 0.5)
-                    .stroke(BridgeTokens.rim, lineWidth: 1.0)
-                    .mask(
-                        LinearGradient(
-                            colors: [.black, .black, .clear],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                    )
-                    .allowsHitTesting(false)
-            )
-            .clipShape(shape)
-            // Ingredient 4 — dual ambient + contact drop shadow.
-            .modifier(OptionalShadow(rung.shadow))
+        BridgeContentCard(cornerRadius: cornerRadius, padding: padding, depth: .hairline) {
+            content
+        }
     }
 }
 
 /// Applies a `BridgeShadow` when present; a no-op when the rung carries none.
+/// Kept for Dashboard / section-icon chrome that still uses the dual-shadow
+/// elevation ladder. Settings content cards use `bridgeSoftShadow` instead.
 private struct OptionalShadow: ViewModifier {
     let shadow: BridgeTokens.BridgeShadow?
     init(_ shadow: BridgeTokens.BridgeShadow?) { self.shadow = shadow }

@@ -278,8 +278,17 @@ public enum BridgeTokens {
         public static let footBar: CGFloat = 30
         /// Leading inset that clears the native traffic-light cluster.
         public static let trafficGutter: CGFloat = 78
-        /// Sidebar / section-nav width (`--sidebar-w`).
+        /// Sidebar / section-nav width (`--sidebar-w`) — the labeled rail.
         public static let sidebarW: CGFloat = 188
+        /// Collapsed sidebar / icon-rail width (Codex / Cursor / Claude Code).
+        /// Icons stay 15pt with 8pt side inset: 8+15+8+ padding 10+10 = 52.
+        public static let sidebarCollapsedW: CGFloat = 52
+        /// Width added when the labeled rail expands (`sidebarW − sidebarCollapsedW`).
+        public static var sidebarExpandDelta: CGFloat { sidebarW - sidebarCollapsedW }
+        /// Standard Settings window content size when the sidebar is collapsed.
+        /// Expand may grow width by `sidebarExpandDelta`; height stays put.
+        public static let settingsWindowW: CGFloat = 1080
+        public static let settingsWindowH: CGFloat = 880
     }
 
     // MARK: - Type scale (v4 — `--t-*` + tracking)
@@ -688,6 +697,42 @@ public extension BridgeTokens {
         public static let highlight = adaptive(dark: { whiteAlpha(0.02) }, light: { whiteAlpha(0.45) })
         /// The darker (shade) hairline.
         public static let shadow    = adaptive(dark: { blackAlpha(0.22) }, light: { srgb(0.059, 0.071, 0.110, 0.022) }) // rgba(15,18,28,.022)
+
+        /// #283: carbon-fibre weave is a SHELL texture only — outer chrome
+        /// (titlebar / sidebar / footbar) or one hero band. Content panes must
+        /// paint an opaque fill (`bgRaised` / `ContentCard.fill`) so the hatch
+        /// never reads under cards. The forbidden `.contentPane` case exists
+        /// so tests can lock the placement contract.
+        public enum Placement: String, Sendable {
+            case outerShell
+            case heroBand
+            case contentPane
+        }
+        public static let placement: Placement = .outerShell
+    }
+
+    // ── Content-card chrome (#283 Part 1) ────────────────────────────────
+    //
+    // Settings content cards are FLAT: hairline OR a single soft shadow.
+    // Never bevel stacking, never dual ambient+contact shadows, never a
+    // specular rim on top of both. Later slices reuse `ContentCard` /
+    // `BridgeContentCard` instead of `Elevation.card` (the legacy glass
+    // ladder stays for Dashboard / Onboarding floating chrome).
+
+    enum ContentCard {
+        /// Opaque raised fill — solid, no glass sheen, no weave show-through.
+        public static let fill = bgRaised
+        /// Hairline edge (the default Settings card depth cue).
+        public static let edge = hairline
+        /// Single soft contact shadow — the alternate depth cue. One layer.
+        public static let softShadow = ShadowLayer(
+            adaptive(dark: { blackAlpha(0.28) }, light: { srgb(0.071, 0.086, 0.133, 0.12) }),
+            radius: 8,
+            y: 2
+        )
+        public static let radius = Radius.card
+        /// Contract lock: content cards carry exactly one shadow layer.
+        public static let shadowLayerCount = 1
     }
 
     // ── Focus ring spread ────────────────────────────────────────────────────
@@ -744,9 +789,17 @@ public extension BridgeTokens {
 
 public extension View {
     /// Apply a `BridgeTokens.BridgeShadow` (the dual ambient+contact drop shadow).
+    /// Reserved for floating chrome (Dashboard / Onboarding). Settings content
+    /// cards use `bridgeSoftShadow` — one layer — or a hairline, never both.
     func bridgeShadow(_ s: BridgeTokens.BridgeShadow) -> some View {
         self.shadow(color: s.a.color, radius: s.a.radius, x: 0, y: s.a.y)
             .shadow(color: s.b.color, radius: s.b.radius, x: 0, y: s.b.y)
+    }
+
+    /// Apply a single soft contact shadow (`ContentCard.softShadow`). One
+    /// layer only — the #283 card contract.
+    func bridgeSoftShadow(_ layer: BridgeTokens.ShadowLayer = BridgeTokens.ContentCard.softShadow) -> some View {
+        self.shadow(color: layer.color, radius: layer.radius, x: 0, y: layer.y)
     }
 
     /// Apply a directional `BridgeTokens.Bevel` as an inset top+bottom edge
