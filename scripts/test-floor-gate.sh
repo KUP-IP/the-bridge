@@ -228,8 +228,7 @@
 # 2026-09-19: 4083 → 4095 (+12) — #283 Settings shell foundation (parent #282):
 #   collapsible icon/labeled rail, weave-on-shell-only, flat content cards.
 #   +8 SettingsShellFoundationTests +3 BridgeTokensAdaptiveTests
-#   +1 SettingsAXIdentifierTests. Linux host cannot compile macOS 26;
-#   CI must re-measure.
+#   +1 SettingsAXIdentifierTests. CI run 35462298228 measured passed=4095.
 FLOOR="${BRIDGE_TEST_FLOOR:-4095}"
 
 echo "🧪 test-floor-gate: building debug test executable + running suite (floor=${FLOOR})..."
