@@ -116,6 +116,8 @@ func runMemorySettingsTests() async {
         let chrome = Set([
             BridgeAXID.navRow(.memory),
             BridgeAXID.titleBar,
+            BridgeAXID.sidebarToggle,
+            BridgeAXID.contentPane,
             BridgeAXID.control(.memory, "root"),
         ])
         let report = SettingsUIValidationHarness.validate(section: .memory, observedIdentifiers: chrome.union(Set(ids)))

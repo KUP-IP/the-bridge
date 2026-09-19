@@ -49,6 +49,13 @@ func runSettingsAXIdentifierTests() async {
         try expect(id == "bridge.settings.title", "got \(id)")
     }
 
+    await test("#283: sidebar toggle + content pane are stable shared-chrome ids") {
+        let toggle = await MainActor.run { BridgeAXID.sidebarToggle }
+        let pane = await MainActor.run { BridgeAXID.contentPane }
+        try expect(toggle == "bridge.settings.chrome.sidebar.toggle", "got \(toggle)")
+        try expect(pane == "bridge.settings.chrome.content.pane", "got \(pane)")
+    }
+
     await test("PKT-1005: control() composes section + control slug") {
         let id = await MainActor.run { BridgeAXID.control(.security, "root") }
         try expect(id == "bridge.settings.security.root", "got \(id)")
@@ -171,13 +178,14 @@ func runSettingsAXIdentifierTests() async {
     }
 
     await test("PKT-1005(b): every section's manifest carries at least one inner-control id") {
-        // Shared chrome (nav + title + root) = 3 ids; remainder (b) means every
-        // section now also exposes section-specific controls (> 3 manifest ids).
+        // Shared chrome (nav + title + sidebar toggle + content pane + root) = 5
+        // ids; remainder (b) means every section also exposes section-specific
+        // controls (> 5 manifest ids).
         let manifest = SettingsUIValidationHarness.expectedIdentifiers
         for section in SettingsSection.allCases {
             let ids = manifest[section] ?? []
-            try expect(ids.count > 3,
-                       "section \(section) must expose inner-control ids beyond the 3 shared-chrome ids, has \(ids.count)")
+            try expect(ids.count > 5,
+                       "section \(section) must expose inner-control ids beyond the 5 shared-chrome ids, has \(ids.count)")
             // No id may be empty (an unprovided axID passes "" — must never reach the manifest).
             try expect(!ids.contains(""), "section \(section) manifest must not carry an empty id")
         }

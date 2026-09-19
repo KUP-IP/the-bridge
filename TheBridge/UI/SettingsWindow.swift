@@ -103,7 +103,11 @@ public final class SettingsWindowController {
         // have squeezed a fresh build back to 900 wide).
         window.minSize = NSSize(width: 760, height: 600)
         window.maxSize = NSSize(width: 1600, height: 1300)
-        window.setContentSize(NSSize(width: 1080, height: 880))
+        // #283: standard size is the collapsed (icon-rail) window. A persisted
+        // labeled-rail expand may grow width; height stays the standard.
+        let sidebarExpanded = UserDefaults.standard.bool(forKey: BridgeDefaults.settingsSidebarExpanded)
+        let size = SettingsShellLayout.contentSize(sidebarExpanded: sidebarExpanded)
+        window.setContentSize(NSSize(width: size.width, height: size.height))
         window.toolbarStyle = .unified
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
@@ -224,6 +228,10 @@ public struct SettingsView: View {
 
     @ObservedObject var nav: SettingsNavigation
 
+    /// #283: icon rail (false) ↔ labeled rail (true). Default collapsed so
+    /// the standard 1080×880 window is the zero-scroll chrome.
+    @AppStorage(BridgeDefaults.settingsSidebarExpanded) var sidebarExpanded = false
+
     /// cmd-ux W1: the single observable Commands source of truth,
     /// injected by `SettingsWindowController` onto the root view. Read
     /// here so the Commands status row + recorder glyph re-render the
@@ -268,14 +276,17 @@ public struct SettingsView: View {
             VStack(spacing: 0) {
                 BridgeTitleBar(title: nav.section.displayName)
                 HStack(spacing: 0) {
-                    BridgeSectionNav(selection: $nav.section)
-                    detailContent
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    BridgeSectionNav(selection: $nav.section, isExpanded: $sidebarExpanded)
+                    // Opaque pane — carbon weave stays on the outer shell only.
+                    BridgeContentPane { detailContent }
                 }
                 BridgeFootBar(version: "v\(appVersion) · build \(AppVersion.build)")
             }
         }
         .frame(minWidth: 760, minHeight: 600)
+        .onChange(of: sidebarExpanded) { _, expanded in
+            SettingsShellLayout.applyWindowGrowth(sidebarExpanded: expanded)
+        }
         // v3.7.6: system-tethered appearance — no forced color scheme.
     }
 

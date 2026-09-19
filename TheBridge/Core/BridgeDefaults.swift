@@ -177,6 +177,13 @@ public enum BridgeDefaults {
     /// Standard mode must not show GitHub, branch, commit, or push controls.
     public static let commandsDeveloperPublication = "com.notionbridge.commandsDeveloperPublication"
 
+    // MARK: - Settings shell (#283)
+
+    /// Settings sidebar labeled-rail vs icon-rail. Bool. ABSENT ⇒ collapsed
+    /// (icon rail) so the standard window (1080×880) is the zero-scroll
+    /// collapsed chrome. Expanding the labeled rail may grow the window.
+    public static let settingsSidebarExpanded = "com.notionbridge.settings.sidebarExpanded"
+
     // MARK: - Onboarding & Legal
 
     /// Whether the user has completed the onboarding wizard. Bool.
