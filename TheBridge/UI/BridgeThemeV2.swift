@@ -115,6 +115,18 @@ public struct BridgeGlassCard<Content: View>: View {
     }
 }
 
+/// Applies a `BridgeShadow` when present; a no-op when the rung carries none.
+/// Kept for Dashboard / section-icon chrome that still uses the dual-shadow
+/// elevation ladder. Settings content cards use `bridgeSoftShadow` instead.
+private struct OptionalShadow: ViewModifier {
+    let shadow: BridgeTokens.BridgeShadow?
+    init(_ shadow: BridgeTokens.BridgeShadow?) { self.shadow = shadow }
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let s = shadow { content.bridgeShadow(s) } else { content }
+    }
+}
+
 /// Section-header label rendered inside cards (small caps).
 public struct BridgeCardLabel: View {
     private let text: String
