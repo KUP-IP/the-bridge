@@ -353,6 +353,21 @@ func runSkillExposureAuthorityTests() async {
         let empty = runtimeRoutingSnapshotForTesting(items: [], gate: freshGate, now: exposureNow)
         try expect(empty.metadata.status == .empty, "zero routing entries must never be healthy")
         try expect(empty.metadata.count == 0)
+
+        let publishedLease = SkillRuntimeExposureGate(
+            generation: publishedGeneration(),
+            freshnessRenewedAt: exposureNow
+        )
+        let publishedSnap = runtimeRoutingSnapshotForTesting(items: [row], gate: publishedLease, now: exposureNow)
+        try expect(publishedSnap.metadata.reason == "verified_active_runtime_exposure_generation",
+                   "publish lease at compiledAt must not look like a shadow renew")
+
+        let shadowLease = SkillRuntimeExposureGate(
+            generation: publishedGeneration(),
+            freshnessRenewedAt: exposureNow.addingTimeInterval(60)
+        )
+        let shadowSnap = runtimeRoutingSnapshotForTesting(items: [row], gate: shadowLease, now: exposureNow)
+        try expect(shadowSnap.metadata.reason == "verified_unchanged_shadow_renewed_freshness")
     }
 
     await test("stale Runtime Exposure suppresses routing and reports degraded evidence") {
@@ -543,6 +558,173 @@ func runSkillExposureAuthorityTests() async {
         }
         try expect(gate.freshnessRenewedAt == nil, "gen B must ignore gen A's lease")
         try expect(gate.isDegraded(now: exposureNow), "stale gen B without its own lease must degrade")
+    }
+
+    await test("successful publish realigns freshness lease without a follow-up shadow") {
+        // #279: after publish, status showed the new activeGenerationId /
+        // published receipt but freshnessLease still pointed at the prior
+        // shadow. LIVE verify that checks lease.generationId === active
+        // generation then false-FAILS a clean publish.
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("bridge-exposure-lease-publish-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = SkillRuntimeGenerationStore(baseDirectory: root)
+        let prior = publishedGeneration(
+            compiledAt: exposureNow.addingTimeInterval(-48 * 3600),
+            generationID: "ff2db121-prior-shadow-generation"
+        )
+        let published = publishedGeneration(
+            compiledAt: exposureNow,
+            generationID: "6c00f3e1-published-generation"
+        )
+        _ = try await store.stage(prior)
+        _ = try await store.promote(generationID: prior.generationID)
+        let priorShadow = SkillExposureReconciliationReceipt(
+            receiptID: "9f4c83d9-prior-shadow-receipt",
+            mode: .shadow, outcome: .shadowReady,
+            attemptedAt: exposureNow.addingTimeInterval(-3600),
+            snapshotID: prior.snapshotID,
+            candidateGenerationID: "unpublished-candidate",
+            activeGenerationID: prior.generationID,
+            errors: [], warnings: [], changes: []
+        )
+        try await store.writeReceipt(priorShadow)
+        try expect(await store.freshnessLease()?.generationID == prior.generationID)
+        try expect(await store.freshnessLease()?.receiptID == priorShadow.receiptID)
+
+        _ = try await store.stage(published)
+        _ = try await store.promote(generationID: published.generationID)
+        let publishReceipt = SkillExposureReconciliationReceipt(
+            receiptID: "27eadcdc-publish-receipt",
+            mode: .publish, outcome: .published,
+            attemptedAt: exposureNow,
+            snapshotID: published.snapshotID,
+            candidateGenerationID: published.generationID,
+            activeGenerationID: published.generationID,
+            errors: [], warnings: [], changes: []
+        )
+        try await store.writeReceipt(publishReceipt)
+
+        let lease = await store.freshnessLease()
+        try expect(lease?.generationID == published.generationID,
+                   "publish must set lease.generationId to the activated generation")
+        try expect(lease?.receiptID == publishReceipt.receiptID,
+                   "publish must set lease.receiptId to the publish receipt")
+        try expect(lease?.renewedAt == exposureNow)
+        try expect(await store.activeGenerationID() == published.generationID)
+        try expect(await store.latestReceipt()?.outcome == .published)
+        guard case .active(let gate) = await store.routingAuthority() else {
+            throw TestError.assertion("expected active routing authority")
+        }
+        try expect(gate.freshnessRenewedAt == exposureNow,
+                   "publish lease must renew freshness for the new generation")
+        try expect(!gate.isDegraded(now: exposureNow))
+    }
+
+    await test("publish with exposure changes still sets the freshness lease") {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("bridge-exposure-lease-publish-changes-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = SkillRuntimeGenerationStore(baseDirectory: root)
+        let prior = publishedGeneration(
+            compiledAt: exposureNow.addingTimeInterval(-48 * 3600),
+            generationID: "generation-prior"
+        )
+        let published = publishedGeneration(
+            compiledAt: exposureNow,
+            generationID: "generation-published"
+        )
+        _ = try await store.stage(prior)
+        _ = try await store.promote(generationID: prior.generationID)
+        try await store.writeReceipt(.init(
+            mode: .shadow, outcome: .shadowReady,
+            attemptedAt: exposureNow.addingTimeInterval(-3600),
+            snapshotID: prior.snapshotID, candidateGenerationID: "cand-prior",
+            activeGenerationID: prior.generationID,
+            errors: [], warnings: [], changes: []
+        ))
+        _ = try await store.stage(published)
+        _ = try await store.promote(generationID: published.generationID)
+        try await store.writeReceipt(.init(
+            receiptID: "publish-with-changes",
+            mode: .publish, outcome: .published, attemptedAt: exposureNow,
+            snapshotID: published.snapshotID,
+            candidateGenerationID: published.generationID,
+            activeGenerationID: published.generationID,
+            errors: [], warnings: [],
+            changes: ["exposure:Alpha:Routing->Standard"]
+        ))
+        let lease = await store.freshnessLease()
+        try expect(lease?.generationID == published.generationID,
+                   "changed publish still activates a verified generation")
+        try expect(lease?.receiptID == "publish-with-changes")
+    }
+
+    await test("failed publish does not move or erase a prior freshness lease") {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("bridge-exposure-lease-publish-failed-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = SkillRuntimeGenerationStore(baseDirectory: root)
+        let prior = publishedGeneration(
+            compiledAt: exposureNow.addingTimeInterval(-48 * 3600),
+            generationID: "generation-prior"
+        )
+        _ = try await store.stage(prior)
+        _ = try await store.promote(generationID: prior.generationID)
+        try await store.writeReceipt(.init(
+            receiptID: "good-shadow",
+            mode: .shadow, outcome: .shadowReady, attemptedAt: exposureNow,
+            snapshotID: prior.snapshotID, candidateGenerationID: "cand",
+            activeGenerationID: prior.generationID,
+            errors: [], warnings: [], changes: []
+        ))
+        try await store.writeReceipt(.init(
+            mode: .publish, outcome: .failed,
+            attemptedAt: exposureNow.addingTimeInterval(30),
+            snapshotID: nil, candidateGenerationID: nil,
+            activeGenerationID: prior.generationID,
+            errors: ["reconciliation_failed:publicationVerificationFailed"],
+            warnings: [], changes: []
+        ))
+        let lease = await store.freshnessLease()
+        try expect(lease?.generationID == prior.generationID)
+        try expect(lease?.receiptID == "good-shadow")
+        try expect(lease?.renewedAt == exposureNow)
+        try expect(await store.latestReceipt()?.outcome == .failed)
+    }
+
+    await test("upgrade seeds lease from a published receipt when the lease file is missing") {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("bridge-exposure-lease-seed-publish-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = SkillRuntimeGenerationStore(baseDirectory: root)
+        let published = publishedGeneration(compiledAt: exposureNow.addingTimeInterval(-48 * 3600))
+        _ = try await store.stage(published)
+        _ = try await store.promote(generationID: published.generationID)
+        try await store.writeReceipt(.init(
+            receiptID: "publish-seed",
+            mode: .publish, outcome: .published, attemptedAt: exposureNow,
+            snapshotID: published.snapshotID,
+            candidateGenerationID: published.generationID,
+            activeGenerationID: published.generationID,
+            errors: [], warnings: [], changes: []
+        ))
+        try await store.writeReceipt(.init(
+            mode: .shadow, outcome: .failed, attemptedAt: exposureNow.addingTimeInterval(90),
+            snapshotID: nil, candidateGenerationID: nil,
+            activeGenerationID: published.generationID,
+            errors: ["reconciliation_failed:offline"], warnings: [], changes: []
+        ))
+        let leaseURL = root.appendingPathComponent("freshness-lease.json")
+        try FileManager.default.removeItem(at: leaseURL)
+        let reloaded = SkillRuntimeGenerationStore(baseDirectory: root)
+        guard case .active(let gate) = await reloaded.routingAuthority() else {
+            throw TestError.assertion("expected active routing authority")
+        }
+        try expect(gate.freshnessRenewedAt == exposureNow,
+                   "upgrade must seed from the published receipt, not failed latest-receipt")
+        try expect(await reloaded.freshnessLease()?.receiptID == "publish-seed")
+        try expect(await reloaded.freshnessLease()?.generationID == published.generationID)
     }
 
     await test("upgrade seeds lease from receipts when the lease file is missing") {

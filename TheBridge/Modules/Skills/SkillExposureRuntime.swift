@@ -5,7 +5,8 @@ import Foundation
 import MCP
 
 /// Persisted freshness lease for an active Runtime Exposure generation.
-/// Independent of `latest-receipt.json`, which remains the audit of the last
+/// Written on successful publish and on unchanged shadow renew. Independent
+/// of `latest-receipt.json`, which remains the audit of the last
 /// reconciliation *attempt* (including failed/blocked/changed shadows).
 public struct SkillFreshnessLease: Codable, Sendable, Equatable {
     public let generationID: String
@@ -142,7 +143,7 @@ public actor SkillRuntimeGenerationStore {
         let url = receiptsDir.appendingPathComponent("\(receipt.receiptID).json")
         try atomicWrite(receipt, to: url)
         try atomicWrite(receipt, to: root.appendingPathComponent("latest-receipt.json"))
-        if Self.receiptQualifiesAsUnchangedShadow(receipt),
+        if Self.receiptQualifiesForLease(receipt),
            let generationID = receipt.activeGenerationID, !generationID.isEmpty {
             try atomicWrite(
                 SkillFreshnessLease(
@@ -164,19 +165,23 @@ public actor SkillRuntimeGenerationStore {
         readLease()
     }
 
-    /// An unchanged shadow renews the active generation's freshness window.
+    /// A successful publish, or an unchanged shadow, renews the active
+    /// generation's freshness window.
     ///
     /// The lease is a separate pointer from `latest-receipt.json`. Failed,
     /// blocked, and changed shadows still overwrite the latest-attempt audit
-    /// but must not erase a prior good lease for this generation.
+    /// but must not erase a prior good lease. Publish must not wait for a
+    /// follow-up shadow to realign `freshnessLease.generationId` with the
+    /// newly activated generation (#279).
     ///
-    /// Key off empty exposure `changes` + the receipt's `activeGenerationID`,
-    /// not `snapshotID` equality. The registry snapshot hash includes
-    /// `notionLastEditedTime`, so ordinary page edits change the snapshot
-    /// while leaving published Runtime Exposure policy unchanged
+    /// Shadow renew keys off empty exposure `changes` + the receipt's
+    /// `activeGenerationID`, not `snapshotID` equality. The registry snapshot
+    /// hash includes `notionLastEditedTime`, so ordinary page edits change
+    /// the snapshot while leaving published Runtime Exposure policy unchanged
     /// (`changes == []`). Requiring snapshot equality left cold starts stuck
     /// on `runtime_exposure_freshness_expired` after a successful shadowReady
-    /// (build 89 local pilot, 2026-08-03).
+    /// (build 89 local pilot, 2026-08-03). Publish receipts qualify even when
+    /// `changes` is non-empty: the new generation is already verified-active.
     private func freshnessRenewedAt(for generation: SkillRuntimeGeneration) -> Date? {
         if let lease = readLease(), lease.generationID == generation.generationID {
             return lease.renewedAt
@@ -193,14 +198,19 @@ public actor SkillRuntimeGenerationStore {
         return try? decoder().decode(SkillFreshnessLease.self, from: data)
     }
 
-    private static func receiptQualifiesAsUnchangedShadow(
+    private static func receiptQualifiesForLease(
         _ receipt: SkillExposureReconciliationReceipt
     ) -> Bool {
-        receipt.mode == .shadow
-            && receipt.outcome == .shadowReady
-            && receipt.errors.isEmpty
-            && receipt.changes.isEmpty
-            && !(receipt.activeGenerationID ?? "").isEmpty
+        guard receipt.errors.isEmpty,
+              !(receipt.activeGenerationID ?? "").isEmpty else { return false }
+        switch (receipt.mode, receipt.outcome) {
+        case (.shadow, .shadowReady):
+            return receipt.changes.isEmpty
+        case (.publish, .published):
+            return true
+        default:
+            return false
+        }
     }
 
     private func newestQualifyingLease(for generationID: String) -> SkillFreshnessLease? {
@@ -215,7 +225,7 @@ public actor SkillRuntimeGenerationStore {
             let url = receiptsDir.appendingPathComponent(name)
             guard let data = try? Data(contentsOf: url),
                   let receipt = try? decoder().decode(SkillExposureReconciliationReceipt.self, from: data),
-                  Self.receiptQualifiesAsUnchangedShadow(receipt),
+                  Self.receiptQualifiesForLease(receipt),
                   receipt.activeGenerationID == generationID
             else { continue }
             if let current = best {

@@ -219,7 +219,13 @@
 #   stale empty flatten; body cache persists the catalog. +7
 #   FetchSkillNotionFilesTests +1 SkillBodyCacheTests. CI run 34860177190
 #   measured passed=4079. Linux host cannot compile macOS 26.
-FLOOR="${BRIDGE_TEST_FLOOR:-4079}"
+# 2026-09-19: 4079 → 4083 (+4) — #279 publish realigns freshnessLease to the
+#   newly activated generation + publish receipt (no follow-up shadow).
+#   +4 SkillExposureAuthorityTests (publish lease, changed publish, failed
+#   publish, publish-receipt upgrade seed). Routing-snapshot reason for a
+#   publish lease at compiledAt stays generation-verified. CI run
+#   35457036314 measured passed=4083.
+FLOOR="${BRIDGE_TEST_FLOOR:-4083}"
 
 echo "🧪 test-floor-gate: building debug test executable + running suite (floor=${FLOOR})..."
 swift build -c debug --product TheBridgeTests

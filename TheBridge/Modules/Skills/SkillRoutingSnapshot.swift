@@ -100,7 +100,11 @@ extension SkillsModule {
             reason = "runtime_exposure_freshness_expired"
         } else if items.isEmpty {
             reason = "verified_runtime_exposure_contains_no_routing_skills"
-        } else if gate.freshnessRenewedAt != nil {
+        } else if let renewed = gate.freshnessRenewedAt, renewed > gate.generation.compiledAt {
+            // A later unchanged shadow is the only path that moves the lease
+            // past compiledAt. Publish writes a lease at compiledAt (#279)
+            // and must keep the generation-verified reason so LIVE read-back
+            // does not look like a shadow renew.
             reason = "verified_unchanged_shadow_renewed_freshness"
         } else {
             reason = "verified_active_runtime_exposure_generation"
