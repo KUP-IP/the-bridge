@@ -14,7 +14,7 @@ extension SkillsModule {
             name: "skills_exposure_status",
             module: moduleName,
             tier: .open,
-            description: "Read Runtime Exposure state: active verified generation, freshness lease, latest reconciliation receipt (last attempt — may disagree with the lease after failed/blocked/changed shadows), enabled migration baseline, degraded status, and emergency denylist. Read-only.",
+            description: "Read Runtime Exposure state: active verified generation, freshness lease (last successful publish or unchanged shadow for that generation), latest reconciliation receipt (last attempt — may disagree with the lease after failed/blocked/changed shadows), enabled migration baseline, degraded status, and emergency denylist. Read-only.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([:]),

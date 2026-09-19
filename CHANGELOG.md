@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **skills exposure freshness lease after publish (#279).** Successful
+  `skills_exposure_reconcile` publish now writes `freshnessLease` to the
+  newly activated generation + that publish receipt. Status no longer
+  lags on the prior shadow until a follow-up `mode=shadow` renew.
+
 ## v4.0.8 (build 97) — Sparkle published install — 2026-09-19
 
 Sparkle annotated tag `v4.0.8` is this release (do not hand-edit `appcast.xml`). Promotes the prior Unreleased hotfix stack that lived on tip `dcf60a2` as local 4.0.7/96 into the next +1 published install.
