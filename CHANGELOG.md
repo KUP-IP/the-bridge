@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased — hotfix on 4.0.7 / build 96 (not a published install)
+## Unreleased
+
+## v4.0.8 (build 97) — Sparkle published install — 2026-09-19
+
+Sparkle annotated tag `v4.0.8` is this release (do not hand-edit `appcast.xml`). Promotes the prior Unreleased hotfix stack that lived on tip `dcf60a2` as local 4.0.7/96 into the next +1 published install.
 
 - **fetch_skill Files & media catalog identity (#276).** Live Notion GET
   file objects (2026-03-11) have a name and signed URL, not a top-level
