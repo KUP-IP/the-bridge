@@ -305,7 +305,7 @@ func runRemoteOAuthBearerTests() async {
         // connector-reachable tool — across every bucket — must be allowed:
         // authentication is the grant, SecurityGate/step-up are the per-call guard.
         for tool in ["snippets_list", "snippets_create", "snippets_delete",
-                     "shell_exec", "job_run", "bridge_initialize", "bridge_status",
+                     "shell_exec", "bridge_initialize", "bridge_status",
                      "tools_list", "session_info", "contacts_get", "contacts_resolve_handle"] {
             let d = await gate.evaluate(toolName: tool, grantedScopes: [])
             guard case .allow = d else {
@@ -374,7 +374,7 @@ func runRemoteOAuthBearerTests() async {
     }
 
     await test("ScopeGate: runners.exec gates command/exec tools") {
-        for tool in ["shell_exec", "run_script", "worktree_command_run", "bg_run", "job_run"] {
+        for tool in ["shell_exec", "run_script", "worktree_command_run", "bg_run"] {
             let denied = await gate.evaluate(
                 toolName: tool, grantedScopes: [ConnectorScope(name: "snippets.read")]
             )

@@ -28,8 +28,6 @@ public extension Notification.Name {
     /// session material; AppDelegate routes it to the live ServerManager.
     static let bridgeConnectionResetRequested = Notification.Name("com.notionbridge.bridgeConnectionResetRequested")
 
-    /// Posted after any job mutation (create, delete, pause, resume, update, import) so the Jobs UI can reload.
-    static let jobsDidChange = Notification.Name("com.notionbridge.jobsDidChange")
 
     /// PKT-879 (v3.6.4): posted when the onboarding wizard completes its
     /// final step. Observers (AppDelegate) bring attention to the menu

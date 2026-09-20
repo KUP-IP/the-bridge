@@ -654,17 +654,6 @@ func runRoutingIntegrityLayerTests() async {
         try expect(due[0].ageDays >= 30)
     }
 
-    await test("Amendment lifecycle: scheduler template exposes weekly scan") {
-        let template = AmendmentLifecycle.jobTemplate()
-        guard case .string("weekly-amendment-collapse-scan")? = template["id"],
-              case .string("0 9 * * 1")? = template["schedule"],
-              case .array(let actions)? = template["actions"],
-              case .object(let first)? = actions.first,
-              case .string("standing_orders_list")? = first["tool"] else {
-            throw TestError.assertion("amendment lifecycle template shape drift: \(template)")
-        }
-    }
-
     await test("Identity propagation: unresolved impact hits block rename close") {
         let clean = IdentityPropagationScanResult(renameId: "rename-clean", unresolvedHits: 0, completedScanCycles: 1)
         try expect(IdentityPropagationContract.closeDecision(for: clean) == .canClose)

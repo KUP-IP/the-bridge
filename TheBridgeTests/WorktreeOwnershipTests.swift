@@ -2725,6 +2725,6 @@ func runWorktreeOwnershipTests() async {
         try expect(claimAnnotation?.idempotentHint == true)
         try expect(releaseAnnotation?.idempotentHint == false)
         try expect(commandAnnotation?.requiresConfirmation == true)
-        try expect(BridgeConstants.staticFeatureModuleToolCount == 240)
+        try expect(BridgeConstants.staticFeatureModuleToolCount == 225)
     }
 }

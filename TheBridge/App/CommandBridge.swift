@@ -323,13 +323,6 @@ public final class CommandBridgeController: NSObject {
     /// `show()` BEFORE `orderFrontRegardless()`.
     private var priorApp: NSRunningApplication?
 
-    /// (PKT-1006 R2) Cached Jobs snapshot for multi-entity search. `JobStore`
-    /// is an `actor` (async reads), but `buildSearchEntities()` runs
-    /// synchronously inside `queryDidChange`. We refresh this snapshot
-    /// asynchronously on each `show()` and read it synchronously while typing —
-    /// jobs change rarely, so a one-open-stale snapshot is acceptable.
-    private var cachedJobs: [JobRecord] = []
-
     /// (v3.7.6) Presents the standalone Dashboard popover anchored off the
     /// bar's leading bridge-mark. Injected by the App layer (it owns the
     /// `StatusBarController` / `PermissionManager` the dashboard needs); `nil`
@@ -655,13 +648,6 @@ public final class CommandBridgeController: NSObject {
         // command shows immediately. Failures fall back to empty.
         model?.reload()
         model?.queryDidChange("")
-        // (PKT-1006 R2) Refresh the Jobs snapshot for multi-entity search.
-        // JobStore is an actor (async); we snapshot it here so the synchronous
-        // search path can read jobs while typing without an await.
-        Task { [weak self] in
-            let jobs = (try? await JobStore.shared.listAll()) ?? []
-            await MainActor.run { self?.cachedJobs = jobs }
-        }
 
         // (v3.7.6) Make the panel KEY (not just ordered front) so the hosted
         // query field can take first responder and the user types immediately.
@@ -1061,20 +1047,6 @@ public final class CommandBridgeController: NSObject {
             ))
         }
 
-        // ── Jobs (deep-link into Settings → Jobs) ────────────────────────
-        // Read the snapshot refreshed asynchronously on show() (JobStore is an
-        // actor — see `cachedJobs`).
-        let jobs = cachedJobs
-        for j in jobs {
-            entities.append(BridgeSearchEntity(
-                kind: .job,
-                id: j.id,
-                title: j.name,
-                subtitle: j.schedule,
-                destination: .job(id: j.id)
-            ))
-        }
-
         // ── Tools (deep-link into Settings → Tools, open the grouping) ───
         let tools = AppDelegate.shared?.statusBar.toolInfoList ?? []
         for t in tools {
@@ -1142,9 +1114,6 @@ public final class CommandBridgeController: NSObject {
 
         case .skillSettings(let anchor):
             navigateSettings(.skills, anchor: anchor)
-
-        case .job(let id):
-            navigateSettings(.jobs, anchor: id)
 
         case .tool(let group, let tool):
             // Open the tool's GROUPING and scroll to the tool so it can be

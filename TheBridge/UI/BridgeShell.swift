@@ -91,21 +91,6 @@ public enum BridgeAXID {
         public static let list          = id("list")
     }
 
-    // ── Jobs section control slugs (enum case `.jobs`) ───────────────────
-    public enum Jobs {
-        private static func id(_ slug: String) -> String { BridgeAXID.control(.jobs, slug) }
-        /// Primary "New job" button.
-        public static let newJob        = id("new")
-        /// "Pause all" button.
-        public static let pauseAll      = id("pause.all")
-        /// The job-search field.
-        public static let search        = id("search")
-        /// The scrollable jobs list.
-        public static let list          = id("list")
-        /// A single job list row (shared id; one per row).
-        public static let row           = id("row")
-    }
-
     // ── Tools section control slugs (enum case `.tools`) ─────────────────
     public enum Tools {
         private static func id(_ slug: String) -> String { BridgeAXID.control(.tools, slug) }
@@ -227,7 +212,6 @@ public enum BridgeAXID {
             public static let ladderApple = id("settings.ladder.apple")
             public static let ladderSpeechAnalyzer = id("settings.ladder.speechAnalyzer")
             public static let ladderParakeet = id("settings.ladder.parakeet")
-            public static let ladderOllama = id("settings.ladder.ollama")
             /// Cloud enhancement card.
             public static let cloudBaseURL = id("settings.cloud.baseURL")
             public static let cloudModel = id("settings.cloud.model")

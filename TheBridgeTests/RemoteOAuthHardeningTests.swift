@@ -552,6 +552,6 @@ func runRemoteOAuthHardeningTests() async {
         try expect(MCPHTTPRoute.classify(method: "GET", path: "/health", endpoint: "/mcp") == .health)
         try expect(MCPHTTPRoute.classify(method: "GET", path: "/sse", endpoint: "/mcp") == .legacySSE)
         try expect(MCPHTTPRoute.classify(method: "POST", path: "/messages", endpoint: "/mcp") == .legacyMessages)
-        try expect(MCPHTTPRoute.classify(method: "POST", path: "/jobs/x/run", endpoint: "/mcp") == .jobsRun("x"))
+        try expect(MCPHTTPRoute.classify(method: "POST", path: "/jobs/x/run", endpoint: "/mcp") == .notFound)
     }
 }

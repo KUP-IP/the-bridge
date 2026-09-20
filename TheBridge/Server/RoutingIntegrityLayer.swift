@@ -393,21 +393,6 @@ public enum AmendmentLifecycle {
             .filter(\.isDueForCollapse)
     }
 
-    public static func jobTemplate() -> [String: Value] {
-        [
-            "id": .string("weekly-amendment-collapse-scan"),
-            "name": .string("Weekly amendment collapse scan"),
-            "schedule": .string("0 9 * * 1"),
-            "description": .string("Scan standing-order and skill-page amendment markers for ACTIVE entries older than 30 days and flag them DUE_FOR_COLLAPSE."),
-            "actions": .array([
-                .object([
-                    "tool": .string("standing_orders_list"),
-                    "arguments": .object(["includeArchived": .bool(false)])
-                ])
-            ])
-        ]
-    }
-
     private static func parseLine(
         _ line: String,
         sourceLine: Int,

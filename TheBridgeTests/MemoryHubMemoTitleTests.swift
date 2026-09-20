@@ -291,30 +291,10 @@ private final class StubLocalTitleLLM: MemoryHubMemoTitler.LocalTitleLLM, @unche
     }
 }
 
-/// Snapshot + restore the UserDefaults keys the Tier-2 gate reads, so a test can force the
-/// flag ON/OFF deterministically regardless of seeded first-run defaults.
-private func withOllamaTitleFlags<T>(enabled: Bool, _ body: () async throws -> T) async rethrows -> T {
-    let d = UserDefaults.standard
-    let routingKey = BridgeDefaults.voiceMemoOllamaRouting
-    let modeKey = BridgeDefaults.voiceMemoCuratorMode
-    let modelKey = BridgeDefaults.ollamaSummarizationModel
-    let priorRouting = d.object(forKey: routingKey)
-    let priorMode = d.object(forKey: modeKey)
-    let priorModel = d.object(forKey: modelKey)
-    defer {
-        if let priorRouting { d.set(priorRouting, forKey: routingKey) } else { d.removeObject(forKey: routingKey) }
-        if let priorMode { d.set(priorMode, forKey: modeKey) } else { d.removeObject(forKey: modeKey) }
-        if let priorModel { d.set(priorModel, forKey: modelKey) } else { d.removeObject(forKey: modelKey) }
-    }
-    if enabled {
-        d.set(true, forKey: routingKey)
-        d.set(VoiceMemoCuratorMode.auto.rawValue, forKey: modeKey)
-        d.set("gemma4:12b", forKey: modelKey)
-    } else {
-        // `.heuristics` forces shouldUseLocalOllama() == false regardless of the routing flag.
-        d.set(VoiceMemoCuratorMode.heuristics.rawValue, forKey: modeKey)
-    }
-    return try await body()
+/// #284: local-model title flags are gone. Keep the helper so the P3a
+/// cases stay structurally identical while asserting the gate stays closed.
+private func withLocalTitleFlagsRemoved<T>(_ body: () async throws -> T) async rethrows -> T {
+    try await body()
 }
 
 private func snapIntent(_ id: String, _ kind: String, _ conf: Double,
@@ -331,8 +311,8 @@ func runMemoryHubMemoTitleP3aTests(cal: Calendar, now: Date) async {
 
     await test("p3a_gate_off_noLocalTitleProduced") {
         try await withTitleTempHome {
-            try await withOllamaTitleFlags(enabled: false) {
-                try expect(!MemoryHubMemoTitler.localTitleEnabled(), "flag OFF ⇒ gate closed")
+            try await withLocalTitleFlagsRemoved {
+                try expect(!MemoryHubMemoTitler.localTitleEnabled(), "#284: local-model title gate stays closed")
                 let stub = StubLocalTitleLLM(candidate: "Should Not Be Used")
                 MemoryHubMemoTitler.localTitleLLMOverride = stub
                 defer { MemoryHubMemoTitler.localTitleLLMOverride = nil }
@@ -345,29 +325,26 @@ func runMemoryHubMemoTitleP3aTests(cal: Calendar, now: Date) async {
         }
     }
 
-    await test("p3a_gate_on_cachesLocalProvenance") {
+    await test("p3a_gate_stays_closed_after_local_model_removal") {
         try await withTitleTempHome {
-            try await withOllamaTitleFlags(enabled: true) {
-                try expect(MemoryHubMemoTitler.localTitleEnabled(), "flag ON + model ⇒ gate open")
+            try await withLocalTitleFlagsRemoved {
+                try expect(!MemoryHubMemoTitler.localTitleEnabled(), "#284: no flag can reopen local titles")
                 let stub = StubLocalTitleLLM(candidate: "Ship Bridge v4 Trust Fixes")
                 MemoryHubMemoTitler.localTitleLLMOverride = stub
                 defer { MemoryHubMemoTitler.localTitleLLMOverride = nil }
                 let out = await MemoryHubMemoTitler.enhanceWithLocalTitle(
                     memoId: "m1", transcript: "we shipped the trust fixes for bridge v4 today",
                     fallbackTitle: "Bridge v4", now: now)
-                try expect(stub.called, "enabled ⇒ the LLM is invoked")
-                try expect(out?.provenance == .local, "cached as .local provenance: \(String(describing: out))")
-                try expect(out?.title == "Ship Bridge v4 Trust Fixes", "cleaned candidate: \(String(describing: out?.title))")
-                try expect(out?.transcriptHash?.isEmpty == false, "carries a transcript hash for invalidation")
-                try expect(MemoryHubMemoTitleStore.title(for: "m1")?.provenance == .local, "persisted to the cache")
+                try expect(!stub.called, "closed gate must not invoke the LLM")
+                try expect(out == nil, "closed gate returns nil")
+                try expect(MemoryHubMemoTitleStore.title(for: "m1") == nil, "no .local cached after removal")
             }
         }
     }
 
     await test("p3a_localDoesNotOverwriteEdited") {
         try await withTitleTempHome {
-            try await withOllamaTitleFlags(enabled: true) {
-                // A human rename is pinned: a later Tier-2 .local title must NOT clobber it.
+            try await withLocalTitleFlagsRemoved {
                 MemoryHubMemoTitleStore.put(mtitle("My own title", .edited, "2026-06-25T09:00:00Z"), memoId: "m1")
                 MemoryHubMemoTitler.localTitleLLMOverride = StubLocalTitleLLM(candidate: "Auto Local Guess")
                 defer { MemoryHubMemoTitler.localTitleLLMOverride = nil }
@@ -375,25 +352,23 @@ func runMemoryHubMemoTitleP3aTests(cal: Calendar, now: Date) async {
                     memoId: "m1", transcript: "some transcript", fallbackTitle: "fallback", now: now)
                 let got = MemoryHubMemoTitleStore.title(for: "m1")
                 try expect(got?.title == "My own title" && got?.provenance == .edited,
-                           "edit survives the Tier-2 upgrade: \(String(describing: got))")
+                           "edit survives the closed local-title path: \(String(describing: got))")
             }
         }
     }
 
     await test("p3a_emptyOrFallbackCandidate_keepsHeuristic") {
         try await withTitleTempHome {
-            try await withOllamaTitleFlags(enabled: true) {
-                // nil candidate (failure/timeout) ⇒ no write.
+            try await withLocalTitleFlagsRemoved {
                 MemoryHubMemoTitler.localTitleLLMOverride = StubLocalTitleLLM(candidate: nil)
                 let a = await MemoryHubMemoTitler.enhanceWithLocalTitle(
                     memoId: "m1", transcript: "t", fallbackTitle: "Heuristic Title", now: now)
-                try expect(a == nil && MemoryHubMemoTitleStore.title(for: "m1") == nil, "nil candidate ⇒ no .local")
-                // A candidate identical to the fallback is rejected (no value added).
+                try expect(a == nil && MemoryHubMemoTitleStore.title(for: "m1") == nil, "closed gate ⇒ no .local")
                 MemoryHubMemoTitler.localTitleLLMOverride = StubLocalTitleLLM(candidate: "Heuristic Title")
                 defer { MemoryHubMemoTitler.localTitleLLMOverride = nil }
                 let b = await MemoryHubMemoTitler.enhanceWithLocalTitle(
                     memoId: "m1", transcript: "t", fallbackTitle: "Heuristic Title", now: now)
-                try expect(b == nil && MemoryHubMemoTitleStore.title(for: "m1") == nil, "fallback-equal ⇒ no .local")
+                try expect(b == nil && MemoryHubMemoTitleStore.title(for: "m1") == nil, "closed gate ⇒ no .local")
             }
         }
     }

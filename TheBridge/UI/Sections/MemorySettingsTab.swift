@@ -11,8 +11,8 @@
 //
 // Real store bindings preserved from the ported files (no fake/stub data):
 //   - @AppStorage(BridgeDefaults.voiceMemoCuratorMode) → VoiceMemoCuratorMode
-//   - @AppStorage(BridgeDefaults.voiceMemoOllamaRouting / .voiceMemoAppleTranscript /
-//     .voiceMemoParakeetTranscription)
+//   - @AppStorage(BridgeDefaults.voiceMemoAppleTranscript /
+//     .voiceMemoSpeechAnalyzerTranscription / .voiceMemoParakeetTranscription)
 //   - MemoryHubProviderConfigStore.{load,upsert,saveKey,deleteKey,keyConfigured,
 //     validateSyntax,canRunCloud}
 //   - MCPClientPresence.shared.{hasConnectedClient,primaryClientName}
@@ -22,7 +22,6 @@ import SwiftUI
 
 public struct MemorySettingsTab: View {
     @AppStorage(BridgeDefaults.voiceMemoCuratorMode) private var curatorModeRaw: String = VoiceMemoCuratorMode.auto.rawValue
-    @AppStorage(BridgeDefaults.voiceMemoOllamaRouting) private var ollamaRouting = true
     @AppStorage(BridgeDefaults.voiceMemoAppleTranscript) private var appleTranscript = true
     @AppStorage(BridgeDefaults.voiceMemoSpeechAnalyzerTranscription) private var speechAnalyzerTranscription = false
     @AppStorage(BridgeDefaults.voiceMemoParakeetTranscription) private var parakeetTranscription = true
@@ -72,7 +71,7 @@ public struct MemorySettingsTab: View {
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 12) {
                 BridgeCardLabel("Curator routing")
-                Text("When an MCP client is connected, Auto defers Execute to the agent (`voice_memo_get` → `voice_memo_commit`). When alone: cloud → local Ollama → heuristics, then Bridge auto-execute.")
+                Text("When an MCP client is connected, Auto defers Execute to the agent (`voice_memo_get` → `voice_memo_commit`). When alone: cloud → heuristics, then Bridge auto-execute.")
                     .font(BridgeTokens.Typeface.sub)
                     .foregroundStyle(BridgeTokens.fg3)
                     .fixedSize(horizontal: false, vertical: true)
@@ -102,7 +101,6 @@ public struct MemorySettingsTab: View {
                     Picker("Mode", selection: $curatorModeRaw) {
                         Text(VoiceMemoCuratorMode.auto.label).tag(VoiceMemoCuratorMode.auto.rawValue)
                         Text(VoiceMemoCuratorMode.heuristics.label).tag(VoiceMemoCuratorMode.heuristics.rawValue)
-                        Text(VoiceMemoCuratorMode.local.label).tag(VoiceMemoCuratorMode.local.rawValue)
                         Text(VoiceMemoCuratorMode.agent.label).tag(VoiceMemoCuratorMode.agent.rawValue)
                         Text(VoiceMemoCuratorMode.cloud.label).tag(VoiceMemoCuratorMode.cloud.rawValue)
                     }
@@ -125,9 +123,7 @@ public struct MemorySettingsTab: View {
     public nonisolated static func curatorModeHelp(_ mode: VoiceMemoCuratorMode) -> String {
         switch mode {
         case .auto:
-            return "Tries cloud, then local Ollama, then heuristics — whichever is available first. Configure and enable Cloud enhancement below to allow cloud routing. Defers Execute to a connected agent when one is present."
-        case .local:
-            return "Uses the local Ollama model only. No network calls, no cloud spend."
+            return "Tries cloud, then heuristics — whichever is available first. Configure and enable Cloud enhancement below to allow cloud routing. Defers Execute to a connected agent when one is present."
         case .cloud:
             return "Sends the transcript to the configured cloud provider for every Understand step. Configure and enable Cloud enhancement below."
         case .heuristics:
@@ -137,40 +133,15 @@ public struct MemorySettingsTab: View {
         }
     }
 
-    /// Explain when the Ollama switch is inert because the selected curator
-    /// mode forces local routing on or off. Auto is the only mode that reads it.
-    public nonisolated static func ollamaRoutingAnnotation(_ mode: VoiceMemoCuratorMode) -> String? {
-        switch mode {
-        case .auto:
-            return nil
-        case .local:
-            return "Local Ollama mode forces this on; the toggle is only applied in Auto mode."
-        case .heuristics, .agent, .cloud:
-            return "\(mode.label) forces Ollama routing off; the toggle is only applied in Auto mode."
-        }
-    }
-
     // MARK: - Card 2: Transcription ladder
 
     private var transcriptionLadderCard: some View {
         BridgeGlassCard {
             VStack(alignment: .leading, spacing: 12) {
                 BridgeCardLabel("Transcription ladder")
-                Text("Local model picks live under Settings → Advanced → Local Models.")
-                    .font(BridgeTokens.Typeface.sub)
-                    .foregroundStyle(BridgeTokens.fg3)
-                    .fixedSize(horizontal: false, vertical: true)
                 ladderRow("Apple embedded transcript (tsrp)", isOn: $appleTranscript, axid: BridgeAXID.Memory.Settings.ladderApple)
                 ladderRow("SpeechAnalyzer (opt-in)", isOn: $speechAnalyzerTranscription, axid: BridgeAXID.Memory.Settings.ladderSpeechAnalyzer)
                 ladderRow("Parakeet fallback", isOn: $parakeetTranscription, axid: BridgeAXID.Memory.Settings.ladderParakeet)
-                ladderRow("Ollama routing + summarization", isOn: $ollamaRouting, axid: BridgeAXID.Memory.Settings.ladderOllama)
-                if let mode = VoiceMemoCuratorMode(rawValue: curatorModeRaw),
-                   let annotation = Self.ollamaRoutingAnnotation(mode) {
-                    Text(annotation)
-                        .font(BridgeTokens.Typeface.meta)
-                        .foregroundStyle(BridgeTokens.fg4)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
             }
         }
     }

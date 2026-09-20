@@ -103,7 +103,7 @@ public final class LegacySSEBridge: @unchecked Sendable {
 /// Bridge NIO listener into exactly one route. Single source of truth for
 /// dispatch order so the live handler and tests cannot drift: the new
 /// PRM route is provably distinct from `/health`, `/sse`, `/messages`,
-/// the job callback, and the Streamable HTTP `/mcp` endpoint.
+/// and the Streamable HTTP `/mcp` endpoint.
 public enum MCPHTTPRoute: Equatable, Sendable {
     case corsPreflight
     case health
@@ -111,8 +111,6 @@ public enum MCPHTTPRoute: Equatable, Sendable {
     case protectedResourceMetadata
     case legacySSE
     case legacyMessages
-    /// `POST /jobs/{id}/run` — the captured job id.
-    case jobsRun(String)
     /// The Streamable HTTP MCP endpoint (`endpoint`, e.g. `/mcp`).
     case mcpEndpoint
     case notFound
@@ -128,10 +126,6 @@ public enum MCPHTTPRoute: Equatable, Sendable {
         }
         if m == "GET" && path == "/sse" { return .legacySSE }
         if m == "POST" && path == "/messages" { return .legacyMessages }
-        if m == "POST" && path.hasPrefix("/jobs/") && path.hasSuffix("/run") {
-            let jobId = String(path.dropFirst("/jobs/".count).dropLast("/run".count))
-            return .jobsRun(jobId)
-        }
         if path == endpoint { return .mcpEndpoint }
         return .notFound
     }
@@ -366,25 +360,6 @@ public actor SSEServer {
             await self?.notifyClientDisconnected(name)
         }
 
-        // PKT-340 V2-SCHEDULER: Jobs callback handler -- looks up job in sqlite
-        // and runs its action chain through the ToolRouter.
-        let routerForJobs = self.router
-        let jobsCallback: @Sendable (String) async -> Data = { jobId in
-            do {
-                let result = try await JobsManager.shared.runCallback(jobId: jobId, router: routerForJobs)
-                // Encode as minimal JSON so launchd's curl sees 200 OK.
-                if case .object = result {
-                    let enc = JSONEncoder()
-                    enc.outputFormatting = [.sortedKeys]
-                    if let data = try? enc.encode(result) { return data }
-                }
-                return Data("{\"ok\":true}".utf8)
-            } catch {
-                let msg = error.localizedDescription.replacingOccurrences(of: "\\", with: "").replacingOccurrences(of: "\"", with: "'")
-                return Data("{\"ok\":false,\"error\":\"\(msg)\"}".utf8)
-            }
-        }
-
         let rpcHandler: @Sendable (Data, String?) async -> Data? = { [weak self] data, legacySessionID in
             await self?.processLegacyRPC(data, sessionID: legacySessionID)
         }
@@ -412,7 +387,6 @@ public actor SSEServer {
                         rpcHandler: rpcHandler,
                         httpRequestHandler: httpRequestHandler,
                         healthHandler: healthHandler,
-                        jobsCallbackHandler: jobsCallback,
                         onClientDisconnected: onDisconnect
                     ))
                 }
@@ -1887,7 +1861,6 @@ private final class SSEHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
     private let rpcHandler: @Sendable (Data, String?) async -> Data?
     private let httpRequestHandler: @Sendable (HTTPRequest) async -> HTTPResponse
     private let healthHandler: @Sendable () async -> Data
-    private let jobsCallbackHandler: @Sendable (String) async -> Data  // PKT-340: POST /jobs/{id}/run
     private let onClientDisconnected: @Sendable (String) async -> Void  // PKT-366 F13
 
     /// Packet E Wave 3 (test seam ONLY): when non-nil, the PRM serving path
@@ -1916,7 +1889,6 @@ private final class SSEHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
         rpcHandler: @escaping @Sendable (Data, String?) async -> Data?,
         httpRequestHandler: @escaping @Sendable (HTTPRequest) async -> HTTPResponse,
         healthHandler: @escaping @Sendable () async -> Data,
-        jobsCallbackHandler: @escaping @Sendable (String) async -> Data = { _ in Data() },
         onClientDisconnected: @escaping @Sendable (String) async -> Void = { _ in },
         prmDecisionForTesting:
             (@Sendable () -> ProtectedResourceMetadataProvider.PRMServingDecision)? = nil
@@ -1926,7 +1898,6 @@ private final class SSEHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
         self.rpcHandler = rpcHandler
         self.httpRequestHandler = httpRequestHandler
         self.healthHandler = healthHandler
-        self.jobsCallbackHandler = jobsCallbackHandler
         self.onClientDisconnected = onClientDisconnected
         self.prmDecisionForTesting = prmDecisionForTesting
     }
@@ -2134,13 +2105,6 @@ private final class SSEHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
             }
             logAccess(method: "POST", path: path, sessionID: nil, status: 200, start: startTime)
             await handleLegacyMessage(head: head, body: body, uri: fullURI, context: context)
-            return
-
-        case .jobsRun(let jobId):
-            // PKT-340 V2-SCHEDULER: POST /jobs/{id}/run -- invoked by launchd via curl
-            let data = await jobsCallbackHandler(jobId)
-            logAccess(method: "POST", path: path, sessionID: nil, status: 200, start: startTime)
-            await writeJSONResponse(data: data, version: head.version, context: context)
             return
 
         case .notFound:
@@ -2397,7 +2361,6 @@ extension SSEServer {
             rpcHandler: { _, _ in nil },
             httpRequestHandler: { _ in .ok() },
             healthHandler: { Data("{}".utf8) },
-            jobsCallbackHandler: { _ in Data() },
             onClientDisconnected: { _ in },
             prmDecisionForTesting: prmDecisionForTesting
         )
@@ -2418,7 +2381,6 @@ extension SSEServer {
             rpcHandler: { _, _ in nil },
             httpRequestHandler: { _ in .ok() },
             healthHandler: { Data("{\"ok\":true}".utf8) },
-            jobsCallbackHandler: { _ in Data() },
             onClientDisconnected: { _ in }
         )
         try await channel.pipeline.addHandler(handler).get()

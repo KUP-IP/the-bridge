@@ -3,13 +3,13 @@
 //
 // GH #73: `voice_memo_process(mode: "single", ...)` could stall with no
 // completion payload and no review-queue entry. Likely failure area per the
-// issue write-up: intent parsing/classification (Ollama), local-model
-// routing, registry target resolution, or a Notion/Reminder write — none of
-// which were individually bounded at the ORCHESTRATION level (OllamaClient's
-// own HTTP request has a `timeoutInterval`, but nothing capped the full
+// issue write-up: intent parsing/classification, provider routing,
+// registry target resolution, or a Notion/Reminder write — none of
+// which were individually bounded at the ORCHESTRATION level (each
+// HTTP request has a `timeoutInterval`, but nothing capped the full
 // async chain: parse → summarize → registry resolve → write, several of
-// which can each independently hang on a stuck network call, a wedged
-// Ollama request, or a slow Notion round-trip).
+// which can each independently hang on a stuck network call or a slow
+// Notion round-trip).
 //
 // This file provides ONE generic race-based timeout primitive — mirrors
 // `CredentialValidator.withTimeout` (the codebase's existing timeout-race

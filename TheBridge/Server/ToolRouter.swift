@@ -1402,3 +1402,20 @@ public enum ToolRouterError: Error, LocalizedError {
         }
     }
 }
+
+// MARK: - Live router holder (#284)
+
+/// Process-wide holder for the live MCP `ToolRouter` so UI and wake hooks
+/// can dispatch without depending on a product scheduler.
+public actor LiveToolRouter {
+    public static let shared = LiveToolRouter()
+    private var router: ToolRouter?
+
+    public func bind(_ router: ToolRouter) {
+        self.router = router
+    }
+
+    public func current() -> ToolRouter? {
+        router
+    }
+}

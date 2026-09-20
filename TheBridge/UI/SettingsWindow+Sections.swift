@@ -138,8 +138,6 @@ extension SettingsView {
             showSSEPortRestartPrompt: $showSSEPortRestartPrompt,
             ssePortRevertOnCancel: $ssePortRevertOnCancel,
             showResetConfirmation: $showResetConfirmation,
-            showResetBackgroundItemsConfirmation: $showResetBackgroundItemsConfirmation,
-            resetBackgroundItemsMessage: $resetBackgroundItemsMessage,
             showFactoryResetConfirmation: $showFactoryResetConfirmation,
             factoryResetMessage: $factoryResetMessage,
             onSaveSSEPort: { saveSSEPort() },
@@ -319,15 +317,6 @@ extension SettingsView {
             )
         }
         return (message: "Reset partially failed. Some permissions may need to be reset manually in System Settings.", didFail: true)
-    }
-}
-
-// MARK: - Jobs Section (PKT-876 v3.6.1 — Liquid Glass reskin)
-
-extension SettingsView {
-    @ViewBuilder
-    var jobsSection: some View {
-        JobsSection()
     }
 }
 

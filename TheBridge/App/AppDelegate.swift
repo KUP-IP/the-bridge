@@ -414,10 +414,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             await LogManager.shared.bootstrap()
         }
 
-        // PKT-340 V2-SCHEDULER: Bootstrap JobsManager (opens SQLite, scans missed executions)
         Task {
-            await JobsManager.shared.bootstrap()
-            await VoiceMemoReviewLifecycle.sweepIfNeeded(router: await JobsManager.shared.router_())
+            await VoiceMemoReviewLifecycle.sweepIfNeeded(router: await LiveToolRouter.shared.current())
         }
 
         // PKT-341: Install signal handlers for crash breadcrumbs
@@ -599,14 +597,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.runCredentialAutoValidateIfDue() }
-            // PKT-381 (Scheduler Resilience): on wake, reconcile + drain any
-            // scheduled occurrences that were missed while the Mac slept past a
-            // slot. launchd coalesces a sleep-spanning miss into at most one
-            // wake-run; this is the durable catch-up that also covers slots
-            // launchd dropped. Idempotent — deduped against job_executions.
-            Task.detached { await JobsManager.shared.onWakeOrHeartbeatOnline() }
             Task.detached {
-                await VoiceMemoReviewLifecycle.sweepIfNeeded(router: await JobsManager.shared.router_())
+                await VoiceMemoReviewLifecycle.sweepIfNeeded(router: await LiveToolRouter.shared.current())
             }
             // Sleep drops Cloudflare edge sockets for LaunchAgent cloudflared while
             // local /mcp often stays fine. Kickstart the tunnel agent after a short

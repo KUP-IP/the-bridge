@@ -273,13 +273,11 @@ public enum MemoryHubMemoTitler {
         func titleCandidate(transcript: String, fallbackTitle: String) async -> String?
     }
 
-    /// Whether Tier-2 local titling may AUTO-run right now: the SAME flag chain the rest of
-    /// the curator uses (`voiceMemoOllamaRoutingEffective` ∧ `shouldUseLocalOllama()` ∧ a model).
-    /// Pure read of the stored flag — no network. The cockpit checks this before kicking the Task.
+    /// Whether Tier-2 local titling may AUTO-run. Always false after #284
+    /// (local-model connection removed). Kept as a closed gate so callers
+    /// and tests stay fail-closed instead of probing a missing client.
     public static func localTitleEnabled() -> Bool {
-        BridgeDefaults.voiceMemoOllamaRoutingEffective
-            && VoiceMemoCuratorRouter.shouldUseLocalOllama()
-            && BridgeDefaults.ollamaSummarizationModelEffective != nil
+        false
     }
 
     /// Test/override hook for the local-LLM. nil ⇒ the real Ollama-backed summarizer.
@@ -298,7 +296,7 @@ public enum MemoryHubMemoTitler {
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
-        let llm: LocalTitleLLM = localTitleLLMOverride ?? OllamaLocalTitleLLM()
+        guard let llm = localTitleLLMOverride else { return nil }
         guard let raw = await llm.titleCandidate(transcript: trimmed, fallbackTitle: fallbackTitle) else {
             return nil
         }
@@ -376,35 +374,5 @@ public enum MemoryHubMemoTitler {
         }
         return MemoTitleDisplay(text: humanizedDate(recording.recordedAt, now: now),
                                 provenance: .placeholder, intentCount: 0, isPlaceholder: true)
-    }
-}
-
-/// Default Tier-2 local-title LLM: a focused, ≤8-word intent-led title prompt over Ollama,
-/// bounded by the 0c local soft-timeout. Health-gated; any failure/timeout returns nil so the
-/// caller keeps the heuristic. The enabled-flag check is the caller's responsibility
-/// (`MemoryHubMemoTitler.localTitleEnabled()`); this type only performs the network call.
-public struct OllamaLocalTitleLLM: MemoryHubMemoTitler.LocalTitleLLM {
-    public init() {}
-
-    public func titleCandidate(transcript: String, fallbackTitle: String) async -> String? {
-        guard let model = BridgeDefaults.ollamaSummarizationModelEffective else { return nil }
-        let client = OllamaClient.fromDefaults()
-        guard (try? await client.health()) == true else { return nil }
-
-        let prompt = """
-        Write a short, scannable title for this voice memo: at most 8 words, intent-led \
-        (lead with the main action or subject), Title Case, no trailing punctuation. \
-        Reply with ONLY the title — no quotes, no labels, no JSON.
-        Transcript:
-        \(transcript.prefix(6000))
-        """
-        let timeout = MemoryHubPreview.localTimeoutSeconds
-        guard let raw = try? await client.generate(
-            model: model, prompt: prompt, timeout: timeout,
-            options: .init(numPredict: 32, temperature: 0.2)
-        ) else { return nil }
-
-        let sanitized = VoiceMemoParser.sanitizeTitle(raw, fallback: "")
-        return sanitized.isEmpty ? nil : sanitized
     }
 }

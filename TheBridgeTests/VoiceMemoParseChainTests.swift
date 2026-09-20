@@ -4,7 +4,7 @@
 // Covers the parse provider-chain abstraction + plan provenance:
 //  • providers(for:) chain ORDER + shape per curator mode
 //  • parse() walks the chain: first available rung that yields a plan wins
-//  • .auto is FRONTIER-FIRST (Cloud → Local → Heuristic) by availability
+//  • .auto is FRONTIER-FIRST (Cloud → Heuristic) by availability
 //  • degraded set IFF an earlier AVAILABLE rung returned nil at runtime
 //  • the heuristic floor is always available and never nil (guaranteed)
 //  • provenance is stamped from the winning rung
@@ -73,23 +73,13 @@ private final class InvocationFlag: @unchecked Sendable {
 // MARK: - Mode helper
 
 /// Set the curator mode in UserDefaults for the duration of `body`, then restore.
-/// Also force the local-Ollama routing flag OFF (and restore it) so the REAL
-/// production chain's `LocalParseProvider.isAvailable()` is deterministic
-/// regardless of suite order (an earlier suite that flipped the flag on must not
-/// leak into these tests). Stub-injected tests bypass `providers(for:)` so this
-/// is a no-op for them; real-chain tests rely on it.
 private func withCuratorMode(_ mode: VoiceMemoCuratorMode, _ body: () async -> Void) async {
     let modeKey = BridgeDefaults.voiceMemoCuratorMode
-    let ollamaKey = BridgeDefaults.voiceMemoOllamaRouting
     let priorMode = UserDefaults.standard.string(forKey: modeKey)
-    let priorOllama = UserDefaults.standard.object(forKey: ollamaKey)
     UserDefaults.standard.set(mode.rawValue, forKey: modeKey)
-    UserDefaults.standard.set(false, forKey: ollamaKey)
     defer {
         if let priorMode { UserDefaults.standard.set(priorMode, forKey: modeKey) }
         else { UserDefaults.standard.removeObject(forKey: modeKey) }
-        if let priorOllama { UserDefaults.standard.set(priorOllama, forKey: ollamaKey) }
-        else { UserDefaults.standard.removeObject(forKey: ollamaKey) }
     }
     await body()
 }
@@ -103,21 +93,16 @@ func runVoiceMemoParseChainTests() async {
 
     // ── providers(for:) chain order + shape per mode ──────────────────────────
 
-    await test("providers(.auto) is frontier-first: cloud → local → heuristic") {
+    await test("providers(.auto) is frontier-first: cloud → heuristic") {
         let chain = VoiceMemoParseRouter.providers(for: .auto)
-        try expect(chain.map { $0.provenance } == [.cloud, .local, .heuristic],
-                   "auto chain must be [cloud, local, heuristic], got \(chain.map { $0.provenance })")
+        try expect(chain.map { $0.provenance } == [.cloud, .heuristic],
+                   "auto chain must be [cloud, heuristic], got \(chain.map { $0.provenance })")
     }
 
     await test("providers(.cloud) is [cloud, heuristic]") {
         let chain = VoiceMemoParseRouter.providers(for: .cloud)
         try expect(chain.map { $0.provenance } == [.cloud, .heuristic],
                    "cloud chain must be [cloud, heuristic], got \(chain.map { $0.provenance })")
-    }
-
-    await test("providers(.local) is [local, heuristic]") {
-        let chain = VoiceMemoParseRouter.providers(for: .local)
-        try expect(chain.map { $0.provenance } == [.local, .heuristic])
     }
 
     await test("providers(.heuristics) is [heuristic] only") {
@@ -143,7 +128,6 @@ func runVoiceMemoParseChainTests() async {
     await test(".auto picks Cloud when cloud is available + yields") {
         VoiceMemoParseRouter.providerOverride = { _ in [
             StubParseProvider(provenance: .cloud, available: true, yieldsPlan: true),
-            StubParseProvider(provenance: .local, available: true, yieldsPlan: true),
             StubParseProvider(provenance: .heuristic, available: true, yieldsPlan: true),
         ] }
         await withCuratorMode(.auto) {
@@ -157,21 +141,20 @@ func runVoiceMemoParseChainTests() async {
         try expect(chainResult?.2 == "stub-cloud", "cloud rung's plan must be returned")
     }
 
-    await test(".auto degrades to Local when cloud available but returns nil") {
+    await test(".auto degrades to Heuristic when cloud available but returns nil") {
         let cloudHit = InvocationFlag()
-        let localHit = InvocationFlag()
+        let heuristicHit = InvocationFlag()
         VoiceMemoParseRouter.providerOverride = { _ in [
             StubParseProvider(provenance: .cloud, available: true, yieldsPlan: false, onParse: { cloudHit.mark() }),
-            StubParseProvider(provenance: .local, available: true, yieldsPlan: true, onParse: { localHit.mark() }),
-            StubParseProvider(provenance: .heuristic, available: true, yieldsPlan: true),
+            StubParseProvider(provenance: .heuristic, available: true, yieldsPlan: true, onParse: { heuristicHit.mark() }),
         ] }
         await withCuratorMode(.auto) {
             let plan = await VoiceMemoParseRouter.parse(transcript: "hello", fallbackTitle: "F")
             chainResult = (plan.provenance, plan.degraded, plan.generatedTitle)
         }
         try expect(cloudHit.wasHit, "cloud parse() should have been attempted")
-        try expect(localHit.wasHit, "local parse() should have been attempted after cloud nil")
-        try expect(chainResult?.0 == .local, "expected local winner")
+        try expect(heuristicHit.wasHit, "heuristic parse() should have been attempted after cloud nil")
+        try expect(chainResult?.0 == .heuristic, "expected heuristic winner")
         try expect(chainResult?.1 == true, "an earlier AVAILABLE rung returned nil ⇒ degraded")
     }
 
@@ -179,7 +162,6 @@ func runVoiceMemoParseChainTests() async {
         let cloudHit = InvocationFlag()
         VoiceMemoParseRouter.providerOverride = { _ in [
             StubParseProvider(provenance: .cloud, available: false, yieldsPlan: true, onParse: { cloudHit.mark() }),
-            StubParseProvider(provenance: .local, available: true, yieldsPlan: true),
             StubParseProvider(provenance: .heuristic, available: true, yieldsPlan: true),
         ] }
         await withCuratorMode(.auto) {
@@ -187,14 +169,13 @@ func runVoiceMemoParseChainTests() async {
             chainResult = (plan.provenance, plan.degraded, plan.generatedTitle)
         }
         try expect(!cloudHit.wasHit, "an UNavailable rung must NOT have parse() called")
-        try expect(chainResult?.0 == .local, "expected local winner (cloud unavailable)")
+        try expect(chainResult?.0 == .heuristic, "expected heuristic winner (cloud unavailable)")
         try expect(chainResult?.1 == false, "skipping an UNavailable rung is NOT a degrade")
     }
 
-    await test(".auto falls to Heuristic floor when cloud+local both fail (degraded)") {
+    await test(".auto falls to Heuristic floor when cloud fails (degraded)") {
         VoiceMemoParseRouter.providerOverride = { _ in [
             StubParseProvider(provenance: .cloud, available: true, yieldsPlan: false),
-            StubParseProvider(provenance: .local, available: true, yieldsPlan: false),
             StubParseProvider(provenance: .heuristic, available: true, yieldsPlan: true),
         ] }
         await withCuratorMode(.auto) {
@@ -206,17 +187,14 @@ func runVoiceMemoParseChainTests() async {
     }
 
     await test("winner short-circuits: later rungs' parse() not called") {
-        let localHit = InvocationFlag()
         let heuristicHit = InvocationFlag()
         VoiceMemoParseRouter.providerOverride = { _ in [
             StubParseProvider(provenance: .cloud, available: true, yieldsPlan: true),
-            StubParseProvider(provenance: .local, available: true, yieldsPlan: true, onParse: { localHit.mark() }),
             StubParseProvider(provenance: .heuristic, available: true, yieldsPlan: true, onParse: { heuristicHit.mark() }),
         ] }
         await withCuratorMode(.auto) {
             _ = await VoiceMemoParseRouter.parse(transcript: "hello", fallbackTitle: "F")
         }
-        try expect(!localHit.wasHit, "local parse() must not run once cloud wins")
         try expect(!heuristicHit.wasHit, "heuristic parse() must not run once cloud wins")
     }
 
@@ -245,10 +223,8 @@ func runVoiceMemoParseChainTests() async {
 
     await test(".auto with the REAL cloud (unavailable in hermetic env) falls through offline") {
         // The real CloudParseProvider is unavailable here (no providers.json /
-        // Keychain key ⇒ isAvailable==false). With no Ollama model configured in
-        // the hermetic test env, Local is also unavailable, so production .auto
-        // must land on the heuristic floor with NO degrade (unavailable rungs
-        // don't degrade).
+        // Keychain key ⇒ isAvailable==false). Production .auto is [cloud,
+        // heuristic], so it lands on the heuristic floor with NO degrade.
         VoiceMemoParseRouter.providerOverride = nil
         await withCuratorMode(.auto) {
             let plan = await VoiceMemoParseRouter.parse(transcript: "remind me to ship", fallbackTitle: "F")

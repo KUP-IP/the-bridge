@@ -124,13 +124,6 @@ public enum BridgeSettingsHeaderPreset {
                 systemImage: BridgeSectionIcon.systemImage(for: .skills),
                 tint: NotionPalette.yellow
             )
-        case .jobs:
-            return Spec(
-                title: "Jobs",
-                subtitle: "Scheduled background automations triggered by launchd.",
-                systemImage: BridgeSectionIcon.systemImage(for: .jobs),
-                tint: NotionPalette.purple
-            )
         case .tools:
             return Spec(
                 title: "Tools",

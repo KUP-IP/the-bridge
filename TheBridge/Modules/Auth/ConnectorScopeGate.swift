@@ -87,24 +87,15 @@ public struct ConnectorScopeGate: ScopeGating {
         "snippets_delete", "snippets_import",
     ]
 
-    /// Execution / process / job-runner surface: requires `runners.exec`.
-    /// `bg_run`/`bg_poll`/`bg_kill` are BgProcessModule's real tool names
-    /// (this bucket previously listed stale `bg_process_*` names that never
-    /// matched any registered tool — a live gap since strictScopes defaulted
-    /// to false and this gate went unconsulted until now). `jobs_pause_all`/
-    /// `jobs_resume_all` are explicitly deprecated in JobsModule — replaced
-    /// by `job_pause`/`job_resume` with `all: true`, already listed below —
-    /// so they're dropped rather than carried forward as dead names.
+    /// Execution / process surface: requires `runners.exec`.
+    /// `bg_run`/`bg_poll`/`bg_kill` are BgProcessModule's real tool names.
+    /// Product Jobs scheduler tools were removed (#284).
     /// `devserver_*` are omitted: documented in
     /// docs/operator/mcp-builder-audit-report.md but not currently
     /// registered anywhere in the codebase; add them here if/when they ship.
     private static let runnerExecTools: Set<String> = [
         "shell_exec", "run_script", "worktree_command_run",
         "bg_run", "bg_poll", "bg_kill",
-        "job_create", "job_run", "job_update", "job_delete",
-        "job_pause", "job_resume", "job_duplicate", "job_import",
-        "job_export", "job_get", "job_list", "job_history",
-        "job_templates",
     ]
 
     /// Broker/session control-plane tools that remote connectors must be able

@@ -220,7 +220,7 @@ func runRemoteOAuthHTTPTests() async {
         try expect(MCPHTTPRoute.classify(method: "GET", path: "/health", endpoint: "/mcp") == .health)
         try expect(MCPHTTPRoute.classify(method: "GET", path: "/sse", endpoint: "/mcp") == .legacySSE)
         try expect(MCPHTTPRoute.classify(method: "POST", path: "/messages", endpoint: "/mcp") == .legacyMessages)
-        try expect(MCPHTTPRoute.classify(method: "POST", path: "/jobs/abc/run", endpoint: "/mcp") == .jobsRun("abc"))
+        try expect(MCPHTTPRoute.classify(method: "POST", path: "/jobs/abc/run", endpoint: "/mcp") == .notFound)
         try expect(MCPHTTPRoute.classify(method: "POST", path: "/mcp", endpoint: "/mcp") == .mcpEndpoint)
         try expect(MCPHTTPRoute.classify(method: "GET", path: "/mcp", endpoint: "/mcp") == .mcpEndpoint)
         // None of the above is the PRM route.

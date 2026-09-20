@@ -883,8 +883,8 @@ public struct MemoryMemosTab: View {
                         .font(BridgeTokens.Typeface.sub)
                         .foregroundStyle(BridgeTokens.fg3)
                     HStack(spacing: 10) {
-                        BridgeButton("Process locally", systemImage: "cpu", variant: .primary) {
-                            Task { await runUnderstand(for: memo, forceRefresh: false, provider: "local") }
+                        BridgeButton("Process with rules", systemImage: "cpu", variant: .primary) {
+                            Task { await runUnderstand(for: memo, forceRefresh: false, provider: "heuristics") }
                         }
                         .accessibilityIdentifier(BridgeAXID.Memory.Process.processLocal)
                         if let cloudProvider, MemoryHubProviderConfigStore.canRunCloud(cloudProvider) {
@@ -1144,7 +1144,7 @@ public struct MemoryMemosTab: View {
         titleDraft = MemoryHubMemoTitler.listDisplay(recording: memo, cached: titleCache[memo.id]).text
         titleCache[memo.id] = MemoryHubMemoTitleStore.title(for: memo.id)
 
-        guard let router = await JobsManager.shared.router_() else {
+        guard let router = await LiveToolRouter.shared.current() else {
             statusMessage = "MCP server not ready."
             return
         }
@@ -1182,11 +1182,11 @@ public struct MemoryMemosTab: View {
         }
 
         isLoading = true
-        loadingLabel = provider == "cloud" ? "Understanding (cloud)…" : (provider == "local" ? "Understanding (local)…" : "Understanding…")
+        loadingLabel = provider == "cloud" ? "Understanding (cloud)…" : (provider == "heuristics" ? "Understanding (rules)…" : "Understanding…")
         defer { isLoading = false }
         reloadActivity()
 
-        guard let router = await JobsManager.shared.router_() else {
+        guard let router = await LiveToolRouter.shared.current() else {
             statusMessage = "MCP server not ready."
             return
         }
@@ -1362,7 +1362,7 @@ public struct MemoryMemosTab: View {
     @MainActor
     private func loadPicker(for row: CockpitIntentRow) async {
         guard let entity = row.entityKey else { return }
-        guard let router = await JobsManager.shared.router_() else {
+        guard let router = await LiveToolRouter.shared.current() else {
             pickerByIntentId[row.intentId] = MemoryProcessCockpit.picker(entity: entity, liveRows: nil, sourceError: "MCP server not ready")
             return
         }
@@ -1388,7 +1388,7 @@ public struct MemoryMemosTab: View {
     @MainActor
     private func runDryRun() async {
         guard let memoId = selectedId else { return }
-        guard let router = await JobsManager.shared.router_() else {
+        guard let router = await LiveToolRouter.shared.current() else {
             statusMessage = "MCP server not ready."
             return
         }
@@ -1407,7 +1407,7 @@ public struct MemoryMemosTab: View {
     @MainActor
     private func runBatchConfirm() async {
         guard let memoId = selectedId else { return }
-        guard let router = await JobsManager.shared.router_() else {
+        guard let router = await LiveToolRouter.shared.current() else {
             statusMessage = "MCP server not ready."
             return
         }
@@ -1510,7 +1510,7 @@ public struct MemoryMemosTab: View {
             defer {
                 Task { @MainActor in resolvingReviewIds.remove(entry.id) }
             }
-            guard let router = await JobsManager.shared.router_() else {
+            guard let router = await LiveToolRouter.shared.current() else {
                 await MainActor.run { actionMessage = "MCP server not ready — try again shortly." }
                 return
             }

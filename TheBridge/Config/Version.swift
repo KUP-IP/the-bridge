@@ -368,7 +368,7 @@ public enum BridgeConstants {
     /// v2.2 · 3.1 (PKT-743): 147 + 7 artifact/diff helper tools = 154.
     /// v2.3 · 0.1 (PKT-804): − cursor (5 cursor_agent_* tools) = 149.
     /// v2.3 · WS-D (PKT-2135a9e9): + snippets (9 snippets_* tools) = 158.
-    /// Note: jobs_pause_all / jobs_resume_all dropped; current JobsModule contributes 13 job_* tools.
+    /// Note: jobs_pause_all / jobs_resume_all dropped; JobsModule later contributed 13 job_* tools (removed #284).
     /// run-app re-platform: + notion_datasource_delete (NotionModule 23→24) = 159.
     /// Sprint A (mcp-builder Phase 2): 159 + 13 net = 172. Delta:
     ///   − 4 deprecated removals (ax_focused_app deprecated-shim, ax_find_element, ax_element_info, notion_block_read)
@@ -511,7 +511,9 @@ public enum BridgeConstants {
     ///   (skill_materialize_file; existing skills family). Copies a
     ///   Notion-hosted Files & media attachment into skill-files/<uuid>/
     ///   for file_read. Notion is not binary SSOT. 239 + 1 = 240.
-    public static let staticFeatureModuleToolCount = 240
+    /// #284 Jobs gut + local-model connection removal (2026-09-20): −13 job_*
+    ///   scheduler tools − 2 ollama_* tools. 240 − 15 = 225.
+    public static let staticFeatureModuleToolCount = 225
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.
@@ -541,5 +543,6 @@ public enum BridgeConstants {
     /// Local Ollama (2026-06-24): + ollama family = 30.
     /// PKT-1061 (2026-06-29): + commands family = 31.
     /// Bridge v4 stabilization Wave 1 (2026-07-17): + calls family = 32.
-    public static let staticFeatureModuleFamilyCount = 32
+    /// #284 (2026-09-20): − scheduler family − ollama family. 32 − 2 = 30.
+    public static let staticFeatureModuleFamilyCount = 30
 }

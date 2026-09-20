@@ -23,9 +23,6 @@ PLUGINS_DIR     = $(APP_BUNDLE)/Contents/PlugIns
 EXT_NAME        = NotificationContentExtension
 EXT_SRC_DIR     = NotificationContentExtension
 EXT_APPEX       = $(PLUGINS_DIR)/$(EXT_NAME).appex
-# v1.9.2: Signed launchd callback helper embedded at Contents/MacOS/NBJobRunner.
-JOB_RUNNER_NAME = NBJobRunner
-JOB_RUNNER_PATH = $(APP_BUNDLE)/Contents/MacOS/$(JOB_RUNNER_NAME)
 VERSION        := $(shell /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Info.plist)
 DMG_NAME        = the-bridge-v$(VERSION).dmg
 DMG_PATH        = $(BUILD_DIR)/$(DMG_NAME)
@@ -72,7 +69,7 @@ SPARKLE_ARTIFACT_DIR = $(BUILD_DIR)/artifacts/sparkle/Sparkle
 SPARKLE_FRAMEWORK = $(SPARKLE_ARTIFACT_DIR)/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework
 SPARKLE_TOOLS_DIR = $(SPARKLE_ARTIFACT_DIR)/bin
 
-.PHONY: debug build test test-floor test-clean check-counter-collisions app extension jobrunner appcast dmg dmg-background sign notarize verify verify-sparkle-feed check-update-flow check-appcast release clean install install-copy install-copy-staged install-agent-safe clean-tcc patch-deps check-stale-build check-clean-tree check-staged-candidate inject-license-key inject-remote-access
+.PHONY: debug build test test-floor test-clean check-counter-collisions app extension appcast dmg dmg-background sign notarize verify verify-sparkle-feed check-update-flow check-appcast release clean install install-copy install-copy-staged install-agent-safe clean-tcc patch-deps check-stale-build check-clean-tree check-staged-candidate inject-license-key inject-remote-access
 
 # ── Debug Build ────────────────────────────────────────────────
 debug:
@@ -157,7 +154,7 @@ check-counter-collisions:
 	./scripts/check-counter-collisions.sh
 
 # ── App Bundle (.app) ──────────────────────────────────────────
-app: build extension jobrunner
+app: build extension
 	@echo "📦 Packaging .app bundle..."
 	@rm -rf $(APP_BUNDLE)
 	@mkdir -p $(APP_BUNDLE)/Contents/MacOS
@@ -239,11 +236,6 @@ app: build extension jobrunner
 	@cp $(RELEASE_DIR)/$(EXT_NAME) $(EXT_APPEX)/Contents/MacOS/$(EXT_NAME)
 	@cp $(EXT_SRC_DIR)/Info.plist $(EXT_APPEX)/Contents/Info.plist
 	@echo "  ↳ Embedded $(EXT_NAME).appex"
-	@# v1.9.2: Embed NBJobRunner helper into Contents/MacOS/
-	@echo "🔗 Embedding $(JOB_RUNNER_NAME) into Contents/MacOS/..."
-	@cp $(RELEASE_DIR)/$(JOB_RUNNER_NAME) "$(JOB_RUNNER_PATH)"
-	@chmod +x "$(JOB_RUNNER_PATH)"
-	@echo "  ↳ Embedded $(JOB_RUNNER_NAME)"
 	@echo "✅ App bundle: $(APP_BUNDLE)"
 
 # ── Notification Content Extension (.appex) ───────────────
@@ -253,14 +245,6 @@ extension:
 	@echo "🔨 Building $(EXT_NAME) binary..."
 	swift build -c release --product $(EXT_NAME)
 	@echo "✅ Extension binary: $(RELEASE_DIR)/$(EXT_NAME)"
-
-# ── NBJobRunner helper binary (v1.9.2) ──
-# Builds the signed launchd callback helper. Replaces /usr/bin/curl in job
-# plists so macOS BTM attributes background items to The Bridge.
-jobrunner:
-	@echo "🔨 Building $(JOB_RUNNER_NAME) binary..."
-	swift build -c release --product $(JOB_RUNNER_NAME)
-	@echo "✅ JobRunner binary: $(RELEASE_DIR)/$(JOB_RUNNER_NAME)"
 
 # ── Stale-build guard ──────────────────────────────────────────────────
 # Runs BEFORE build so it reads the path from the *previous* build.
@@ -338,7 +322,6 @@ define PREINSTALL_SAFETY
 @echo "⏏️  Quitting any running $(APP_NAME) (prevents install/Sparkle race)..."
 @osascript -e 'tell application "The Bridge" to quit' >/dev/null 2>&1 || true
 @pkill -f "The Bridge.app/Contents/MacOS/TheBridge" 2>/dev/null || true
-@pkill -f "NBJobRunner" 2>/dev/null || true
 @i=0; while pgrep -f "The Bridge.app/Contents/MacOS/TheBridge" >/dev/null 2>&1 && [ $$i -lt 20 ]; do sleep 0.5; i=$$((i+1)); done
 @echo "🧹 Clearing any pending Sparkle staged update (prevents revert-over-install)..."
 @rm -rf "$$HOME/Library/Caches/$(BUNDLE_ID)/org.sparkle-project.Sparkle/Installation/"* "$$HOME/Library/Caches/$(BUNDLE_ID)/org.sparkle-project.Sparkle/PersistentDownloads/"* 2>/dev/null || true

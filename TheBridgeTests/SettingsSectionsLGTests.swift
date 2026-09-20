@@ -40,7 +40,7 @@ func runSettingsSectionsLGTests() async {
     //    sections (the dead "5 callers" set is gone; one preset per case).
     await test("PKT-A: header preset targetSections is all sections") {
         let ids = BridgeSettingsHeaderPreset.targetSections.map(\.rawValue)
-        try expect(ids == ["Standing Orders", "Skills", "Jobs", "Tools",
+        try expect(ids == ["Standing Orders", "Skills", "Tools",
                            "Security", "Connection", "Memory", "Data Sources", "Advanced"],
                    "targetSections drift: \(ids)")
         try expect(BridgeSettingsHeaderPreset.targetSections.count == SettingsSection.allCases.count,
@@ -202,7 +202,6 @@ func runSettingsSectionsLGTests() async {
     await test("PKT-A: BridgeSectionIcon SF Symbols locked for all sections") {
         try expect(BridgeSectionIcon.systemImage(for: .orders) == "command")
         try expect(BridgeSectionIcon.systemImage(for: .skills) == "sparkles")
-        try expect(BridgeSectionIcon.systemImage(for: .jobs) == "clock.badge.checkmark")
         try expect(BridgeSectionIcon.systemImage(for: .tools) == "hammer")
         try expect(BridgeSectionIcon.systemImage(for: .security) == "lock.shield")
         try expect(BridgeSectionIcon.systemImage(for: .connection) == "network")

@@ -780,9 +780,7 @@ await runSettingsAXIdentifierTests()    // PKT-1005: BridgeAXID convention + Set
 await runSettingsShellFoundationTests() // #283: Settings shell tokens + collapsible rail + flat cards
 await runCGEventModuleTests()           // PKT-765 (v2.2 · 3.3.1)
 await runPasteboardHistoryModuleTests() // PKT-765 (v2.2 · 3.3.1)
-await runJobsModuleTests()
-await runSchedulerResilienceTests()  // PKT-381: durable backlog + reconciler + serial drain + first job
-await runVoiceMemoModuleTests()        // Voice Memos curator: registry-centric router + 9am job
+await runVoiceMemoModuleTests()        // Voice Memos curator: registry-centric router
 await runVoiceMemoSettingsToolsTests() // PKT-1120: voice_memo_settings get/set + UI mode clarity
 await runVoiceMemoLiveRegressionTests() // PKT-MEM-105/106 live fixture regression
 await runVoiceMemoParseChainTests()    // Voice Curator FRONTIER-FIRST (Phase 1 W1): parse provider chain + plan provenance/degraded
@@ -797,7 +795,6 @@ await runVoiceMemoContentQualityGateTests() // GH #81: minimum-information quali
 await runVoiceMemoReliabilitySlice2Tests() // Closeout-A Voice Memo SC2/4/5/6/8 + SC1 hermetic: unbound preflight, first-name resolve, degraded preview, reminder title gate, fallback policy default=review
 // PKT-MEM-106 0a + 0b run early in runAllTests() (flake-avoidance) — not duplicated here.
 await runMemorySettingsTests()         // PKT-MEM-102: Memory Settings section + Inbox UI
-await runOllamaModuleTests()           // Local Ollama client + module (Wave 2a)
 await runGhModuleTests()
 await runGitModuleTests()
 await runWorktreeOwnershipTests()
@@ -859,7 +856,7 @@ await runToolArgumentAliasTests()    // PKT-1125: tool-aware hint-only aliases +
 await runToolMetadataAuthoringTests() // PKT v3.0·0.5: P1 — projection + authored-metadata render
 await runArtifactModuleTests()    // PKT-743 (v2.2 · 3.1)
 await runRunnerParsersTests()      // PKT-782 (v2.2 · 3.2b)
-await runCronHumanizerTests()
+await runProductSurfaceGutTests()  // #284: Jobs + local-model connection gone
 
 await runEndToEndTests()
 

@@ -54,11 +54,11 @@ func runPKT879DashboardTests() async {
         try expect(a == "gates", "expected anchor 'gates', got \(a ?? "nil")")
     }
 
-    await test("Dashboard stats row navigates to .tools / .jobs / .skills") {
-        // The three stats targets must all exist in the canonical sidebar.
+    await test("Dashboard stats row navigates to .tools / .skills") {
+        // Calls today retargets to Tools after the #284 Jobs gut.
         let ids = Set(SettingsSection.allCases.map(\.rawValue))
-        try expect(ids.contains("Tools"), "Tools section missing — dashboard stat-row 'tools active' would 404")
-        try expect(ids.contains("Jobs"),  "Jobs section missing — dashboard stat-row 'calls today' would 404")
+        try expect(ids.contains("Tools"), "Tools section missing — dashboard stat-row would 404")
+        try expect(!ids.contains("Jobs"), "#284: Jobs section must be gone")
         try expect(ids.contains("Skills"), "Skills section missing — dashboard stat-row 'skills' would 404")
     }
 

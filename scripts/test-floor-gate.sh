@@ -229,7 +229,16 @@
 #   collapsible icon/labeled rail, weave-on-shell-only, flat content cards.
 #   +8 SettingsShellFoundationTests +3 BridgeTokensAdaptiveTests
 #   +1 SettingsAXIdentifierTests. CI run 35462298228 measured passed=4095.
-FLOOR="${BRIDGE_TEST_FLOOR:-4095}"
+# 2026-09-20: 4095 → 4010 (−85) — #284 Jobs gut + local-model connection
+#   removal (parent #282). DROP: Jobs UI/models/persistence/MCP/NBJobRunner
+#   and Ollama connection tools/UI. Deleted JobsModuleTests (45),
+#   SchedulerResilienceTests (33), CronHumanizerTests (3), OllamaModuleTests
+#   (6), plus job_*/ollama settings/annotation/seeder/scheduler-template
+#   cases; added ProductSurfaceGutTests (+8). Floor lowered with recorded
+#   reason — suite shrinks because the product surfaces were removed, not
+#   because coverage was dropped silently. Linux host cannot compile
+#   macOS 26; CI must re-measure and raise if the green count is higher.
+FLOOR="${BRIDGE_TEST_FLOOR:-4010}"
 
 echo "🧪 test-floor-gate: building debug test executable + running suite (floor=${FLOOR})..."
 swift build -c debug --product TheBridgeTests

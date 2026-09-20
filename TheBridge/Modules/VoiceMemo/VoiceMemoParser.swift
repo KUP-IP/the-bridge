@@ -124,11 +124,8 @@ public enum VoiceMemoParser {
         )
     }
 
-    /// FRONTIER-FIRST shim: delegate the Understand step to `VoiceMemoParseRouter`,
-    /// which walks the mode-ordered provider chain (cloud → local → heuristic for
-    /// `.auto`) and stamps `plan.provenance`. Retained so existing callers
-    /// (`VoiceMemoProcessor.processOne`, `VoiceMemoReviewResolver`) keep compiling;
-    /// the local-Ollama body now lives in `LocalParseProvider` via `ollamaParse`.
+    /// FRONTIER-FIRST shim: delegate the Understand step to `VoiceMemoParseRouter`
+    /// (cloud → heuristic for `.auto`). Name retained so existing callers compile.
     public static func parseWithOptionalOllama(
         transcript: String,
         fallbackTitle: String,
@@ -139,42 +136,6 @@ public enum VoiceMemoParser {
             fallbackTitle: fallbackTitle,
             recordingPath: recordingPath
         )
-    }
-
-    /// The local-Ollama Understand arm, extracted verbatim from the old
-    /// `parseWithOptionalOllama`. Returns nil (NOT the heuristic fallback) on a
-    /// missing model / unhealthy daemon / generation or JSON-parse failure — the
-    /// chain router decides the fallback. The returned plan is stamped `.local`.
-    /// The gate (`voiceMemoOllamaRoutingEffective ∧ shouldUseLocalOllama ∧ model`)
-    /// is checked by `LocalParseProvider.isAvailable()`, but re-asserted here so a
-    /// direct call is still safe.
-    public static func ollamaParse(
-        transcript: String,
-        fallbackTitle: String,
-        recordingPath: String? = nil
-    ) async -> VoiceMemoPlan? {
-        guard BridgeDefaults.voiceMemoOllamaRoutingEffective,
-              VoiceMemoCuratorRouter.shouldUseLocalOllama(),
-              let model = BridgeDefaults.ollamaRoutingModelEffective else {
-            return nil
-        }
-        let client = OllamaClient.fromDefaults()
-        guard (try? await client.health()) == true else {
-            return nil
-        }
-        let prompt = """
-        Classify this voice memo transcript into routing lanes. Reply with ONLY JSON:
-        {"lanes":["reminder"|"memory_keep"|"agent_memory"|"registry_update"|"review"], "title":"...", "confidence":0.0-1.0}
-        Transcript:
-        \(transcript.prefix(4000))
-        """
-        let genOptions = OllamaClient.GenerateOptions(numPredict: 512, temperature: 0.2, think: false)
-        guard let raw = try? await client.generate(model: model, prompt: prompt, options: genOptions),
-              var plan = parseOllamaJSON(raw, transcript: transcript, fallbackTitle: fallbackTitle, recordingPath: recordingPath) else {
-            return nil
-        }
-        plan.provenance = .local
-        return plan
     }
 
     // MARK: - Matchers
@@ -402,60 +363,6 @@ public enum VoiceMemoParser {
             fields["url"] = "file://\(recordingPath)"
         }
         return fields
-    }
-
-    private static func parseOllamaJSON(
-        _ raw: String,
-        transcript: String,
-        fallbackTitle: String,
-        recordingPath: String?
-    ) -> VoiceMemoPlan? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let start = trimmed.firstIndex(of: "{"),
-              let end = trimmed.lastIndex(of: "}"),
-              start < end else { return nil }
-        let jsonSlice = String(trimmed[start...end])
-        guard let data = jsonSlice.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let lanes = obj["lanes"] as? [String] else { return nil }
-
-        let confidence = (obj["confidence"] as? Double) ?? (obj["confidence"] as? Int).map(Double.init) ?? 0.75
-        let summary = firstSentence(in: transcript, maxLen: 280)
-        let actions = extractActionBullets(from: transcript)
-        let generated = sanitizeTitle(obj["title"] as? String, fallback: generatedTitle(from: transcript, fallback: fallbackTitle))
-
-        var intents: [VoiceMemoIntent] = []
-        for lane in lanes {
-            switch lane {
-            case "reminder":
-                intents.append(VoiceMemoIntent(kind: .reminder, confidence: confidence, title: generated, body: summary))
-            case "memory_keep":
-                intents.append(VoiceMemoIntent(
-                    kind: .memoryKeep,
-                    confidence: confidence,
-                    entityKey: "memory",
-                    title: generated,
-                    body: summary,
-                    fields: memoryKeepFields(title: generated, summary: summary, actions: actions, recordingPath: recordingPath)
-                ))
-            case "agent_memory":
-                intents.append(VoiceMemoIntent(kind: .agentMemory, confidence: confidence, title: generated, body: summary, fields: ["scope": "global"]))
-            case "registry_update":
-                intents.append(VoiceMemoIntent(kind: .registryUpdate, confidence: confidence * 0.9, entityKey: "session", title: generated, body: summary))
-            case "review":
-                intents.append(VoiceMemoIntent(kind: .review, confidence: confidence, title: generated, body: summary))
-            default:
-                continue
-            }
-        }
-        guard !intents.isEmpty else { return nil }
-        return VoiceMemoPlan(
-            generatedTitle: generated,
-            skipMemoryKeep: !lanes.contains("memory_keep"),
-            summary: summary,
-            actions: actions,
-            intents: intents
-        )
     }
 
     private static func appendLog(_ summary: String, actions: [String]) -> String {

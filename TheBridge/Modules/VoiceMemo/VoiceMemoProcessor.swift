@@ -163,8 +163,8 @@ public enum VoiceMemoProcessor {
 
         let llmSummary: String
         // GH #73 — bound the Understand stage. parseWithOptionalOllama/summarize are
-        // non-throwing (they already `try?` their own Ollama call, which has its own
-        // OllamaClient timeoutInterval), but that per-request bound is not a bound on
+        // non-throwing (they already `try?` their own provider call, which has its own
+        // per-request timeoutInterval), but that per-request bound is not a bound on
         // the WHOLE async chain — a genuinely wedged local call (the exact GH #73
         // symptom: "Local Ollama reachable" yet the call never returned) must still
         // degrade to the heuristic floor rather than hang voice_memo_process forever.

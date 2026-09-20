@@ -711,7 +711,6 @@ public enum BridgeSectionIcon {
         switch section {
         case .orders:     return "command"
         case .skills:     return "sparkles"
-        case .jobs:       return "clock.badge.checkmark"
         case .tools:      return "hammer"
         case .security:   return "lock.shield"
         case .connection: return "network"

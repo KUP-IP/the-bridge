@@ -45,9 +45,9 @@ func runModuleGroupTests() async {
         try expect(ModuleGroupDerivation.resolve(toolName: "bg_process_kill") == .bgProcess)
     }
 
-    await test("prefix derivation: job_* AND jobs_* both fold into .jobs") {
-        try expect(ModuleGroupDerivation.resolve(toolName: "job_create") == .jobs)
-        try expect(ModuleGroupDerivation.resolve(toolName: "jobs_pause_all") == .jobs)
+    await test("prefix derivation: retired job_* prefix folds to .system") {
+        try expect(ModuleGroupDerivation.resolve(toolName: "job_create") == .system)
+        try expect(ModuleGroupDerivation.resolve(toolName: "jobs_pause_all") == .system)
     }
 
     await test("prefix derivation: skill_*, skills_* both → .skills") {

@@ -602,7 +602,7 @@ enum ToolFamilyCategory: String, CaseIterable, Hashable {
             return .webData
         case .git, .gh, .lsp, .devserver:
             return .localDev
-        case .skills, .jobs, .memory, .snippets:
+        case .skills, .memory, .snippets:
             return .bridge
         }
     }

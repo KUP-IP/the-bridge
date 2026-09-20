@@ -1,5 +1,6 @@
 // VoiceMemoSettingsToolsTests.swift — PKT-1120
 // Hermetic coverage for the MCP settings pair and mode-aware UI copy.
+// #284: local-model routing keys are gone; snapshot is four values.
 
 import Foundation
 import MCP
@@ -49,9 +50,10 @@ func runVoiceMemoSettingsToolsTests() async {
             throw TestError.assertion("settings_set schema missing")
         }
         try expect(Set(properties.keys) == Set([
-            "curatorMode", "ollamaRouting", "appleTranscript", "speechAnalyzerTranscription",
+            "curatorMode", "appleTranscript", "speechAnalyzerTranscription",
             "parakeetTranscription",
-        ]), "settings_set must expose five optional keys")
+        ]), "settings_set must expose four optional keys (no local-model routing)")
+        try expect(!properties.keys.contains("ollamaRouting"), "#284: ollamaRouting must not be a settings key")
         let getAnnotation = ToolAnnotationCatalog.annotations(for: get.name)
         let setAnnotation = ToolAnnotationCatalog.annotations(for: set.name)
         try expect(getAnnotation?.readOnlyHint == true && getAnnotation?.idempotentHint == true,
@@ -60,7 +62,7 @@ func runVoiceMemoSettingsToolsTests() async {
                    "settings_set annotation")
     }
 
-    await test("voice_memo_settings_get returns all five effective defaults") {
+    await test("voice_memo_settings_get returns all four effective defaults") {
         fixture.reset()
         let result = try await router.dispatch(
             toolName: "voice_memo_settings_get",
@@ -69,26 +71,24 @@ func runVoiceMemoSettingsToolsTests() async {
             throw TestError.assertion("expected settings snapshot")
         }
         try expect(snapshot["curatorMode"] == .string("auto"), "default curatorMode")
-        try expect(snapshot["ollamaRouting"] == .bool(false), "default ollamaRouting")
         try expect(snapshot["appleTranscript"] == .bool(true), "default appleTranscript")
         try expect(snapshot["speechAnalyzerTranscription"] == .bool(false), "default speechAnalyzer off")
         try expect(snapshot["parakeetTranscription"] == .bool(true), "default parakeetTranscription")
-        try expect(snapshot.count == 5, "snapshot must contain exactly five values")
+        try expect(snapshot["ollamaRouting"] == nil, "#284: snapshot must omit ollamaRouting")
+        try expect(snapshot.count == 4, "snapshot must contain exactly four values")
     }
 
     await test("voice_memo_settings_set partially updates mode and preserves ladder toggles") {
         fixture.reset()
-        fixture.defaults.set(true, forKey: BridgeDefaults.voiceMemoOllamaRouting)
         fixture.defaults.set(false, forKey: BridgeDefaults.voiceMemoAppleTranscript)
         fixture.defaults.set(true, forKey: BridgeDefaults.voiceMemoParakeetTranscription)
         let result = try await router.dispatch(
             toolName: "voice_memo_settings_set",
-            arguments: .object(["curatorMode": .string("local")]))
+            arguments: .object(["curatorMode": .string("heuristics")]))
         guard case .object(let snapshot) = result else {
             throw TestError.assertion("expected post-write snapshot")
         }
-        try expect(snapshot["curatorMode"] == .string("local"), "mode update")
-        try expect(snapshot["ollamaRouting"] == .bool(true), "ollama unchanged")
+        try expect(snapshot["curatorMode"] == .string("heuristics"), "mode update")
         try expect(snapshot["appleTranscript"] == .bool(false), "apple unchanged")
         try expect(snapshot["parakeetTranscription"] == .bool(true), "parakeet unchanged")
     }
@@ -99,7 +99,7 @@ func runVoiceMemoSettingsToolsTests() async {
             toolName: "voice_memo_settings_set",
             arguments: .object([
                 "curatorMode": .string("bogus"),
-                "ollamaRouting": .bool(true),
+                "appleTranscript": .bool(false),
             ]))
         guard case .object(let response) = result,
               case .string(let error)? = response["error"],
@@ -111,9 +111,11 @@ func runVoiceMemoSettingsToolsTests() async {
         for mode in VoiceMemoCuratorMode.allCases {
             try expect(error.contains(mode.rawValue), "error must list \(mode.rawValue)")
         }
+        try expect(!VoiceMemoCuratorMode.allCases.map(\.rawValue).contains("local"),
+                   "#284: local is not a valid curator mode")
         try expect(fixture.defaults.object(forKey: BridgeDefaults.voiceMemoCuratorMode) == nil,
                    "invalid mode must not write curatorMode")
-        try expect(fixture.defaults.object(forKey: BridgeDefaults.voiceMemoOllamaRouting) == nil,
+        try expect(fixture.defaults.object(forKey: BridgeDefaults.voiceMemoAppleTranscript) == nil,
                    "validation must precede all writes")
     }
 
@@ -121,7 +123,7 @@ func runVoiceMemoSettingsToolsTests() async {
         fixture.reset()
         let setResult = try await router.dispatch(
             toolName: "voice_memo_settings_set",
-            arguments: .object(["ollamaRouting": .bool(true)]))
+            arguments: .object(["appleTranscript": .bool(false)]))
         let getResult = try await router.dispatch(
             toolName: "voice_memo_settings_get",
             arguments: .object([:]))
@@ -129,27 +131,10 @@ func runVoiceMemoSettingsToolsTests() async {
               case .object(let getSnapshot) = getResult else {
             throw TestError.assertion("expected settings snapshots")
         }
-        try expect(fixture.defaults.bool(forKey: BridgeDefaults.voiceMemoOllamaRouting), "toggle persisted")
+        try expect(fixture.defaults.object(forKey: BridgeDefaults.voiceMemoAppleTranscript) as? Bool == false,
+                   "toggle persisted")
         try expect(setSnapshot == getSnapshot, "set returns the post-write get snapshot")
-        try expect(getSnapshot["ollamaRouting"] == .bool(true), "subsequent get reflects write")
-    }
-
-    await test("Memory Settings Ollama annotation is correct in all five modes") {
-        for mode in VoiceMemoCuratorMode.allCases {
-            let annotation = MemorySettingsTab.ollamaRoutingAnnotation(mode)
-            if mode == .auto {
-                try expect(annotation == nil, "Auto is the only mode that reads the toggle")
-            } else {
-                try expect(annotation?.contains("Auto mode") == true,
-                           "\(mode.rawValue) must explain toggle is inert")
-                if mode == .local {
-                    try expect(annotation?.contains("forces this on") == true, "Local forces on")
-                } else {
-                    try expect(annotation?.contains("forces Ollama routing off") == true,
-                               "\(mode.rawValue) forces off")
-                }
-            }
-        }
+        try expect(getSnapshot["appleTranscript"] == .bool(false), "subsequent get reflects write")
     }
 
     await test("Memory Settings Auto and Cloud help point to Cloud enhancement") {

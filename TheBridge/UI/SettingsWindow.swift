@@ -139,7 +139,7 @@ public final class SettingsWindowController {
 /// directly to a section.
 ///
 /// Settings Redesign PKT-A (2026-06-10): collapsed 10 → 7 sections in
-/// conceptual-flow order (Orders → Skills → Jobs → Tools → Security →
+/// conceptual-flow order (Orders → Skills → Tools → Security →
 /// Connection → Advanced). The merges fold:
 ///   • Commands           → Orders   (sub-area, anchor `commands`)
 ///   • Credentials        → Security (Vault tab,  anchor `vault`)
@@ -156,7 +156,6 @@ public final class SettingsWindowController {
 public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
     case orders     = "Standing Orders"   // display "Commands"; stable legacy MCP id
     case skills     = "Skills"
-    case jobs       = "Jobs"
     case tools      = "Tools"
     case security   = "Security"          // Credentials + Permissions merged
     case connection = "Connection"        // Connections + Remote Access merged
@@ -173,7 +172,6 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .orders:     return "Commands"
         case .skills:     return "Skills"
-        case .jobs:       return "Jobs"
         case .tools:      return "Tools"
         case .security:   return "Security"
         case .connection: return "Connection"
@@ -187,7 +185,6 @@ public enum SettingsSection: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .orders:     return "command"
         case .skills:     return "sparkles"
-        case .jobs:       return "clock.badge.checkmark"
         case .tools:      return "hammer"
         case .security:   return "lock.shield"
         case .connection: return "network"
@@ -256,8 +253,6 @@ public struct SettingsView: View {
     @State var showSSEPortRestartPrompt = false
     @State var ssePortRevertOnCancel: Int?
     @State var factoryResetMessage: String?
-    @State var showResetBackgroundItemsConfirmation = false
-    @State var resetBackgroundItemsMessage: String?
     @State var showTCCResetDialog = false
 
     public init(
@@ -301,7 +296,6 @@ public struct SettingsView: View {
             switch nav.section {
             case .orders: commandsSection
             case .skills: SkillsSection()
-            case .jobs: jobsSection
             case .tools: toolsSection
             case .security: securitySection
             case .connection: connectionSection

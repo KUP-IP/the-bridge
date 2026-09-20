@@ -28,24 +28,21 @@ public enum VoiceMemoParseRouter {
 
     /// The ordered Understand chain for a curator mode (FRONTIER-FIRST):
     ///   .cloud      → [Cloud, Heuristic]
-    ///   .local      → [Local, Heuristic]
     ///   .heuristics → [Heuristic]
     ///   .agent      → [Heuristic]   (the connected agent parses out-of-process;
     ///                                the in-process preview uses the floor)
-    ///   .auto       → [Cloud, Local, Heuristic]   (frontier-first)
+    ///   .auto       → [Cloud, Heuristic]   (frontier-first; local-model connection removed)
     /// Heuristic is ALWAYS last so every chain has a guaranteed non-nil floor.
     public static func providers(for mode: VoiceMemoCuratorMode) -> [VoiceMemoParseProvider] {
         switch mode {
         case .cloud:
             return [CloudParseProvider(), HeuristicParseProvider()]
-        case .local:
-            return [LocalParseProvider(), HeuristicParseProvider()]
         case .heuristics:
             return [HeuristicParseProvider()]
         case .agent:
             return [HeuristicParseProvider()]
         case .auto:
-            return [CloudParseProvider(), LocalParseProvider(), HeuristicParseProvider()]
+            return [CloudParseProvider(), HeuristicParseProvider()]
         }
     }
 

@@ -53,7 +53,6 @@ public enum ModuleGroupID: String, CaseIterable, Sendable, Hashable {
     case git
     case gh
     case snippets
-    case jobs
     case skills
     case lsp
     case bgProcess
@@ -86,7 +85,6 @@ public enum ModuleGroupID: String, CaseIterable, Sendable, Hashable {
         case .git:           return "git"
         case .gh:            return "gh"
         case .snippets:      return "snippets"
-        case .jobs:          return "jobs"
         case .skills:        return "skills"
         case .lsp:           return "lsp"
         case .bgProcess:     return "bg_process"
@@ -121,7 +119,6 @@ public enum ModuleGroupID: String, CaseIterable, Sendable, Hashable {
         case .git:           return "local git plumbing — log, diff, worktree"
         case .gh:            return "GitHub CLI wrappers — PRs, issues, runs"
         case .snippets:      return "saved snippet library"
-        case .jobs:          return "scheduled job CRUD + run"
         case .skills:        return "skill index — fetch, create, sync"
         case .lsp:           return "language server — hover, refs, rename"
         case .bgProcess:     return "background process supervision"
@@ -156,7 +153,6 @@ public enum ModuleGroupID: String, CaseIterable, Sendable, Hashable {
         case .git:           return "arrow.triangle.branch"
         case .gh:            return "chevron.left.forwardslash.chevron.right"
         case .snippets:      return "scroll"
-        case .jobs:          return "clock.badge.checkmark"
         case .skills:        return "sparkles"
         case .lsp:           return "text.alignleft"
         case .bgProcess:     return "gearshape.2"
@@ -342,8 +338,6 @@ public enum ModuleGroupDerivation {
         "git":         .git,
         "gh":          .gh,
         "snippets":    .snippets,
-        "job":         .jobs,
-        "jobs":        .jobs,
         "skill":       .skills,
         "skills":      .skills,
         "lsp":         .lsp,

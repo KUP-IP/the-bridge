@@ -9,7 +9,7 @@
 //
 // PURE BY DESIGN — every type here is value-only (no AppKit, no SwiftUI, no
 // live store I/O). The aggregator takes lightweight `SearchEntity`
-// descriptors (the view-model adapts the live SkillsManager / JobStore /
+// descriptors (the view-model adapts the live SkillsManager /
 // StatusBarController into these) and a query string, and returns the
 // ranked + grouped `[BridgeSearchResult]`. That keeps fuzzy matching,
 // scoring, ranking, and grouping fully unit-testable headlessly (the W3 GUI
@@ -24,11 +24,10 @@ import Foundation
 
 /// The entity kind a search result represents. Drives the row's TYPE TAG
 /// label and its COLOR indicator (R2). The four kinds the v4 launcher
-/// searches — no Connections/Credentials this packet (out of scope).
+/// searches — Commands, Skills, Tools. Product Jobs were removed (#284).
 public enum BridgeSearchKind: String, Sendable, Equatable, CaseIterable, Codable {
     case command
     case skill
-    case job
     case tool
 
     /// Short uppercase tag rendered on the row (`.cb-type`).
@@ -36,7 +35,6 @@ public enum BridgeSearchKind: String, Sendable, Equatable, CaseIterable, Codable
         switch self {
         case .command: return "CMD"
         case .skill:   return "SKILL"
-        case .job:     return "JOB"
         case .tool:    return "TOOL"
         }
     }
@@ -49,7 +47,6 @@ public enum BridgeSearchKind: String, Sendable, Equatable, CaseIterable, Codable
         switch self {
         case .command: return "blue"
         case .skill:   return "purple"
-        case .job:     return "green"
         case .tool:    return "orange"
         }
     }
@@ -60,8 +57,7 @@ public enum BridgeSearchKind: String, Sendable, Equatable, CaseIterable, Codable
         switch self {
         case .command: return 0
         case .skill:   return 1
-        case .job:     return 2
-        case .tool:    return 3
+        case .tool:    return 2
         }
     }
 
@@ -70,7 +66,6 @@ public enum BridgeSearchKind: String, Sendable, Equatable, CaseIterable, Codable
         switch self {
         case .command: return "Commands"
         case .skill:   return "Skills"
-        case .job:     return "Jobs"
         case .tool:    return "Tools"
         }
     }
@@ -101,9 +96,6 @@ public enum BridgeSearchDestination: Sendable, Equatable {
     /// Fallback when a skill has no resolvable source (manual/no URL): just
     /// open Settings → Skills scrolled to the skill row.
     case skillSettings(anchor: String)
-
-    /// Job → open Settings → Jobs deep-linked (scrolled + selected) to the job.
-    case job(id: String)
 
     /// Tool → open Settings → Tools, opening the tool's GROUPING and scrolling
     /// to the tool so it can be toggled / permission-gated. `group` is the

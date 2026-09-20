@@ -434,20 +434,14 @@ private struct RealCloudParserRung: VoiceMemoParseProvider {
 /// Set the curator mode in UserDefaults for the duration of `body`, then restore.
 /// Returns the body's value. (File-scoped copy of the chain-suite helper; here we
 /// drive the PUBLIC `VoiceMemoParseRouter.parse` API rather than the internal
-/// `walk`. Ollama routing is forced OFF so the Local rung is deterministically
-/// unavailable regardless of suite order.)
+/// `walk`.)
 private func withCuratorModeLocal<T>(_ mode: VoiceMemoCuratorMode, _ body: () async -> T) async -> T {
     let modeKey = BridgeDefaults.voiceMemoCuratorMode
-    let ollamaKey = BridgeDefaults.voiceMemoOllamaRouting
     let priorMode = UserDefaults.standard.string(forKey: modeKey)
-    let priorOllama = UserDefaults.standard.object(forKey: ollamaKey)
     UserDefaults.standard.set(mode.rawValue, forKey: modeKey)
-    UserDefaults.standard.set(false, forKey: ollamaKey)
     defer {
         if let priorMode { UserDefaults.standard.set(priorMode, forKey: modeKey) }
         else { UserDefaults.standard.removeObject(forKey: modeKey) }
-        if let priorOllama { UserDefaults.standard.set(priorOllama, forKey: ollamaKey) }
-        else { UserDefaults.standard.removeObject(forKey: ollamaKey) }
     }
     return await body()
 }
