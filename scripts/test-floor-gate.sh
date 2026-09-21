@@ -242,7 +242,12 @@
 #   0 failed on cfb31f4c. await test( net on the branch is −85 (matches the
 #   4095→4010 write-up). Extra −10 vs 4095 is CI-measured shrinkage past
 #   that accounting. Stamp the measured green count (same convention as #276).
-FLOOR="${BRIDGE_TEST_FLOOR:-4000}"
+# 2026-09-21: 4000 → 4004 (+4) — #298 messages_send notify-default for
+#   ordinary 1:1 plain text; groups / attachments / SMS-override stay
+#   Request. +4 MessagesSendApprovalPolicyTests (discriminator table,
+#   router notify, router request paths, Settings override). CI run
+#   35636531485 measured passed=4004, 0 failed on 818ba83.
+FLOOR="${BRIDGE_TEST_FLOOR:-4004}"
 
 echo "🧪 test-floor-gate: building debug test executable + running suite (floor=${FLOOR})..."
 swift build -c debug --product TheBridgeTests

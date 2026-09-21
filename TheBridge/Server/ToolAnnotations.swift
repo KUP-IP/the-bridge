@@ -255,7 +255,10 @@ public enum ToolAnnotationCatalog {
         "messages_participants": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "messages_recent": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "messages_search": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
-        "messages_send": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: true),
+        // #298: catalog default is notify for ordinary 1:1 plain text.
+        // Groups / attachments / SMS-override still Request at dispatch.
+        // Handler confirm:'SEND' is unchanged. Not host Auto-review (#294).
+        "messages_send": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "mouse_click": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         // v3.7·G — notes_* (Apple Notes via AppleScript). list/read/search are
         // pure reads (.open → requiresConfirmation:false). create/update are

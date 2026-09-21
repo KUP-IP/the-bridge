@@ -307,7 +307,7 @@ func runEndToEndTests() async {
         try expect(tierMap["file_write"] == "notify", "file_write should be notify")
         try expect(tierMap["shell_exec"] == "request", "shell_exec should be request")
         try expect(tierMap["clipboard_write"] == "notify", "clipboard_write should be notify (SEC-03)")
-        try expect(tierMap["messages_send"] == "request", "messages_send should be request")
+        try expect(tierMap["messages_send"] == "notify", "messages_send catalog default is notify (#298)")
         try expect(tierMap["applescript_exec"] == "request", "applescript_exec should be request")
         try expect(tierMap["run_script"] == "request", "run_script should be request")
         try expect(tierMap["system_info"] == "open", "system_info should be open")

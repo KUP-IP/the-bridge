@@ -4,7 +4,9 @@
 // Six tools: messages_search, messages_recent, messages_chat,
 // messages_content, messages_participants, messages_send.
 // Read tools use native SQLite C API on ~/Library/Messages/chat.db.
-// Send uses in-process AppleScript (NSAppleScript). Tier: request (5 open, 1 request).
+// Send uses in-process AppleScript (NSAppleScript). Catalog default for
+// messages_send is notify for ordinary 1:1 plain text; groups / attachments /
+// SMS-override raise to request (#298). Settings overrides still win.
 //
 // V1-PATCH-001 changes:
 // - Replaced runSQLite CLI helper with SQLiteConnection (native sqlite3 C API)
@@ -1519,19 +1521,23 @@ public enum MessagesModule {
             }
         ))
 
-        // MARK: 6. messages_send – request (ordinary 3-tier ladder)
-        // Catalog default is .request; neverAutoApprove is false so Settings
-        // (tool or module override, Always Allow) can lower it to .notify or
-        // .open — including for remote/tunnel sessions. confirm:'SEND' remains
-        // handler-required. Ordinary one-to-one inherits live inbound
-        // iMessage/SMS or fails closed (#198); explicit SMS on RCS/unknown
-        // requires allowSmsDespiteLiveService (#249). THREAD M1 still binds
-        // explicit service. Jobs still require explicit service.
+        // MARK: 6. messages_send – notify catalog default, payload-aware (#298)
+        // Ordinary 1:1 handle/chat + plain text → .notify (loud, non-blocking).
+        // Groups, attachments/media, and SMS-override
+        // (`allowSmsDespiteLiveService`) stay .request at dispatch via
+        // MessagesSendCatalogTier. neverAutoApprove is false so Settings
+        // (tool or module override, Always Allow) can still raise or lower
+        // the per-tool tier — including for remote/tunnel sessions.
+        // confirm:'SEND' remains handler-required. Ordinary one-to-one
+        // inherits live inbound iMessage/SMS or fails closed (#198);
+        // explicit SMS on RCS/unknown requires allowSmsDespiteLiveService
+        // (#249) and that path stays Request. This does not change host
+        // Auto-review (#294).
         await router.register(ToolRegistration(
             name: "messages_send",
             module: moduleName,
-            tier: .request,
-            description: "Send one exact iMessage or SMS after confirm:'SEND'. Resolve raw chatNNN via messages_participants; names via contacts_resolve_handle. Omit service to inherit the latest inbound iMessage/SMS for that recipient, or pass exactly iMessage or SMS. Fail closed on RCS/unknown/mismatch — never silent iMessage→SMS fallback. Operator-authorized SMS on a live RCS/unknown thread requires service=SMS and allowSmsDespiteLiveService:true; the flag does not unlock iMessage↔SMS mismatch. Optional filePath XOR non-empty body: attachments are 1:1 iMessage only (no SMS/RCS, no chatIdentifier/groups). Existing-group text send uses chatIdentifier; group create is not built. Bounded THREAD M1 still binds recipient/service/body. Local chat.db correlation is not provider delivery (never providerDeliveryConfirmed). Catalog default is Request; Settings can lower the tool to Notify or Open.",
+            tier: MessagesSendCatalogTier.registeredToolTier,
+            description: "Send one exact iMessage or SMS after confirm:'SEND'. Resolve raw chatNNN via messages_participants; names via contacts_resolve_handle. Omit service to inherit the latest inbound iMessage/SMS for that recipient, or pass exactly iMessage or SMS. Fail closed on RCS/unknown/mismatch — never silent iMessage→SMS fallback. Operator-authorized SMS on a live RCS/unknown thread requires service=SMS and allowSmsDespiteLiveService:true; the flag does not unlock iMessage↔SMS mismatch. Optional filePath XOR non-empty body: attachments are 1:1 iMessage only (no SMS/RCS, no chatIdentifier/groups). Existing-group text send uses chatIdentifier; group create is not built. Bounded THREAD M1 still binds recipient/service/body. Local chat.db correlation is not provider delivery (never providerDeliveryConfirmed). Catalog default is Notify for ordinary 1:1 plain-text sends; group chats, attachments/media, and SMS-override stay Request. Settings can raise or lower the per-tool tier. Does not change host Auto-review.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([

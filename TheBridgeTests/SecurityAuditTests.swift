@@ -116,13 +116,17 @@ func runSecurityAuditTests() async {
         let expectedRequest = [
             "shell_exec", "run_script",
             "applescript_exec",
-            "credential_save", "credential_read", "credential_delete",
-            "messages_send"
+            "credential_save", "credential_read", "credential_delete"
         ]
         for name in expectedRequest {
             let found = requestTools.contains(where: { $0.name == name })
             try expect(found, "Expected \(name) at .request tier")
         }
+        let send = all.first { $0.name == "messages_send" }
+        try expect(send?.tier == .notify,
+                   "messages_send catalog default is notify (#298); groups/attachments/SMS-override raise at dispatch")
+        try expect(send?.neverAutoApprove == false,
+                   "Settings must still be able to raise or lower messages_send")
     }
 
     await test("No write/mutating tools at .open tier") {

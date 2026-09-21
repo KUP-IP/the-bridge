@@ -60,17 +60,18 @@ func runMessagesModuleTests() async {
         try expect(tool.tier == .open, "Expected green, got \(tool.tier.rawValue)")
     }
 
-    await test("messages_send tier is request") {
+    await test("messages_send catalog default is notify") {
         let tools = await router.registrations(forModule: "messages")
         let tool = tools.first(where: { $0.name == "messages_send" })!
-        try expect(tool.tier == .request, "Expected request, got \(tool.tier.rawValue)")
+        try expect(tool.tier == .notify, "Expected notify, got \(tool.tier.rawValue)")
+        try expect(tool.tier == MessagesSendCatalogTier.registeredToolTier)
     }
 
-    await test("messages_send is downgradable on the ordinary 3-tier ladder") {
+    await test("messages_send is raisable and lowerable on the ordinary 3-tier ladder") {
         let tools = await router.registrations(forModule: "messages")
         let tool = tools.first(where: { $0.name == "messages_send" })!
-        try expect(tool.tier == .request, "catalog default stays .request")
-        try expect(!tool.neverAutoApprove, "Settings must be able to lower messages_send to notify/open")
+        try expect(tool.tier == .notify, "catalog registration default is .notify (#298)")
+        try expect(!tool.neverAutoApprove, "Settings must be able to raise or lower messages_send")
         let opened = ToolRouter.resolveEffectiveTier(
             toolName: "messages_send",
             module: "messages",
@@ -80,6 +81,15 @@ func runMessagesModuleTests() async {
             moduleOverrides: [:]
         )
         try expect(opened == .open, "operator Open override must win: got \(opened.rawValue)")
+        let raised = ToolRouter.resolveEffectiveTier(
+            toolName: "messages_send",
+            module: "messages",
+            registeredTier: tool.tier,
+            neverAutoApprove: tool.neverAutoApprove,
+            toolOverrides: ["messages_send": SecurityTier.request.rawValue],
+            moduleOverrides: [:]
+        )
+        try expect(raised == .request, "operator Request override must win: got \(raised.rawValue)")
         let notified = ToolRouter.resolveEffectiveTier(
             toolName: "messages_send",
             module: "messages",
