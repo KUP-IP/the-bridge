@@ -2,11 +2,14 @@
 // TheBridge · Tests
 //
 // `messages_send` uses the ordinary SecurityGate ladder (open / notify /
-// request). Catalog default stays .request with neverAutoApprove false so
-// Settings can lower it, including for remote/tunnel sessions. confirm:SEND
-// remains handler-required. Ordinary send inherits live inbound iMessage/SMS
-// or fails closed (#198). Explicit SMS on RCS/unknown requires
-// allowSmsDespiteLiveService (#249). No live Messages.app send.
+// request). Catalog default is .notify for ordinary 1:1 plain text (#298);
+// groups, attachments, and SMS-override (`allowSmsDespiteLiveService`)
+// stay .request at dispatch. neverAutoApprove is false so Settings can
+// raise or lower the per-tool tier, including for remote/tunnel sessions.
+// confirm:SEND remains handler-required. Ordinary send inherits live inbound
+// iMessage/SMS or fails closed (#198). Explicit SMS on RCS/unknown requires
+// allowSmsDespiteLiveService (#249). This does not change host Auto-review
+// (#294). No live Messages.app send.
 
 import Foundation
 import MCP
@@ -15,20 +18,24 @@ import TheBridgeLib
 func runMessagesSendApprovalPolicyTests() async {
     print("\n📬 Messages send 3-tier SecurityGate ladder")
 
-    await test("messages_send is catalog request and downgradable") {
+    await test("messages_send is catalog notify and Settings can raise or lower it") {
         let router = ToolRouter(
             securityGate: SecurityGate(approvalProvider: TestSecurityApprovalProvider()),
             auditLog: AuditLog()
         )
         await MessagesModule.register(on: router)
         let tool = await router.registrations(forModule: "messages").first { $0.name == "messages_send" }!
-        try expect(tool.tier == .request, "catalog default must stay .request")
-        try expect(!tool.neverAutoApprove, "Settings must be able to lower messages_send")
+        try expect(tool.tier == .notify, "catalog registration default is .notify for ordinary 1:1 text (#298)")
+        try expect(!tool.neverAutoApprove, "Settings must be able to raise or lower messages_send")
         try expect(tool.description.localizedCaseInsensitiveContains("confirm"),
                    "tool description must name confirm:SEND")
         try expect(tool.description.localizedCaseInsensitiveContains("iMessage")
                    || tool.description.localizedCaseInsensitiveContains("SMS"),
                    "tool description must name the explicit service contract")
+        try expect(tool.description.localizedCaseInsensitiveContains("Notify"),
+                   "tool description must name the Notify catalog default")
+        try expect(tool.description.localizedCaseInsensitiveContains("Auto-review"),
+                   "tool description must name that host Auto-review (#294) is unchanged")
         try expect(!tool.description.contains("Always ask"),
                    "send-only Always ask copy must not remain on the tool")
     }
@@ -256,8 +263,8 @@ func runMessagesSendApprovalPolicyTests() async {
         try expect(snippets?.neverAutoApprove == false, "snippets_delete Always Allow must be available")
         try expect(sendMail?.neverAutoApprove == false && sendMail?.tier == .request,
                    "mail_send is request without neverAutoApprove")
-        try expect(send?.neverAutoApprove == false && send?.tier == .request,
-                   "messages_send must match mail_send: request without neverAutoApprove")
+        try expect(send?.neverAutoApprove == false && send?.tier == .notify,
+                   "messages_send catalog default is notify without neverAutoApprove (#298)")
         try expect(trash?.tier == .request)
         try expect(snippets?.tier == .request)
     }
@@ -324,7 +331,7 @@ func runMessagesSendApprovalPolicyTests() async {
         await MessagesModule.register(on: router)
         let result = try await router.dispatch(
             toolName: "messages_send",
-            arguments: ordinarySend()
+            arguments: groupSend()
         )
         guard case .object(let object) = result else {
             throw TestError.assertion("awaiting_approval must be an object, got \(result)")
@@ -345,7 +352,7 @@ func runMessagesSendApprovalPolicyTests() async {
         await MessagesModule.register(on: router)
         let first = try await router.dispatch(
             toolName: "messages_send",
-            arguments: ordinarySend(service: "auto")
+            arguments: groupSend(service: "auto")
         )
         guard case .object(let pendingObject) = first else {
             throw TestError.assertion("first call must be an object")
@@ -355,7 +362,7 @@ func runMessagesSendApprovalPolicyTests() async {
 
         let second = try await router.dispatch(
             toolName: "messages_send",
-            arguments: ordinarySend(service: "auto")
+            arguments: groupSend(service: "auto")
         )
         guard case .object(let allowedObject) = second else {
             throw TestError.assertion("retry after Allow must reach the handler")
@@ -366,9 +373,157 @@ func runMessagesSendApprovalPolicyTests() async {
                    "auto service still fail-closes; proves handler ran")
         try expect(provider.requestCount == 2)
     }
+
+    await test("#298 discriminator: 1:1 plain text is notify; group/attachment/SMS-override are request") {
+        let cases: [(String, Value, SecurityTier)] = [
+            ("1:1 phone + body", ordinarySend(), .notify),
+            ("1:1 email + body", ordinarySend(recipient: "ada@example.com"), .notify),
+            ("1:1 chatIdentifier phone", chatIdentifierSend("+15551234567"), .notify),
+            ("1:1 chatIdentifier email", chatIdentifierSend("ada@example.com"), .notify),
+            ("1:1 service-prefixed chat", chatIdentifierSend("iMessage;-;+15551234567"), .notify),
+            ("1:1 SMS-prefixed chat", chatIdentifierSend("SMS;-;+15551234567"), .notify),
+            ("omit-service 1:1 still notify", ordinarySend(omitService: true), .notify),
+            ("group chatNNNN", groupSend(), .request),
+            ("group UUID chat id", chatIdentifierSend("677927082d92462b9e1ddc5450b9ae10"), .request),
+            ("attachment filePath", ordinarySend(extra: ["filePath": .string("/tmp/song.m4a"), "body": .string("")]), .request),
+            ("SMS override flag", ordinarySend(extra: ["allowSmsDespiteLiveService": .bool(true)]), .request),
+            ("dual recipient+chatIdentifier", ordinarySend(extra: ["chatIdentifier": .string("chat123456789")]), .request),
+            ("raw chatNNNN recipient", ordinarySend(recipient: "chat123456789"), .request),
+            ("empty body no file", ordinarySend(extra: ["body": .string("   ")]), .request),
+        ]
+        for (label, arguments, expected) in cases {
+            let got = MessagesSendCatalogTier.registeredDefault(
+                toolName: "messages_send", arguments: arguments
+            )
+            try expect(got == expected, "\(label): expected \(expected.rawValue), got \(got.rawValue)")
+            let forces = MessagesSendCatalogTier.forcesRequestHumanApproval(
+                toolName: "messages_send", arguments: arguments
+            )
+            try expect(forces == (expected == .request),
+                       "\(label): forcesRequest=\(forces) expected \(expected == .request)")
+        }
+        try expect(
+            !MessagesSendCatalogTier.forcesRequestHumanApproval(
+                toolName: "mail_send", arguments: ordinarySend()
+            ),
+            "discriminator must not raise unrelated tools"
+        )
+    }
+
+    await test("#298 router: ordinary 1:1 text is notify (no Confirm prompt)") {
+        let provider = TestSecurityApprovalProvider()
+        let gate = SecurityGate(approvalProvider: provider)
+        let router = ToolRouter(securityGate: gate, auditLog: AuditLog())
+        await MessagesModule.register(on: router)
+        let result = try await router.dispatch(
+            toolName: "messages_send",
+            arguments: ordinarySend(service: "auto")
+        )
+        guard case .object(let object) = result else {
+            throw TestError.assertion("1:1 notify path must reach the handler")
+        }
+        try expect(object["approvalStatus"] == nil, "1:1 plain text must not await Confirm")
+        try expect(object["sent"] == .bool(false), "auto service still fail-closes; proves handler ran")
+        try expect(provider.approvalRequestCount == 0,
+                   "ordinary 1:1 text must use notify, not request")
+    }
+
+    await test("#298 router: group, attachment, and SMS-override still request") {
+        let cases: [(String, Value)] = [
+            ("group", groupSend()),
+            ("attachment", ordinarySend(extra: ["filePath": .string("/tmp/clip.m4a"), "body": .string("")])),
+            ("SMS override", ordinarySend(extra: ["allowSmsDespiteLiveService": .bool(true)])),
+        ]
+        for (label, arguments) in cases {
+            let provider = TestSecurityApprovalProvider(decision: .pending)
+            let gate = SecurityGate(approvalProvider: provider)
+            let router = ToolRouter(securityGate: gate, auditLog: AuditLog())
+            await MessagesModule.register(on: router)
+            let result = try await router.dispatch(
+                toolName: "messages_send",
+                arguments: arguments
+            )
+            guard case .object(let object) = result else {
+                throw TestError.assertion("\(label) must return an object")
+            }
+            try expect(object["approvalStatus"] == .string("awaiting_approval"),
+                       "\(label) must stay Request / Confirm")
+            try expect(object["sent"] == .bool(false), "\(label) must not send while awaiting")
+            try expect(provider.approvalRequestCount == 1,
+                       "\(label) must prompt; count=\(provider.approvalRequestCount)")
+        }
+    }
+
+    await test("#298 Settings override still wins over the discriminator") {
+        let groupRegistered = MessagesSendCatalogTier.registeredDefault(
+            toolName: "messages_send", arguments: groupSend()
+        )
+        try expect(groupRegistered == .request, "group catalog default is request")
+        let lowered = ToolRouter.resolveEffectiveTier(
+            toolName: "messages_send",
+            module: "messages",
+            registeredTier: groupRegistered,
+            neverAutoApprove: false,
+            toolOverrides: ["messages_send": SecurityTier.open.rawValue],
+            moduleOverrides: [:]
+        )
+        try expect(lowered == .open, "Settings Open must still lower a group send")
+
+        let oneToOne = MessagesSendCatalogTier.registeredDefault(
+            toolName: "messages_send", arguments: ordinarySend()
+        )
+        try expect(oneToOne == .notify, "1:1 catalog default is notify")
+        let raised = ToolRouter.resolveEffectiveTier(
+            toolName: "messages_send",
+            module: "messages",
+            registeredTier: oneToOne,
+            neverAutoApprove: false,
+            toolOverrides: ["messages_send": SecurityTier.request.rawValue],
+            moduleOverrides: [:]
+        )
+        try expect(raised == .request, "Settings Request must still raise a 1:1 send")
+
+        let provider = TestSecurityApprovalProvider()
+        let gate = SecurityGate(approvalProvider: provider)
+        let router = ToolRouter(securityGate: gate, auditLog: AuditLog())
+        await MessagesModule.register(on: router)
+        try await withToolOverride("messages_send", SecurityTier.open) {
+            let result = try await router.dispatch(
+                toolName: "messages_send",
+                arguments: groupSend(service: "auto")
+            )
+            guard case .object(let object) = result else {
+                throw TestError.assertion("Open override on group must reach handler")
+            }
+            try expect(object["approvalStatus"] == nil)
+            try expect(provider.approvalRequestCount == 0,
+                       "Settings Open must skip Confirm even for a group send")
+        }
+    }
 }
 
 // MARK: - Helpers
+
+private func groupSend(
+    chatIdentifier: String = "chat123456789",
+    service: String = "iMessage",
+    confirm: String = "SEND"
+) -> Value {
+    chatIdentifierSend(chatIdentifier, service: service, confirm: confirm)
+}
+
+private func chatIdentifierSend(
+    _ chatIdentifier: String,
+    service: String = "iMessage",
+    confirm: String = "SEND"
+) -> Value {
+    .object([
+        "chatIdentifier": .string(chatIdentifier),
+        "body": .string("policy probe"),
+        "confirm": .string(confirm),
+        "service": .string(service)
+    ])
+}
 
 private func ordinarySend(
     recipient: String = "+15551234567",

@@ -265,7 +265,7 @@ func runMessagesSuiteAuditTests() async {
         }
     }
 
-    await test("read tools are readOnly+non-destructive; messages_send is the lone confirm-gate") {
+    await test("read tools are readOnly+non-destructive; messages_send is write + catalog notify") {
         let names = ["messages_search", "messages_recent", "messages_chat",
                      "messages_content", "messages_participants"]
         for n in names {
@@ -275,8 +275,8 @@ func runMessagesSuiteAuditTests() async {
                        "\(n) annotation should be read-only/non-destructive/no-confirm, got \(String(describing: a))")
         }
         let send = ToolAnnotationCatalog.annotations(for: "messages_send")
-        try expect(send?.readOnlyHint == false && send?.requiresConfirmation == true,
-                   "messages_send must be write + confirm-gated, got \(String(describing: send))")
+        try expect(send?.readOnlyHint == false && send?.requiresConfirmation == false,
+                   "messages_send is write + catalog notify (#298); handler still requires confirm:SEND. got \(String(describing: send))")
     }
 
     await test("annotation.requiresConfirmation mirrors registered tier (request==confirm)") {

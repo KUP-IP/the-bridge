@@ -737,6 +737,14 @@ public actor ToolRouter {
         if MailModule.forcesBatchHumanApproval(toolName: toolName, arguments: arguments) {
             registeredTier = .request
         }
+        // #298 messages_send: catalog default is Notify for ordinary 1:1
+        // plain text. Groups, attachments, and SMS-override
+        // (`allowSmsDespiteLiveService`) raise this invocation to Request.
+        // Settings per-tool / per-module overrides still win via
+        // resolveEffectiveTier. Does not change host Auto-review (#294).
+        if MessagesSendCatalogTier.forcesRequestHumanApproval(toolName: toolName, arguments: arguments) {
+            registeredTier = .request
+        }
         let neverAutoApprove = tool.neverAutoApprove
         let effectiveTier = ToolRouter.resolveEffectiveTier(
             toolName: toolName,

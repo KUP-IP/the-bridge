@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **messages_send notify-default for ordinary 1:1 text (#298).** Catalog
+  default is Notify when the target is a single 1:1 handle/chat and the
+  payload is plain text. Group chats, attachments/media, and SMS-override
+  (`allowSmsDespiteLiveService`) stay Request at dispatch. Settings can
+  still raise or lower the per-tool tier. Does not change host Auto-review
+  (#294). Floor **4000 → 4004** (+4 discriminator / router tests). Linux
+  host cannot compile macOS 26; CI must re-measure.
+
 - **skills exposure freshness lease after publish (#279).** Successful
   `skills_exposure_reconcile` publish now writes `freshnessLease` to the
   newly activated generation + that publish receipt. Status no longer
