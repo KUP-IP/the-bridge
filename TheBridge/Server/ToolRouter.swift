@@ -740,9 +740,11 @@ public actor ToolRouter {
         // #298 messages_send: catalog default is Notify for ordinary 1:1
         // plain text. Groups, attachments, and SMS-override
         // (`allowSmsDespiteLiveService`) raise this invocation to Request.
-        // Settings per-tool / per-module overrides still win via
-        // resolveEffectiveTier. Does not change host Auto-review (#294).
-        if MessagesSendCatalogTier.forcesRequestHumanApproval(toolName: toolName, arguments: arguments) {
+        // Only raise from the notify catalog default — do not rewrite an
+        // explicit Open registration (RIL fakes / Settings apply after this
+        // via resolveEffectiveTier). Does not change host Auto-review (#294).
+        if registeredTier == .notify,
+           MessagesSendCatalogTier.forcesRequestHumanApproval(toolName: toolName, arguments: arguments) {
             registeredTier = .request
         }
         let neverAutoApprove = tool.neverAutoApprove
