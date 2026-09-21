@@ -4,7 +4,7 @@
 
 The Bridge exposes your local Mac and connected services as Model Context Protocol (MCP) tools over **Streamable HTTP**, **legacy SSE**, and **stdio** — locally on `127.0.0.1` for clients like Claude Code, Cursor, and Notion agents, and **securely from the cloud** (claude.ai and ChatGPT custom connectors) through a customer-owned Cloudflare Tunnel with OAuth. Built in Swift 6.2 for macOS 26+ on Apple Silicon, it is designed to be always-on, auto-launched, and safe enough for daily operator use.
 
-**224 static feature-module tools** across **32 module families** · **3 transports + cloud connector** (Claude web · ChatGPT) · **3-tier security model** with on-device approvals · **Liquid Glass UI**
+**240 static feature-module tools** across **32 module families** · **3 transports + cloud connector** (Claude web · ChatGPT) · **3-tier security model** with on-device approvals · **Liquid Glass UI**
 
 **Latest published release:** [v4.0.5](https://github.com/KUP-IP/the-bridge/releases/tag/v4.0.5) (August 2026). The current source version is 4.0.5 (build 94). Existing installs auto-update via Sparkle.
 
@@ -29,7 +29,7 @@ Current commercial posture:
 
 ## Current product surface
 
-The Bridge registers **224 static feature-module tools across 32 module families**, surfaced collapsibly in **Settings → Tools**. Conditional tools such as cloud status are outside that static count, and the displayed list can be smaller when a feature group is disabled. Highlights below; the full live registry is in-app.
+The Bridge registers **240 static feature-module tools across 32 module families**, surfaced collapsibly in **Settings → Tools**. Conditional tools such as cloud status are outside that static count, and the displayed list can be smaller when a feature group is disabled. Highlights below; the full live registry is in-app.
 
 | Module | Tools | Notes |
 |---|---:|---|
@@ -39,14 +39,14 @@ The Bridge registers **224 static feature-module tools across 32 module families
 | SystemModule | 3 | system info, processes, notifications |
 | ContactsModule | 4 | CNContactStore search, get, resolve — no Contacts.app required |
 | NotionModule | 21 | Notion pages, blocks, databases, data sources, comments, files, queries |
-| SessionModule | 3 | session status and tool registry introspection |
+| SessionModule | 5 | session status, tool registry introspection, and bounded schema discovery |
 | AppleScriptModule | 1 | in-process AppleScript execution |
 | AccessibilityModule | 5 | AX tree, inspection, and actions |
 | ScreenModule | 5 | capture, OCR, recording, screen analysis |
 | CredentialModule | 4 | Keychain-backed credential storage |
 | SkillsModule | 3 | `fetch_skill`, `list_routing_skills`, `manage_skill` |
 | ConnectionsModule | 6 | connection inventory, health, validation, and local reset |
-| **Total** | **224 static** | Across 32 feature-module families. The former builtin `echo` and Stripe/payment surfaces are removed; conditional tools are counted separately. The table highlights selected families, while **Settings → Tools** shows the full live registry. |
+| **Total** | **240 static** | Across 32 feature-module families. The former builtin `echo` and Stripe/payment surfaces are removed; conditional tools are counted separately. The table highlights selected families, while **Settings → Tools** shows the full live registry. |
 
 Core product traits:
 - Native macOS menu-bar app with onboarding, settings, and a status popover
@@ -153,7 +153,7 @@ Use stdio when connecting local clients such as Claude Code or Cursor directly t
 
 #### Using Bridge with Antigravity
 
-Google Antigravity enforces a strict 100-tool limit per MCP server, whereas The Bridge registers 224 static feature-module tools. To use Bridge with Antigravity, we have curated a subset of ~84 tools to stay under the limit.
+Google Antigravity enforces a strict 100-tool limit per MCP server, whereas The Bridge registers 240 static feature-module tools. To use Bridge with Antigravity, we have curated a subset of ~84 tools to stay under the limit.
 
 You can launch the Bridge process with a `--multi-instance` flag (bypasses single-instance GUI guard) and `--allow-tools` flag pointing to the Antigravity allowlist:
 
@@ -319,9 +319,9 @@ If you install via a non-standard npm prefix, symlink the binary into one of the
 
 ### LSP session supervision (`lsp_session_list`)
 
-LSP servers are long-running processes; The Bridge supervises them out-of-band from the short-lived shell processes managed by `bg_process_*`. Each `(language, workspaceRoot)` pair gets a single `LspSession` lazy-spawned on first request, idle-disposed after 15 minutes of inactivity, and observable via `lsp_session_list` (PID, server name/version, spawn / last-used timestamps, idle seconds, request count, open-file count).
+LSP servers are long-running processes; The Bridge supervises them out-of-band from user-launched shell jobs started with `bg_run` and observed with `bg_poll`. Each `(language, workspaceRoot)` pair gets a single `LspSession` lazy-spawned on first request, idle-disposed after 15 minutes of inactivity, and observable via `lsp_session_list` (PID, server name/version, spawn / last-used timestamps, idle seconds, request count, open-file count).
 
 - **`lsp_session_list`** — LSP server processes only (typescript-language-server, sourcekit-lsp). Use this for LSP-specific lifecycle questions: “is the TS server up?”, “how many open files does the Swift session have?”, “when will it idle out?”.
-- **`bg_process_list`** — Foreground-detached shell processes spawned via `bg_process_*` (long-running builds, watchers, dev servers). Use this for user-launched commands; LSP servers are **not** listed here.
+- **`bg_run` / `bg_poll`** — User-launched detached shell jobs (long-running builds, watchers, dev servers) are started and observed by exact `jobId`. LSP servers are not part of that job contract.
 
 The two surfaces are deliberately separated so observability for LSP supervision (which has its own RPC lifecycle, didOpen tracking, and capability probe) does not collide with generic shell lifecycle (which has none of those). When debugging cross-cutting state, query both.

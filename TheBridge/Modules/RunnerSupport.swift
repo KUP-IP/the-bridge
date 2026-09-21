@@ -1,7 +1,7 @@
 // RunnerSupport.swift — PKT-781 (Bridge v2.2 · 3.2a)
 // Shared scaffold for runner modules (Playwright / Vitest / Lighthouse):
 //   1. RunnerProbe — `npx --no-install <runner> --version` with timeout; never installs.
-//   2. RunnerToolImpl.handle — common handler body (probe → build argv → bg_process spawn).
+//   2. RunnerToolImpl.handle — common handler body (probe → build argv → managed background runtime).
 // Boundary: no JSON parsing (PKT-3.2b); no e2e (PKT-3.2c).
 
 import Foundation
@@ -86,7 +86,7 @@ enum RunnerToolImpl {
                 "pid":        .int(Int(meta.pid)),
                 "label":      .string(label),
                 "command":    .string(command),
-                "hint":       .string("poll bg_poll / terminate with bg_kill, id=\(meta.id)")
+                "hint":       .string("Poll with bg_poll(jobId: '\(meta.id)'); cancel with bg_kill(jobId: '\(meta.id)').")
             ])
         } catch {
             return errorValue(toolName, status: "failed", reason: "bg_run failed: \(error)")

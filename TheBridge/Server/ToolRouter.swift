@@ -118,6 +118,7 @@ public enum BrokerBootstrapToolOrdering {
         "bridge_status",
         "tools_list",
         "session_info",
+        "tools_search",
     ]
 
     public static func prioritize(_ registrations: [ToolRegistration]) -> [ToolRegistration] {
@@ -1241,15 +1242,7 @@ public actor ToolRouter {
                     text = String(describing: result)
                 }
             }
-            let structuredFailure: Bool = {
-                if case .object(let dict) = result {
-                    if case .bool(let success) = dict["success"], success == false { return true }
-                    if case .string(let status) = dict["status"], ["failed", "error", "partial_or_unverified"].contains(status) { return true }
-                    if case .string = dict["error"] { return true }
-                }
-                return false
-            }()
-            return (text: text, isError: structuredFailure)
+            return (text: text, isError: Self.structuredFailureReason(for: result) != nil)
         } catch {
             // v3.0·0.5: central param-misnomer recovery. Structured routing
             // recovery is resolved first; every error path remains single-shot
@@ -1319,6 +1312,59 @@ public actor ToolRouter {
             }
             return (text: msg, isError: true)
         }
+    }
+
+    /// Classifies the returned envelopes that represent a failed tool outcome
+    /// even though the handler itself completed normally. Keep this deliberately
+    /// narrow and shared: MCP callers and unattended scheduler actions must not
+    /// disagree about whether the same result succeeded.
+    public static func structuredFailureReason(for result: Value) -> String? {
+        guard case .object(let dict) = result else { return nil }
+        if case .bool(let success) = dict["success"], success == false {
+            return "success:false"
+        }
+        if case .bool(let ok) = dict["ok"], ok == false {
+            return "ok:false"
+        }
+        if case .string(let status) = dict["status"],
+           ["failed", "error", "partial_or_unverified"].contains(status) {
+            return "status:\(status)"
+        }
+        if case .string(let error) = dict["error"] {
+            return "error:\(error)"
+        }
+        return nil
+    }
+
+    /// Whether an explicit failure envelope has opted into a scheduler retry.
+    /// Failed envelopes are non-retryable by default: a handler may have begun
+    /// a consequential operation before it can return an error. A handler must
+    /// explicitly set `retryable: true`, and an outcome that reports a possible
+    /// consequence remains non-retryable even when it does so.
+    public static func structuredFailureMayBeRetried(for result: Value) -> Bool {
+        guard structuredFailureReason(for: result) != nil,
+              case .object(let dict) = result else {
+            return false
+        }
+        if case .string("partial_or_unverified") = dict["status"] {
+            return false
+        }
+        if case .bool(true) = dict["deliveryInvoked"] {
+            return false
+        }
+        if case .bool(true) = dict["consequencePossible"] {
+            return false
+        }
+        if case .bool(true) = dict["mutated"] {
+            return false
+        }
+        if case .array(let mutations) = dict["mutated"], !mutations.isEmpty {
+            return false
+        }
+        if case .array(let unverified) = dict["unverified"], !unverified.isEmpty {
+            return false
+        }
+        return dict["retryable"] == .bool(true)
     }
 
     // MARK: Helpers

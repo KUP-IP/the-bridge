@@ -53,6 +53,28 @@ public enum CodeEditError: Error, LocalizedError {
 
 public enum CodeEditModule {
     public static let moduleName = "dev"
+    private static let ripgrepOutputLimitBytes = 2_000_000
+    private static let maximumSearchMatches = 500
+    private static let maximumContextLines = 100
+    private static let maximumReturnedMatchBytes = 512_000
+    private static let maximumLineTextBytes = 16_000
+    private static let maximumSubmatchesPerMatch = 100
+    private static let maximumSubmatchTextBytes = 4_000
+    private static let maximumUnifiedDiffSourceBytes = 2_000_000
+    private static let maximumUnifiedDiffInputLines = 20_000
+    private static let maximumUnifiedDiffMatrixCells = 250_000
+    private static let maximumUnifiedDiffBytes = 512_000
+
+    private struct UnifiedDiffResult {
+        let text: String
+        let omissionReason: String?
+    }
+
+    private static func truncateUTF8(_ text: String, to maximumBytes: Int) -> (text: String, truncated: Bool) {
+        guard text.utf8.count > maximumBytes else { return (text, false) }
+        let prefix = Data(text.utf8.prefix(maximumBytes))
+        return (String(decoding: prefix, as: UTF8.self), true)
+    }
 
     public static func register(on router: ToolRouter) async {
         await registerCodeSearch(on: router)
@@ -66,7 +88,7 @@ public enum CodeEditModule {
             name: "file_edit",
             module: moduleName,
             tier: .notify,
-            description: "Edit a file with mode='replace' (literal search→replacement with optional preview) or mode='patch' (unified-diff application). Single tool for code-edit ergonomics matching Claude Code's built-in edit verb.",
+            description: "Edit a file with mode='replace' (literal search→replacement with optional preview) or mode='patch' (unified-diff application). Replace responses include a unified diff when it fits bounded source, complexity, and 512,000-byte limits; otherwise the edit result reports diffAvailable:false with an omission reason rather than returning a partial patch. Single tool for code-edit ergonomics matching Claude Code's built-in edit verb.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -222,9 +244,9 @@ public enum CodeEditModule {
                     "path": .object(["type": .string("string"), "description": .string("Root directory or single file (default: current working directory)")]),
                     "fixedString": .object(["type": .string("boolean"), "description": .string("Treat pattern as literal (rg -F). Default: false")]),
                     "ignoreCase": .object(["type": .string("boolean"), "description": .string("Case-insensitive (rg -i). Default: false")]),
-                    "contextBefore": .object(["type": .string("integer"), "description": .string("Lines of context before each match (rg -B). Default: 0")]),
-                    "contextAfter": .object(["type": .string("integer"), "description": .string("Lines of context after each match (rg -A). Default: 0")]),
-                    "maxMatches": .object(["type": .string("integer"), "description": .string("Cap on returned match records. Default: 500")]),
+                    "contextBefore": .object(["type": .string("integer"), "description": .string("Lines of context before each match (rg -B). Default: 0; capped at 100.")]),
+                    "contextAfter": .object(["type": .string("integer"), "description": .string("Lines of context after each match (rg -A). Default: 0; capped at 100.")]),
+                    "maxMatches": .object(["type": .string("integer"), "description": .string("Cap on returned match records. Default and maximum: 500. Results also have a 512,000-byte structured-result budget.")]),
                     "globs": .object(["type": .string("array"), "description": .string("Optional rg --glob filters (e.g. [\"*.swift\", \"!*.lock\"])")]),
                     "hidden": .object(["type": .string("boolean"), "description": .string("Search hidden files (rg --hidden). Default: false")])
                 ]),
@@ -241,9 +263,18 @@ public enum CodeEditModule {
                 }()
                 let fixedString: Bool = { if case .bool(let b) = args["fixedString"] { return b }; return false }()
                 let ignoreCase: Bool = { if case .bool(let b) = args["ignoreCase"] { return b }; return false }()
-                let cBefore: Int = { if case .int(let i) = args["contextBefore"] { return max(0, i) }; return 0 }()
-                let cAfter: Int = { if case .int(let i) = args["contextAfter"] { return max(0, i) }; return 0 }()
-                let maxMatches: Int = { if case .int(let i) = args["maxMatches"] { return max(1, i) }; return 500 }()
+                let cBefore: Int = {
+                    if case .int(let i) = args["contextBefore"] { return min(max(0, i), maximumContextLines) }
+                    return 0
+                }()
+                let cAfter: Int = {
+                    if case .int(let i) = args["contextAfter"] { return min(max(0, i), maximumContextLines) }
+                    return 0
+                }()
+                let maxMatches: Int = {
+                    if case .int(let i) = args["maxMatches"] { return min(max(1, i), maximumSearchMatches) }
+                    return maximumSearchMatches
+                }()
                 let hidden: Bool = { if case .bool(let b) = args["hidden"] { return b }; return false }()
                 var globs: [String] = []
                 if case .array(let arr) = args["globs"] {
@@ -276,7 +307,10 @@ public enum CodeEditModule {
         contextBefore: Int, contextAfter: Int,
         maxMatches: Int, globs: [String], hidden: Bool
     ) throws -> Value {
-        var rgArgs: [String] = ["--json", "--max-count", String(maxMatches)]
+        // Request one extra record per file so the parser can distinguish an
+        // exact `maxMatches` result from a result that was cut at the cap.
+        // The parser below still enforces the global returned-match limit.
+        var rgArgs: [String] = ["--json", "--max-count", String(maxMatches + 1)]
         if fixedString { rgArgs.append("-F") }
         if ignoreCase { rgArgs.append("-i") }
         if contextBefore > 0 { rgArgs.append("-B"); rgArgs.append(String(contextBefore)) }
@@ -299,21 +333,32 @@ public enum CodeEditModule {
         do { try proc.run() } catch {
             throw CodeEditError.rgFailed(exit: -1, stderr: "failed to launch rg: \(error.localizedDescription)")
         }
-        let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-        let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+        let outputDrains = ProcessOutputDrains.start(
+            stdoutHandle: outPipe.fileHandleForReading,
+            stderrHandle: errPipe.fileHandleForReading,
+            limitPerStream: ripgrepOutputLimitBytes
+        )
         proc.waitUntilExit()
+        outputDrains.wait()
         let elapsedMs = Int(Date().timeIntervalSince(start) * 1000)
+        let stdoutCapture = outputDrains.stdout.snapshot()
+        let stderrCapture = outputDrains.stderr.snapshot()
 
         let exitCode = proc.terminationStatus
         if exitCode == 2 {
-            let stderr = String(data: errData, encoding: .utf8) ?? ""
-            throw CodeEditError.rgFailed(exit: exitCode, stderr: stderr.trimmingCharacters(in: .whitespacesAndNewlines))
+            throw CodeEditError.rgFailed(
+                exit: exitCode,
+                stderr: stderrCapture.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
         }
 
         var matches: [Value] = []
-        var truncated = false
+        var truncated = stdoutCapture.truncated
+        var resultBudgetTruncated = false
+        var returnedMatchBytes = 0
 
-        if let stdout = String(data: outData, encoding: .utf8) {
+        let stdout = stdoutCapture.text
+        if !stdout.isEmpty {
             for raw in stdout.split(separator: "\n", omittingEmptySubsequences: true) {
                 if matches.count >= maxMatches { truncated = true; break }
                 guard let data = raw.data(using: .utf8),
@@ -322,29 +367,47 @@ public enum CodeEditModule {
                 if type != "match" { continue }
                 guard let dataObj = obj["data"] as? [String: Any] else { continue }
                 let pathText = (dataObj["path"] as? [String: Any])?["text"] as? String ?? ""
-                let lineText = (dataObj["lines"] as? [String: Any])?["text"] as? String ?? ""
+                let originalLineText = (dataObj["lines"] as? [String: Any])?["text"] as? String ?? ""
+                let lineText = truncateUTF8(originalLineText, to: maximumLineTextBytes)
                 let lineNumber = dataObj["line_number"] as? Int ?? 0
                 let absoluteOffset = dataObj["absolute_offset"] as? Int ?? 0
                 var subs: [Value] = []
+                var submatchesTruncated = false
                 if let submatches = dataObj["submatches"] as? [[String: Any]] {
-                    for sm in submatches {
-                        let mtxt = (sm["match"] as? [String: Any])?["text"] as? String ?? ""
+                    for (index, sm) in submatches.enumerated() {
+                        if index >= maximumSubmatchesPerMatch {
+                            submatchesTruncated = true
+                            break
+                        }
+                        let originalMatchText = (sm["match"] as? [String: Any])?["text"] as? String ?? ""
+                        let matchText = truncateUTF8(originalMatchText, to: maximumSubmatchTextBytes)
                         let s = sm["start"] as? Int ?? 0
                         let e = sm["end"] as? Int ?? 0
                         subs.append(.object([
-                            "match": .string(mtxt),
+                            "match": .string(matchText.text),
                             "start": .int(s),
-                            "end": .int(e)
+                            "end": .int(e),
+                            "truncated": .bool(matchText.truncated)
                         ]))
                     }
                 }
-                matches.append(.object([
+                let match: Value = .object([
                     "path": .string(pathText),
                     "lineNumber": .int(lineNumber),
                     "absoluteOffset": .int(absoluteOffset),
-                    "lineText": .string(lineText),
-                    "submatches": .array(subs)
-                ]))
+                    "lineText": .string(lineText.text),
+                    "lineTextTruncated": .bool(lineText.truncated),
+                    "submatches": .array(subs),
+                    "submatchesTruncated": .bool(submatchesTruncated)
+                ])
+                let encodedSize = (try? JSONEncoder().encode(match).count) ?? maximumReturnedMatchBytes + 1
+                if returnedMatchBytes + encodedSize > maximumReturnedMatchBytes {
+                    truncated = true
+                    resultBudgetTruncated = true
+                    break
+                }
+                returnedMatchBytes += encodedSize
+                matches.append(match)
             }
         }
 
@@ -352,9 +415,20 @@ public enum CodeEditModule {
             "ok": .bool(true),
             "count": .int(matches.count),
             "truncated": .bool(truncated),
+            "outputTruncated": .bool(stdoutCapture.truncated || stderrCapture.truncated),
+            "resultBudgetTruncated": .bool(resultBudgetTruncated),
             "elapsedMs": .int(elapsedMs),
             "rgPath": .string(rg),
             "exitCode": .int(Int(exitCode)),
+            "maxMatchesApplied": .int(maxMatches),
+            "contextBeforeApplied": .int(contextBefore),
+            "contextAfterApplied": .int(contextAfter),
+            "stdoutBytes": .int(stdoutCapture.totalBytes),
+            "stderrBytes": .int(stderrCapture.totalBytes),
+            "stdoutCapturedBytes": .int(stdoutCapture.capturedBytes),
+            "stderrCapturedBytes": .int(stderrCapture.capturedBytes),
+            "stdoutTruncated": .bool(stdoutCapture.truncated),
+            "stderrTruncated": .bool(stderrCapture.truncated),
             "matches": .array(matches)
         ])
     }
@@ -395,13 +469,13 @@ public enum CodeEditModule {
             newContent = originalContent
         }
 
-        let diff = makeUnifiedDiff(path: path, original: originalContent, modified: newContent, contextLines: 3)
+        let diff = makeBoundedUnifiedDiff(path: path, original: originalContent, modified: newContent, contextLines: 3)
 
         if !preview {
             try atomicWrite(path: path, content: newContent)
         }
 
-        return .object([
+        var response: [String: Value] = [
             "ok": .bool(true),
             "preview": .bool(preview),
             "path": .string(path),
@@ -409,16 +483,36 @@ public enum CodeEditModule {
             "occurrencesReplaced": .int(replaceAll ? occurrenceCount : 1),
             "bytesBefore": .int(originalData.count),
             "bytesAfter": .int(newContent.utf8.count),
-            "diff": .string(diff)
-        ])
+            "diff": .string(diff.text),
+            "diffAvailable": .bool(diff.omissionReason == nil)
+        ]
+        if let omissionReason = diff.omissionReason {
+            response["diffOmittedReason"] = .string(omissionReason)
+        }
+        return .object(response)
     }
 
     // MARK: - Unified diff generator (LCS-based, line-oriented)
 
-    static func makeUnifiedDiff(path: String, original: String, modified: String, contextLines: Int) -> String {
+    private static func makeBoundedUnifiedDiff(
+        path: String,
+        original: String,
+        modified: String,
+        contextLines: Int
+    ) -> UnifiedDiffResult {
+        guard original.utf8.count <= maximumUnifiedDiffSourceBytes,
+              modified.utf8.count <= maximumUnifiedDiffSourceBytes else {
+            return UnifiedDiffResult(text: "", omissionReason: "source_bytes_limit")
+        }
         let aLines = original.components(separatedBy: "\n")
         let bLines = modified.components(separatedBy: "\n")
-        if aLines == bLines { return "" }
+        guard aLines.count + bLines.count <= maximumUnifiedDiffInputLines else {
+            return UnifiedDiffResult(text: "", omissionReason: "input_lines_limit")
+        }
+        guard aLines.count <= maximumUnifiedDiffMatrixCells / max(1, bLines.count) else {
+            return UnifiedDiffResult(text: "", omissionReason: "matrix_cells_limit")
+        }
+        if aLines == bLines { return UnifiedDiffResult(text: "", omissionReason: nil) }
         let lcs = longestCommonSubsequence(aLines, bLines)
         var ops: [(Character, String)] = []
         var i = 0, j = 0, k = 0
@@ -432,7 +526,19 @@ public enum CodeEditModule {
                 ops.append(("+", bLines[j])); j += 1
             }
         }
-        var out = "--- a/\(path)\n+++ b/\(path)\n"
+        var out = ""
+        var outputBytes = 0
+        func appendWithinLimit(_ text: String) -> Bool {
+            let byteCount = text.utf8.count
+            guard outputBytes + byteCount <= maximumUnifiedDiffBytes else { return false }
+            out.append(text)
+            outputBytes += byteCount
+            return true
+        }
+        guard appendWithinLimit("--- a/\(path)\n"),
+              appendWithinLimit("+++ b/\(path)\n") else {
+            return UnifiedDiffResult(text: "", omissionReason: "output_bytes_limit")
+        }
         var pos = 0
         while pos < ops.count {
             guard let changeStart = (pos..<ops.count).first(where: { ops[$0].0 != "=" }) else { break }
@@ -462,7 +568,9 @@ public enum CodeEditModule {
                 default: break
                 }
             }
-            out += "@@ -\(aStart + 1),\(aLen) +\(bStart + 1),\(bLen) @@\n"
+            guard appendWithinLimit("@@ -\(aStart + 1),\(aLen) +\(bStart + 1),\(bLen) @@\n") else {
+                return UnifiedDiffResult(text: "", omissionReason: "output_bytes_limit")
+            }
             for x in hunkStart..<hunkEnd {
                 let prefix: String
                 switch ops[x].0 {
@@ -471,11 +579,15 @@ public enum CodeEditModule {
                 case "+": prefix = "+"
                 default: prefix = " "
                 }
-                out += "\(prefix)\(ops[x].1)\n"
+                guard appendWithinLimit(prefix),
+                      appendWithinLimit(ops[x].1),
+                      appendWithinLimit("\n") else {
+                    return UnifiedDiffResult(text: "", omissionReason: "output_bytes_limit")
+                }
             }
             pos = hunkEnd
         }
-        return out
+        return UnifiedDiffResult(text: out, omissionReason: nil)
     }
 
     private static func longestCommonSubsequence(_ a: [String], _ b: [String]) -> [String] {

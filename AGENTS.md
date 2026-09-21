@@ -9,8 +9,9 @@ TheBridge is a native macOS menu bar app (Swift 6.2, macOS 26+, Apple Silicon) t
 Bundle ID: `kup.solutions.the-bridge` (legacy: `kup.solutions.notion-bridge`, `solutions.kup.keepr`)
 
 > **Agents:** see [`docs/AGENT_PLAYBOOK.md`](docs/AGENT_PLAYBOOK.md) for a task → tool
-> map (builds/tests → `bg_process_*`, surgical edits → `file_edit`, filesystem grounding
-> → `system_info`, long Notion reads → `notion_query` projection, etc.) before falling
+> map (builds/tests → `bg_run` → `bg_poll`, exact schema lookup → `tools_search`,
+> surgical edits → `file_edit`, filesystem grounding → `system_info`, long Notion reads
+> → `notion_query` projection, etc.) before falling
 > back to `shell_exec`.
 
 ## Commands

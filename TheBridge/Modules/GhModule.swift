@@ -68,7 +68,7 @@ public enum GhModule {
             name: "gh_pr_create",
             module: moduleName,
             tier: .request,
-            description: "Create a GitHub pull request via `gh pr create`. Requires title (or fill: true). Returns the new PR URL on success. Long runs (e.g., `--fill` against many commits) can be sent to bg_process by passing background: true — the tool returns a bg_process job id immediately.",
+            description: "Create a GitHub pull request via `gh pr create`. Requires title (or fill: true). Returns the new PR URL on success. Long runs (e.g., `--fill` against many commits) can run in the Bridge background runtime with background:true; it returns a jobId that can be observed with bg_poll or stopped with bg_kill.",
             inputSchema: schemaObj([
                 "title":     strProp("PR title (required unless fill: true)."),
                 "body":      strProp("PR body (markdown)."),
@@ -80,7 +80,7 @@ public enum GhModule {
                 "labels":    arrStrProp("Labels to apply."),
                 "assignees": arrStrProp("Assignees by login."),
                 "reviewers": arrStrProp("Reviewers (users or 'org/team')."),
-                "background": boolProp("Run via bg_run and return jobId immediately.")
+                "background": boolProp("Run in the Bridge background runtime and return a jobId usable with bg_poll or bg_kill.")
             ], required: []),
             handler: { arguments in
                 guard case .object(let obj) = arguments else {
@@ -171,7 +171,7 @@ public enum GhModule {
             name: "gh_pr_merge",
             module: moduleName,
             tier: .request,
-            description: "Merge a pull request via `gh pr merge`. method: 'merge'|'squash'|'rebase' (default 'merge'). auto: enable auto-merge after checks pass. deleteBranch: delete the head branch after merge. background: true — spawn via bg_process and return jobId (recommended for `auto: true` since it can wait minutes for required checks).",
+            description: "Merge a pull request via `gh pr merge`. method: 'merge'|'squash'|'rebase' (default 'merge'). auto: enable auto-merge after checks pass. deleteBranch: delete the head branch after merge. background:true runs in the Bridge background runtime and returns a jobId usable with bg_poll or bg_kill (recommended for auto:true since it can wait minutes for required checks).",
             inputSchema: schemaObj([
                 "number":       intProp("PR number (required)."),
                 "repo":         strProp("Optional OWNER/REPO override."),
@@ -180,7 +180,7 @@ public enum GhModule {
                 "deleteBranch": boolProp("Delete the head branch after merging."),
                 "subject":      strProp("Optional commit subject (squash/merge only)."),
                 "bodyText":     strProp("Optional commit body text."),
-                "background":   boolProp("Run via bg_run and return jobId immediately.")
+                "background":   boolProp("Run in the Bridge background runtime and return a jobId usable with bg_poll or bg_kill.")
             ], required: ["number"]),
             handler: { arguments in
                 if let cap = await ensureCapability("gh_pr_merge", runtime: runtime) { return cap }
@@ -619,7 +619,7 @@ public enum GhModule {
                 "pid":        .int(Int(meta.pid)),
                 "label":      .string(label),
                 "command":    .string(cmd),
-                "hint":       .string("poll bg_poll with id=\(meta.id)")
+                "hint":       .string("Poll with bg_poll(jobId: '\(meta.id)'); cancel with bg_kill(jobId: '\(meta.id)').")
             ])
         } catch {
             return .object([

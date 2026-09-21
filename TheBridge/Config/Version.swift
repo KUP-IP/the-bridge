@@ -511,7 +511,9 @@ public enum BridgeConstants {
     ///   (skill_materialize_file; existing skills family). Copies a
     ///   Notion-hosted Files & media attachment into skill-files/<uuid>/
     ///   for file_read. Notion is not binary SSOT. 239 + 1 = 240.
-    public static let staticFeatureModuleToolCount = 240
+    /// Agent tool discovery (2026-09-14): +1 (tools_search; existing session
+    /// family, read-only bounded search + exact schema selection). 240 + 1 = 241.
+    public static let staticFeatureModuleToolCount = 241
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

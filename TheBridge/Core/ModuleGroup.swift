@@ -267,7 +267,7 @@ public enum ModuleGroupOverride {
     ///   • `list_routing_skills` → skills      (legacy alias for skills_routing_list)
     ///   • `skills_routing_list` → skills      (skills routing inventory)
     ///   • `notify`           → system         (singleton notification primitive)
-    ///   • `tools_list`       → system         (registry self-inspection)
+    ///   • `tools_list` / `tools_search` → system      (registry self-inspection)
     ///   • `session_info` / `session_clear` → system  (cross-cutting session ops)
     ///   • `system_info`      → system         (canonical)
     ///   • `process_list`     → system         (top-level supervision)
@@ -293,6 +293,7 @@ public enum ModuleGroupOverride {
         "skills_routing_list":  .skills,
         "notify":               .system,
         "tools_list":           .system,
+        "tools_search":         .system,
         "session_info":         .system,
         "session_clear":        .system,
         "system_info":          .system,

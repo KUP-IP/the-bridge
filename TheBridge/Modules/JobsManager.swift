@@ -1313,6 +1313,64 @@ public actor JobsManager {
 
     // MARK: Callback dispatch (SSE /jobs/{id}/run)
 
+    /// A tool handler can complete normally while returning an explicit failed
+    /// result envelope. Keep the raw envelope so scheduler history and
+    /// `$prev_result` remain evidence-bearing rather than collapsing it into a
+    /// generic thrown-error string.
+    private struct ActionDispatchFailure: Error, Sendable {
+        let result: JSONValue
+        let reason: String
+        let retryAllowed: Bool
+    }
+
+    private static func dispatchAction(
+        _ step: ActionStep,
+        previousResult: JSONValue?,
+        router: ToolRouter
+    ) async throws -> JSONValue {
+        let mcpArgs = try substitutePrev(step.arguments, prev: previousResult)
+        let toolName = canonicalActionToolName(step.tool)
+        let result = try await router.dispatch(toolName: toolName, arguments: .object(mcpArgs))
+        let json = JSONValue.fromMCP(result)
+        if let reason = ToolRouter.structuredFailureReason(for: result) {
+            throw ActionDispatchFailure(
+                result: json,
+                reason: reason,
+                retryAllowed: ToolRouter.structuredFailureMayBeRetried(for: result)
+            )
+        }
+        return json
+    }
+
+    private static func actionFailure(
+        _ error: Error,
+        stepIndex: Int,
+        toolName: String
+    ) -> (result: JSONValue, message: String) {
+        if let structured = error as? ActionDispatchFailure {
+            var reason = structured.reason
+            if case .object(let result) = structured.result,
+               case .string(let underlying)? = result["error"],
+               !underlying.isEmpty,
+               !reason.hasPrefix("error:") {
+                reason += "; error:\(underlying)"
+            }
+            return (
+                structured.result,
+                "step \(stepIndex) (\(toolName)): \(reason)"
+            )
+        }
+        let message = "step \(stepIndex) (\(toolName)): \(error.localizedDescription)"
+        return (.object(["error": .string(message)]), message)
+    }
+
+    /// Thrown errors retain the scheduler's established one-retry behavior.
+    /// Newly-classified returned failure envelopes must opt in through the
+    /// router's consequence-aware `retryable` contract.
+    private static func actionFailureMayBeRetried(_ error: Error) -> Bool {
+        (error as? ActionDispatchFailure)?.retryAllowed ?? true
+    }
+
     public func runCallback(jobId: String, router: ToolRouter, allowPaused: Bool = false) async throws -> Value {
         try await ensureOpen()
         self.router = router
@@ -1340,44 +1398,76 @@ public actor JobsManager {
 
         let start = Date()
         var stepResults: [JSONValue] = []
+        // `stepResults` is durable execution history. Keep the final raw result
+        // separately so a retry's persisted attempts wrapper never changes what
+        // the following action sees through `$prev_result`.
+        var previousResult: JSONValue?
         var firstError: String?
         var overall: ExecutionRecord.Status = .success
 
-        for (idx, step) in job.actionChain.enumerated() {
-            let previousResult = stepResults.last
+        actionLoop: for (idx, step) in job.actionChain.enumerated() {
+            let toolName = Self.canonicalActionToolName(step.tool)
             do {
-                let mcpArgs = try Self.substitutePrev(step.arguments, prev: previousResult)
-                let toolName = Self.canonicalActionToolName(step.tool)
-                let result = try await router.dispatch(toolName: toolName, arguments: .object(mcpArgs))
-                stepResults.append(JSONValue.fromMCP(result))
+                let result = try await Self.dispatchAction(
+                    step,
+                    previousResult: previousResult,
+                    router: router
+                )
+                stepResults.append(result)
+                previousResult = result
             } catch {
-                let toolName = Self.canonicalActionToolName(step.tool)
-                let msg = "step \(idx) (\(toolName)): \(error.localizedDescription)"
-                firstError = firstError ?? msg
-                stepResults.append(.object(["error": .string(msg)]))
+                let firstAttempt = Self.actionFailure(error, stepIndex: idx, toolName: toolName)
                 switch step.onFail {
                 case .stop:
+                    firstError = firstError ?? firstAttempt.message
+                    stepResults.append(firstAttempt.result)
+                    previousResult = firstAttempt.result
                     overall = stepResults.count == 1 ? .failure : .partial
-                    break
+                    break actionLoop
                 case .continue:
+                    firstError = firstError ?? firstAttempt.message
+                    stepResults.append(firstAttempt.result)
+                    previousResult = firstAttempt.result
                     overall = .partial
                     continue
                 case .retry:
+                    // A structured result may describe an ambiguous mutation
+                    // (for example, an AppleScript send that was invoked but
+                    // could not be verified). Preserve it as a single failed
+                    // logical step rather than risking a duplicate action.
+                    guard Self.actionFailureMayBeRetried(error) else {
+                        firstError = firstError ?? firstAttempt.message
+                        stepResults.append(firstAttempt.result)
+                        previousResult = firstAttempt.result
+                        overall = .partial
+                        continue
+                    }
                     // One retry with a short backoff.
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
                     do {
-                        let mcpArgs = try Self.substitutePrev(step.arguments, prev: previousResult)
-                        let toolName = Self.canonicalActionToolName(step.tool)
-                        let result = try await router.dispatch(toolName: toolName, arguments: .object(mcpArgs))
-                        stepResults[stepResults.count - 1] = JSONValue.fromMCP(result)
-                        firstError = nil
+                        let retryResult = try await Self.dispatchAction(
+                            step,
+                            previousResult: previousResult,
+                            router: router
+                        )
+                        stepResults.append(.object([
+                            "attempts": .array([firstAttempt.result, retryResult]),
+                            "result": retryResult
+                        ]))
+                        previousResult = retryResult
                         continue
                     } catch {
+                        let retryAttempt = Self.actionFailure(error, stepIndex: idx, toolName: toolName)
+                        stepResults.append(.object([
+                            "attempts": .array([firstAttempt.result, retryAttempt.result]),
+                            "result": retryAttempt.result
+                        ]))
+                        previousResult = retryAttempt.result
+                        firstError = firstError ?? firstAttempt.message
                         overall = .partial
                         continue
                     }
                 }
-                break
             }
         }
 

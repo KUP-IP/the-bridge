@@ -306,7 +306,7 @@ func runRemoteOAuthBearerTests() async {
         // authentication is the grant, SecurityGate/step-up are the per-call guard.
         for tool in ["snippets_list", "snippets_create", "snippets_delete",
                      "shell_exec", "job_run", "bridge_initialize", "bridge_status",
-                     "tools_list", "session_info", "contacts_get", "contacts_resolve_handle"] {
+                     "tools_list", "tools_search", "session_info", "contacts_get", "contacts_resolve_handle"] {
             let d = await gate.evaluate(toolName: tool, grantedScopes: [])
             guard case .allow = d else {
                 throw TestError.assertion("scope-less token must reach reachable tool \(tool)")
@@ -460,11 +460,11 @@ func runRemoteOAuthBearerTests() async {
 
     await test("ScopeGate: requiredScopes — bridge session tools accept any known connector scope") {
         // Bootstrap/session tools (bridge_initialize/bridge_status/tools_list/
-        // session_info) must be reachable by ANY authenticated connector
+        // tools_search/session_info) must be reachable by ANY authenticated connector
         // grant, not gated behind the specific bridge.session scope alone —
         // see "ScopeGate: bridge_initialize is bootstrap-reachable by any
         // connector grant" below for the reachability half of this contract.
-        for tool in ["bridge_initialize", "bridge_status", "tools_list", "session_info"] {
+        for tool in ["bridge_initialize", "bridge_status", "tools_list", "tools_search", "session_info"] {
             let req = try await gate.requiredScopes(for: tool).map(\.name)
             try expect(Set(req) == Set(ConnectorScopeName.all), "\(tool) got \(req)")
         }
@@ -502,6 +502,7 @@ func runRemoteOAuthBearerTests() async {
         try expect(reachable.contains("bridge_initialize"))
         try expect(reachable.contains("bridge_status"))
         try expect(reachable.contains("tools_list"))
+        try expect(reachable.contains("tools_search"))
         try expect(reachable.contains("session_info"))
         try expect(reachable.contains("contacts_resolve_handle"))
         try expect(reachable.contains("contacts_get"),

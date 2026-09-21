@@ -436,6 +436,7 @@ public enum ToolAnnotationCatalog {
         // openWorld (compiler / dependency fetch / wider machine).
         "system_info": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
         "tools_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
+        "tools_search": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
     ]
 
     /// Pure lookup. Returns nil on a miss — NO permissive default.

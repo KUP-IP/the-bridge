@@ -13,7 +13,32 @@
 // real user DB is never disturbed (CASCADE deletes the backlog rows too).
 
 import Foundation
+import MCP
 import TheBridgeLib
+
+private actor SchedulerActionProbe {
+    private var calls: [String: Int] = [:]
+    private var received: String?
+
+    func nextCall(_ name: String) -> Int {
+        calls[name, default: 0] += 1
+        return calls[name, default: 0]
+    }
+
+    func callCount(_ name: String) -> Int {
+        calls[name, default: 0]
+    }
+
+    func captureReceived(_ arguments: Value) -> Value {
+        if case .object(let object) = arguments,
+           case .string(let value)? = object["received"] {
+            received = value
+        }
+        return .object(["received": .string(received ?? "")])
+    }
+
+    func capturedReceived() -> String? { received }
+}
 
 func runSchedulerResilienceTests() async {
     print("\n\u{1F501} Scheduler Resilience Tests (PKT-381)")
@@ -38,15 +63,319 @@ func runSchedulerResilienceTests() async {
 
     // Insert a throwaway active job and return its id; caller deletes it.
     func makeJob(_ schedule: String, name: String = "resilience-test",
+                 actions: [ActionStep] = [ActionStep(tool: "noop")],
                  createdAt: Date = Date(), skipOnBattery: Bool = false) async throws -> String {
         try await JobStore.shared.open()
         let id = "RT-" + UUID().uuidString
         let job = JobRecord(id: id, name: name, schedule: schedule,
-                            actionChain: [ActionStep(tool: "noop")],
+                            actionChain: actions,
                             status: .active, skipOnBattery: skipOnBattery,
                             createdAt: createdAt, updatedAt: createdAt)
         try await JobStore.shared.insert(job)
         return id
+    }
+
+    // ---------------------------------------------------------------
+    // Returned error envelopes must fail jobs just as thrown errors do.
+    // ---------------------------------------------------------------
+
+    await test("Structured failure classifier matches the MCP transport contract") {
+        let cases: [(Value, Bool)] = [
+            (.object(["success": .bool(false)]), true),
+            (.object(["status": .string("failed")]), true),
+            (.object(["status": .string("error")]), true),
+            (.object(["status": .string("partial_or_unverified")]), true),
+            (.object(["ok": .bool(false)]), true),
+            (.object(["error": .string("denied")]), true),
+            (.object(["success": .bool(true)]), false),
+            (.object(["status": .string("started")]), false)
+        ]
+        for (value, expectedFailure) in cases {
+            try expect((ToolRouter.structuredFailureReason(for: value) != nil) == expectedFailure,
+                       "classifier mismatch for \(value)")
+        }
+        try expect(
+            ToolRouter.structuredFailureMayBeRetried(for: .object([
+                "success": .bool(false), "retryable": .bool(true)
+            ])),
+            "a handler may explicitly mark a known-safe failure retryable"
+        )
+        try expect(
+            !ToolRouter.structuredFailureMayBeRetried(for: .object([
+                "status": .string("partial_or_unverified"), "retryable": .bool(true)
+            ])),
+            "partial or unverified outcomes must not be retried"
+        )
+        try expect(
+            !ToolRouter.structuredFailureMayBeRetried(for: .object([
+                "error": .string("send failed"), "retryable": .bool(true),
+                "deliveryInvoked": .bool(true), "consequencePossible": .bool(true)
+            ])),
+            "a possible delivery remains non-retryable despite a retryable flag"
+        )
+        try expect(
+            !ToolRouter.structuredFailureMayBeRetried(for: .object([
+                "ok": .bool(false), "retryable": .bool(true),
+                "mutated": .array([.object(["messageId": .string("123")])]),
+                "unverified": .array([.object(["messageId": .string("123")])])
+            ])),
+            "an unverified mutation remains non-retryable despite a retryable flag"
+        )
+    }
+
+    await test("Scheduler: structured failure with stop records raw evidence and stops later actions") {
+        let id = try await makeJob(
+            "0 6 * * *",
+            actions: [
+                ActionStep(tool: "structured_stop", onFail: .stop),
+                ActionStep(tool: "should_not_run")
+            ]
+        )
+        defer { Task { try? await JobStore.shared.delete(id: id) } }
+        let router = await makeTestToolRouter()
+        let probe = SchedulerActionProbe()
+        await router.register(ToolRegistration(
+            name: "structured_stop", module: "scheduler-test", tier: .open,
+            description: "test", inputSchema: .object(["type": .string("object")]),
+            handler: { _ in .object(["success": .bool(false), "error": .string("denied")]) }
+        ))
+        await router.register(ToolRegistration(
+            name: "should_not_run", module: "scheduler-test", tier: .open,
+            description: "test", inputSchema: .object(["type": .string("object")]),
+            handler: { _ in
+                _ = await probe.nextCall("should_not_run")
+                return .object(["ok": .bool(true)])
+            }
+        ))
+
+        let result = try await JobsManager.shared.runCallback(jobId: id, router: router)
+        guard case .object(let response) = result,
+              case .string(let status)? = response["status"],
+              case .int(let steps)? = response["steps"] else {
+            throw TestError.assertion("unexpected scheduler callback response: \(result)")
+        }
+        try expect(status == "failure" && steps == 1,
+                   "structured stop must report one failed logical step, got status=\(status) steps=\(steps)")
+        try expect(await probe.callCount("should_not_run") == 0,
+                   "stop policy must not dispatch the next action")
+        guard let execution = try await JobStore.shared.executions(jobId: id, limit: 1).first,
+              let results = execution.results,
+              let data = results.data(using: .utf8) else {
+            throw TestError.assertion("missing persisted execution evidence")
+        }
+        let persisted = try JSONDecoder().decode([JSONValue].self, from: data)
+        try expect(persisted == [.object(["success": .bool(false), "error": .string("denied")])],
+                   "structured envelope must be preserved verbatim in history")
+        try expect(execution.errorMessage?.contains("success:false") == true,
+                   "scheduler error should identify the structured failure")
+        try await JobStore.shared.delete(id: id)
+    }
+
+    await test("Scheduler: structured failure with continue remains partial and runs the next action") {
+        let id = try await makeJob(
+            "0 6 * * *",
+            actions: [
+                ActionStep(tool: "structured_continue", onFail: .continue),
+                ActionStep(tool: "runs_after_continue")
+            ]
+        )
+        defer { Task { try? await JobStore.shared.delete(id: id) } }
+        let router = await makeTestToolRouter()
+        let probe = SchedulerActionProbe()
+        await router.register(ToolRegistration(
+            name: "structured_continue", module: "scheduler-test", tier: .open,
+            description: "test", inputSchema: .object(["type": .string("object")]),
+            handler: { _ in .object(["status": .string("failed"), "detail": .string("first")]) }
+        ))
+        await router.register(ToolRegistration(
+            name: "runs_after_continue", module: "scheduler-test", tier: .open,
+            description: "test", inputSchema: .object(["type": .string("object")]),
+            handler: { _ in
+                _ = await probe.nextCall("runs_after_continue")
+                return .object(["ok": .bool(true)])
+            }
+        ))
+
+        let result = try await JobsManager.shared.runCallback(jobId: id, router: router)
+        guard case .object(let response) = result,
+              case .string(let status)? = response["status"],
+              case .int(let steps)? = response["steps"] else {
+            throw TestError.assertion("unexpected scheduler callback response: \(result)")
+        }
+        try expect(status == "partial" && steps == 2,
+                   "continue policy must retain partial outcome and two logical steps")
+        try expect(await probe.callCount("runs_after_continue") == 1,
+                   "continue policy must dispatch the next action")
+        try await JobStore.shared.delete(id: id)
+    }
+
+    await test("Scheduler: retry retains both attempts while $prev_result sees the recovered raw result") {
+        let id = try await makeJob(
+            "0 6 * * *",
+            actions: [
+                ActionStep(tool: "structured_retry", onFail: .retry),
+                ActionStep(tool: "consume_recovered", arguments: ["received": .string("$prev_result.value")])
+            ]
+        )
+        defer { Task { try? await JobStore.shared.delete(id: id) } }
+        let router = await makeTestToolRouter()
+        let probe = SchedulerActionProbe()
+        await router.register(ToolRegistration(
+            name: "structured_retry", module: "scheduler-test", tier: .open,
+            description: "test", inputSchema: .object(["type": .string("object")]),
+            handler: { _ in
+                let call = await probe.nextCall("structured_retry")
+                if call == 1 {
+                    return .object([
+                        "success": .bool(false), "error": .string("transient"),
+                        "retryable": .bool(true)
+                    ])
+                }
+                return .object(["value": .string("recovered")])
+            }
+        ))
+        await router.register(ToolRegistration(
+            name: "consume_recovered", module: "scheduler-test", tier: .open,
+            description: "test", inputSchema: .object(["type": .string("object")]),
+            handler: { arguments in await probe.captureReceived(arguments) }
+        ))
+
+        let result = try await JobsManager.shared.runCallback(jobId: id, router: router)
+        guard case .object(let response) = result,
+              case .string(let status)? = response["status"],
+              case .int(let steps)? = response["steps"] else {
+            throw TestError.assertion("unexpected scheduler callback response: \(result)")
+        }
+        try expect(status == "success" && steps == 2,
+                   "successful retry must be one logical successful step before its consumer")
+        try expect(await probe.callCount("structured_retry") == 2,
+                   "retry policy must dispatch exactly twice")
+        try expect(await probe.capturedReceived() == "recovered",
+                   "$prev_result must use the recovered raw response, not the persisted attempts wrapper")
+        guard let execution = try await JobStore.shared.executions(jobId: id, limit: 1).first,
+              let results = execution.results,
+              let data = results.data(using: .utf8) else {
+            throw TestError.assertion("missing retry execution evidence")
+        }
+        let persisted = try JSONDecoder().decode([JSONValue].self, from: data)
+        guard persisted.count == 2,
+              case .object(let retryEntry) = persisted[0],
+              case .array(let attempts)? = retryEntry["attempts"],
+              case .object(let finalResult)? = retryEntry["result"] else {
+            throw TestError.assertion("retry history must preserve attempts plus final result")
+        }
+        try expect(attempts.count == 2,
+                   "retry history must retain both dispatch results")
+        try expect(finalResult["value"] == .string("recovered"),
+                   "retry history must identify the final recovered result")
+        try await JobStore.shared.delete(id: id)
+    }
+
+    await test("Scheduler: ambiguous ok:false retry failure is recorded once without redispatch") {
+        let id = try await makeJob(
+            "0 6 * * *",
+            actions: [ActionStep(tool: "ambiguous_send", onFail: .retry)]
+        )
+        defer { Task { try? await JobStore.shared.delete(id: id) } }
+        let router = await makeTestToolRouter()
+        let probe = SchedulerActionProbe()
+        await router.register(ToolRegistration(
+            name: "ambiguous_send", module: "scheduler-test", tier: .open,
+            description: "test", inputSchema: .object(["type": .string("object")]),
+            handler: { _ in
+                _ = await probe.nextCall("ambiguous_send")
+                return .object([
+                    "ok": .bool(false),
+                    "status": .string("partial_or_unverified"),
+                    "deliveryInvoked": .bool(true),
+                    "consequencePossible": .bool(true),
+                    "mutated": .array([.object(["messageId": .string("123")])]),
+                    "unverified": .array([.object(["messageId": .string("123")])]),
+                    "error": .string("AppleScript outcome unknown")
+                ])
+            }
+        ))
+
+        let result = try await JobsManager.shared.runCallback(jobId: id, router: router)
+        guard case .object(let response) = result,
+              case .string(let status)? = response["status"],
+              case .int(let steps)? = response["steps"] else {
+            throw TestError.assertion("unexpected scheduler callback response: \(result)")
+        }
+        try expect(status == "partial" && steps == 1,
+                   "ambiguous retry outcome must remain one partial logical step")
+        try expect(await probe.callCount("ambiguous_send") == 1,
+                   "ambiguous action must never be dispatched a second time")
+        guard let execution = try await JobStore.shared.executions(jobId: id, limit: 1).first,
+              let results = execution.results,
+              let data = results.data(using: .utf8) else {
+            throw TestError.assertion("missing ambiguous-outcome execution evidence")
+        }
+        let persisted = try JSONDecoder().decode([JSONValue].self, from: data)
+        try expect(persisted == [.object([
+            "ok": .bool(false),
+            "status": .string("partial_or_unverified"),
+            "deliveryInvoked": .bool(true),
+            "consequencePossible": .bool(true),
+            "mutated": .array([.object(["messageId": .string("123")])]),
+            "unverified": .array([.object(["messageId": .string("123")])]),
+            "error": .string("AppleScript outcome unknown")
+        ])], "ambiguous outcome must be retained verbatim without a retry wrapper")
+        try expect(execution.errorMessage?.contains("ok:false") == true,
+                   "ambiguous scheduler error should retain the structured classification")
+        try await JobStore.shared.delete(id: id)
+    }
+
+    await test("Scheduler: retry exhaustion preserves both attempts and the first error") {
+        let id = try await makeJob(
+            "0 6 * * *",
+            actions: [ActionStep(tool: "retry_exhausted", onFail: .retry)]
+        )
+        defer { Task { try? await JobStore.shared.delete(id: id) } }
+        let router = await makeTestToolRouter()
+        let probe = SchedulerActionProbe()
+        await router.register(ToolRegistration(
+            name: "retry_exhausted", module: "scheduler-test", tier: .open,
+            description: "test", inputSchema: .object(["type": .string("object")]),
+            handler: { _ in
+                let call = await probe.nextCall("retry_exhausted")
+                return .object([
+                    "success": .bool(false),
+                    "retryable": .bool(true),
+                    "error": .string(call == 1 ? "first transient error" : "second transient error")
+                ])
+            }
+        ))
+
+        let result = try await JobsManager.shared.runCallback(jobId: id, router: router)
+        guard case .object(let response) = result,
+              case .string(let status)? = response["status"],
+              case .int(let steps)? = response["steps"] else {
+            throw TestError.assertion("unexpected scheduler callback response: \(result)")
+        }
+        try expect(status == "partial" && steps == 1,
+                   "retry exhaustion must remain one partial logical step")
+        try expect(await probe.callCount("retry_exhausted") == 2,
+                   "an explicitly retryable failure should dispatch exactly twice")
+        guard let execution = try await JobStore.shared.executions(jobId: id, limit: 1).first,
+              let results = execution.results,
+              let data = results.data(using: .utf8) else {
+            throw TestError.assertion("missing retry exhaustion execution evidence")
+        }
+        let persisted = try JSONDecoder().decode([JSONValue].self, from: data)
+        guard persisted.count == 1,
+              case .object(let retryEntry) = persisted[0],
+              case .array(let attempts)? = retryEntry["attempts"],
+              case .object(let finalResult)? = retryEntry["result"] else {
+            throw TestError.assertion("retry exhaustion must preserve an attempts wrapper")
+        }
+        try expect(attempts.count == 2,
+                   "retry exhaustion must preserve both raw failure envelopes")
+        try expect(finalResult["error"] == .string("second transient error"),
+                   "retry exhaustion must identify the final raw result")
+        try expect(execution.errorMessage?.contains("first transient error") == true,
+                   "retry exhaustion should retain the first observed error")
+        try await JobStore.shared.delete(id: id)
     }
 
     // ---------------------------------------------------------------

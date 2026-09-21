@@ -203,6 +203,64 @@ func runShellModuleTests() async {
         }
     }
 
+    await test("bounded process output preserves both ends of one oversized read") {
+        let output = BoundedProcessOutput(limit: 10)
+        output.append(Data("abcdefghijklmnop".utf8))
+        let snapshot = output.snapshot()
+        try expect(snapshot.truncated, "Expected oversized single read to be marked truncated")
+        try expect(snapshot.totalBytes == 16, "Expected all 16 source bytes to be counted")
+        try expect(snapshot.capturedBytes == 10, "Expected capture to remain at the configured limit")
+        try expect(snapshot.lineCount == 1, "Expected full-stream line accounting despite truncation")
+        try expect(snapshot.text.hasPrefix("abcde"), "Expected retained head from oversized read")
+        try expect(snapshot.text.hasSuffix("lmnop"), "Expected retained tail from oversized read")
+        try expect(snapshot.text.contains("output truncated"), "Expected an explicit omitted-output marker")
+    }
+
+    await test("shell_exec drains stderr while stdout remains open") {
+        let result = try await router.dispatch(
+            toolName: "shell_exec",
+            arguments: .object([
+                "command": .string("printf '%*s' 131072 '' >&2; printf 'drained-ok'"),
+                "workingDir": .string(nonGitWorkingDirectory),
+                "timeout": .int(3)
+            ])
+        )
+        guard case .object(let dict) = result,
+              case .string(let stdout) = dict["stdout"],
+              case .int(let stderrBytes) = dict["stderrBytes"],
+              case .bool(let timedOut) = dict["timedOut"],
+              case .bool(let success) = dict["success"] else {
+            throw TestError.assertion("Expected concurrent-drain result metadata")
+        }
+        try expect(stdout.contains("drained-ok"), "Expected stdout after large stderr write")
+        try expect(stderrBytes >= 131_072, "Expected the complete stderr stream to be drained")
+        try expect(!timedOut, "Concurrent drain must not hit the request timeout")
+        try expect(success, "Command should succeed after both pipes drain")
+    }
+
+    await test("shell_exec caps oversized stream while reporting full byte count") {
+        let result = try await router.dispatch(
+            toolName: "shell_exec",
+            arguments: .object([
+                "command": .string("printf '%*s' 1100000 ''"),
+                "workingDir": .string(nonGitWorkingDirectory),
+                "timeout": .int(5)
+            ])
+        )
+        guard case .object(let dict) = result,
+              case .string(let stdout) = dict["stdout"],
+              case .int(let stdoutBytes) = dict["stdoutBytes"],
+              case .int(let capturedBytes) = dict["stdoutCapturedBytes"],
+              case .bool(let truncated) = dict["stdoutTruncated"],
+              case .bool(let captureTruncated) = dict["stdoutCaptureTruncated"] else {
+            throw TestError.assertion("Expected bounded stdout metadata")
+        }
+        try expect(stdoutBytes >= 1_100_000, "Expected total source bytes despite capture cap")
+        try expect(capturedBytes <= 1_000_000, "Captured bytes must stay within the documented cap")
+        try expect(truncated && captureTruncated, "Oversized capture must be explicitly marked")
+        try expect(stdout.contains("output truncated"), "Returned stdout should label the omitted range")
+    }
+
     // shell_exec: missing command param
     await test("shell_exec rejects missing command") {
         do {

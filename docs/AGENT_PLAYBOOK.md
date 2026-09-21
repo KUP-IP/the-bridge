@@ -11,9 +11,10 @@ in the Swift source (grep `name: "<tool>"` under `TheBridge/Modules/`). Tools th
 section — do not assume them.
 
 > All tool names are the bare MCP tool names. Depending on your host they may be
-> prefixed (`mcp__Bridge_MCP__…`, `mcp__The_Bridge__…`). If a tool is deferred, load
-> its schema with `ToolSearch` (`select:<name>`) before the first call — guessing the
-> argument shape hard-errors (see `AGENT_FEEDBACK.md`, 2026-05-19).
+> prefixed (`mcp__Bridge_MCP__…`, `mcp__The_Bridge__…`). To find a Bridge tool or load
+> one exact schema without expanding the catalog, use `tools_search` (`select:<name>`) before
+> the first call. Guessing the argument shape hard-errors (see `AGENT_FEEDBACK.md`,
+> 2026-05-19).
 
 ---
 
@@ -21,18 +22,19 @@ section — do not assume them.
 
 | Task | Reach for | Not |
 |---|---|---|
-| Build / test / migration / dev server (anything > shell's ~60s request window) | `bg_process_start` → `bg_process_status` / `bg_process_logs` → `bg_process_kill` | a foreground `shell_exec` that will time out |
+| Build / test / migration / dev server (anything > shell's ~60s request window) | `bg_run` → `bg_poll` → optional `bg_kill` | a foreground `shell_exec` that will time out |
+| Find one tool or exact argument schema | `tools_search` (`query` or `select`) | expanding the entire catalog just to inspect one tool |
 | Surgical in-place file edit | `file_edit` (`mode:"replace"` or `mode:"patch"`) | `shell_exec` + `sed`/`python3` heredoc |
 | Search source code | `code_search` (ripgrep, structured matches) | `shell_exec rg` for programmatic consumption |
 | Ground `$HOME` / user / cwd before touching the filesystem | `system_info` | guessing `/Users/<name>` from an email |
 | Read specific columns from a Notion data source | `notion_query` with `properties` + `pageSize` | N follow-up reads to bucket by Status |
 | Read one Notion page's prose | `notion_page_markdown_read` | paginating raw blocks yourself |
-| Long-running shell work generally | `bg_process_*` | `cmd &` (still capped to the request window) |
+| Long-running shell work generally | `bg_run` → `bg_poll` | `cmd &` (still capped to the request window) |
 | On-device Settings verification | manual AX raise + `screen_capture` (see [Not yet available](#not-yet-available)) | a dedicated settings-navigation tool — it does not exist yet |
 
 ---
 
-## Builds, tests, and anything long-running → `bg_process_*`
+## Builds, tests, and anything long-running → `bg_run` / `bg_poll`
 
 `shell_exec` has a short server-side request window (~60s observed; see
 `AGENT_FEEDBACK.md` 2026-05-10 / 2026-05-11). A trailing `&` does **not** help — the
@@ -40,22 +42,36 @@ background command is still capped to that window. For `swift build`, `make test
 migrations, dev servers, or any work where you want to keep iterating while it runs,
 use the background-process module:
 
-- **`bg_process_start`** (`.request`) — spawns the command as a detached child in its
-  own POSIX process group; returns a job `id` immediately. Optional `workingDir`,
-  `env`, `label`. Stdout/stderr stream to
-  `~/Library/Application Support/TheBridge/jobs/<id>/`.
-- **`bg_process_status`** (`.request`) — `status`, `pid`, `pgid`, `exitCode`,
-  `killSignal`, timestamps for one job `id`.
-- **`bg_process_logs`** (`.request`) — paginated stdout/stderr chunk. Pass `cursor:0`
-  (or omit) for the start; pass the returned `nextCursor` to continue. `eof:true` once
-  the job is terminal and the cursor reached `totalBytes`.
-- **`bg_process_list`** (`.request`) — enumerate jobs (filter by `label`).
-- **`bg_process_kill`** (`.request`) — terminate a job by `id`.
+- **`bg_run`** (`.request`) — starts a detached shell command and returns a `jobId`
+  immediately. Optional `workingDir`, `env`, `loginShell`, `label`, and
+  `ownerSession`. Combined stdout/stderr are captured for polling.
+- **`bg_poll`** (`.open`) — returns one job's `status`, trailing combined output,
+  `logPath`, and when terminal an `exitCode` / `success`. Use `tailLines` to
+  bound output.
+- **`bg_kill`** (`.notify`) — stops one job by `jobId`; it is idempotent for a
+  terminal job.
 
-Typical loop: `bg_process_start` the build → poll `bg_process_status` until terminal →
-`bg_process_logs` to read the tail on failure.
+Typical loop: `bg_run` the build → poll `bg_poll` until `status` is no longer
+`running` → inspect the returned `tail` on failure. Use `bg_kill` only when you
+need to stop live work.
 
 Source: `TheBridge/Modules/BgProcessModule.swift`.
+
+## Find a tool or exact schema → `tools_search`
+
+Use `tools_search` when a capability is known but the exact Bridge tool or argument
+shape is not:
+
+- `query:"calendar availability"` returns a bounded, ranked set of matching tool names,
+  module families, tiers, short summaries, and match reasons.
+- `query:"select:calendar_free_busy"` (or `select:"calendar_free_busy"`) returns the
+  one exact registered tool, including the complete exposed input schema, descriptions,
+  enum constraints, and selection guidance.
+- Add `module:"calendar"` to keep a search within one family, and `limit` (1...25) to
+  constrain the result set.
+
+For a complete module inventory, use `tools_list` with `module`; for the whole catalog,
+use compact `tools_list` only when its larger response is actually needed.
 
 ## Surgical file edits → `file_edit`
 

@@ -67,11 +67,12 @@ func runAgentSurfaceReliabilityTests() async {
         registration("alpha"),
         registration("bridge_initialize", module: "standing_orders"),
         registration("tools_list", module: "session"),
+        registration("tools_search", module: "session"),
         registration("middle"),
         registration("bridge_status", module: "cloud"),
     ]
     let expected = [
-        "bridge_initialize", "bridge_status", "tools_list", "session_info",
+        "bridge_initialize", "bridge_status", "tools_list", "session_info", "tools_search",
         "alpha", "middle", "zulu",
     ]
 
@@ -103,7 +104,7 @@ func runAgentSurfaceReliabilityTests() async {
         let second = await router.toolManifestSnapshot(disabledNames: ["middle"])
         try expect(second.revision > first.revision, "dynamic registration must advance manifest revision")
         try expect(second.registrations.map(\.name) == [
-            "bridge_initialize", "bridge_status", "tools_list", "session_info",
+            "bridge_initialize", "bridge_status", "tools_list", "session_info", "tools_search",
             "alpha", "beta", "zulu",
         ])
     }
@@ -115,15 +116,15 @@ func runAgentSurfaceReliabilityTests() async {
             licenseStatusProvider: { .trial(daysRemaining: 5) }
         )
         await SessionModule.register(on: router, auditLog: AuditLog())
-        for item in shuffled where !["tools_list", "session_info"].contains(item.name) {
+        for item in shuffled where !["tools_list", "session_info", "tools_search"].contains(item.name) {
             await router.register(item)
         }
         let result = try await router.dispatch(toolName: "tools_list", arguments: .object([:]))
         let listed = try names(from: result)
-        try expect(Array(listed.prefix(4)) == [
-            "bridge_initialize", "bridge_status", "tools_list", "session_info",
+        try expect(Array(listed.prefix(5)) == [
+            "bridge_initialize", "bridge_status", "tools_list", "session_info", "tools_search",
         ])
-        try expect(Array(listed.dropFirst(4)) == Array(listed.dropFirst(4)).sorted(),
+        try expect(Array(listed.dropFirst(5)) == Array(listed.dropFirst(5)).sorted(),
                    "tools_list remainder must be alphabetical: \(listed)")
     }
 

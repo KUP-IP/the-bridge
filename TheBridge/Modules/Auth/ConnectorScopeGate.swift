@@ -25,7 +25,7 @@
 //                         least-privilege per data-sensitivity tier.
 //   • bridge.session   → broker/session bootstrap + management tools
 //                         (`bridge_initialize`, `bridge_status`, `tools_list`,
-//                         `session_info`, `session_clear`). Available to any
+//                         `tools_search`, `session_info`, `session_clear`). Available to any
 //                         authenticated connector grant — none mutate
 //                         operator config, and the read-only members are
 //                         needed before a client can route work correctly.
@@ -112,7 +112,7 @@ public struct ConnectorScopeGate: ScopeGating {
     /// SecurityGate and per-tool annotations; this bucket only makes the
     /// connector allowlist explicit.
     private static let bridgeSessionTools: Set<String> = [
-        "bridge_initialize", "bridge_status", "tools_list", "session_info",
+        "bridge_initialize", "bridge_status", "tools_list", "tools_search", "session_info",
         "session_clear",
     ]
 

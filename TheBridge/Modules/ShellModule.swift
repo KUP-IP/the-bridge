@@ -16,9 +16,14 @@ import MCP
 public enum ShellModule {
 
     public static let moduleName = "shell"
+    private static let outputLimitBytes = 1_000_000
 
     private final class TimeoutFlag: @unchecked Sendable {
-        var value = false
+        private let lock = NSLock()
+        private var stored = false
+
+        func set() { lock.lock(); stored = true; lock.unlock() }
+        var value: Bool { lock.lock(); defer { lock.unlock() }; return stored }
     }
 
     private static func valueToString(_ value: Value) -> String? {
@@ -32,19 +37,28 @@ public enum ShellModule {
         return nil
     }
 
-    private static func lineSummary(_ text: String, head: Int?, tail: Int?) -> (text: String, lineCount: Int, truncated: Bool) {
+    private static func lineSummary(
+        _ text: String,
+        fullLineCount: Int? = nil,
+        captureTruncated: Bool = false,
+        head: Int?,
+        tail: Int?
+    ) -> (text: String, lineCount: Int, truncated: Bool) {
         var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         if lines.last == "" { lines.removeLast() }
-        let lineCount = text.isEmpty ? 0 : lines.count
+        let lineCount = fullLineCount ?? (text.isEmpty ? 0 : lines.count)
         let headCount = head.map { max(0, $0) }
         let tailCount = tail.map { max(0, $0) }
-        guard headCount != nil || tailCount != nil else { return (text, lineCount, false) }
+        guard headCount != nil || tailCount != nil else { return (text, lineCount, captureTruncated) }
         let h = headCount ?? 0
         let t = tailCount ?? 0
-        if lineCount <= h + t || lineCount == 0 { return (text, lineCount, false) }
+        if !captureTruncated && (lineCount <= h + t || lineCount == 0) {
+            return (text, lineCount, false)
+        }
         var kept: [String] = []
         if h > 0 { kept.append(contentsOf: lines.prefix(h)) }
-        kept.append("… [truncated \(lineCount - h - t) middle lines] …")
+        let omitted = max(0, lineCount - h - t)
+        kept.append("… [truncated \(omitted) middle lines] …")
         if t > 0 { kept.append(contentsOf: lines.suffix(t)) }
         return (kept.joined(separator: "\n"), lineCount, true)
     }
@@ -57,7 +71,7 @@ public enum ShellModule {
             name: "shell_exec",
             module: moduleName,
             tier: .request,
-            description: "Run a shell command. Returns {stdout, stderr, exitCode, duration}. Pass timeout (seconds) to override the 600s default for long builds/migrations. Escalates for sudo/rm -rf patterns. Prefer dedicated tools when available: file_list (not ls), file_read (not cat), file_write (not echo >), file_copy (not cp), file_move (not mv), dir_create (not mkdir), file_metadata (not stat), process_list (not ps), clipboard_read/clipboard_write (not pbcopy/pbpaste), screen_capture (not screencapture), credential_read (not security), applescript_exec (not osascript). If a dedicated tool is not available on this connection, shell_exec is the correct fallback. Use shell_exec directly for git, make, build tools, package managers, and commands with no dedicated tool equivalent.",
+            description: "Run a shell command. Returns {stdout, stderr, exitCode, duration}. Each stream is captured concurrently and capped at 1,000,000 bytes; use stdoutBytes/stderrBytes and truncation fields to detect omitted output. Pass timeout (seconds) to override the 600s default for long builds/migrations. Escalates for sudo/rm -rf patterns. Prefer dedicated tools when available: file_list (not ls), file_read (not cat), file_write (not echo >), file_copy (not cp), file_move (not mv), dir_create (not mkdir), file_metadata (not stat), process_list (not ps), clipboard_read/clipboard_write (not pbcopy/pbpaste), screen_capture (not screencapture), credential_read (not security), applescript_exec (not osascript). If a dedicated tool is not available on this connection, shell_exec is the correct fallback. Use shell_exec directly for git, make, build tools, package managers, and commands with no dedicated tool equivalent.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -194,7 +208,13 @@ public enum ShellModule {
                         stdoutLineCount: 0,
                         stderrLineCount: 1,
                         stdoutTruncated: false,
-                        stderrTruncated: false
+                        stderrTruncated: false,
+                        stdoutBytes: 0,
+                        stderrBytes: error.localizedDescription.utf8.count,
+                        stdoutCapturedBytes: 0,
+                        stderrCapturedBytes: error.localizedDescription.utf8.count,
+                        stdoutCaptureTruncated: false,
+                        stderrCaptureTruncated: false
                     )
                 }
 
@@ -203,7 +223,7 @@ public enum ShellModule {
                 // this is residual request-window truth for shell_exec only.
                 let timeoutItem = DispatchWorkItem {
                     if process.isRunning {
-                        timeoutFlag.value = true
+                        timeoutFlag.set()
                         let pid = process.processIdentifier
                         process.terminate()
                         DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
@@ -218,24 +238,32 @@ public enum ShellModule {
                     execute: timeoutItem
                 )
 
-                let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                let outputDrains = ProcessOutputDrains.start(
+                    stdoutHandle: stdoutPipe.fileHandleForReading,
+                    stderrHandle: stderrPipe.fileHandleForReading,
+                    limitPerStream: outputLimitBytes
+                )
 
                 process.waitUntilExit()
                 timeoutItem.cancel()
+                outputDrains.wait()
 
                 let elapsed = ContinuousClock.now - startTime
                 let durationSec = Double(elapsed.components.seconds)
                     + Double(elapsed.components.attoseconds) / 1_000_000_000_000_000_000.0
-                let rawStdout = String(data: stdoutData, encoding: .utf8) ?? ""
-                let rawStderr = String(data: stderrData, encoding: .utf8) ?? ""
+                let stdoutCapture = outputDrains.stdout.snapshot()
+                let stderrCapture = outputDrains.stderr.snapshot()
                 let stdoutSummary = Self.lineSummary(
-                    rawStdout,
+                    stdoutCapture.text,
+                    fullLineCount: stdoutCapture.lineCount,
+                    captureTruncated: stdoutCapture.truncated,
                     head: Self.valueToInt(args["stdoutHeadLines"]),
                     tail: Self.valueToInt(args["stdoutTailLines"])
                 )
                 let stderrSummary = Self.lineSummary(
-                    rawStderr,
+                    stderrCapture.text,
+                    fullLineCount: stderrCapture.lineCount,
+                    captureTruncated: stderrCapture.truncated,
                     head: Self.valueToInt(args["stderrHeadLines"]),
                     tail: Self.valueToInt(args["stderrTailLines"])
                 )
@@ -302,7 +330,13 @@ public enum ShellModule {
                     stdoutLineCount: stdoutSummary.lineCount,
                     stderrLineCount: stderrSummary.lineCount,
                     stdoutTruncated: stdoutSummary.truncated,
-                    stderrTruncated: stderrSummary.truncated
+                    stderrTruncated: stderrSummary.truncated,
+                    stdoutBytes: stdoutCapture.totalBytes,
+                    stderrBytes: stderrCapture.totalBytes,
+                    stdoutCapturedBytes: stdoutCapture.capturedBytes,
+                    stderrCapturedBytes: stderrCapture.capturedBytes,
+                    stdoutCaptureTruncated: stdoutCapture.truncated,
+                    stderrCaptureTruncated: stderrCapture.truncated
                 )
             }
         ))
@@ -312,7 +346,7 @@ public enum ShellModule {
             name: "run_script",
             module: moduleName,
             tier: .request,
-            description: "Compatibility surface for allow-listed scripts. Execution currently fails closed because arbitrary scripts cannot prove a complete worktree mutation target set; use shell_exec with an explicit command and workingDir.",
+            description: "Compatibility surface for allow-listed scripts. Captures stdout/stderr concurrently with a 1,000,000-byte cap per stream and reports byte/truncation evidence. Execution currently fails closed because arbitrary scripts cannot prove a complete worktree mutation target set; use shell_exec with an explicit command and workingDir.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -421,19 +455,28 @@ public enum ShellModule {
                     execute: timeoutItem
                 )
 
-                // PKT-373 P0-3: Read pipes BEFORE waitUntilExit to prevent deadlock
-                let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                let outputDrains = ProcessOutputDrains.start(
+                    stdoutHandle: stdoutPipe.fileHandleForReading,
+                    stderrHandle: stderrPipe.fileHandleForReading,
+                    limitPerStream: outputLimitBytes
+                )
 
                 process.waitUntilExit()
                 timeoutItem.cancel()
-                let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
-                let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+                outputDrains.wait()
+                let stdout = outputDrains.stdout.snapshot()
+                let stderr = outputDrains.stderr.snapshot()
 
                 return .object([
-                    "stdout": .string(stdout),
-                    "stderr": .string(stderr),
-                    "exitCode": .int(Int(process.terminationStatus))
+                    "stdout": .string(stdout.text),
+                    "stderr": .string(stderr.text),
+                    "exitCode": .int(Int(process.terminationStatus)),
+                    "stdoutBytes": .int(stdout.totalBytes),
+                    "stderrBytes": .int(stderr.totalBytes),
+                    "stdoutCapturedBytes": .int(stdout.capturedBytes),
+                    "stderrCapturedBytes": .int(stderr.capturedBytes),
+                    "stdoutTruncated": .bool(stdout.truncated),
+                    "stderrTruncated": .bool(stderr.truncated)
                 ])
             }
         ))
@@ -453,7 +496,13 @@ public enum ShellModule {
         stdoutLineCount: Int,
         stderrLineCount: Int,
         stdoutTruncated: Bool,
-        stderrTruncated: Bool
+        stderrTruncated: Bool,
+        stdoutBytes: Int,
+        stderrBytes: Int,
+        stdoutCapturedBytes: Int,
+        stderrCapturedBytes: Int,
+        stdoutCaptureTruncated: Bool,
+        stderrCaptureTruncated: Bool
     ) -> Value {
         var obj: [String: Value] = [
             "stdout": .string(stdout),
@@ -473,6 +522,12 @@ public enum ShellModule {
             "stderrLineCount": .int(stderrLineCount),
             "stdoutTruncated": .bool(stdoutTruncated),
             "stderrTruncated": .bool(stderrTruncated),
+            "stdoutBytes": .int(stdoutBytes),
+            "stderrBytes": .int(stderrBytes),
+            "stdoutCapturedBytes": .int(stdoutCapturedBytes),
+            "stderrCapturedBytes": .int(stderrCapturedBytes),
+            "stdoutCaptureTruncated": .bool(stdoutCaptureTruncated),
+            "stderrCaptureTruncated": .bool(stderrCaptureTruncated),
             "terminalState": .string(receipt.state.rawValue),
             "stillRunning": .bool(receipt.stillRunning),
             "descendantCleanup": .string(receipt.descendantCleanup.rawValue),

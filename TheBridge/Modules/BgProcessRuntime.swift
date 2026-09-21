@@ -62,6 +62,7 @@ public struct BgProcessJobMeta: Codable, Sendable {
 public enum BgProcessError: Error, LocalizedError {
     case capabilityMissing(String)
     case spawnFailed(Int32, String)
+    case signalFailed(signal: Int32, pgid: Int32, code: Int32)
     case notFound(String)
     case invalidArgument(String)
     case ioError(String)
@@ -70,6 +71,8 @@ public enum BgProcessError: Error, LocalizedError {
         switch self {
         case .capabilityMissing(let m): return "capability_missing: \(m)"
         case .spawnFailed(let code, let m): return "spawn failed (errno \(code)): \(m)"
+        case .signalFailed(let signal, let pgid, let code):
+            return "killpg(-\(pgid), \(signal)) failed (errno \(code)): \(String(cString: strerror(code)))"
         case .notFound(let id): return "job not found: \(id)"
         case .invalidArgument(let m): return "invalid argument: \(m)"
         case .ioError(let m): return "io error: \(m)"
@@ -86,6 +89,21 @@ public struct BgProcessLogPage: Sendable {
     public let totalBytes: Int  // total file size
     public let eof: Bool        // true ⇔ nextCursor == totalBytes && job terminal
     public let text: String
+}
+
+/// The two durable log files owned by a runtime-backed background job.
+///
+/// Runtime jobs deliberately keep stdout and stderr separate. Consumers that
+/// need a human-facing tail should expose that distinction instead of claiming
+/// a synthesized stream has the original chronological ordering.
+public struct BgProcessLogPaths: Sendable {
+    public let stdoutPath: String
+    public let stderrPath: String
+
+    public init(stdoutPath: String, stderrPath: String) {
+        self.stdoutPath = stdoutPath
+        self.stderrPath = stderrPath
+    }
 }
 
 // MARK: - Runtime Actor
@@ -191,6 +209,20 @@ public actor BgProcessRuntime {
         return meta
     }
 
+    /// Return the durable stdout/stderr locations for an existing job.
+    /// Keeping this lookup in the runtime lets public adapters expose truthful
+    /// paths without reaching into the runtime's storage layout directly.
+    public func logPaths(id: String) throws -> BgProcessLogPaths {
+        guard readMeta(id: id) != nil else {
+            throw BgProcessError.notFound(id)
+        }
+        let dir = baseDir.appendingPathComponent(id, isDirectory: true)
+        return BgProcessLogPaths(
+            stdoutPath: dir.appendingPathComponent("stdout").path,
+            stderrPath: dir.appendingPathComponent("stderr").path
+        )
+    }
+
     // MARK: Logs (paginated by byte offset)
 
     public func logs(
@@ -238,9 +270,30 @@ public actor BgProcessRuntime {
         guard meta.status == .running else {
             return meta  // idempotent — already terminal
         }
+        guard meta.pgid > 0 else {
+            throw BgProcessError.invalidArgument("job \(id) has invalid recorded process group \(meta.pgid)")
+        }
         let signal: Int32 = force ? SIGKILL : SIGTERM
         // Negative pid → killpg semantics: deliver to the entire process group.
-        _ = Darwin.kill(-meta.pgid, signal)
+        let signalResult = Darwin.kill(-meta.pgid, signal)
+        guard signalResult == 0 else {
+            let signalErrno = errno
+            if signalErrno == ESRCH {
+                // The process group is already absent. This is a truthful
+                // idempotent terminal result, not evidence that this request
+                // delivered a signal to a live workload.
+                let now = Date()
+                meta.status = .unknown
+                meta.endedAt = meta.endedAt ?? now
+                meta.note = "kill request observed no live process group \(meta.pgid)"
+                let dir = baseDir.appendingPathComponent(id, isDirectory: true)
+                try writeMeta(meta, to: dir)
+                pendingSigkill[id]?.cancel()
+                pendingSigkill[id] = nil
+                return meta
+            }
+            throw BgProcessError.signalFailed(signal: signal, pgid: meta.pgid, code: signalErrno)
+        }
         meta.killSignal = signal
         let dir = baseDir.appendingPathComponent(id, isDirectory: true)
         try writeMeta(meta, to: dir)
@@ -253,8 +306,9 @@ public actor BgProcessRuntime {
             let work = DispatchWorkItem {
                 // Probe — if process group is still alive, escalate.
                 if Darwin.kill(-pgid, 0) == 0 {
-                    _ = Darwin.kill(-pgid, SIGKILL)
-                    Task { await runtime.recordEscalation(id: id) }
+                    if Darwin.kill(-pgid, SIGKILL) == 0 {
+                        Task { await runtime.recordEscalation(id: id) }
+                    }
                 }
             }
             pendingSigkill[id] = work
@@ -265,6 +319,10 @@ public actor BgProcessRuntime {
 
     private func recordEscalation(id: String) {
         guard var meta = readMeta(id: id) else { return }
+        // The SIGKILL was accepted before this actor hop. Preserve that
+        // delivery receipt even if the exit watcher finalized the leader in
+        // the meantime; otherwise a successful escalation could be recorded
+        // incorrectly as only SIGTERM.
         meta.killSignal = SIGKILL
         let dir = baseDir.appendingPathComponent(id, isDirectory: true)
         try? writeMeta(meta, to: dir)

@@ -68,12 +68,42 @@ func runBgProcessModuleTests() async {
 
     // Build a router with ONLY this module registered (registration/tier checks
     // don't need the full surface; dispatch checks don't either).
-    func makeRouter() async -> ToolRouter {
+    func makeRouter(runtime: BgProcessRuntime = .shared) async -> ToolRouter {
         let gate = SecurityGate(approvalProvider: TestSecurityApprovalProvider())
         let log = AuditLog()
         let router = ToolRouter(securityGate: gate, auditLog: log)
-        await BgProcessModule.register(on: router)
+        await BgProcessModule.register(on: router, runtime: runtime)
         return router
+    }
+
+    /// A hermetic stand-in for `gh`: capability probes succeed, normal calls
+    /// emit distinct stdout/stderr markers, and a title containing
+    /// `runtime-sleep` holds the child open for the cancellation regression.
+    func makeFakeGh(at path: URL) throws {
+        let script = """
+        #!/bin/bash
+        if [ "$1" = "--version" ]; then
+          echo "gh version fake"
+          exit 0
+        fi
+        if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+          echo "Logged in to github.com account fake (keyring)"
+          echo "Token scopes: 'repo'"
+          exit 0
+        fi
+        case "$*" in
+          *runtime-sleep*)
+            echo "runtime-start"
+            sleep 60
+            ;;
+          *)
+            echo "runtime-stdout-marker"
+            echo "runtime-stderr-marker" >&2
+            ;;
+        esac
+        """
+        try script.write(to: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path.path)
     }
 
     // MARK: Registration / tiers
@@ -148,6 +178,148 @@ func runBgProcessModuleTests() async {
             } catch is ToolRouterError {
                 // expected — the charset guard refuses '/' and '.'
             }
+        }
+    }
+
+    // MARK: Runtime-backed handoff (GhModule → public bg_poll/bg_kill)
+
+    await test("runtime-backed gh job is observable through public bg_poll") {
+        try await bgWithTempHome { tmp in
+            let runtime = BgProcessRuntime(
+                baseDir: tmp.appendingPathComponent("runtime-jobs", isDirectory: true),
+                killGracePeriodSec: 1
+            )
+            let router = await makeRouter(runtime: runtime)
+            let fakeGh = tmp.appendingPathComponent("fake-gh")
+            try makeFakeGh(at: fakeGh)
+            await GhModule.register(
+                on: router,
+                runtime: GhRuntime(ghPath: fakeGh.path),
+                bgRuntime: runtime
+            )
+
+            let started = try await router.dispatch(
+                toolName: "gh_pr_create",
+                arguments: .object([
+                    "title": .string("runtime-finish"),
+                    "background": .bool(true)
+                ])
+            )
+            guard let jobId = bgString(started, "jobId") else {
+                throw TestError.assertion("runtime-backed gh call did not return jobId")
+            }
+            let hint = bgString(started, "hint") ?? ""
+            try expect(hint.contains("bg_poll(jobId:") && hint.contains("bg_kill(jobId:"),
+                       "background hint must name the public poll/kill contract: \(hint)")
+
+            let final = try await bgPollUntilDone(router, jobId: jobId)
+            try expect(bgString(final, "status") == "exited",
+                       "runtime job should normalize to exited, got \(bgString(final, "status") ?? "nil")")
+            try expect(bgString(final, "provider") == "runtime",
+                       "runtime fallback must identify its provider")
+            try expect(bgString(final, "runtimeStatus") == "done",
+                       "expected runtime done status, got \(bgString(final, "runtimeStatus") ?? "nil")")
+            try expect(bgInt(final, "exitCode") == 0,
+                       "runtime exit code should be surfaced")
+            let tail = bgString(final, "tail") ?? ""
+            try expect(tail.contains("runtime-stdout-marker") && tail.contains("runtime-stderr-marker"),
+                       "separate runtime streams should be present in convenience tail: \(tail)")
+            let stdoutPath = bgString(final, "stdoutPath") ?? ""
+            let stderrPath = bgString(final, "stderrPath") ?? ""
+            try expect(FileManager.default.fileExists(atPath: stdoutPath),
+                       "runtime stdout path must be truthful")
+            try expect(FileManager.default.fileExists(atPath: stderrPath),
+                       "runtime stderr path must be truthful")
+            await runtime.purgeAll()
+        }
+    }
+
+    await test("runtime-backed gh job is cancellable through public bg_kill") {
+        try await bgWithTempHome { tmp in
+            let runtime = BgProcessRuntime(
+                baseDir: tmp.appendingPathComponent("runtime-jobs", isDirectory: true),
+                killGracePeriodSec: 1
+            )
+            let router = await makeRouter(runtime: runtime)
+            let fakeGh = tmp.appendingPathComponent("fake-gh")
+            try makeFakeGh(at: fakeGh)
+            await GhModule.register(
+                on: router,
+                runtime: GhRuntime(ghPath: fakeGh.path),
+                bgRuntime: runtime
+            )
+
+            let started = try await router.dispatch(
+                toolName: "gh_pr_create",
+                arguments: .object([
+                    "title": .string("runtime-sleep"),
+                    "background": .bool(true)
+                ])
+            )
+            guard let jobId = bgString(started, "jobId") else {
+                throw TestError.assertion("runtime-backed gh call did not return jobId")
+            }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            let before = try await bgDispatch(router, "bg_poll", .object(["jobId": .string(jobId)]))
+            try expect(bgString(before, "status") == "running",
+                       "expected runtime job to be running before kill, got \(bgString(before, "status") ?? "nil")")
+
+            let killed = try await bgDispatch(router, "bg_kill", .object(["jobId": .string(jobId)]))
+            try expect(bgString(killed, "status") == "signalled",
+                       "runtime kill must retain public signalled outcome, got \(bgString(killed, "status") ?? "nil")")
+            try expect(bgString(killed, "provider") == "runtime",
+                       "runtime kill fallback must identify its provider")
+            try expect(bgString(killed, "signal") == "SIGTERM",
+                       "runtime kill must expose the requested signal")
+
+            let final = try await bgPollUntilDone(router, jobId: jobId)
+            try expect(bgString(final, "status") != "running",
+                       "runtime job must become terminal after public bg_kill")
+            await runtime.purgeAll()
+        }
+    }
+
+    await test("runtime bg_kill distinguishes a normal exit from an external termination") {
+        try await bgWithTempHome { tmp in
+            let runtime = BgProcessRuntime(
+                baseDir: tmp.appendingPathComponent("runtime-jobs", isDirectory: true),
+                killGracePeriodSec: 1
+            )
+            let router = await makeRouter(runtime: runtime)
+            do {
+                let externallySignalled = try await runtime.start(command: "sleep 30")
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                _ = Darwin.kill(-externallySignalled.pgid, SIGKILL)
+
+                var signalledMeta = externallySignalled
+                for _ in 0..<60 {
+                    signalledMeta = try await runtime.status(id: externallySignalled.id)
+                    if signalledMeta.status != .running { break }
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
+                try expect(signalledMeta.status == .failed && (signalledMeta.exitCode ?? 0) < 0,
+                           "external SIGKILL must finalize as a terminal signal, got \(signalledMeta.status) / \(String(describing: signalledMeta.exitCode))")
+                let signalledKill = try await bgDispatch(router, "bg_kill", .object(["jobId": .string(externallySignalled.id)]))
+                try expect(bgString(signalledKill, "status") == "already_terminated",
+                           "externally signalled runtime job must not be called already_exited")
+
+                let nonzeroExit = try await runtime.start(command: "exit 7")
+                var exitedMeta = nonzeroExit
+                for _ in 0..<60 {
+                    exitedMeta = try await runtime.status(id: nonzeroExit.id)
+                    if exitedMeta.status != .running { break }
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
+                try expect(exitedMeta.status == .failed && exitedMeta.exitCode == 7,
+                           "normal nonzero exit must retain exit evidence, got \(exitedMeta.status) / \(String(describing: exitedMeta.exitCode))")
+                let exitedKill = try await bgDispatch(router, "bg_kill", .object(["jobId": .string(nonzeroExit.id)]))
+                try expect(bgString(exitedKill, "status") == "already_exited",
+                           "nonzero normal exit must remain already_exited")
+            } catch {
+                await runtime.purgeAll()
+                throw error
+            }
+            await runtime.purgeAll()
         }
     }
 

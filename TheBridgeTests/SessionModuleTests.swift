@@ -20,15 +20,16 @@ func runSessionModuleTests() async {
     )
 
     // Registration
-    await test("SessionModule registers 4 tools") {
+    await test("SessionModule registers 5 tools") {
         let tools = await router.registrations(forModule: "session")
-        try expect(tools.count == 4, "Expected 4 session tools, got \(tools.count)")
+        try expect(tools.count == 5, "Expected 5 session tools, got \(tools.count)")
     }
 
     await test("SessionModule tool names match spec") {
         let tools = await router.registrations(forModule: "session")
         let names = Set(tools.map(\.name))
         try expect(names.contains("tools_list"), "Missing tools_list")
+        try expect(names.contains("tools_search"), "Missing tools_search")
         try expect(names.contains("session_info"), "Missing session_info")
         try expect(names.contains("audit_recent"), "Missing audit_recent")
         try expect(names.contains("session_clear"), "Missing session_clear")
@@ -39,6 +40,7 @@ func runSessionModuleTests() async {
         let tools = await router.registrations(forModule: "session")
         let tierMap = Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0.tier) })
         try expect(tierMap["tools_list"] == .open, "tools_list should be green")
+        try expect(tierMap["tools_search"] == .open, "tools_search should be green")
         try expect(tierMap["session_info"] == .open, "session_info should be green")
         try expect(tierMap["audit_recent"] == .open, "audit_recent should be green")
         try expect(tierMap["session_clear"] == .notify, "session_clear should be orange")
@@ -51,7 +53,7 @@ func runSessionModuleTests() async {
             arguments: .object([:])
         )
         if case .array(let tools) = result {
-            try expect(tools.count == 4, "Expected 4 tools from session-only router, got \(tools.count)")
+            try expect(tools.count == 5, "Expected 5 tools from session-only router, got \(tools.count)")
         } else {
             throw TestError.assertion("Expected array result from tools_list")
         }
@@ -72,7 +74,7 @@ func runSessionModuleTests() async {
             arguments: .object(["module": .string("session")])
         )
         if case .array(let tools) = result {
-            try expect(tools.count == 4, "Module filter should return only session tools, got \(tools.count)")
+            try expect(tools.count == 5, "Module filter should return only session tools, got \(tools.count)")
             for tool in tools {
                 if case .object(let dict) = tool,
                    case .string(let mod) = dict["module"] {
@@ -97,9 +99,93 @@ func runSessionModuleTests() async {
             try expect(dict["tier"] != nil, "Missing 'tier' field")
             try expect(dict["description"] != nil, "Missing 'description' field")
             try expect(dict["inputs"] != nil, "Missing 'inputs' field")
+            try expect(dict["title"] != nil, "Missing rendered 'title' field")
+            try expect(dict["inputSchema"] != nil, "Missing complete exposed 'inputSchema' field")
         } else {
             throw TestError.assertion("Expected non-empty array of objects")
         }
+    }
+
+    await test("tools_search ranks a name match, respects module, and bounds output") {
+        await router.register(ToolRegistration(
+            name: "ranked_schema_tool",
+            module: "discovery",
+            tier: .open,
+            description: "Fixture used to verify ranked schema discovery.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "mode": .object([
+                        "type": .string("string"),
+                        "enum": .array([.string("inspect"), .string("apply")]),
+                        "description": .string("Fixture mode with an enum.")
+                    ])
+                ]),
+                "required": .array([.string("mode")])
+            ]),
+            metadata: ToolMetadata(
+                title: "Ranked Schema Fixture",
+                whenToUse: ["Verify bounded tool discovery."],
+                relatedTools: ["tools_list"]
+            ),
+            handler: { _ in .null }
+        ))
+        await router.register(ToolRegistration(
+            name: "description_only_fixture",
+            module: "discovery",
+            tier: .open,
+            description: "A schema-related fixture that should rank below a name match.",
+            inputSchema: .object([:]),
+            handler: { _ in .null }
+        ))
+
+        let result = try await router.dispatch(
+            toolName: "tools_search",
+            arguments: .object([
+                "query": .string("ranked schema"),
+                "module": .string("DISCOVERY"),
+                "limit": .int(1)
+            ])
+        )
+        guard case .object(let object) = result,
+              case .int(let count) = object["count"],
+              case .array(let matches) = object["matches"],
+              case .object(let first)? = matches.first,
+              case .string(let name)? = first["name"] else {
+            throw TestError.assertion("Expected ranked tools_search result, got \(result)")
+        }
+        try expect(count == 1 && matches.count == 1, "limit must bound results")
+        try expect(name == "ranked_schema_tool", "name match should rank first, got \(name)")
+        try expect(first["matchReasons"] != nil, "search result should explain its match")
+    }
+
+    await test("tools_search select returns the exact exposed schema and safe miss") {
+        let found = try await router.dispatch(
+            toolName: "tools_search",
+            arguments: .object(["query": .string("select:RANKED_SCHEMA_TOOL")])
+        )
+        guard case .object(let object) = found,
+              object["found"] == .bool(true),
+              case .object(let tool) = object["tool"],
+              case .string(let toolName) = tool["name"],
+              case .object(let schema) = tool["inputSchema"],
+              case .object(let properties) = schema["properties"],
+              case .object(let mode) = properties["mode"] else {
+            throw TestError.assertion("Expected exact tools_search selection, got \(found)")
+        }
+        try expect(toolName == "ranked_schema_tool", "select should be case-insensitive")
+        try expect(mode["enum"] != nil, "selection must preserve schema enum detail")
+        try expect(tool["selection"] != nil, "selection metadata should be available for exact lookup")
+
+        let missing = try await router.dispatch(
+            toolName: "tools_search",
+            arguments: .object(["select": .string("not_a_real_tool")])
+        )
+        guard case .object(let missingObject) = missing else {
+            throw TestError.assertion("Expected safe not-found object, got \(missing)")
+        }
+        try expect(missingObject["found"] == .bool(false), "unknown selection should be a safe miss")
+        try expect(missingObject["error"] == nil, "unknown selection should not fabricate a tool error")
     }
 
     // session_info: returns expected fields
@@ -378,5 +464,50 @@ func runSessionModuleTests() async {
         } else {
             throw TestError.assertion("Expected previousUptimeSeconds field")
         }
+    }
+
+    await test("agent documentation names the live discovery and background tools") {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let documents: [(path: String, requiredNames: [String])] = [
+            (
+                path: "docs/AGENT_PLAYBOOK.md",
+                requiredNames: ["tools_search", "bg_run", "bg_poll", "bg_kill"]
+            ),
+            (
+                path: "docs/mcp-transport-and-bg-process.md",
+                requiredNames: ["bg_run", "bg_poll", "bg_kill"]
+            )
+        ]
+        let staleBackgroundNames = [
+            "bg_process_start",
+            "bg_process_status",
+            "bg_process_logs",
+            "bg_process_list",
+            "bg_process_kill"
+        ]
+
+        for document in documents {
+            let url = repositoryRoot.appendingPathComponent(document.path)
+            let content = try String(contentsOf: url, encoding: .utf8)
+            for liveName in document.requiredNames {
+                try expect(content.contains(liveName),
+                           "\(document.path) should name \(liveName)")
+            }
+            for staleName in staleBackgroundNames {
+                try expect(!content.contains(staleName),
+                           "\(document.path) must not advertise removed \(staleName)")
+            }
+        }
+
+        let readme = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("README.md"),
+            encoding: .utf8
+        )
+        try expect(
+            readme.contains("\(BridgeConstants.staticFeatureModuleToolCount) static feature-module tools"),
+            "README static-tool count should match BridgeConstants"
+        )
     }
 }

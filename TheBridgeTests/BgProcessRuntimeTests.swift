@@ -126,6 +126,27 @@ func runBgProcessRuntimeTests() async {
         }
     }
 
+    await test("kill: an absent process group is terminal without claiming signal delivery") {
+        try await rtWithTemp { rt, base in
+            let id = "20200101-000000-absentgroup"
+            // Deliberately outside the macOS PID range so this is a safe,
+            // deterministic ESRCH group probe rather than a live workload.
+            let absentPgid: Int32 = 999_999_999
+            try seedMeta(BgProcessJobMeta(
+                id: id, pid: absentPgid, pgid: absentPgid, command: "sleep 999",
+                workingDir: nil, label: nil, startedAt: Date(timeIntervalSinceNow: -60),
+                status: .running
+            ), baseDir: base)
+
+            let meta = try await rt.kill(id: id)
+            try expect(meta.status == .unknown, "absent group must become terminal/unknown, got \(meta.status)")
+            try expect(meta.killSignal == nil, "must not record a signal that was never delivered")
+            try expect(meta.endedAt != nil, "absent group must carry terminal evidence")
+            try expect(meta.lastReconcileAt == nil, "direct kill observation must not claim relaunch reconciliation")
+            try expect((meta.note ?? "").contains("no live process group"), "missing absent-group evidence note")
+        }
+    }
+
     // 2) reconcileOrphans keeps a live job running + reattaches a watcher across
     //    a FRESH runtime over the same baseDir (simulating a Bridge relaunch).
     await test("reconcileOrphans: a live job stays running + watcher reattaches across a fresh runtime") {

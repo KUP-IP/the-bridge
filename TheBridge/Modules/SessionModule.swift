@@ -6,11 +6,13 @@ import MCP
 
 // MARK: - SessionModule
 
-/// Provides session tools: tools_list, session_info, audit_recent, session_clear.
+/// Provides session tools: tools_list, tools_search, session_info, audit_recent, session_clear.
 public enum SessionModule {
 
     public static let auditRecentDefaultLimit = 20
     public static let auditRecentMaximumLimit = 100
+    public static let toolSearchDefaultLimit = 8
+    public static let toolSearchMaximumLimit = 25
 
     public struct RuntimeDiagnostics: Sendable {
         public let connections: Int
@@ -44,7 +46,7 @@ public enum SessionModule {
             name: "tools_list",
             module: moduleName,
             tier: .open,
-            description: "List MCP tools the bridge exposes. COMPACT by default (name, module, tier, one-line summary) to stay well under client output-token caps. Pass `module` to scope to one family, or `detail:true` for full descriptions + input schemas.",
+            description: "List registered MCP tools. COMPACT by default (name, module, tier, one-line summary) to stay well under client output-token caps. Pass module to scope to one family, or detail:true for rendered descriptions and exact exposed input schemas. Use tools_search to find one tool or retrieve its schema without listing the full catalog.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -82,59 +84,162 @@ public enum SessionModule {
                     )
                 }
 
-                func summarize(_ s: String) -> String {
-                    let oneLine = s.split(whereSeparator: { $0 == "\n" || $0 == "\r" }).joined(separator: " ")
-                    return oneLine.count <= 100 ? oneLine : String(oneLine.prefix(99)) + "…"
+                return .array(registrations.map {
+                    fullDetail ? toolDetailValue($0) : compactToolValue($0)
+                })
+            }
+        ))
+
+        // tools_search — open. Native MCP hosts commonly defer schemas until a
+        // model asks for one tool by name; this gives Bridge clients the same
+        // bounded, deterministic discovery path without requiring a full
+        // tools_list payload.
+        await router.register(ToolRegistration(
+            name: "tools_search",
+            module: moduleName,
+            tier: .open,
+            description: "Find registered Bridge tools by name, module, description, or selection metadata without listing the entire catalog. Pass select:<tool_name> in query, or select directly, to retrieve one exact tool's rendered description and complete exposed input schema.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "query": .object([
+                        "type": .string("string"),
+                        "description": .string("Search terms, or select:<tool_name> for an exact schema lookup. Required unless select is supplied.")
+                    ]),
+                    "select": .object([
+                        "type": .string("string"),
+                        "description": .string("Exact tool name to retrieve. Case-insensitive; takes precedence over query.")
+                    ]),
+                    "module": .object([
+                        "type": .string("string"),
+                        "description": .string("Optional exact module-family filter, matched case-insensitively.")
+                    ]),
+                    "limit": .object([
+                        "type": .string("integer"),
+                        "description": .string("Maximum search matches to return (default 8, range 1...25). Ignored for an exact selection.")
+                    ])
+                ]),
+                "required": .array([])
+            ]),
+            metadata: ToolMetadata(
+                title: "Find a Bridge Tool",
+                whenToUse: [
+                    "You know a capability or tool name but need the exact registered tool.",
+                    "You need one tool's schema without expanding the full catalog."
+                ],
+                whenNotToUse: [
+                    "You already know the exact tool and its arguments.",
+                    "You need a complete module inventory (use tools_list with module)."
+                ],
+                relatedTools: ["tools_list", "session_info"]
+            ),
+            handler: { arguments in
+                guard case .object(let args) = arguments else {
+                    return toolSearchArgumentError("arguments must be an object")
                 }
 
-                let toolEntries: [Value] = registrations.map { reg in
-                    guard fullDetail else {
+                let moduleFilter: String?
+                if let value = args["module"] {
+                    guard case .string(let module) = value else {
+                        return toolSearchArgumentError("module must be a string")
+                    }
+                    let trimmed = module.trimmingCharacters(in: .whitespacesAndNewlines)
+                    moduleFilter = trimmed.isEmpty ? nil : trimmed
+                } else {
+                    moduleFilter = nil
+                }
+
+                let explicitSelect: String?
+                if let value = args["select"] {
+                    guard case .string(let select) = value else {
+                        return toolSearchArgumentError("select must be a string")
+                    }
+                    let trimmed = select.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else {
+                        return toolSearchArgumentError("select must not be empty")
+                    }
+                    explicitSelect = trimmed
+                } else {
+                    explicitSelect = nil
+                }
+
+                let rawQuery: String?
+                if let value = args["query"] {
+                    guard case .string(let query) = value else {
+                        return toolSearchArgumentError("query must be a string")
+                    }
+                    let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                    rawQuery = trimmed.isEmpty ? nil : trimmed
+                } else {
+                    rawQuery = nil
+                }
+
+                let limit: Int
+                if let value = args["limit"] {
+                    guard case .int(let requested) = value else {
+                        return toolSearchArgumentError("limit must be an integer")
+                    }
+                    limit = max(1, min(requested, toolSearchMaximumLimit))
+                } else {
+                    limit = toolSearchDefaultLimit
+                }
+
+                let registrations = BrokerBootstrapToolOrdering.prioritize(
+                    await router.allRegistrations()
+                ).filter { registration in
+                    guard let moduleFilter else { return true }
+                    return normalizedSearchText(registration.module) == normalizedSearchText(moduleFilter)
+                }
+
+                let prefixedSelect = rawQuery.flatMap { selectTarget(from: $0) }
+                if let target = explicitSelect ?? prefixedSelect {
+                    if let registration = registrations.first(where: {
+                        normalizedSearchText($0.name) == normalizedSearchText(target)
+                    }) {
                         return .object([
-                            "name": .string(reg.name),
-                            "module": .string(reg.module),
-                            "tier": .string(reg.tier.rawValue),
-                            "summary": .string(summarize(reg.description))
+                            "mode": .string("select"),
+                            "catalog": .string("registered"),
+                            "found": .bool(true),
+                            "select": .string(registration.name),
+                            "tool": toolDetailValue(registration)
                         ])
                     }
-                    let inputs: Value
-                    if case .object(let schema) = reg.inputSchema,
-                       case .object(let props) = schema["properties"] {
-                        let required: [String]
-                        if case .array(let reqArr) = schema["required"] {
-                            required = reqArr.compactMap { if case .string(let s) = $0 { return s } else { return nil } }
-                        } else {
-                            required = []
-                        }
-                        let inputItems: [Value] = props.map { key, val in
-                            let propType: String
-                            if case .object(let propDict) = val,
-                               case .string(let t) = propDict["type"] {
-                                propType = t
-                            } else {
-                                propType = "unknown"
-                            }
-                            return .object([
-                                "name": .string(key),
-                                "type": .string(propType),
-                                "required": .bool(required.contains(key))
-                            ])
-                        }
-                        inputs = .array(inputItems)
-                    } else {
-                        inputs = .array([])
-                    }
 
+                    let suggestions = searchMatches(
+                        registrations: registrations,
+                        query: target,
+                        limit: min(5, toolSearchMaximumLimit)
+                    ).map { match in
+                        searchResultValue(match)
+                    }
                     return .object([
-                        "name": .string(reg.name),
-                        "module": .string(reg.module),
-                        "tier": .string(reg.tier.rawValue),
-                        "description": .string(reg.description),
-                        "inputs": inputs,
-                        "output": .string("Value")
+                        "mode": .string("select"),
+                        "catalog": .string("registered"),
+                        "found": .bool(false),
+                        "select": .string(target),
+                        "message": .string("No registered tool named '\(target)'."),
+                        "suggestions": .array(suggestions)
                     ])
                 }
 
-                return .array(toolEntries)
+                guard let query = rawQuery else {
+                    return toolSearchArgumentError("provide a non-empty query or select")
+                }
+
+                let matches = searchMatches(
+                    registrations: registrations,
+                    query: query,
+                    limit: limit
+                )
+                return .object([
+                    "mode": .string("search"),
+                    "catalog": .string("registered"),
+                    "query": .string(query),
+                    "module": moduleFilter.map(Value.string) ?? .null,
+                    "count": .int(matches.count),
+                    "limit": .int(limit),
+                    "matches": .array(matches.map { searchResultValue($0) })
+                ])
             }
         ))
 
@@ -331,6 +436,231 @@ public enum SessionModule {
                 ])
             }
         ))
+    }
+
+    // MARK: Tool discovery projections
+
+    private struct ToolSearchMatch {
+        let registration: ToolRegistration
+        let score: Int
+        let reasons: [String]
+    }
+
+    private static func compactToolValue(_ registration: ToolRegistration) -> Value {
+        .object([
+            "name": .string(registration.name),
+            "module": .string(registration.module),
+            "tier": .string(registration.tier.rawValue),
+            "summary": .string(summarizeToolDescription(registration))
+        ])
+    }
+
+    /// Mirrors the fields an MCP client receives for one registration rather
+    /// than returning the raw source schema. In particular, this includes
+    /// routed-skill receipt inputs added by MCPToolFactory.
+    private static func toolDetailValue(_ registration: ToolRegistration) -> Value {
+        let inputSchema = MCPToolFactory.inputSchema(for: registration)
+        let inputs: Value
+        if case .object(let schema) = inputSchema,
+           case .object(let properties) = schema["properties"] {
+            let required: Set<String>
+            if case .array(let values) = schema["required"] {
+                required = Set(values.compactMap {
+                    if case .string(let name) = $0 { return name }
+                    return nil
+                })
+            } else {
+                required = []
+            }
+            inputs = .array(properties.keys.sorted().map { name in
+                let property = properties[name] ?? .null
+                let type: String
+                if case .object(let object) = property,
+                   case .string(let value) = object["type"] {
+                    type = value
+                } else {
+                    type = "unknown"
+                }
+                return .object([
+                    "name": .string(name),
+                    "type": .string(type),
+                    "required": .bool(required.contains(name))
+                ])
+            })
+        } else {
+            inputs = .array([])
+        }
+
+        var result: [String: Value] = [
+            "name": .string(registration.name),
+            "title": .string(BridgeToolDescriptionRenderer.title(registration)),
+            "module": .string(registration.module),
+            "tier": .string(registration.tier.rawValue),
+            "description": .string(BridgeToolDescriptionRenderer.render(registration)),
+            "inputs": inputs,
+            "inputSchema": inputSchema,
+            "output": .string("Value")
+        ]
+        if let metadata = registration.metadata {
+            result["selection"] = .object([
+                "whenToUse": .array(metadata.whenToUse.map(Value.string)),
+                "whenNotToUse": .array(metadata.whenNotToUse.map(Value.string)),
+                "relatedTools": .array(metadata.relatedTools.map(Value.string))
+            ])
+        }
+        return .object(result)
+    }
+
+    private static func searchResultValue(_ match: ToolSearchMatch) -> Value {
+        var fields: [String: Value] = [
+            "name": .string(match.registration.name),
+            "title": .string(BridgeToolDescriptionRenderer.title(match.registration)),
+            "module": .string(match.registration.module),
+            "tier": .string(match.registration.tier.rawValue),
+            "summary": .string(summarizeToolDescription(match.registration)),
+            "matchReasons": .array(match.reasons.map(Value.string))
+        ]
+        if let relatedTools = match.registration.metadata?.relatedTools,
+           !relatedTools.isEmpty {
+            fields["relatedTools"] = .array(relatedTools.map(Value.string))
+        }
+        return .object(fields)
+    }
+
+    private static func toolSearchArgumentError(_ message: String) -> Value {
+        .object([
+            "status": .string("error"),
+            "error": .string("tools_search: \(message)")
+        ])
+    }
+
+    private static func selectTarget(from query: String) -> String? {
+        let prefix = "select:"
+        let normalized = normalizedSearchText(query)
+        guard normalized.hasPrefix(prefix) else { return nil }
+        let target = String(query.dropFirst(prefix.count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return target.isEmpty ? nil : target
+    }
+
+    private static func searchMatches(
+        registrations: [ToolRegistration],
+        query: String,
+        limit: Int
+    ) -> [ToolSearchMatch] {
+        let normalizedQuery = normalizedSearchText(query)
+        let tokens = searchTokens(query)
+        guard !normalizedQuery.isEmpty, !tokens.isEmpty else { return [] }
+
+        return registrations.compactMap { registration in
+            searchMatch(
+                registration: registration,
+                normalizedQuery: normalizedQuery,
+                tokens: tokens
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.score != rhs.score { return lhs.score > rhs.score }
+            let lhsName = normalizedSearchText(lhs.registration.name)
+            let rhsName = normalizedSearchText(rhs.registration.name)
+            if lhsName != rhsName { return lhsName < rhsName }
+            return lhs.registration.name.utf8.lexicographicallyPrecedes(rhs.registration.name.utf8)
+        }
+        .prefix(limit)
+        .map { $0 }
+    }
+
+    private static func searchMatch(
+        registration: ToolRegistration,
+        normalizedQuery: String,
+        tokens: [String]
+    ) -> ToolSearchMatch? {
+        let name = normalizedSearchText(registration.name)
+        let module = normalizedSearchText(registration.module)
+        let title = normalizedSearchText(BridgeToolDescriptionRenderer.title(registration))
+        let description = normalizedSearchText(BridgeToolDescriptionRenderer.render(registration))
+        let metadata = registration.metadata.map {
+            normalizedSearchText(
+                ($0.whenToUse + $0.whenNotToUse + $0.relatedTools)
+                    .joined(separator: " ")
+            )
+        } ?? ""
+
+        var score = 0
+        var reasons: [String] = []
+        func record(_ reason: String, _ points: Int) {
+            score += points
+            if !reasons.contains(reason) { reasons.append(reason) }
+        }
+
+        if name == normalizedQuery {
+            record("exact_name", 10_000)
+        } else if name.hasPrefix(normalizedQuery) {
+            record("name_prefix", 4_000)
+        } else if name.contains(normalizedQuery) {
+            record("name_contains", 2_500)
+        }
+        if module == normalizedQuery {
+            record("exact_module", 1_500)
+        }
+        if title.contains(normalizedQuery) {
+            record("title_match", 800)
+        }
+        if description.contains(normalizedQuery) {
+            record("description_match", 400)
+        }
+        if metadata.contains(normalizedQuery) {
+            record("selection_metadata_match", 300)
+        }
+
+        for token in tokens {
+            var matched = false
+            if name.contains(token) {
+                record("name_match", 160)
+                matched = true
+            }
+            if module.contains(token) {
+                record("module_match", 80)
+                matched = true
+            }
+            if title.contains(token) {
+                record("title_match", 45)
+                matched = true
+            }
+            if description.contains(token) {
+                record("description_match", 20)
+                matched = true
+            }
+            if metadata.contains(token) {
+                record("selection_metadata_match", 15)
+                matched = true
+            }
+            guard matched else { return nil }
+        }
+
+        return ToolSearchMatch(registration: registration, score: score, reasons: reasons)
+    }
+
+    private static func summarizeToolDescription(_ registration: ToolRegistration) -> String {
+        let rendered = BridgeToolDescriptionRenderer.render(registration)
+        let oneLine = rendered
+            .split(whereSeparator: { $0 == "\n" || $0 == "\r" })
+            .joined(separator: " ")
+        return oneLine.count <= 100 ? oneLine : String(oneLine.prefix(99)) + "…"
+    }
+
+    private static func searchTokens(_ value: String) -> [String] {
+        var seen: Set<String> = []
+        return normalizedSearchText(value)
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0).inserted }
+    }
+
+    private static func normalizedSearchText(_ value: String) -> String {
+        value
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+            .lowercased(with: Locale(identifier: "en_US_POSIX"))
     }
 
     /// Public pure projection for secrecy/shape tests. `inputSummary` and

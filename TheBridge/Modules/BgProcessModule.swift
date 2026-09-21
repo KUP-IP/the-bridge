@@ -161,6 +161,168 @@ public enum BgProcessModule {
         return attrs?[.modificationDate] as? Date
     }
 
+    // MARK: Runtime-backed job adapter
+
+    /// The public bg_* tools predate BgProcessRuntime and retain their legacy
+    /// file-backed contract above. Some Bridge modules now create runtime jobs,
+    /// though, and hand callers the same `jobId` plus a bg_poll hint. This
+    /// adapter makes that handoff real without changing the legacy branch.
+    private static func runtimePoll(
+        jobId: String,
+        tailLines: Int,
+        runtime: BgProcessRuntime
+    ) async -> Value {
+        do {
+            let meta = try await runtime.status(id: jobId)
+            let paths = try await runtime.logPaths(id: jobId)
+            let (stdoutWindow, stdoutTruncated) = readTailWindow(
+                URL(fileURLWithPath: paths.stdoutPath)
+            )
+            let (stderrWindow, stderrTruncated) = readTailWindow(
+                URL(fileURLWithPath: paths.stderrPath)
+            )
+            let stdoutTail = tail(stdoutWindow, lines: tailLines)
+            let stderrTail = tail(stderrWindow, lines: tailLines)
+
+            // Runtime preserves stdout and stderr independently. Deliberately
+            // label the convenience tail rather than implying it is a single
+            // chronologically interleaved stream like legacy bg_run's .log.
+            var tailSections: [String] = []
+            if !stdoutTail.isEmpty { tailSections.append("[stdout]\n\(stdoutTail)") }
+            if !stderrTail.isEmpty { tailSections.append("[stderr]\n\(stderrTail)") }
+            let publicStatus: String
+            switch meta.status {
+            case .running:
+                publicStatus = "running"
+            case .done:
+                publicStatus = "exited"
+            case .failed:
+                publicStatus = (meta.exitCode ?? -1) >= 0 ? "exited" : "terminated"
+            case .killed, .unknown:
+                publicStatus = "terminated"
+            }
+
+            var out: [String: Value] = [
+                "jobId": .string(jobId),
+                "status": .string(publicStatus),
+                "provider": .string("runtime"),
+                "runtimeStatus": .string(meta.status.rawValue),
+                "tail": .string(tailSections.joined(separator: "\n")),
+                "tailLayout": .string("per-stream snapshots; stdout and stderr are not chronologically merged"),
+                // Preserve the familiar logPath key for generic callers while
+                // making its stream explicit. New callers should use the two
+                // precise paths below.
+                "logPath": .string(paths.stdoutPath),
+                "logPathStream": .string("stdout"),
+                "stdoutPath": .string(paths.stdoutPath),
+                "stderrPath": .string(paths.stderrPath),
+                "logDirectory": .string(URL(fileURLWithPath: paths.stdoutPath).deletingLastPathComponent().path),
+                "stdoutTail": .string(stdoutTail),
+                "stderrTail": .string(stderrTail),
+                "stdoutLogTruncated": .bool(stdoutTruncated),
+                "stderrLogTruncated": .bool(stderrTruncated)
+            ]
+            if publicStatus == "running" {
+                out["pid"] = .int(Int(meta.pid))
+            }
+            if publicStatus == "exited", let exitCode = meta.exitCode {
+                out["exitCode"] = .int(Int(exitCode))
+                out["success"] = .bool(exitCode == 0)
+            }
+            if let runtimeExitCode = meta.exitCode {
+                out["runtimeExitCode"] = .int(Int(runtimeExitCode))
+            }
+            if let signal = meta.killSignal {
+                out["runtimeSignal"] = .int(Int(signal))
+            }
+            if let note = meta.note, !note.isEmpty {
+                out["note"] = .string(note)
+            }
+            let end = meta.endedAt ?? Date()
+            out["duration"] = .double(max(0, end.timeIntervalSince(meta.startedAt)))
+            return .object(out)
+        } catch let error as BgProcessError {
+            if case .notFound = error {
+                return .object([
+                    "jobId": .string(jobId),
+                    "status": .string("not_found"),
+                    "error": .string("no such job (log file absent)")
+                ])
+            }
+            return .object([
+                "jobId": .string(jobId),
+                "status": .string("error"),
+                "provider": .string("runtime"),
+                "error": .string(error.localizedDescription)
+            ])
+        } catch {
+            return .object([
+                "jobId": .string(jobId),
+                "status": .string("error"),
+                "provider": .string("runtime"),
+                "error": .string(error.localizedDescription)
+            ])
+        }
+    }
+
+    private static func runtimeKill(
+        jobId: String,
+        force: Bool,
+        runtime: BgProcessRuntime
+    ) async -> Value {
+        do {
+            let meta = try await runtime.kill(id: jobId, force: force)
+            if meta.status != .running {
+                let status: String
+                switch meta.status {
+                case .done:
+                    status = "already_exited"
+                case .failed:
+                    status = (meta.exitCode ?? -1) >= 0 ? "already_exited" : "already_terminated"
+                case .killed, .unknown:
+                    status = "already_terminated"
+                case .running:
+                    status = "signalled"
+                }
+                return .object([
+                    "jobId": .string(jobId),
+                    "status": .string(status),
+                    "provider": .string("runtime"),
+                    "runtimeStatus": .string(meta.status.rawValue)
+                ])
+            }
+            return .object([
+                "jobId": .string(jobId),
+                "pid": .int(Int(meta.pid)),
+                "status": .string("signalled"),
+                "signal": .string(force ? "SIGKILL" : "SIGTERM"),
+                "provider": .string("runtime"),
+                "runtimeStatus": .string(meta.status.rawValue)
+            ])
+        } catch let error as BgProcessError {
+            if case .notFound = error {
+                return .object([
+                    "jobId": .string(jobId),
+                    "status": .string("not_found"),
+                    "error": .string("no such job (log file absent)")
+                ])
+            }
+            return .object([
+                "jobId": .string(jobId),
+                "status": .string("kill_failed"),
+                "provider": .string("runtime"),
+                "error": .string(error.localizedDescription)
+            ])
+        } catch {
+            return .object([
+                "jobId": .string(jobId),
+                "status": .string("kill_failed"),
+                "provider": .string("runtime"),
+                "error": .string(error.localizedDescription)
+            ])
+        }
+    }
+
     // MARK: PATH bootstrap (mirrors ShellModule)
 
     private static func bootstrappedPath() -> String {
@@ -177,7 +339,10 @@ public enum BgProcessModule {
     }
 
     /// Register all BgProcessModule tools on the given router.
-    public static func register(on router: ToolRouter) async {
+    public static func register(
+        on router: ToolRouter,
+        runtime: BgProcessRuntime = BgProcessRuntime.shared
+    ) async {
 
         // MARK: bg_run — request
         await router.register(ToolRegistration(
@@ -330,13 +495,13 @@ public enum BgProcessModule {
             name: "bg_poll",
             module: moduleName,
             tier: .open,
-            description: "Check on a detached job started by bg_run. Returns {jobId, status, exitCode?, tail, logPath, duration?}. status is 'running' while the process is alive, 'exited' once it finished (with exitCode + duration in seconds), or 'terminated' if the process died without recording an exit code (killed/crashed). tail is the last tailLines lines of combined output (default 50). Poll repeatedly until status != 'running'.",
+            description: "Check a detached job started by bg_run or an eligible Bridge tool that returned this jobId. Returns {jobId, status, exitCode?, tail, logPath, duration?}. status is 'running' while the process is alive, 'exited' once it finished (with exitCode + duration in seconds), or 'terminated' if it was killed/crashed. Legacy bg_run jobs provide a combined-output tail. Runtime-backed jobs add provider:'runtime', stdoutPath, stderrPath, and separate stream tails; their convenience tail is explicitly not chronologically merged. Poll repeatedly until status != 'running'.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "jobId": .object([
                         "type": .string("string"),
-                        "description": .string("The jobId returned by bg_run.")
+                        "description": .string("The jobId returned by bg_run or an eligible Bridge tool that named bg_poll.")
                     ]),
                     "tailLines": .object([
                         "type": .string("integer"),
@@ -352,16 +517,12 @@ public enum BgProcessModule {
                 }
                 let paths = try resolvePaths(jobId: jobId)
 
-                // A job exists iff its log file exists (created at spawn).
-                guard FileManager.default.fileExists(atPath: paths.log.path) else {
-                    return .object([
-                        "jobId": .string(jobId),
-                        "status": .string("not_found"),
-                        "error": .string("no such job (log file absent)")
-                    ])
-                }
-
                 let tailLines = valueToInt(args["tailLines"]) ?? 50
+                // Preserve the legacy filesystem contract whenever its log
+                // exists. Only its absence selects the newer runtime adapter.
+                guard FileManager.default.fileExists(atPath: paths.log.path) else {
+                    return await runtimePoll(jobId: jobId, tailLines: tailLines, runtime: runtime)
+                }
                 // DoS guard (v4 audit #5): read only the trailing window of the
                 // log, not the whole file — a multi-MB log no longer loads whole
                 // on every poll. tail() then trims that window to the line count.
@@ -431,13 +592,13 @@ public enum BgProcessModule {
             name: "bg_kill",
             module: moduleName,
             tier: .notify,
-            description: "Stop a detached job started by bg_run. Sends SIGTERM by default; pass force:true to send SIGKILL. Returns {jobId, status, signal}. Idempotent: a job that already exited returns status 'already_exited' without signalling.",
+            description: "Stop a detached job started by bg_run or an eligible Bridge tool that returned this jobId. Sends SIGTERM by default; pass force:true to send SIGKILL. Returns {jobId, status, signal}. Idempotent: a job that already exited returns status 'already_exited' without signalling.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "jobId": .object([
                         "type": .string("string"),
-                        "description": .string("The jobId returned by bg_run.")
+                        "description": .string("The jobId returned by bg_run or an eligible Bridge tool that named bg_kill.")
                     ]),
                     "force": .object([
                         "type": .string("boolean"),
@@ -453,12 +614,11 @@ public enum BgProcessModule {
                 }
                 let paths = try resolvePaths(jobId: jobId)
 
+                let force = valueToBool(args["force"])
+                // As in bg_poll, the legacy artifact wins on collision; only a
+                // missing legacy log is delegated to the runtime lifecycle.
                 guard FileManager.default.fileExists(atPath: paths.log.path) else {
-                    return .object([
-                        "jobId": .string(jobId),
-                        "status": .string("not_found"),
-                        "error": .string("no such job (log file absent)")
-                    ])
+                    return await runtimeKill(jobId: jobId, force: force, runtime: runtime)
                 }
 
                 // Already terminal — nothing to signal (idempotent).
@@ -487,7 +647,6 @@ public enum BgProcessModule {
                     ])
                 }
 
-                let force = valueToBool(args["force"])
                 let signal: Int32 = force ? SIGKILL : SIGTERM
                 // TOCTOU hardening (v4 audit #9): signal the worker's process
                 // GROUP, not a bare pid. bg_run launches under `set -m`, so the
