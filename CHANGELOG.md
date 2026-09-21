@@ -7,8 +7,8 @@
   payload is plain text. Group chats, attachments/media, and SMS-override
   (`allowSmsDespiteLiveService`) stay Request at dispatch. Settings can
   still raise or lower the per-tool tier. Does not change host Auto-review
-  (#294). Floor **4000 → 4004** (+4 discriminator / router tests). Linux
-  host cannot compile macOS 26; CI must re-measure.
+  (#294). Floor **4000 → 4004** (+4 discriminator / router tests). CI run
+  35636531485 measured passed=4004, 0 failed.
 
 - **skills exposure freshness lease after publish (#279).** Successful
   `skills_exposure_reconcile` publish now writes `freshnessLease` to the
