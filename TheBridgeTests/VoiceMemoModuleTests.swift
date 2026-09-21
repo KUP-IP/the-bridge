@@ -92,24 +92,6 @@ func runVoiceMemoModuleTests() async {
         try? FileManager.default.removeItem(at: fakeHome)
     }
 
-    await test("VoiceMemoCuratorJob: seeder is idempotent") {
-        let noop: @Sendable (String, [CronParser.CalendarInterval]) throws -> Void = { _, _ in }
-        try await JobStore.shared.open()
-        try? await JobStore.shared.delete(id: VoiceMemoCuratorJob.jobId)
-
-        let first = await JobsManager.shared.seedVoiceMemoCuratorJobIfNeeded(installLaunchAgent: noop)
-        try expect(first == true, "first seed inserts")
-        let job = try await JobStore.shared.fetch(id: VoiceMemoCuratorJob.jobId)
-        try expect(job?.schedule == "0 9 * * *", "9am schedule")
-        try expect(job?.status == .paused, "seed paused until operator go-live")
-        try expect(job?.actionChain.first?.tool == "voice_memo_process")
-
-        let second = await JobsManager.shared.seedVoiceMemoCuratorJobIfNeeded(installLaunchAgent: noop)
-        try expect(second == false, "second seed no-op")
-
-        try? await JobStore.shared.delete(id: VoiceMemoCuratorJob.jobId)
-    }
-
     await test("VoiceMemoProcessor skips already-processed memo unless forceReprocess") {
         let fakeHome = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("bridge-voicememo-idem-\(UUID().uuidString)", isDirectory: true)

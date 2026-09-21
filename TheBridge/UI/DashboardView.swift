@@ -17,7 +17,7 @@
 //   • connected-clients section → "Manage" jumps to Connection
 //   • permissions 2-col grid → "Gates" / each cell jumps to Security#gates
 //   • stats row: tools active / calls today / skills — BridgeStatTiles, each a
-//     nav jump-link (Tools / Jobs / Skills)
+//     nav jump-link (Tools / Skills)
 //   • Restart / Quit footer (BridgeButton .default / .danger) — wiring retained
 //
 // Historical (preserved for context):
@@ -465,13 +465,13 @@ public struct DashboardView: View {
     // MARK: - Stats Row
 
     private var statsRow: some View {
-        // `.db-stats` — three inset stat tiles (neutral / info / gold), padding
-        // 9×12, gap 7. Each tile is a nav jump-link (Tools / Jobs / Skills).
+        // `.db-stats` — three inset stat tiles (neutral / info / gold).
+        // Jobs chrome removed (#284); Calls today stays a Tools jump.
         HStack(spacing: 7) {
             statTile(value: "\(statusBar.activeToolCount)", label: "Tools active",
                      signal: .neutral, section: .tools)
             statTile(value: "\(statusBar.totalToolCalls)", label: "Calls today",
-                     signal: .info, section: .jobs)
+                     signal: .info, section: .tools)
             statTile(value: "\(skillsCount)", label: "Skills",
                      valueColor: BridgeTokens.goldSoft, section: .skills)
         }

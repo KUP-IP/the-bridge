@@ -133,24 +133,10 @@ public enum VoiceMemoModule {
                 if includeHealth {
                     let unprocessed = all.filter { !VoiceMemoProcessedStore.isProcessed(id: $0.id) }.count
                     let pendingReview = VoiceMemoReviewStore.pendingEntries().count
-                    var curatorStatus = "missing"
-                    var curatorActive = false
-                    do {
-                        try await JobStore.shared.open()
-                        if let job = try await JobStore.shared.fetch(id: VoiceMemoCuratorJob.jobId) {
-                            curatorStatus = job.status.rawValue
-                            curatorActive = job.status == .active
-                        }
-                    } catch {
-                        curatorStatus = "unavailable"
-                    }
                     result["health"] = .object([
-                        "curatorJobId": .string(VoiceMemoCuratorJob.jobId),
-                        "curatorStatus": .string(curatorStatus),
-                        "curatorActive": .bool(curatorActive),
                         "unprocessedCount": .int(unprocessed),
                         "pendingReviewCount": .int(pendingReview),
-                        "backlogHealthy": .bool(unprocessed < 50 && curatorActive),
+                        "backlogHealthy": .bool(unprocessed < 50),
                     ])
                 }
                 return .object(result)
@@ -221,11 +207,11 @@ public enum VoiceMemoModule {
         let rawMode = defaults.string(forKey: BridgeDefaults.voiceMemoCuratorMode)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        let curatorMode = rawMode.flatMap(VoiceMemoCuratorMode.init(rawValue:)) ?? .auto
+        let curatorMode: VoiceMemoCuratorMode = {
+            if rawMode == "local" { return .heuristics }
+            return rawMode.flatMap(VoiceMemoCuratorMode.init(rawValue:)) ?? .auto
+        }()
 
-        let ollamaRouting = useProductionEffectiveAccessors
-            ? BridgeDefaults.voiceMemoOllamaRoutingEffective
-            : defaults.bool(forKey: BridgeDefaults.voiceMemoOllamaRouting)
         let appleTranscript = useProductionEffectiveAccessors
             ? BridgeDefaults.voiceMemoAppleTranscriptEffective
             : (defaults.object(forKey: BridgeDefaults.voiceMemoAppleTranscript) == nil
@@ -242,7 +228,6 @@ public enum VoiceMemoModule {
 
         return .object([
             "curatorMode": .string(curatorMode.rawValue),
-            "ollamaRouting": .bool(ollamaRouting),
             "appleTranscript": .bool(appleTranscript),
             "speechAnalyzerTranscription": .bool(speechAnalyzerTranscription),
             "parakeetTranscription": .bool(parakeetTranscription),
@@ -261,7 +246,7 @@ public enum VoiceMemoModule {
             name: "voice_memo_settings_get",
             module: moduleName,
             tier: .open,
-            description: "Read the effective Voice Memo curator mode and transcription/routing toggles. Returns curatorMode, ollamaRouting, appleTranscript, speechAnalyzerTranscription, and parakeetTranscription.",
+            description: "Read the effective Voice Memo curator mode and transcription/routing toggles. Returns curatorMode, appleTranscript, speechAnalyzerTranscription, and parakeetTranscription.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([:]),
@@ -292,11 +277,7 @@ public enum VoiceMemoModule {
                 "properties": .object([
                     "curatorMode": .object([
                         "type": .string("string"),
-                        "description": .string("Curator mode: auto | heuristics | local | agent | cloud."),
-                    ]),
-                    "ollamaRouting": .object([
-                        "type": .string("boolean"),
-                        "description": .string("Allow Ollama routing in Auto mode. Local forces Ollama on; other explicit modes force it off."),
+                        "description": .string("Curator mode: auto | heuristics | agent | cloud."),
                     ]),
                     "appleTranscript": .object([
                         "type": .string("boolean"),
@@ -349,7 +330,6 @@ public enum VoiceMemoModule {
 
                 var requestedBooleans: [(key: String, defaultsKey: String, value: Bool)] = []
                 for (key, defaultsKey) in [
-                    ("ollamaRouting", BridgeDefaults.voiceMemoOllamaRouting),
                     ("appleTranscript", BridgeDefaults.voiceMemoAppleTranscript),
                     ("speechAnalyzerTranscription", BridgeDefaults.voiceMemoSpeechAnalyzerTranscription),
                     ("parakeetTranscription", BridgeDefaults.voiceMemoParakeetTranscription),

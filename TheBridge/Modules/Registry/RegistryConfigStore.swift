@@ -5,7 +5,7 @@
 // `registry.json` under `BridgePaths.applicationSupport(.registry)`, written
 // atomically (temp → replace) so a concurrent reader never sees a torn doc.
 // Path is injectable so tests drive a temp file — mirrors
-// SessionPersistenceStore / JobStore.
+// SessionPersistenceStore / SQLite WAL store.
 //
 // Posture: config is TRUTH, not a hint. So the two failure modes are handled
 // distinctly:

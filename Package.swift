@@ -20,7 +20,6 @@ let package = Package(
         .executable(name: "TheBridge", targets: ["TheBridge"]),
         .executable(name: "TheBridgeTests", targets: ["TheBridgeTests"]),
         .executable(name: "NotificationContentExtension", targets: ["NotificationContentExtension"]),
-        .executable(name: "NBJobRunner", targets: ["NBJobRunner"]),
         .executable(name: "license-cli", targets: ["license-cli"]),
     ],
     dependencies: [
@@ -90,13 +89,6 @@ let package = Package(
             path: "NotificationContentExtension",
             exclude: ["Info.plist"],
             sources: ["NotificationViewController.swift"]
-        ),
-        // v1.9.2: Signed launchd callback helper. Replaces /usr/bin/curl in
-        // job plists so BTM groups background items under The Bridge.
-        .executableTarget(
-            name: "NBJobRunner",
-            path: "NBJobRunner",
-            sources: ["main.swift"]
         ),
         // Packet B (PRJCT-2754): operator CLI for the Ed25519 license-token
         // system. Depends on TheBridgeLib so `mint` reuses the SAME

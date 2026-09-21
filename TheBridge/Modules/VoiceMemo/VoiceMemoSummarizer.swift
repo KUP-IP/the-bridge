@@ -34,29 +34,6 @@ public enum VoiceMemoSummarizer {
 
         let heuristicActions = VoiceMemoParser.extractActionBulletsPublic(from: trimmed)
         let heuristicParagraph = VoiceMemoParser.firstSentencePublic(in: trimmed, maxLen: 280)
-
-        guard BridgeDefaults.voiceMemoOllamaRoutingEffective,
-              VoiceMemoCuratorRouter.shouldUseLocalOllama(),
-              let model = BridgeDefaults.ollamaSummarizationModelEffective else {
-            return VoiceMemoStructuredSummary(paragraph: heuristicParagraph, actions: heuristicActions)
-        }
-
-        let client = OllamaClient.fromDefaults()
-        guard (try? await client.health()) == true else {
-            return VoiceMemoStructuredSummary(paragraph: heuristicParagraph, actions: heuristicActions)
-        }
-
-        let prompt = """
-        Summarize this voice memo for a personal knowledge base. Reply with ONLY valid JSON, no markdown:
-        {"summary":"2-4 sentence paragraph","actions":["Who will take the next physical step to achieve which outcome"]}
-        Each action must name who, the next physical step, and the outcome. Never write "Follow up." Use an empty actions array if none. Max 400 chars in summary.
-        Transcript:
-        \(trimmed.prefix(6000))
-        """
-        if let raw = try? await client.generate(model: model, prompt: prompt, options: .init(numPredict: 220, temperature: 0.3)),
-           let parsed = parseStructuredJSON(raw, fallbackParagraph: heuristicParagraph, fallbackActions: heuristicActions) {
-            return parsed
-        }
         return VoiceMemoStructuredSummary(paragraph: heuristicParagraph, actions: heuristicActions)
     }
 

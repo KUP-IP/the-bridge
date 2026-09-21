@@ -190,23 +190,6 @@ public enum ToolAnnotationCatalog {
         "worktree_command_run": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: false),
         // Sprint A · mcp-builder #6: git_worktree split into 3 primitives.
         "http_fetch": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: true, openWorld: true),
-        "job_create": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
-        "job_delete": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: true, openWorld: false),
-        "job_duplicate": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
-        "job_export": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
-        "job_get": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
-        "job_history": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
-        "job_import": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
-        "job_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
-        // Sprint A · audit Top-15 #12: job_pause / job_resume mutate LaunchAgent state.
-        // Was readOnlyHint:true (incorrect — pause unregisters the LaunchAgent).
-        // Sprint A · #3: jobs_pause_all / jobs_resume_all reinstated as 1-cycle
-        // deprecation aliases that forward to job_pause/job_resume with all:true.
-        "job_pause": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
-        "job_resume": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
-        "job_run": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
-        "job_templates": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
-        "job_update": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
         "keyboard_type": .init(readOnlyHint: false, destructiveHint: true, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         // Sprint A · mcp-builder #14: list_routing_skills → skills_routing_list.
         "skills_routing_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
@@ -267,8 +250,6 @@ public enum ToolAnnotationCatalog {
         "voice_memo_commit": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "voice_memo_triage_open": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
         "voice_memo_triage_await": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: false),
-        "ollama_health": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
-        "ollama_list_models": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
         "messages_chat": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "messages_content": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: true),
         "messages_participants": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),

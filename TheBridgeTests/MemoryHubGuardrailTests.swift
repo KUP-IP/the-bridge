@@ -189,7 +189,7 @@ func runMemoryHubGuardrailTests() async {
 
     await test("preview_heuristicFirst_localAuto_cloudManual") {
         try expect(PreviewProvenance.allCases.first == .heuristic, "heuristic is first")
-        try expect(MemoryHubPreview.mayAutoEnhanceLocal(localEnabled: true), "local may auto when enabled")
+        try expect(!MemoryHubPreview.mayAutoEnhanceLocal(localEnabled: true), "#284: local auto-enhance stays off")
         try expect(!MemoryHubPreview.mayAutoEnhanceLocal(localEnabled: false), "no local auto when disabled")
         try expect(!MemoryHubPreview.mayCloudEnhance(operatorTriggered: false), "cloud NEVER auto")
         try expect(MemoryHubPreview.mayCloudEnhance(operatorTriggered: true), "cloud only on explicit trigger")

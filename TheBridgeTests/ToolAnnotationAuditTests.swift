@@ -93,24 +93,6 @@ func runToolAnnotationAuditTests() async {
                    "tools missing explicit idempotentHint: \(missing.sorted())")
     }
 
-    // Sprint A · mcp-builder Top-15 #12: job_pause / job_resume mutate
-    // LaunchAgent state (unregister/re-register). The catalog previously
-    // marked them readOnlyHint:true — a semantic accuracy bug the
-    // mirror-invariant test couldn't catch. Pin the fix.
-    await test("job_pause / job_resume are NOT readOnly (sprint-a · audit #12)") {
-        let pause = ToolAnnotationCatalog.annotations(for: "job_pause")
-        try expect(pause?.readOnlyHint == false,
-                   "job_pause must be readOnlyHint:false — pause unregisters the LaunchAgent")
-        let resume = ToolAnnotationCatalog.annotations(for: "job_resume")
-        try expect(resume?.readOnlyHint == false,
-                   "job_resume must be readOnlyHint:false — resume re-registers the LaunchAgent")
-        // Both still idempotent (set-to-paused / set-to-running).
-        try expect(pause?.idempotentHint == true,
-                   "job_pause must be idempotentHint:true — pausing a paused job is a noop")
-        try expect(resume?.idempotentHint == true,
-                   "job_resume must be idempotentHint:true — resuming a running job is a noop")
-    }
-
     await test("screen_capture is Open-tier but not read-only because it writes and cleans capture artifacts") {
         guard let registration = regs.first(where: { $0.name == "screen_capture" }) else {
             throw TestError.assertion("screen_capture must be registered")
@@ -162,19 +144,6 @@ func runToolAnnotationAuditTests() async {
         let ann = ToolAnnotationCatalog.annotations(for: "notion_datasource_delete")
         try expect(ann?.destructiveHint == true && ann?.requiresConfirmation == true,
                    "notion_datasource_delete annotation must be destructive + requiresConfirmation; got \(String(describing: ann))")
-    }
-
-    await test("job_delete is human-gated + Always-Allowable + destructive") {
-        guard let reg = regs.first(where: { $0.name == "job_delete" }) else {
-            throw TestError.assertion("job_delete must be registered")
-        }
-        try expect(reg.tier == .request,
-                   "job_delete tier must be .request; got \(reg.tier.rawValue)")
-        try expect(reg.neverAutoApprove == false,
-                   "job_delete must offer Always Allow")
-        let ann = ToolAnnotationCatalog.annotations(for: "job_delete")
-        try expect(ann?.destructiveHint == true && ann?.requiresConfirmation == true,
-                   "job_delete annotation must be destructive + requiresConfirmation; got \(String(describing: ann))")
     }
 
     await test("skill_delete is human-gated + Always-Allowable + destructive") {

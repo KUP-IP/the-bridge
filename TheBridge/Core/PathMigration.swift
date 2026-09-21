@@ -186,7 +186,7 @@ public enum PathMigration {
     }
 
     /// Reset the sentinel so the next launch re-runs migration. Intended
-    /// for tests and the "Reset background items" maintenance flow.
+    /// for tests and factory-reset / maintenance flows.
     public static func resetSentinel(fileManager fm: FileManager = .default) throws {
         let sentinel = BridgePaths.applicationSupport.appendingPathComponent(sentinelName)
         if fm.fileExists(atPath: sentinel.path) {

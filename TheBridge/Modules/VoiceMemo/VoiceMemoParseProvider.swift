@@ -3,8 +3,8 @@
 //
 // The curator's Understand step is inverted from local-first to FRONTIER-FIRST:
 // a connected MCP agent (out-of-process) or a cloud API produces the routing
-// intents FIRST (zero marginal cost / best quality); local Ollama + the
-// deterministic heuristic are the in-a-pinch floor. Each rung conforms to
+// intents FIRST (zero marginal cost / best quality); the deterministic
+// heuristic is the in-a-pinch floor. Each rung conforms to
 // `VoiceMemoParseProvider`; `VoiceMemoParseRouter` walks the ordered chain and
 // stamps `plan.provenance` / `plan.degraded`.
 //
@@ -38,7 +38,7 @@ public protocol VoiceMemoParseProvider: Sendable {
 /// which one-shots the WHOLE transcript (frontier large context — no 4000-char
 /// cap) into a strict-JSON `VoiceMemoPlan`. It returns nil on ANY failure (non-2xx
 /// / timeout / unparseable JSON / zero intents) so the chain gracefully degrades to
-/// Local → Heuristic (`degraded == true`). The router stamps `.cloud` provenance;
+/// Heuristic (`degraded == true`). The router stamps `.cloud` provenance;
 /// the API key is read from the Keychain at call time and is NEVER logged.
 public struct CloudParseProvider: VoiceMemoParseProvider {
     public init() {}
@@ -59,7 +59,7 @@ public struct CloudParseProvider: VoiceMemoParseProvider {
     }
 
     /// Frontier parse over the WHOLE transcript. Returns nil on any throw (the
-    /// router then degrades to local/heuristic). Provenance is (re)stamped `.cloud`
+    /// router then degrades to heuristic). Provenance is (re)stamped `.cloud`
     /// by the router, so we do not set it here.
     public func parse(transcript: String, fallbackTitle: String, recordingPath: String) async -> VoiceMemoPlan? {
         guard let provider = loadedProvider else { return nil }
@@ -68,33 +68,6 @@ public struct CloudParseProvider: VoiceMemoParseProvider {
             fallbackTitle: fallbackTitle,
             recordingPath: recordingPath,
             provider: provider
-        )
-    }
-}
-
-// MARK: - Local (Ollama) — in-a-pinch fallback
-
-/// Local Ollama Understand rung. Availability is the EXISTING gate
-/// (`voiceMemoOllamaRoutingEffective ∧ shouldUseLocalOllama() ∧ a routing model`);
-/// `parse` delegates to `VoiceMemoParser.ollamaParse` (the verbatim-extracted
-/// Ollama body), which returns nil on an unhealthy daemon / generation or
-/// JSON-parse failure. The plan is stamped `.local` by `ollamaParse`.
-public struct LocalParseProvider: VoiceMemoParseProvider {
-    public init() {}
-
-    public var provenance: ParseProvenance { .local }
-
-    public func isAvailable() -> Bool {
-        BridgeDefaults.voiceMemoOllamaRoutingEffective
-            && VoiceMemoCuratorRouter.shouldUseLocalOllama()
-            && BridgeDefaults.ollamaRoutingModelEffective != nil
-    }
-
-    public func parse(transcript: String, fallbackTitle: String, recordingPath: String) async -> VoiceMemoPlan? {
-        await VoiceMemoParser.ollamaParse(
-            transcript: transcript,
-            fallbackTitle: fallbackTitle,
-            recordingPath: recordingPath
         )
     }
 }

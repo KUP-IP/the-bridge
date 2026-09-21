@@ -79,13 +79,6 @@ public enum SettingsUIValidationHarness {
                     BridgeAXID.Commands.searchPaletteHint,
                     BridgeAXID.Commands.list,
                 ])
-            case .jobs:
-                ids.append(contentsOf: [
-                    BridgeAXID.Jobs.newJob,
-                    BridgeAXID.Jobs.pauseAll,
-                    BridgeAXID.Jobs.search,
-                    BridgeAXID.Jobs.list,
-                ])
             case .tools:
                 ids.append(contentsOf: [
                     BridgeAXID.Tools.list,
@@ -174,7 +167,6 @@ public enum SettingsUIValidationHarness {
                     BridgeAXID.Memory.Settings.ladderApple,
                     BridgeAXID.Memory.Settings.ladderSpeechAnalyzer,
                     BridgeAXID.Memory.Settings.ladderParakeet,
-                    BridgeAXID.Memory.Settings.ladderOllama,
                     BridgeAXID.Memory.Settings.cloudBaseURL,
                     BridgeAXID.Memory.Settings.cloudModel,
                     BridgeAXID.Memory.Settings.cloudEnabled,

@@ -90,18 +90,17 @@ func runBridgeSearchTests() async {
         try expect(results.isEmpty, "blank query must return nothing (the bar shows the tray, not all)")
     }
 
-    await test("Ranked: results are grouped Commands → Skills → Jobs → Tools") {
+    await test("Ranked: results are grouped Commands → Skills → Tools") {
         let entities = [
             entity(.tool, "t", "deploy_tool"),
-            entity(.job, "j", "deploy job"),
             entity(.skill, "s", "deploy skill"),
             entity(.command, "c", "deploy"),
         ]
         let results = BridgeSearch.rankedResults(query: "deploy", entities: entities)
-        try expect(results.count == 4, "all four should match 'deploy', got \(results.count)")
+        try expect(results.count == 3, "all three should match 'deploy', got \(results.count)")
         let kinds = results.map { $0.kind }
-        try expect(kinds == [.command, .skill, .job, .tool],
-                   "group order must be command, skill, job, tool — got \(kinds)")
+        try expect(kinds == [.command, .skill, .tool],
+                   "group order must be command, skill, tool — got \(kinds)")
     }
 
     await test("Ranked: within a group, higher score sorts first") {
@@ -142,12 +141,12 @@ func runBridgeSearchTests() async {
     await test("Result: id is kind-namespaced so the same id across kinds stays unique") {
         let entities = [
             BridgeSearchEntity(kind: .skill, id: "deploy", title: "deploy", destination: .skillSettings(anchor: "deploy")),
-            BridgeSearchEntity(kind: .job, id: "deploy", title: "deploy", destination: .job(id: "deploy")),
+            BridgeSearchEntity(kind: .tool, id: "deploy", title: "deploy", destination: .tool(group: "dev", tool: "deploy")),
         ]
         let results = BridgeSearch.rankedResults(query: "deploy", entities: entities)
         let ids = Set(results.map { $0.id })
         try expect(ids.count == 2, "same entity id in two kinds must yield two distinct result ids, got \(ids)")
-        try expect(ids.contains("skill:deploy") && ids.contains("job:deploy"),
+        try expect(ids.contains("skill:deploy") && ids.contains("tool:deploy"),
                    "ids must be namespaced by kind, got \(ids)")
     }
 
@@ -163,11 +162,9 @@ func runBridgeSearchTests() async {
     await test("Kind: tag + colorTag + group header are stable per kind") {
         try expect(BridgeSearchKind.command.tag == "CMD", "command tag")
         try expect(BridgeSearchKind.skill.tag == "SKILL", "skill tag")
-        try expect(BridgeSearchKind.job.tag == "JOB", "job tag")
         try expect(BridgeSearchKind.tool.tag == "TOOL", "tool tag")
         try expect(BridgeSearchKind.command.colorTag == "blue", "command color")
         try expect(BridgeSearchKind.skill.colorTag == "purple", "skill color")
-        try expect(BridgeSearchKind.job.colorTag == "green", "job color")
         try expect(BridgeSearchKind.tool.colorTag == "orange", "tool color")
         try expect(BridgeSearchKind.skill.groupHeader == "Skills", "skill header")
     }

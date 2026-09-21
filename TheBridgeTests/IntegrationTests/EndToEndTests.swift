@@ -400,9 +400,9 @@ func runEndToEndTests() async {
         try expect(connections.count == 6, "ConnectionsModule: expected 6")
 
         let scheduler = await router.registrations(forModule: "scheduler")
-        // v3.7.11 resurface: jobs_pause_all / jobs_resume_all deprecation aliases
-        // removed (use job_pause / job_resume with all:true). 15 − 2 = 13.
-        try expect(scheduler.count == 13, "JobsModule scheduler family: expected 13 (v3.7.11 resurface)")
+        try expect(scheduler.isEmpty, "#284: scheduler/Jobs family must be gone")
+        let ollama = await router.registrations(forModule: "ollama")
+        try expect(ollama.isEmpty, "#284: ollama family must be gone")
 
         let dev = await router.registrations(forModule: "dev")
         // v3.7.11 resurface trimmed dev/ to the lean quick-fix kit: gh_* (9),

@@ -19,15 +19,15 @@
 //   • Maintenance card — the one loud card: a benign Routine sub-group
 //                  (Rebuild skills index · Clear cache · Restart Bridge), then a
 //                  red-edged Danger zone rendered as the design's flat horizontal
-//                  button row (Reset onboarding · Reset background items · spacer
-//                  · Factory reset…) with an inline factory-reset confirm banner.
+//                  button row (Reset onboarding · spacer · Factory reset…)
+//                  with an inline factory-reset confirm banner.
 //
 // VIEW LAYER ONLY — every binding / action is preserved verbatim:
 //   launch-at-login registration (SMAppService `applyLaunchAtLoginChange`),
 //   `checkForUpdates()`, the SSE port edit + validation + save (`onSaveSSEPort`)
-//   + restore-default, copy-endpoint rows, reveal-in-Finder path rows, the four
-//   confirmationDialogs (port restart · reset onboarding · reset background
-//   items · factory reset → `onPerformFactoryReset`), and `onExportDiagnostics`.
+//   + restore-default, copy-endpoint rows, reveal-in-Finder path rows, the
+//   confirmationDialogs (port restart · reset onboarding · factory reset →
+//   `onPerformFactoryReset`), and `onExportDiagnostics`.
 // `launchAtLogin` is the same @AppStorage key the AppDelegate reads at startup,
 // so it stays the single source of truth for the login item.
 
@@ -46,8 +46,6 @@ public struct AdvancedSection: View {
     @Binding var showSSEPortRestartPrompt: Bool
     @Binding var ssePortRevertOnCancel: Int?
     @Binding var showResetConfirmation: Bool
-    @Binding var showResetBackgroundItemsConfirmation: Bool
-    @Binding var resetBackgroundItemsMessage: String?
     @Binding var showFactoryResetConfirmation: Bool
     @Binding var factoryResetMessage: String?
     let onSaveSSEPort: () -> Void
@@ -67,8 +65,6 @@ public struct AdvancedSection: View {
         showSSEPortRestartPrompt: Binding<Bool>,
         ssePortRevertOnCancel: Binding<Int?>,
         showResetConfirmation: Binding<Bool>,
-        showResetBackgroundItemsConfirmation: Binding<Bool>,
-        resetBackgroundItemsMessage: Binding<String?>,
         showFactoryResetConfirmation: Binding<Bool>,
         factoryResetMessage: Binding<String?>,
         onSaveSSEPort: @escaping () -> Void,
@@ -87,8 +83,6 @@ public struct AdvancedSection: View {
         self._showSSEPortRestartPrompt = showSSEPortRestartPrompt
         self._ssePortRevertOnCancel = ssePortRevertOnCancel
         self._showResetConfirmation = showResetConfirmation
-        self._showResetBackgroundItemsConfirmation = showResetBackgroundItemsConfirmation
-        self._resetBackgroundItemsMessage = resetBackgroundItemsMessage
         self._showFactoryResetConfirmation = showFactoryResetConfirmation
         self._factoryResetMessage = factoryResetMessage
         self.onSaveSSEPort = onSaveSSEPort
@@ -130,26 +124,17 @@ public struct AdvancedSection: View {
     private let cardGap: CGFloat = 10
 
     // Endpoint column key width — the JSX `.k { width: 118px }`, widened a touch
-    // so the longest labels ("Streamable HTTP", "Reset background items") clear.
+    // so the longest labels ("Streamable HTTP") clear.
     private let keyColumnWidth: CGFloat = 130
 
     public var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: cardGap) {
-                    metaStrip
-                    systemCard
-                    LocalModelsSection()
-                    maintenanceCard
-                }
-                .padding(paneInset)
+        ScrollView {
+            VStack(alignment: .leading, spacing: cardGap) {
+                metaStrip
+                systemCard
+                maintenanceCard
             }
-            .onChange(of: nav.anchor) { _, newAnchor in
-                scrollToAnchor(newAnchor, proxy: proxy)
-            }
-            .onAppear {
-                scrollToAnchor(nav.anchor, proxy: proxy)
-            }
+            .padding(paneInset)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
@@ -187,21 +172,6 @@ public struct AdvancedSection: View {
             Text("This will restart the setup wizard. Your settings and data will not be affected.")
         }
         .confirmationDialog(
-            "Reset Background Items?",
-            isPresented: $showResetBackgroundItemsConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Reset", role: .destructive) {
-                Task {
-                    let result = await JobsManager.shared.resetBackgroundItems()
-                    await MainActor.run { resetBackgroundItemsMessage = result.message }
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Re-register scheduled background jobs with launchd.")
-        }
-        .confirmationDialog(
             "Factory Reset The Bridge?",
             isPresented: $showFactoryResetConfirmation,
             titleVisibility: .visible
@@ -215,25 +185,6 @@ public struct AdvancedSection: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(factoryResetConfirmationMessage)
-        }
-    }
-
-    // MARK: - Deep-link anchor scroll (local-models)
-
-    private func scrollToAnchor(_ raw: String?, proxy: ScrollViewProxy) {
-        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
-              !raw.isEmpty else { return }
-        let norm = raw
-            .replacingOccurrences(of: " ", with: "")
-            .replacingOccurrences(of: "_", with: "")
-            .replacingOccurrences(of: "-", with: "")
-        let target: String? = switch norm {
-        case "localmodels", "localmodel", "ollama", "models": "local-models"
-        default: nil
-        }
-        guard let target else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            withAnimation { proxy.scrollTo(target, anchor: .top) }
         }
     }
 
@@ -710,8 +661,8 @@ public struct AdvancedSection: View {
     //
     // The one loud card. Benign "Routine" actions (Rebuild skills index · Clear
     // cache · Restart Bridge) sit above the red-edged Danger zone, which is the
-    // design's flat horizontal `.avp-actions` row (Reset onboarding · Reset
-    // background items · spacer · Factory reset…). The three reset/wipe actions
+    // design's flat horizontal `.avp-actions` row (Reset onboarding · spacer ·
+    // Factory reset…). The remaining reset/wipe actions
     // each fire the SAME confirmation-dialog bindings as before; factory reset
     // uses BridgeButton(.danger). (The destructive gate stays the native
     // confirmationDialog — the wired, OS-standard path — in place of the JSX's
@@ -734,18 +685,13 @@ public struct AdvancedSection: View {
                 routineGroup
 
                 // Danger zone — the flat horizontal `.avp-actions` row the design
-                // draws: Reset onboarding · Reset background items · spacer ·
-                // Factory reset…. Each fires the SAME confirmation-dialog bindings.
+                // draws: Reset onboarding · spacer · Factory reset….
+                // Each fires the SAME confirmation-dialog bindings.
                 dangerZone
 
                 // Result echoes from the two async reset paths.
                 if let factoryResetMessage {
                     Text(factoryResetMessage)
-                        .font(BridgeTokens.Typeface.sub)
-                        .foregroundStyle(BridgeTokens.fg3)
-                }
-                if let resetBackgroundItemsMessage {
-                    Text(resetBackgroundItemsMessage)
                         .font(BridgeTokens.Typeface.sub)
                         .foregroundStyle(BridgeTokens.fg3)
                 }
@@ -814,8 +760,8 @@ public struct AdvancedSection: View {
     // MARK: Danger zone (flat horizontal action row)
     //
     // JSX lines 152-158: a bad-text "Danger zone" group label over a bad-tinted
-    // divider, then a flat `.avp-actions` row — Reset onboarding · Reset
-    // background items · spacer · Factory reset… (BridgeButton(.danger)). Every
+    // divider, then a flat `.avp-actions` row — Reset onboarding · spacer ·
+    // Factory reset… (BridgeButton(.danger)). Every
     // action fires its existing confirmation-dialog binding verbatim.
 
     private var dangerZone: some View {
@@ -827,9 +773,6 @@ public struct AdvancedSection: View {
             HStack(spacing: 8) {
                 BridgeButton("Reset onboarding") {
                     showResetConfirmation = true
-                }
-                BridgeButton("Reset background items") {
-                    showResetBackgroundItemsConfirmation = true
                 }
                 Spacer(minLength: 0)
                 BridgeButton("Factory reset\u{2026}", systemImage: "power", variant: .danger) {

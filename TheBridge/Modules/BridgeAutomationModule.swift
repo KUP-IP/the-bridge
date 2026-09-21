@@ -127,9 +127,8 @@ public enum BridgeSettingsAutomation {
         // Singular shorthands for surviving sections
         case "skill":                  return (.skills, nil)
         case "tool":                   return (.tools, nil)
-        case "job":                    return (.jobs, nil)
-        case "advanced", "localmodels", "localmodel", "ollama":
-            return (.advanced, "local-models")
+        case "advanced":
+            return (.advanced, nil)
         case "settings", "preferences": return nil  // ambiguous: not a section
         default:                       return nil
         }
@@ -144,8 +143,8 @@ public enum BridgeSettingsAutomation {
     }
 
     /// The friendly display names advertised to agents (Settings Redesign
-    /// PKT-A; IA change 2026-06-12) — "Commands", "Skills", "Jobs", "Tools",
-    /// "Security", "Connection", "Advanced". The resolver accepts these too.
+    /// PKT-A; IA change 2026-06-12, Jobs dropped #284) — "Commands", "Skills",
+    /// "Tools", "Security", "Connection", "Advanced". The resolver accepts these too.
     public static var sectionDisplayNames: [String] {
         SettingsSection.allCases.map(\.displayName)
     }

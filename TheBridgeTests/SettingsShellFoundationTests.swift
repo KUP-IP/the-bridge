@@ -80,7 +80,7 @@ func runSettingsShellFoundationTests() async {
         let labels = SettingsSection.allCases.map(\.displayName)
         try expect(labels.contains("Commands"))
         try expect(labels.contains("Skills"))
-        try expect(labels.contains("Jobs"))
+        try expect(!labels.contains("Jobs"), "#284: Jobs must be gone from IA")
         try expect(labels.contains("Tools"))
         try expect(labels.contains("Data Sources"))
         try expect(!labels.contains(where: { $0.localizedCaseInsensitiveContains("npass") }),

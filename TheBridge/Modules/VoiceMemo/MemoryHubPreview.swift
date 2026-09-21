@@ -20,7 +20,7 @@ public enum MemoryHubPreview {
     public static let cloudTimeoutSeconds: Double = 20
 
     /// Local (Ollama) may AUTO-enhance after the heuristic render when enabled.
-    public static func mayAutoEnhanceLocal(localEnabled: Bool) -> Bool { localEnabled }
+    public static func mayAutoEnhanceLocal(localEnabled: Bool) -> Bool { false }
 
     /// Cloud enhancement runs ONLY on explicit operator action — never auto.
     public static func mayCloudEnhance(operatorTriggered: Bool) -> Bool { operatorTriggered }

@@ -20,7 +20,7 @@
 //   • idle consolidation Job, and any UI.
 //
 // CONCURRENCY: this is a Swift-6 `actor` wrapping the raw SQLite3 C API,
-// mirroring `JobStore` (PKT-340). The actor's serial executor IS the
+// mirroring the SQLite WAL store pattern (PKT-340). The actor's serial executor IS the
 // single serialized writer the WAL journal mode wants — every prepare/
 // step/finalize runs inside actor isolation, so there is no second writer
 // and no cross-thread handle sharing. The `sqlite3` handle (`OpaquePointer`)
@@ -38,7 +38,7 @@ import SQLite3
 import NaturalLanguage
 
 // sqlite3 transient-destructor sentinel (re-declared because SQLITE_TRANSIENT
-// is a C macro not re-exported as a Swift constant). Same pattern as JobStore.
+// is a C macro not re-exported as a Swift constant). Same pattern as the WAL store.
 private let MEM_SQLITE_TRANSIENT = unsafeBitCast(OpaquePointer(bitPattern: -1), to: sqlite3_destructor_type.self)
 
 // MARK: - Paths
@@ -244,7 +244,7 @@ public actor MemoryStore {
         var handle: OpaquePointer?
         // FULLMUTEX is belt-and-suspenders: the actor already serializes access,
         // but the serialized-threading mode costs nothing here and hardens
-        // against any future nonisolated handle leak. Mirrors JobStore.
+        // against any future nonisolated handle leak. Mirrors the WAL store.
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
         let rc = sqlite3_open_v2(path.path, &handle, flags, nil)
         guard rc == SQLITE_OK, let handle else {
@@ -942,7 +942,7 @@ public actor MemoryStore {
         embeddingIndex.remove(id: id)
     }
 
-    // MARK: - Low-level SQLite helpers (mirror JobStore)
+    // MARK: - Low-level SQLite helpers (WAL store)
 
     private func exec(_ sql: String) throws {
         guard let db else { throw MemoryStoreError.storageFailure("db not open") }
