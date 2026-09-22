@@ -19,9 +19,9 @@
 #     WORKOS_BASE_URL / WORKOS_REDIRECT_URI: public WorkOS/OAuth identity baked
 #     into RemoteAccessIdentity.swift for the cloud connector.
 #
-# Branch-protection note: the "Commit appcast to main" step pushes appcast.xml
-# back to `main` (the Sparkle SUFeedURL is the raw main appcast.xml). The
-# Actions bot must be allowed to push to main (commit carries [skip ci]).
+# Branch-protection note: main requires a pull request and forbids a direct
+# push. The appcast step opens a PR from release/appcast-<tag> with the
+# CI-signed appcast.xml. It does not check out or push main.
 
 name: Release
 
@@ -63,6 +63,7 @@ jobs:
     needs: test
     permissions:
       contents: write
+      pull-requests: write
     env:
       SIGNING_IDENTITY: "Developer ID Application: Isaiah Peters (VP24Z9CS22)"
       NOTARIZE_PROFILE: notarytool-profile
@@ -256,23 +257,35 @@ jobs:
         with:
           files: .build/the-bridge-v${{ env.VERSION }}.dmg
 
-      - name: Commit appcast to main
+      - name: Open appcast pull request
         if: ${{ steps.sparkle_key.outputs.has_key == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.event.inputs.dry_run != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           cp appcast.xml "$RUNNER_TEMP/appcast.xml"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
-          git checkout -f -B main FETCH_HEAD
+          branch="release/appcast-${RELEASE_TAG}"
+          git switch -c "$branch" origin/main
           cp "$RUNNER_TEMP/appcast.xml" appcast.xml
           if git diff --quiet -- appcast.xml; then
-            echo "appcast.xml already up to date on main — nothing to commit"
-          else
-            git add appcast.xml
-            git commit -m "release(${RELEASE_TAG}): publish Sparkle appcast for ${RELEASE_TAG} [skip ci]"
-            git push origin main
-            echo "✅ appcast.xml committed to main for ${RELEASE_TAG}"
+            echo "appcast.xml already matches origin/main — no pull request"
+            exit 0
           fi
+          git add appcast.xml
+          git commit -m "release(${RELEASE_TAG}): publish Sparkle appcast for ${RELEASE_TAG}"
+          git push -u origin "$branch"
+          existing="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --base main --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            echo "Appcast pull request already open: #${existing}"
+            exit 0
+          fi
+          gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$branch" \
+            --title "release(${RELEASE_TAG}): publish Sparkle appcast" \
+            --body "CI-signed appcast.xml for ${RELEASE_TAG}. The enclosure signature was produced in this tag run. Do not regenerate it by hand."
+          echo "Opened appcast pull request for ${RELEASE_TAG}"
 
       - name: Cleanup temporary keychain + signing key
         if: ${{ always() }}
