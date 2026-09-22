@@ -23,6 +23,10 @@ the message. There is **no public Apple API** to:
 - force Continuity to refresh the Mac transcript.
 
 Closing GitHub #199 is therefore **documentation + honesty**, not a UI wipe.
+False Mac “failed to send / try again” while the phone delivered continues
+as [#302](https://github.com/KUP-IP/the-bridge/issues/302). Protocol pick
+(RCS vs SMS vs iMessage) is [#303](https://github.com/KUP-IP/the-bridge/issues/303)
+— see `docs/operator/messages-protocol-discriminator.md`.
 
 ## Operator / agent contract
 

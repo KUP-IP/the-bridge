@@ -247,7 +247,13 @@
 #   Request. +4 MessagesSendApprovalPolicyTests (discriminator table,
 #   router notify, router request paths, Settings override). CI run
 #   35636531485 measured passed=4004, 0 failed on 818ba83.
-FLOOR="${BRIDGE_TEST_FLOOR:-4004}"
+# 2026-09-22: 4004 → 4020 (+16) — #303 / epic #301 protocol discriminator:
+#   inherit live 1:1 thread/contact service or fail closed; 1:1
+#   chatIdentifier uses the same bind (no first-match remap). +16
+#   MessagesProtocolDiscriminatorTests (specimens, tapback/group, RCS
+#   override, ambiguous threads, catalog/doc). Linux host cannot compile
+#   macOS 26; CI must re-measure and raise if the green count is higher.
+FLOOR="${BRIDGE_TEST_FLOOR:-4020}"
 
 echo "🧪 test-floor-gate: building debug test executable + running suite (floor=${FLOOR})..."
 swift build -c debug --product TheBridgeTests

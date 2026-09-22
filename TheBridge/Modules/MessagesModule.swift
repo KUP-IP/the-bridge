@@ -179,10 +179,12 @@ public enum MessagesService: String, Sendable, Equatable, CaseIterable {
     }
 }
 
-/// Ordinary `messages_send` service choice (#198 / #249): inherit live inbound
-/// iMessage/SMS, or fail closed. Never map RCS/unknown onto SMS on omit, and
-/// never honor an explicit service that contradicts a live iMessage/SMS
-/// channel. Explicit SMS on RCS/unknown is allowed only with
+/// Ordinary `messages_send` service choice (#198 / #249 / #303): inherit the
+/// live 1:1 thread/contact service (inbound first, else unambiguous
+/// chat.guid / service_name), or fail closed. Never map RCS/unknown onto
+/// SMS on omit, never honor an explicit service that contradicts a live
+/// iMessage/SMS channel, and never first-match AppleScript services for a
+/// 1:1 chatIdentifier. Explicit SMS on RCS/unknown is allowed only with
 /// `allowSmsDespiteLiveService: true` — the flag does not unlock iMessage↔SMS
 /// mismatch and does not make RCS a sendable service.
 public enum MessagesServiceResolution: Equatable, Sendable {
@@ -206,21 +208,10 @@ extension MessagesModule {
     }
 
     /// First inbound (`is_from_me = 0`) service in date-desc rows. Outbound
-    /// history is ignored — that was the Veronica guess (#198).
+    /// history is ignored — that was the Veronica guess (#198). Tapbacks,
+    /// system rows, and group chats do not set 1:1 inherit (#303).
     public static func latestInboundService(from rows: [[String: Any]]) -> String? {
-        for row in rows {
-            let fromMe: Int = {
-                if let value = row["is_from_me"] as? Int { return value }
-                if let value = row["is_from_me"] as? Bool { return value ? 1 : 0 }
-                return 1
-            }()
-            guard fromMe == 0 else { continue }
-            if let service = row["service"] as? String,
-               !service.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return service
-            }
-        }
-        return nil
+        MessagesProtocolDiscriminator.latestInboundServiceName(from: rows)
     }
 
     public static func resolveSendService(
@@ -859,20 +850,55 @@ public enum MessagesModule {
 
     /// Latest inbound `message.service` for a one-to-one handle. Outbound
     /// rows are ignored so prior SMS history cannot override a live iMessage
-    /// or RCS inbound (#198).
+    /// or RCS inbound (#198). Exact handle / chat.guid keys only — no LIKE
+    /// (#215 / #303). Tapbacks and group chats are excluded.
     public static func lookupLiveInboundService(recipient: String) throws -> String? {
+        try lookupLiveThreadService(
+            target: .oneToOne(handle: recipient, declaredThreadService: nil)
+        )
+    }
+
+    /// Bind the live 1:1 thread/contact service for inherit-or-fail-closed
+    /// (#303). Prefers latest inbound on that thread; else the unambiguous
+    /// chat.guid / service_name identity.
+    public static func lookupLiveThreadService(
+        target: MessagesProtocolDiscriminator.Target
+    ) throws -> String? {
+        let seed: String
+        switch target {
+        case .oneToOne(let handle, _):
+            seed = handle
+        case .group(let chatIdentifier):
+            seed = chatIdentifier
+        }
+        let rows = try lookupLiveThreadRows(keys: MessagesProtocolDiscriminator.exactLookupKeys(for: seed))
+        return MessagesProtocolDiscriminator.liveService(from: rows, target: target)
+    }
+
+    public static func lookupLiveThreadRows(keys: [String]) throws -> [[String: Any]] {
+        let slots = MessagesProtocolDiscriminator.paddedLookupKeys(keys)
+        let inList = (1...MessagesProtocolDiscriminator.lookupSlotCount).map { "?\($0)" }.joined(separator: ", ")
         let sql = """
-            SELECT m.service, m.is_from_me
+            SELECT m.service, m.is_from_me, h.id AS handle_id,
+                   c.chat_identifier, c.guid AS chat_guid, c.service_name,
+                   (SELECT COUNT(*) FROM chat_handle_join chj WHERE chj.chat_id = c.ROWID) AS participant_count,
+                   COALESCE(m.associated_message_type, 0) AS associated_message_type,
+                   COALESCE(m.item_type, 0) AS item_type
             FROM message m
             LEFT JOIN handle h ON m.handle_id = h.ROWID
             JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
             JOIN chat c ON c.ROWID = cmj.chat_id
-            WHERE h.id = ?1
+            WHERE (
+                h.id IN (\(inList))
+                OR c.chat_identifier IN (\(inList))
+                OR c.guid IN (\(inList))
+            )
+              AND \(MessagesQueryContracts.normalRowPredicate)
+              AND (SELECT COUNT(*) FROM chat_handle_join chj WHERE chj.chat_id = c.ROWID) <= 1
             ORDER BY m.date DESC
             LIMIT 50
             """
-        let rows = try performQuery(sql, params: [recipient])
-        return latestInboundService(from: rows)
+        return try performQuery(sql, params: slots)
     }
 
     /// One-to-one delivery primitive for ordinary messages_send and the bounded
@@ -1250,6 +1276,165 @@ public enum MessagesModule {
         return object["error"] == nil
     }
 
+    /// Ordinary 1:1 send after the live thread/contact service has been
+    /// bound (#303). Used for `recipient` and 1:1 `chatIdentifier`.
+    public static func ordinaryOneToOneSendValue(
+        handle: String,
+        body: String?,
+        filePath: String?,
+        confirm: String,
+        serviceOverride: String?,
+        allowSmsDespiteLiveService: Bool,
+        liveInboundRaw: String?,
+        liveRows: [[String: Any]] = [],
+        chatIdentifier: String? = nil
+    ) throws -> Value {
+        if serviceOverride == nil,
+           liveInboundRaw == nil,
+           MessagesProtocolDiscriminator.isAmbiguousThreadIdentity(from: liveRows, handle: handle) {
+            return sendClosedEnvelope(
+                error: MessagesProtocolDiscriminator.ambiguousThreadsRefuseReason(handle: handle),
+                liveInboundRaw: liveInboundRaw,
+                chatIdentifier: chatIdentifier
+            )
+        }
+        switch resolveSendService(
+            requested: serviceOverride,
+            liveInboundRaw: liveInboundRaw,
+            allowSmsDespiteLiveService: allowSmsDespiteLiveService
+        ) {
+        case .refuse(let reason):
+            return sendClosedEnvelope(
+                error: reason,
+                liveInboundRaw: liveInboundRaw,
+                chatIdentifier: chatIdentifier
+            )
+        case .use(let resolved):
+            if resolved == .sms, !isPhoneRecipient(handle) {
+                return sendClosedEnvelope(
+                    error: "SMS requires a phone-number recipient",
+                    liveInboundRaw: liveInboundRaw,
+                    service: resolved.rawValue,
+                    chatIdentifier: chatIdentifier
+                )
+            }
+            if let filePath, let policyError = MessagesQueryContracts.fileSendPolicyError(
+                filePath: filePath,
+                chatIdentifier: chatIdentifier,
+                resolvedService: resolved.rawValue,
+                checkFilesystem: true
+            ) {
+                return sendClosedEnvelope(
+                    error: policyError,
+                    liveInboundRaw: liveInboundRaw,
+                    service: resolved.rawValue,
+                    chatIdentifier: chatIdentifier
+                )
+            }
+            if resolved != .iMessage, filePath != nil {
+                return sendClosedEnvelope(
+                    error: "file attachments are 1:1 iMessage only",
+                    liveInboundRaw: liveInboundRaw,
+                    service: resolved.rawValue,
+                    chatIdentifier: chatIdentifier
+                )
+            }
+        }
+        let preSendMaxId: Int
+        let preparedAt = Date()
+        do {
+            preSendMaxId = try currentMaxMessageRowId()
+        } catch {
+            return sendClosedEnvelope(
+                error: "Could not capture pre-send ROWID watermark: \(error.localizedDescription)",
+                liveInboundRaw: liveInboundRaw,
+                chatIdentifier: chatIdentifier,
+                extra: [
+                    "verified": .bool(false),
+                    "verificationStatus": .string(MessagesDeliveryVerificationStatus.deliveryError.rawValue)
+                ]
+            )
+        }
+        if let filePath {
+            let invocation = invokeAppleScriptFile(recipient: handle, filePath: filePath)
+            if !invocation.succeeded {
+                return .object([
+                    "sent": .bool(false),
+                    "deliveryInvoked": .bool(true),
+                    "consequencePossible": .bool(true),
+                    "correlatedLocalRecord": .bool(false),
+                    "providerDeliveryConfirmed": .bool(false),
+                    "liveInboundService": liveInboundRaw.map(Value.string) ?? .null,
+                    "error": .string(invocation.error ?? "AppleScript file send failed"),
+                    "errorNumber": invocation.errorNumber.map(Value.int) ?? .null
+                ])
+            }
+            let verification = verifyFileDelivery(
+                recipient: handle,
+                afterId: preSendMaxId,
+                preparedAt: preparedAt
+            )
+            return .object([
+                "sent": .bool(true),
+                "deliveryInvoked": .bool(true),
+                "consequencePossible": .bool(true),
+                "correlatedLocalRecord": .bool(verification.verified),
+                "providerDeliveryConfirmed": .bool(false),
+                "recipient": .string(handle),
+                "filePath": .string((filePath as NSString).expandingTildeInPath),
+                "liveInboundService": liveInboundRaw.map(Value.string) ?? .null,
+                "verified": .bool(verification.verified),
+                "verificationStatus": .string(verification.status.rawValue),
+                "messageRowId": verification.messageRowId.map(Value.int) ?? .null
+            ])
+        }
+        guard let body else {
+            throw ToolRouterError.invalidArguments(toolName: "messages_send", reason: "missing body or filePath")
+        }
+        let attempt = performOneToOneSend(
+            recipient: handle,
+            body: body,
+            confirm: confirm,
+            serviceOverride: serviceOverride,
+            afterId: preSendMaxId,
+            preparedAt: preparedAt,
+            liveInboundRaw: liveInboundRaw,
+            allowSmsDespiteLiveService: allowSmsDespiteLiveService
+        )
+        var fields = oneToOneSendMCPFields(
+            recipient: handle,
+            body: body,
+            attempt: attempt
+        )
+        fields["liveInboundService"] = liveInboundRaw.map(Value.string) ?? .null
+        if let chatIdentifier {
+            fields["chatIdentifier"] = .string(chatIdentifier)
+        }
+        return .object(fields)
+    }
+
+    public static func sendClosedEnvelope(
+        error: String,
+        liveInboundRaw: String? = nil,
+        service: String? = nil,
+        chatIdentifier: String? = nil,
+        extra: [String: Value] = [:]
+    ) -> Value {
+        var fields: [String: Value] = [
+            "sent": .bool(false),
+            "deliveryInvoked": .bool(false),
+            "consequencePossible": .bool(false),
+            "correlatedLocalRecord": .bool(false),
+            "providerDeliveryConfirmed": .bool(false),
+            "liveInboundService": liveInboundRaw.map(Value.string) ?? .null,
+            "error": .string(error)
+        ]
+        if let service { fields["service"] = .string(service) }
+        if let chatIdentifier { fields["chatIdentifier"] = .string(chatIdentifier) }
+        for (key, value) in extra { fields[key] = value }
+        return .object(fields)
+    }
+
     /// Register all MessagesModule tools on the given router.
     public static func register(on router: ToolRouter) async {
 
@@ -1529,24 +1714,24 @@ public enum MessagesModule {
         // (tool or module override, Always Allow) can still raise or lower
         // the per-tool tier — including for remote/tunnel sessions.
         // confirm:'SEND' remains handler-required. Ordinary one-to-one
-        // inherits live inbound iMessage/SMS or fails closed (#198);
-        // explicit SMS on RCS/unknown requires allowSmsDespiteLiveService
-        // (#249) and that path stays Request. This does not change host
-        // Auto-review (#294).
+        // (recipient or 1:1 chatIdentifier) inherits live thread/contact
+        // service or fails closed (#198 / #303); explicit SMS on
+        // RCS/unknown requires allowSmsDespiteLiveService (#249) and that
+        // path stays Request. This does not change host Auto-review (#294).
         await router.register(ToolRegistration(
             name: "messages_send",
             module: moduleName,
             tier: MessagesSendCatalogTier.registeredToolTier,
-            description: "Send one exact iMessage or SMS after confirm:'SEND'. Resolve raw chatNNN via messages_participants; names via contacts_resolve_handle. Omit service to inherit the latest inbound iMessage/SMS for that recipient, or pass exactly iMessage or SMS. Fail closed on RCS/unknown/mismatch — never silent iMessage→SMS fallback. Operator-authorized SMS on a live RCS/unknown thread requires service=SMS and allowSmsDespiteLiveService:true; the flag does not unlock iMessage↔SMS mismatch. Optional filePath XOR non-empty body: attachments are 1:1 iMessage only (no SMS/RCS, no chatIdentifier/groups). Existing-group text send uses chatIdentifier; group create is not built. Bounded THREAD M1 still binds recipient/service/body. Local chat.db correlation is not provider delivery (never providerDeliveryConfirmed). Catalog default is Notify for ordinary 1:1 plain-text sends; group chats, attachments/media, and SMS-override stay Request. Settings can raise or lower the per-tool tier. Does not change host Auto-review.",
+            description: "Send one exact iMessage or SMS after confirm:'SEND'. Resolve raw chatNNN via messages_participants; names via contacts_resolve_handle. Omit service to inherit the live 1:1 thread/contact service (latest inbound, else unambiguous chat.guid / service_name). Pass exactly iMessage or SMS. Fail closed on RCS/unknown/mismatch/ambiguous threads — never silent remap or iMessage→SMS fallback. 1:1 chatIdentifier (phone, email, iMessage|SMS|RCS|any;-;handle) uses the same discriminator; do not iterate AppleScript services. Operator-authorized SMS on a live RCS/unknown thread requires service=SMS and allowSmsDespiteLiveService:true; the flag does not unlock iMessage↔SMS mismatch. Optional filePath XOR non-empty body: attachments are 1:1 iMessage only (no SMS/RCS, no chatIdentifier/groups). Existing-group text send uses group chatIdentifier; group create is not built. Bounded THREAD M1 still binds recipient/service/body. Local chat.db correlation is not provider delivery (never providerDeliveryConfirmed). Catalog default is Notify for ordinary 1:1 plain-text sends; group chats, attachments/media, and SMS-override stay Request. Settings can raise or lower the per-tool tier. Does not change host Auto-review.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "recipient": .object(["type": .string("string"), "description": .string("Recipient phone number or email (NOT a raw chatNNN id — resolve those with messages_participants first)")]),
-                    "chatIdentifier": .object(["type": .string("string"), "description": .string("Existing Messages chat identifier for an already-created group/chat. Group create is not built.")]),
+                    "chatIdentifier": .object(["type": .string("string"), "description": .string("Existing Messages chat identifier. 1:1 values (phone, email, iMessage|SMS|RCS|any;-;handle) inherit that thread's live service or fail closed — same discriminator as recipient. Group ids send to the existing chat; group create is not built.")]),
                     "body": .object(["type": .string("string"), "description": .string("Message body text. XOR with filePath — do not send caption+file as one bubble.")]),
                     "filePath": .object(["type": .string("string"), "description": .string("Optional local file to send as a separate 1:1 iMessage. XOR with body. Same confirm:'SEND'.")]),
                     "confirm": .object(["type": .string("string"), "description": .string("Must be exactly 'SEND' to proceed")]),
-                    "service": .object(["type": .string("string"), "enum": .array([.string("iMessage"), .string("SMS")]), "description": .string("Optional for ordinary one-to-one sends. Omit to inherit the latest inbound iMessage/SMS. Exact value only when passed. RCS/unknown live inbound or an explicit mismatch fail closed — no SMS fallback. SMS on RCS/unknown requires allowSmsDespiteLiveService:true.")]),
+                    "service": .object(["type": .string("string"), "enum": .array([.string("iMessage"), .string("SMS")]), "description": .string("Optional for ordinary one-to-one sends (recipient or 1:1 chatIdentifier). Omit to inherit the live thread/contact service. Exact value only when passed. RCS/unknown, explicit mismatch, or ambiguous iMessage+SMS threads fail closed — no SMS fallback. SMS on RCS/unknown requires allowSmsDespiteLiveService:true.")]),
                     "allowSmsDespiteLiveService": .object(["type": .string("boolean"), "description": .string("Operator-authorized SMS when live inbound is RCS/unknown (unsupported). Required together with service=SMS. Does not unlock iMessage↔SMS mismatch or omit-service inherit. Never auto-maps RCS to SMS. Default false.")]),
                     "threadPageId": .object(["type": .string("string"), "description": .string("Canonical THREAD page ID for the bounded one-to-one M1 transaction.")]),
                     "actionId": .object(["type": .string("string"), "description": .string("Stable idempotency action ID for the bounded M1 transaction.")]),
@@ -1791,67 +1976,110 @@ public enum MessagesModule {
                     ).mcpValue()
                 }
 
-                if let chatIdentifier {
-                    guard let body else {
-                        throw ToolRouterError.invalidArguments(toolName: "messages_send", reason: "missing body or filePath")
-                    }
-                    let preRows = (try? performQuery(
-                        "SELECT MAX(ROWID) as max_id FROM message", params: []
-                    )) ?? []
-                    let preSendMaxId = (preRows.first?["max_id"] as? Int) ?? 0
-                    let preparedAt = Date()
+                let serviceOverride: String? = {
+                    if case .string(let value)? = args["service"] { return value }
+                    return nil
+                }()
+                let allowSmsDespiteLiveService: Bool = {
+                    if case .bool(let value)? = args["allowSmsDespiteLiveService"] { return value }
+                    return false
+                }()
 
-                    let safeChatIdentifier = escapeAppleScriptString(chatIdentifier)
-                    let safeBody = escapeAppleScriptString(body)
-                    let script = """
-                        tell application "Messages"
-                            set targetChat to missing value
-                            repeat with targetService in services
-                                repeat with candidateChat in chats of targetService
-                                    set candidateId to id of candidateChat as text
-                                    set candidateName to ""
-                                    try
-                                        set candidateName to name of candidateChat as text
-                                    end try
-                                    if candidateId contains "\(safeChatIdentifier)" or candidateName contains "\(safeChatIdentifier)" then
-                                        set targetChat to candidateChat
-                                        exit repeat
-                                    end if
+                if let chatIdentifier {
+                    switch MessagesProtocolDiscriminator.parseChatIdentifier(chatIdentifier) {
+                    case .oneToOne(let handle, let declared):
+                        let target = MessagesProtocolDiscriminator.Target.oneToOne(
+                            handle: handle,
+                            declaredThreadService: declared
+                        )
+                        let rows: [[String: Any]]
+                        do {
+                            rows = try lookupLiveThreadRows(
+                                keys: MessagesProtocolDiscriminator.exactLookupKeys(for: chatIdentifier)
+                            )
+                        } catch {
+                            return sendClosedEnvelope(
+                                error: "Could not read live inbound service: \(error.localizedDescription)",
+                                chatIdentifier: chatIdentifier
+                            )
+                        }
+                        let liveInboundRaw = MessagesProtocolDiscriminator.liveService(
+                            from: rows,
+                            target: target
+                        )
+                        return try ordinaryOneToOneSendValue(
+                            handle: handle,
+                            body: body,
+                            filePath: filePath,
+                            confirm: confirm,
+                            serviceOverride: serviceOverride,
+                            allowSmsDespiteLiveService: allowSmsDespiteLiveService,
+                            liveInboundRaw: liveInboundRaw,
+                            liveRows: rows,
+                            chatIdentifier: chatIdentifier
+                        )
+                    case .group:
+                        guard let body else {
+                            throw ToolRouterError.invalidArguments(toolName: "messages_send", reason: "missing body or filePath")
+                        }
+                        let preRows = (try? performQuery(
+                            "SELECT MAX(ROWID) as max_id FROM message", params: []
+                        )) ?? []
+                        let preSendMaxId = (preRows.first?["max_id"] as? Int) ?? 0
+                        let preparedAt = Date()
+
+                        let safeChatIdentifier = escapeAppleScriptString(chatIdentifier)
+                        let safeBody = escapeAppleScriptString(body)
+                        let script = """
+                            tell application "Messages"
+                                set targetChat to missing value
+                                repeat with targetService in services
+                                    repeat with candidateChat in chats of targetService
+                                        set candidateId to id of candidateChat as text
+                                        set candidateName to ""
+                                        try
+                                            set candidateName to name of candidateChat as text
+                                        end try
+                                        if candidateId contains "\(safeChatIdentifier)" or candidateName contains "\(safeChatIdentifier)" then
+                                            set targetChat to candidateChat
+                                            exit repeat
+                                        end if
+                                    end repeat
+                                    if targetChat is not missing value then exit repeat
                                 end repeat
-                                if targetChat is not missing value then exit repeat
-                            end repeat
-                            if targetChat is missing value then error "No existing Messages chat matched chatIdentifier \(safeChatIdentifier)"
-                            send "\(safeBody)" to targetChat
-                        end tell
-                        """
-                    let appleScript = NSAppleScript(source: script)
-                    var errorInfo: NSDictionary?
-                    _ = appleScript?.executeAndReturnError(&errorInfo)
-                    if let errorInfo = errorInfo {
-                        let errorMessage = errorInfo[NSAppleScript.errorMessage] as? String ?? "AppleScript execution failed"
-                        let errorNumber = errorInfo[NSAppleScript.errorNumber] as? Int ?? -1
-                        return .object([
-                            "sent": .bool(false),
-                            "deliveryInvoked": .bool(true),
-                            "consequencePossible": .bool(true),
-                            "correlatedLocalRecord": .bool(false),
-                            "providerDeliveryConfirmed": .bool(false),
-                            "error": .string(errorMessage),
-                            "errorNumber": .int(errorNumber),
-                            "chatIdentifier": .string(chatIdentifier)
-                        ])
+                                if targetChat is missing value then error "No existing Messages chat matched chatIdentifier \(safeChatIdentifier)"
+                                send "\(safeBody)" to targetChat
+                            end tell
+                            """
+                        let appleScript = NSAppleScript(source: script)
+                        var errorInfo: NSDictionary?
+                        _ = appleScript?.executeAndReturnError(&errorInfo)
+                        if let errorInfo = errorInfo {
+                            let errorMessage = errorInfo[NSAppleScript.errorMessage] as? String ?? "AppleScript execution failed"
+                            let errorNumber = errorInfo[NSAppleScript.errorNumber] as? Int ?? -1
+                            return .object([
+                                "sent": .bool(false),
+                                "deliveryInvoked": .bool(true),
+                                "consequencePossible": .bool(true),
+                                "correlatedLocalRecord": .bool(false),
+                                "providerDeliveryConfirmed": .bool(false),
+                                "error": .string(errorMessage),
+                                "errorNumber": .int(errorNumber),
+                                "chatIdentifier": .string(chatIdentifier)
+                            ])
+                        }
+                        let verification = verifyExactDelivery(
+                            target: chatIdentifier,
+                            body: body,
+                            afterId: preSendMaxId,
+                            preparedAt: preparedAt
+                        )
+                        return .object(chatIdentifierSendMCPFields(
+                            chatIdentifier: chatIdentifier,
+                            body: body,
+                            verification: verification
+                        ))
                     }
-                    let verification = verifyExactDelivery(
-                        target: chatIdentifier,
-                        body: body,
-                        afterId: preSendMaxId,
-                        preparedAt: preparedAt
-                    )
-                    return .object(chatIdentifierSendMCPFields(
-                        chatIdentifier: chatIdentifier,
-                        body: body,
-                        verification: verification
-                    ))
                 }
 
                 guard let recipient else {
@@ -1868,147 +2096,35 @@ public enum MessagesModule {
                     ])
                 }
 
-                let serviceOverride: String? = {
-                    if case .string(let value)? = args["service"] { return value }
-                    return nil
-                }()
-                let allowSmsDespiteLiveService: Bool = {
-                    if case .bool(let value)? = args["allowSmsDespiteLiveService"] { return value }
-                    return false
-                }()
+                let target = MessagesProtocolDiscriminator.Target.oneToOne(
+                    handle: recipient,
+                    declaredThreadService: nil
+                )
+                let rows: [[String: Any]]
                 let liveInboundRaw: String?
                 do {
-                    liveInboundRaw = try lookupLiveInboundService(recipient: recipient)
-                } catch {
-                    return .object([
-                        "sent": .bool(false),
-                        "deliveryInvoked": .bool(false),
-                        "consequencePossible": .bool(false),
-                        "correlatedLocalRecord": .bool(false),
-                        "providerDeliveryConfirmed": .bool(false),
-                        "error": .string("Could not read live inbound service: \(error.localizedDescription)")
-                    ])
-                }
-                switch resolveSendService(
-                    requested: serviceOverride,
-                    liveInboundRaw: liveInboundRaw,
-                    allowSmsDespiteLiveService: allowSmsDespiteLiveService
-                ) {
-                case .refuse(let reason):
-                    return .object([
-                        "sent": .bool(false),
-                        "deliveryInvoked": .bool(false),
-                        "consequencePossible": .bool(false),
-                        "correlatedLocalRecord": .bool(false),
-                        "providerDeliveryConfirmed": .bool(false),
-                        "liveInboundService": liveInboundRaw.map(Value.string) ?? .null,
-                        "error": .string(reason)
-                    ])
-                case .use(let resolved):
-                    if resolved == .sms, !isPhoneRecipient(recipient) {
-                        return .object([
-                            "sent": .bool(false),
-                            "deliveryInvoked": .bool(false),
-                            "consequencePossible": .bool(false),
-                            "correlatedLocalRecord": .bool(false),
-                            "providerDeliveryConfirmed": .bool(false),
-                            "service": .string(resolved.rawValue),
-                            "error": .string("SMS requires a phone-number recipient")
-                        ])
-                    }
-                    if let filePath, let policyError = MessagesQueryContracts.fileSendPolicyError(
-                        filePath: filePath,
-                        chatIdentifier: nil,
-                        resolvedService: resolved.rawValue,
-                        checkFilesystem: true
-                    ) {
-                        return .object([
-                            "sent": .bool(false),
-                            "deliveryInvoked": .bool(false),
-                            "consequencePossible": .bool(false),
-                            "correlatedLocalRecord": .bool(false),
-                            "providerDeliveryConfirmed": .bool(false),
-                            "service": .string(resolved.rawValue),
-                            "error": .string(policyError)
-                        ])
-                    }
-                    if resolved != .iMessage, filePath != nil {
-                        return .object([
-                            "sent": .bool(false),
-                            "deliveryInvoked": .bool(false),
-                            "consequencePossible": .bool(false),
-                            "correlatedLocalRecord": .bool(false),
-                            "providerDeliveryConfirmed": .bool(false),
-                            "service": .string(resolved.rawValue),
-                            "error": .string("file attachments are 1:1 iMessage only")
-                        ])
-                    }
-                }
-                let preSendMaxId: Int
-                let preparedAt = Date()
-                do {
-                    preSendMaxId = try currentMaxMessageRowId()
-                } catch {
-                    return .object([
-                        "sent": .bool(false),
-                        "deliveryInvoked": .bool(false),
-                        "consequencePossible": .bool(false),
-                        "correlatedLocalRecord": .bool(false),
-                        "providerDeliveryConfirmed": .bool(false),
-                        "verified": .bool(false),
-                        "verificationStatus": .string(MessagesDeliveryVerificationStatus.deliveryError.rawValue),
-                        "error": .string("Could not capture pre-send ROWID watermark: \(error.localizedDescription)")
-                    ])
-                }
-                if let filePath {
-                    let invocation = invokeAppleScriptFile(recipient: recipient, filePath: filePath)
-                    if !invocation.succeeded {
-                        return .object([
-                            "sent": .bool(false),
-                            "deliveryInvoked": .bool(true),
-                            "consequencePossible": .bool(true),
-                            "correlatedLocalRecord": .bool(false),
-                            "providerDeliveryConfirmed": .bool(false),
-                            "error": .string(invocation.error ?? "AppleScript file send failed"),
-                            "errorNumber": invocation.errorNumber.map(Value.int) ?? .null
-                        ])
-                    }
-                    let verification = verifyFileDelivery(
-                        recipient: recipient,
-                        afterId: preSendMaxId,
-                        preparedAt: preparedAt
+                    rows = try lookupLiveThreadRows(
+                        keys: MessagesProtocolDiscriminator.exactLookupKeys(for: recipient)
                     )
-                    return .object([
-                        "sent": .bool(true),
-                        "deliveryInvoked": .bool(true),
-                        "consequencePossible": .bool(true),
-                        "correlatedLocalRecord": .bool(verification.verified),
-                        "providerDeliveryConfirmed": .bool(false),
-                        "recipient": .string(recipient),
-                        "filePath": .string((filePath as NSString).expandingTildeInPath),
-                        "verified": .bool(verification.verified),
-                        "verificationStatus": .string(verification.status.rawValue),
-                        "messageRowId": verification.messageRowId.map(Value.int) ?? .null
-                    ])
+                    liveInboundRaw = MessagesProtocolDiscriminator.liveService(
+                        from: rows,
+                        target: target
+                    )
+                } catch {
+                    return sendClosedEnvelope(
+                        error: "Could not read live inbound service: \(error.localizedDescription)"
+                    )
                 }
-                guard let body else {
-                    throw ToolRouterError.invalidArguments(toolName: "messages_send", reason: "missing body or filePath")
-                }
-                let attempt = performOneToOneSend(
-                    recipient: recipient,
+                return try ordinaryOneToOneSendValue(
+                    handle: recipient,
                     body: body,
+                    filePath: filePath,
                     confirm: confirm,
                     serviceOverride: serviceOverride,
-                    afterId: preSendMaxId,
-                    preparedAt: preparedAt,
+                    allowSmsDespiteLiveService: allowSmsDespiteLiveService,
                     liveInboundRaw: liveInboundRaw,
-                    allowSmsDespiteLiveService: allowSmsDespiteLiveService
+                    liveRows: rows
                 )
-                return .object(oneToOneSendMCPFields(
-                    recipient: recipient,
-                    body: body,
-                    attempt: attempt
-                ))
             }
         ))
     }

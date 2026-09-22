@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **messages_send protocol discriminator (#303 / epic #301).** Inherit the
+  live 1:1 thread/contact service (latest inbound, else unambiguous
+  `chat.guid` / `service_name`) or refuse with an explicit reason. 1:1
+  `chatIdentifier` (`+1…`, `iMessage|SMS|RCS|any;-;handle`) uses the same
+  bind and buddy-sends — no AppleScript first-match remap. Tapbacks,
+  group rows, and ambiguous iMessage+SMS threads without inbound fail
+  closed. RCS/unknown still require `service=SMS` +
+  `allowSmsDespiteLiveService`. Does not change host Auto-review (#294)
+  and does not claim #302 (false Mac failed-to-send). Contract:
+  `docs/operator/messages-protocol-discriminator.md`. Floor **4004 → 4020**
+  (+16 hermetic discriminator tests). Linux host cannot compile macOS 26;
+  CI must re-measure.
+
 - **messages_send notify-default for ordinary 1:1 text (#298).** Catalog
   default is Notify when the target is a single 1:1 handle/chat and the
   payload is plain text. Group chats, attachments/media, and SMS-override
