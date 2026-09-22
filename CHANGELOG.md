@@ -9,11 +9,19 @@
   bind and buddy-sends — no AppleScript first-match remap. Tapbacks,
   group rows, and ambiguous iMessage+SMS threads without inbound fail
   closed. RCS/unknown still require `service=SMS` +
-  `allowSmsDespiteLiveService`. Does not change host Auto-review (#294)
-  and does not claim #302 (false Mac failed-to-send). Contract:
-  `docs/operator/messages-protocol-discriminator.md`. Floor **4004 → 4020**
-  (+16 hermetic discriminator tests). Linux host cannot compile macOS 26;
-  CI must re-measure.
+  `allowSmsDespiteLiveService`. Stacked on #302 status honesty. Contract:
+  `docs/operator/messages-protocol-discriminator.md`. Floor **4011 → 4027**
+  (+16 hermetic discriminator tests on top of #302). Linux host cannot
+  compile macOS 26; CI must re-measure.
+- **messages_send status honesty after premature AppleScript error (#302).**
+  `messages_send` now correlates chat.db after invoke even when Messages
+  AppleScript returns an error. A matching local outbound row is dispatch
+  success: `sent=true`, MCP `error` is null (so agents do not see
+  `isError`), and `scriptError` / `macErrorCode` stay observational.
+  `providerDeliveryConfirmed` remains false. Does not clear the Mac
+  bubble (no public API — same residual as closed #199). Does not
+  change host Auto-review (#294). Parent epic #301. Floor **4004 → 4011**
+  (+7 honesty tests).
 
 - **messages_send notify-default for ordinary 1:1 text (#298).** Catalog
   default is Notify when the target is a single 1:1 handle/chat and the

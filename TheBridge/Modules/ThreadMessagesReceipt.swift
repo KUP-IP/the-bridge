@@ -21,6 +21,10 @@ public struct MessagesDeliveryVerification: Sendable, Equatable {
     public var verifiedAt: Date?
     public var candidateRowIds: [Int]
     public var error: String?
+    /// chat.db `message.error` — Mac-side flag only. Never provider delivery.
+    public var macErrorCode: Int?
+    /// chat.db `message.is_delivered` — Mac-side flag only. Never provider delivery.
+    public var macIsDelivered: Bool?
 
     public init(
         status: MessagesDeliveryVerificationStatus,
@@ -31,7 +35,9 @@ public struct MessagesDeliveryVerification: Sendable, Equatable {
         service: String? = nil,
         verifiedAt: Date? = nil,
         candidateRowIds: [Int] = [],
-        error: String? = nil
+        error: String? = nil,
+        macErrorCode: Int? = nil,
+        macIsDelivered: Bool? = nil
     ) {
         self.status = status
         self.messageRowId = messageRowId
@@ -42,6 +48,8 @@ public struct MessagesDeliveryVerification: Sendable, Equatable {
         self.verifiedAt = verifiedAt
         self.candidateRowIds = candidateRowIds
         self.error = error
+        self.macErrorCode = macErrorCode
+        self.macIsDelivered = macIsDelivered
     }
 
     public var verified: Bool { status == .verified && messageRowId != nil }
@@ -55,6 +63,10 @@ public struct MessagesDeliveryAttempt: Sendable, Equatable {
     public var detectedService: String?
     public var error: String?
     public var errorNumber: Int?
+    /// Observational AppleScript/Messages error. Does not claim send failure
+    /// when a correlated local outbound row exists (#302).
+    public var scriptError: String?
+    public var scriptErrorNumber: Int?
 
     public init(
         invoked: Bool,
@@ -62,7 +74,9 @@ public struct MessagesDeliveryAttempt: Sendable, Equatable {
         service: String? = nil,
         detectedService: String? = nil,
         error: String? = nil,
-        errorNumber: Int? = nil
+        errorNumber: Int? = nil,
+        scriptError: String? = nil,
+        scriptErrorNumber: Int? = nil
     ) {
         self.invoked = invoked
         self.verification = verification
@@ -70,9 +84,12 @@ public struct MessagesDeliveryAttempt: Sendable, Equatable {
         self.detectedService = detectedService
         self.error = error
         self.errorNumber = errorNumber
+        self.scriptError = scriptError
+        self.scriptErrorNumber = scriptErrorNumber
     }
 
-    /// AppleScript/dispatch succeeded. Independent of local chat.db correlation.
+    /// Dispatch succeeded: AppleScript returned no claimable failure, or a
+    /// local outbound row correlated after a premature script error (#302).
     public var dispatchSucceeded: Bool { invoked && error == nil }
 }
 
