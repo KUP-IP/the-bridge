@@ -715,6 +715,7 @@ await runRegistryEdgeCaseTests()     // Data-Source Registry: adversarial edge c
 await runRegistryHydrationTests()    // Packet Runner v1 (FR-1/§8.3): packet-registry-v1 one-hop hydration envelope (primary+body+relations+provenance+warnings)
 await runMessagesModuleTests()
 await runMessagesSendApprovalPolicyTests()  // messages_send ordinary 3-tier SecurityGate ladder
+await runMessagesSendStatusHonestyTests()   // #302: correlate after script error; do not claim failure
 await runThreadMessagesReceiptTests()  // THREAD Messages Receipt M1: exact ROWID + recoverable Intent/Result journal
 await runCallHistoryModuleTests()      // Bridge v4 Wave 1: calls_recent filters, schema/FDA errors, annotations
 await runMessagesSuiteAuditTests()   // Messages-suite every-angle-of-attack audit

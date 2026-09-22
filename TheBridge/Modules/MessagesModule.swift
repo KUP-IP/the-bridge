@@ -7,6 +7,8 @@
 // Send uses in-process AppleScript (NSAppleScript). Catalog default for
 // messages_send is notify for ordinary 1:1 plain text; groups / attachments /
 // SMS-override raise to request (#298). Settings overrides still win.
+// After invoke, always correlate chat.db (#302): a premature AppleScript
+// error plus a matching outbound row is dispatch success, not a send failure.
 //
 // V1-PATCH-001 changes:
 // - Replaced runSQLite CLI helper with SQLiteConnection (native sqlite3 C API)
@@ -715,6 +717,8 @@ public enum MessagesModule {
             var chatGuid: String?
             var messageDate: Date?
             var service: String?
+            var macErrorCode: Int?
+            var macIsDelivered: Bool?
         }
         var uniqueMatches: [Int: Match] = [:]
         let expectedHandle = ThreadMessagesIdentity.canonicalHandle(expectedTarget)
@@ -748,12 +752,26 @@ public enum MessagesModule {
                 if let value = row["message_unix_seconds"] as? Int { return Double(value) }
                 return nil
             }()
+            let macErrorCode: Int? = {
+                if let value = row["mac_error"] as? Int { return value }
+                if let value = row["error"] as? Int { return value }
+                return nil
+            }()
+            let macIsDelivered: Bool? = {
+                if let value = row["mac_is_delivered"] as? Int { return value != 0 }
+                if let value = row["is_delivered"] as? Int { return value != 0 }
+                if let value = row["mac_is_delivered"] as? Bool { return value }
+                if let value = row["is_delivered"] as? Bool { return value }
+                return nil
+            }()
             uniqueMatches[rowId] = Match(
                 rowId: rowId,
                 messageGuid: row["message_guid"] as? String,
                 chatGuid: row["chat_guid"] as? String,
                 messageDate: unixSeconds.map(Date.init(timeIntervalSince1970:)),
-                service: row["service"] as? String
+                service: row["service"] as? String,
+                macErrorCode: macErrorCode,
+                macIsDelivered: macIsDelivered
             )
         }
         let matches = uniqueMatches.values.sorted { $0.rowId < $1.rowId }
@@ -770,7 +788,9 @@ public enum MessagesModule {
             messageDate: only.messageDate,
             service: only.service,
             verifiedAt: verifiedAt,
-            candidateRowIds: [only.rowId]
+            candidateRowIds: [only.rowId],
+            macErrorCode: only.macErrorCode,
+            macIsDelivered: only.macIsDelivered
         )
     }
 
@@ -779,6 +799,11 @@ public enum MessagesModule {
     public static let localCorrelationPollInterval: TimeInterval = 0.5
     public static let sendCompatibilityFieldSemantics =
         "sent is dispatch success; verified and correlatedLocalRecord are local chat.db correlation only"
+    /// Agent-facing note when a local outbound row exists after a Messages/
+    /// AppleScript error or a Mac chat.db error flag (#302). Must not live in
+    /// the MCP `error` string — that trips `dispatchFormatted` isError.
+    public static let correlatedDespiteScriptErrorGuidance =
+        "Local outbound correlated. Do not report send failure. Mac Messages may still show a premature or Continuity false error; that is display, not Bridge send failure."
 
     /// Poll chat.db for one correlated local outbound record candidate. Evidence is bounded
     /// by the pre-send ROWID and Intent preparation timestamp; it does not
@@ -795,7 +820,8 @@ public enum MessagesModule {
     ) -> MessagesDeliveryVerification {
         let sql = """
             SELECT m.ROWID, m.guid AS message_guid, m.text, m.attributedBody,
-                   m.is_from_me, m.service,
+                   m.is_from_me, m.service, m.error AS mac_error,
+                   m.is_delivered AS mac_is_delivered,
                    (CAST(m.date AS REAL) / 1000000000.0 + 978307200.0) AS message_unix_seconds,
                    h.id AS handle_id, c.chat_identifier, c.guid AS chat_guid,
                    c.display_name
@@ -957,20 +983,50 @@ public enum MessagesModule {
         }
 
         let invocation = invoke(service, recipient, body)
-        if !invocation.succeeded {
-            return .init(
-                invoked: true,
-                verification: .init(status: .deliveryError, error: invocation.error),
-                service: service.rawValue,
-                error: invocation.error,
-                errorNumber: invocation.errorNumber
-            )
-        }
-
-        return .init(
-            invoked: true,
+        return reconcileInvokedSend(
+            invocation: invocation,
             verification: verify(recipient, body, afterId, preparedAt),
             service: service.rawValue
+        )
+    }
+
+    /// After AppleScript/Messages invoke, always correlate chat.db. A premature
+    /// script error plus a matching outbound row is dispatch success, not a
+    /// send failure (#302). One invoke — no iMessage→SMS fallback.
+    public static func reconcileInvokedSend(
+        invocation: MessagesAppleScriptInvocationResult,
+        verification: MessagesDeliveryVerification,
+        service: String? = nil
+    ) -> MessagesDeliveryAttempt {
+        if verification.verified {
+            return .init(
+                invoked: true,
+                verification: verification,
+                service: service,
+                detectedService: verification.service,
+                error: nil,
+                errorNumber: nil,
+                scriptError: invocation.error,
+                scriptErrorNumber: invocation.errorNumber
+            )
+        }
+        if invocation.succeeded {
+            return .init(
+                invoked: true,
+                verification: verification,
+                service: service,
+                detectedService: verification.service
+            )
+        }
+        return .init(
+            invoked: true,
+            verification: verification,
+            service: service,
+            detectedService: verification.service,
+            error: invocation.error ?? verification.error,
+            errorNumber: invocation.errorNumber,
+            scriptError: invocation.error,
+            scriptErrorNumber: invocation.errorNumber
         )
     }
 
@@ -1002,33 +1058,74 @@ public enum MessagesModule {
             "verifiedAt": attempt.verification.verifiedAt.map { .string(ISO8601DateFormatter().string(from: $0)) } ?? .null,
             "candidateRowIds": .array(attempt.verification.candidateRowIds.map(Value.int))
         ]
-        result["error"] = (attempt.error ?? attempt.verification.error).map(Value.string) ?? .null
-        if let errorNumber = attempt.errorNumber { result["errorNumber"] = .int(errorNumber) }
+        applySendHonestyFields(&result, attempt: attempt)
         return result
     }
 
-    /// MCP envelope after a successful chatIdentifier AppleScript invoke.
+    /// Shared #302 honesty fields. `error` is claimable send failure only —
+    /// never a string when a local outbound row correlated (MCP isError).
+    public static func applySendHonestyFields(
+        _ result: inout [String: Value],
+        attempt: MessagesDeliveryAttempt
+    ) {
+        result["error"] = attempt.error.map(Value.string) ?? .null
+        if let errorNumber = attempt.errorNumber { result["errorNumber"] = .int(errorNumber) }
+        result["scriptError"] = attempt.scriptError.map(Value.string) ?? .null
+        result["scriptErrorNumber"] = attempt.scriptErrorNumber.map(Value.int) ?? .null
+        result["macErrorCode"] = attempt.verification.macErrorCode.map(Value.int) ?? .null
+        result["macIsDelivered"] = attempt.verification.macIsDelivered.map(Value.bool) ?? .null
+        let macFlagged = (attempt.verification.macErrorCode ?? 0) != 0
+        if attempt.verification.verified, attempt.scriptError != nil || macFlagged {
+            result["agentGuidance"] = .string(correlatedDespiteScriptErrorGuidance)
+            result["macUiMayShowFalseFailure"] = .bool(true)
+        } else {
+            result["agentGuidance"] = .null
+            result["macUiMayShowFalseFailure"] = .bool(false)
+        }
+    }
+
+    /// MCP envelope after a chatIdentifier AppleScript invoke (correlates
+    /// even when the script reported an error — #302).
     public static func chatIdentifierSendMCPFields(
         chatIdentifier: String,
         body: String,
-        verification: MessagesDeliveryVerification
+        verification: MessagesDeliveryVerification,
+        invocation: MessagesAppleScriptInvocationResult = .init()
     ) -> [String: Value] {
-        [
-            "sent": .bool(true),
-            "deliveryInvoked": .bool(true),
-            "consequencePossible": .bool(true),
-            "correlatedLocalRecord": .bool(verification.verified),
+        let attempt = reconcileInvokedSend(
+            invocation: invocation,
+            verification: verification
+        )
+        return chatIdentifierSendMCPFields(
+            chatIdentifier: chatIdentifier,
+            body: body,
+            attempt: attempt
+        )
+    }
+
+    public static func chatIdentifierSendMCPFields(
+        chatIdentifier: String,
+        body: String,
+        attempt: MessagesDeliveryAttempt
+    ) -> [String: Value] {
+        var result: [String: Value] = [
+            "sent": .bool(attempt.dispatchSucceeded),
+            "deliveryInvoked": .bool(attempt.invoked),
+            "consequencePossible": .bool(attempt.invoked),
+            "correlatedLocalRecord": .bool(attempt.verification.verified),
             "providerDeliveryConfirmed": .bool(false),
             "compatibilityFieldSemantics": .string(sendCompatibilityFieldSemantics),
             "chatIdentifier": .string(chatIdentifier),
             "bodyLength": .int(body.utf8.count),
             "target": .string("chatIdentifier"),
-            "verified": .bool(verification.verified),
-            "verificationStatus": .string(verification.status.rawValue),
-            "messageRowId": verification.messageRowId.map(Value.int) ?? .null,
-            "deliveryReference": verification.deliveryReference.map(Value.string) ?? .null,
-            "verifiedAt": verification.verifiedAt.map { .string(ISO8601DateFormatter().string(from: $0)) } ?? .null
+            "verified": .bool(attempt.verification.verified),
+            "verificationStatus": .string(attempt.verification.status.rawValue),
+            "messageRowId": attempt.verification.messageRowId.map(Value.int) ?? .null,
+            "deliveryReference": attempt.verification.deliveryReference.map(Value.string) ?? .null,
+            "verifiedAt": attempt.verification.verifiedAt.map { .string(ISO8601DateFormatter().string(from: $0)) } ?? .null
         ]
+        applySendHonestyFields(&result, attempt: attempt)
+        return result
     }
 
     private static func isPhoneRecipient(_ value: String) -> Bool {
@@ -1096,6 +1193,7 @@ public enum MessagesModule {
     ) -> MessagesDeliveryVerification {
         let sql = """
             SELECT m.ROWID, m.guid AS message_guid, m.is_from_me, m.service,
+                   m.error AS mac_error, m.is_delivered AS mac_is_delivered,
                    (CAST(m.date AS REAL) / 1000000000.0 + 978307200.0) AS message_unix_seconds,
                    h.id AS handle_id, c.guid AS chat_guid
             FROM message m
@@ -1123,6 +1221,11 @@ public enum MessagesModule {
                 if let value = row["message_unix_seconds"] as? Int { return Double(value) }
                 return nil
             }()
+            let macErrorCode = row["mac_error"] as? Int
+            let macIsDelivered: Bool? = {
+                if let value = row["mac_is_delivered"] as? Int { return value != 0 }
+                return nil
+            }()
             return .init(
                 status: .verified,
                 messageRowId: row["ROWID"] as? Int,
@@ -1131,7 +1234,9 @@ public enum MessagesModule {
                 messageDate: unixSeconds.map(Date.init(timeIntervalSince1970:)),
                 service: row["service"] as? String,
                 verifiedAt: Date(),
-                candidateRowIds: (row["ROWID"] as? Int).map { [$0] } ?? []
+                candidateRowIds: (row["ROWID"] as? Int).map { [$0] } ?? [],
+                macErrorCode: macErrorCode,
+                macIsDelivered: macIsDelivered
             )
         } catch {
             return .init(status: .deliveryError, error: error.localizedDescription)
@@ -1537,7 +1642,7 @@ public enum MessagesModule {
             name: "messages_send",
             module: moduleName,
             tier: MessagesSendCatalogTier.registeredToolTier,
-            description: "Send one exact iMessage or SMS after confirm:'SEND'. Resolve raw chatNNN via messages_participants; names via contacts_resolve_handle. Omit service to inherit the latest inbound iMessage/SMS for that recipient, or pass exactly iMessage or SMS. Fail closed on RCS/unknown/mismatch — never silent iMessage→SMS fallback. Operator-authorized SMS on a live RCS/unknown thread requires service=SMS and allowSmsDespiteLiveService:true; the flag does not unlock iMessage↔SMS mismatch. Optional filePath XOR non-empty body: attachments are 1:1 iMessage only (no SMS/RCS, no chatIdentifier/groups). Existing-group text send uses chatIdentifier; group create is not built. Bounded THREAD M1 still binds recipient/service/body. Local chat.db correlation is not provider delivery (never providerDeliveryConfirmed). Catalog default is Notify for ordinary 1:1 plain-text sends; group chats, attachments/media, and SMS-override stay Request. Settings can raise or lower the per-tool tier. Does not change host Auto-review.",
+            description: "Send one exact iMessage or SMS after confirm:'SEND'. After invoke, correlate chat.db — a premature AppleScript error plus a matching outbound row is dispatch success; do not report send failure (scriptError is observational). Resolve raw chatNNN via messages_participants; names via contacts_resolve_handle. Omit service to inherit the latest inbound iMessage/SMS for that recipient, or pass exactly iMessage or SMS. Fail closed on RCS/unknown/mismatch — never silent iMessage→SMS fallback. Operator-authorized SMS on a live RCS/unknown thread requires service=SMS and allowSmsDespiteLiveService:true; the flag does not unlock iMessage↔SMS mismatch. Optional filePath XOR non-empty body: attachments are 1:1 iMessage only (no SMS/RCS, no chatIdentifier/groups). Existing-group text send uses chatIdentifier; group create is not built. Bounded THREAD M1 still binds recipient/service/body. Local chat.db correlation is not provider delivery (never providerDeliveryConfirmed). Catalog default is Notify for ordinary 1:1 plain-text sends; group chats, attachments/media, and SMS-override stay Request. Settings can raise or lower the per-tool tier. Does not change host Auto-review.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -1566,7 +1671,8 @@ public enum MessagesModule {
                                "contact name only: use contacts_resolve_handle",
                                "creating a new Messages group — group create is not built",
                                "treating imessage:open?addresses=… plus UI Return as a successful group create",
-                               "silent RCS→SMS or iMessage→SMS fallback — omit still fails closed"],
+                               "silent RCS→SMS or iMessage→SMS fallback — omit still fails closed",
+                               "claiming send failure when correlatedLocalRecord is true"],
                 relatedTools: ["messages_participants", "contacts_resolve_handle", "messages_chat"]
             ),
             handler: { arguments in
@@ -1827,19 +1933,14 @@ public enum MessagesModule {
                     let appleScript = NSAppleScript(source: script)
                     var errorInfo: NSDictionary?
                     _ = appleScript?.executeAndReturnError(&errorInfo)
-                    if let errorInfo = errorInfo {
-                        let errorMessage = errorInfo[NSAppleScript.errorMessage] as? String ?? "AppleScript execution failed"
-                        let errorNumber = errorInfo[NSAppleScript.errorNumber] as? Int ?? -1
-                        return .object([
-                            "sent": .bool(false),
-                            "deliveryInvoked": .bool(true),
-                            "consequencePossible": .bool(true),
-                            "correlatedLocalRecord": .bool(false),
-                            "providerDeliveryConfirmed": .bool(false),
-                            "error": .string(errorMessage),
-                            "errorNumber": .int(errorNumber),
-                            "chatIdentifier": .string(chatIdentifier)
-                        ])
+                    let invocation: MessagesAppleScriptInvocationResult
+                    if let errorInfo {
+                        invocation = .init(
+                            error: errorInfo[NSAppleScript.errorMessage] as? String ?? "AppleScript execution failed",
+                            errorNumber: errorInfo[NSAppleScript.errorNumber] as? Int ?? -1
+                        )
+                    } else {
+                        invocation = .init()
                     }
                     let verification = verifyExactDelivery(
                         target: chatIdentifier,
@@ -1850,7 +1951,8 @@ public enum MessagesModule {
                     return .object(chatIdentifierSendMCPFields(
                         chatIdentifier: chatIdentifier,
                         body: body,
-                        verification: verification
+                        verification: verification,
+                        invocation: invocation
                     ))
                 }
 
@@ -1962,34 +2064,30 @@ public enum MessagesModule {
                 }
                 if let filePath {
                     let invocation = invokeAppleScriptFile(recipient: recipient, filePath: filePath)
-                    if !invocation.succeeded {
-                        return .object([
-                            "sent": .bool(false),
-                            "deliveryInvoked": .bool(true),
-                            "consequencePossible": .bool(true),
-                            "correlatedLocalRecord": .bool(false),
-                            "providerDeliveryConfirmed": .bool(false),
-                            "error": .string(invocation.error ?? "AppleScript file send failed"),
-                            "errorNumber": invocation.errorNumber.map(Value.int) ?? .null
-                        ])
-                    }
                     let verification = verifyFileDelivery(
                         recipient: recipient,
                         afterId: preSendMaxId,
                         preparedAt: preparedAt
                     )
-                    return .object([
-                        "sent": .bool(true),
-                        "deliveryInvoked": .bool(true),
-                        "consequencePossible": .bool(true),
-                        "correlatedLocalRecord": .bool(verification.verified),
+                    let attempt = reconcileInvokedSend(
+                        invocation: invocation,
+                        verification: verification,
+                        service: "iMessage"
+                    )
+                    var result: [String: Value] = [
+                        "sent": .bool(attempt.dispatchSucceeded),
+                        "deliveryInvoked": .bool(attempt.invoked),
+                        "consequencePossible": .bool(attempt.invoked),
+                        "correlatedLocalRecord": .bool(attempt.verification.verified),
                         "providerDeliveryConfirmed": .bool(false),
                         "recipient": .string(recipient),
                         "filePath": .string((filePath as NSString).expandingTildeInPath),
-                        "verified": .bool(verification.verified),
-                        "verificationStatus": .string(verification.status.rawValue),
-                        "messageRowId": verification.messageRowId.map(Value.int) ?? .null
-                    ])
+                        "verified": .bool(attempt.verification.verified),
+                        "verificationStatus": .string(attempt.verification.status.rawValue),
+                        "messageRowId": attempt.verification.messageRowId.map(Value.int) ?? .null
+                    ]
+                    applySendHonestyFields(&result, attempt: attempt)
+                    return .object(result)
                 }
                 guard let body else {
                     throw ToolRouterError.invalidArguments(toolName: "messages_send", reason: "missing body or filePath")

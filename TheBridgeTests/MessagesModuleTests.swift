@@ -626,7 +626,7 @@ func runMessagesModuleTests() async {
             )
             try expect(attempt.invoked, "AppleScript attempt is consequence-possible even when it reports an error")
             try expect(probe.services == [service], "one request must invoke only the reviewed service")
-            try expect(probe.verifyCount == 0, "synchronous AppleScript error must not trigger correlation retry")
+            try expect(probe.verifyCount == 1, "#302: script error still correlates once; no second invoke / fallback")
         }
     }
 
@@ -670,7 +670,7 @@ func runMessagesModuleTests() async {
         try expect(semantics.contains("dispatch success"))
     }
 
-    await test("AppleScript invoke error reports sent false with deliveryInvoked true") {
+    await test("AppleScript invoke error with no local row reports sent false with deliveryInvoked true") {
         let probe = InvocationProbe()
         probe.result = .init(error: "forced failure", errorNumber: -1708)
         let attempt = MessagesModule.performOneToOneSend(
@@ -687,7 +687,12 @@ func runMessagesModuleTests() async {
         }
         try expect(!sent)
         try expect(invoked)
-        try expect(probe.verifyCount == 0)
+        try expect(probe.verifyCount == 1, "#302: unconfirmed script error still polls chat.db")
+        if case .string(let err) = fields["error"] {
+            try expect(err.contains("forced failure"))
+        } else {
+            throw TestError.assertion("unconfirmed script error must remain a claimable error")
+        }
     }
 
     await test("chatIdentifier success with NOT_FOUND still reports sent true") {
