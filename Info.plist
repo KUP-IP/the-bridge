@@ -23,7 +23,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>4.0.8</string>
+	<string>4.0.9</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -48,7 +48,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>97</string>
+	<string>98</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<key>LSUIElement</key>
@@ -68,7 +68,7 @@
 	<key>SUFeedURL</key>
 	<string>https://raw.githubusercontent.com/KUP-IP/the-bridge/main/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>AYjKcJUCz34FoCoeCEc17j7pd3enjqd2ttzDEV6F6fg=</string>
+	<string>AYjKcJUCz34FoCoeCEc17j7pd3enjvq2ttzDEV6F6fg=</string>
 	<key>SUScheduledCheckInterval</key>
 	<integer>3600</integer>
 </dict>
