@@ -330,7 +330,8 @@ func runMessagesProtocolDiscriminatorTests() async {
         try expect(doc.contains("allowSmsDespiteLiveService"))
         try expect(doc.contains("LIVE matrix"))
         try expect(doc.contains("#302"), "must point false failed-to-send at the sibling")
-        try expect(!doc.contains("LIKE '%'"))
+        try expect(doc.contains("No `LIKE '%'`.") || doc.contains("No LIKE"),
+                   "doc must forbid LIKE wildcards, not prescribe them")
     }
 
     await test("#303 lookup SQL uses exact IN slots and tapback/1:1 filters") {
