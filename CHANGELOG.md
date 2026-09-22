@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **messages_send status honesty after premature AppleScript error (#302).**
+  `messages_send` now correlates chat.db after invoke even when Messages
+  AppleScript returns an error. A matching local outbound row is dispatch
+  success: `sent=true`, MCP `error` is null (so agents do not see
+  `isError`), and `scriptError` / `macErrorCode` stay observational.
+  `providerDeliveryConfirmed` remains false. Does not clear the Mac
+  bubble (no public API — same residual as closed #199). Does not
+  implement protocol pick (#303). Does not change host Auto-review
+  (#294). Parent epic #301. Floor **4004 → 4011** (+7 honesty tests).
+
 - **messages_send notify-default for ordinary 1:1 text (#298).** Catalog
   default is Notify when the target is a single 1:1 handle/chat and the
   payload is plain text. Group chats, attachments/media, and SMS-override

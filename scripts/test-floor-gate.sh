@@ -247,7 +247,11 @@
 #   Request. +4 MessagesSendApprovalPolicyTests (discriminator table,
 #   router notify, router request paths, Settings override). CI run
 #   35636531485 measured passed=4004, 0 failed on 818ba83.
-FLOOR="${BRIDGE_TEST_FLOOR:-4004}"
+# 2026-09-22: 4004 → 4011 (+7) — #302 messages_send status honesty:
+#   correlate after AppleScript error; do not claim failure when a local
+#   outbound row exists. +7 MessagesSendStatusHonestyTests. CI must
+#   re-measure and raise if the green count is higher.
+FLOOR="${BRIDGE_TEST_FLOOR:-4011}"
 
 echo "🧪 test-floor-gate: building debug test executable + running suite (floor=${FLOOR})..."
 swift build -c debug --product TheBridgeTests
