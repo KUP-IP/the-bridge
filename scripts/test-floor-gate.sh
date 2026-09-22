@@ -249,9 +249,13 @@
 #   35636531485 measured passed=4004, 0 failed on 818ba83.
 # 2026-09-22: 4004 → 4011 (+7) — #302 messages_send status honesty:
 #   correlate after AppleScript error; do not claim failure when a local
-#   outbound row exists. +7 MessagesSendStatusHonestyTests. CI must
-#   re-measure and raise if the green count is higher.
-FLOOR="${BRIDGE_TEST_FLOOR:-4011}"
+#   outbound row exists. +7 MessagesSendStatusHonestyTests.
+# 2026-09-22: 4011 → 4027 (+16) — #303 / epic #301 protocol discriminator
+#   stacked on #302: inherit live 1:1 thread/contact service or fail
+#   closed; 1:1 chatIdentifier uses the same bind (no first-match remap).
+#   +16 MessagesProtocolDiscriminatorTests. Linux host cannot compile
+#   macOS 26; CI must re-measure and raise if the green count is higher.
+FLOOR="${BRIDGE_TEST_FLOOR:-4027}"
 
 echo "🧪 test-floor-gate: building debug test executable + running suite (floor=${FLOOR})..."
 swift build -c debug --product TheBridgeTests

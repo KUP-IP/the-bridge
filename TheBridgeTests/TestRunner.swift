@@ -714,6 +714,7 @@ await runDataSourcesViewModelTests() // Data-Source Registry W4: Settings pane s
 await runRegistryEdgeCaseTests()     // Data-Source Registry: adversarial edge cases (codec chunking, pagination, cache concurrency, config race, writer)
 await runRegistryHydrationTests()    // Packet Runner v1 (FR-1/§8.3): packet-registry-v1 one-hop hydration envelope (primary+body+relations+provenance+warnings)
 await runMessagesModuleTests()
+await runMessagesProtocolDiscriminatorTests()  // #303 inherit / fail-closed protocol discriminator
 await runMessagesSendApprovalPolicyTests()  // messages_send ordinary 3-tier SecurityGate ladder
 await runMessagesSendStatusHonestyTests()   // #302: correlate after script error; do not claim failure
 await runThreadMessagesReceiptTests()  // THREAD Messages Receipt M1: exact ROWID + recoverable Intent/Result journal

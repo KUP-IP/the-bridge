@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **messages_send protocol discriminator (#303 / epic #301).** Inherit the
+  live 1:1 thread/contact service (latest inbound, else unambiguous
+  `chat.guid` / `service_name`) or refuse with an explicit reason. 1:1
+  `chatIdentifier` (`+1…`, `iMessage|SMS|RCS|any;-;handle`) uses the same
+  bind and buddy-sends — no AppleScript first-match remap. Tapbacks,
+  group rows, and ambiguous iMessage+SMS threads without inbound fail
+  closed. RCS/unknown still require `service=SMS` +
+  `allowSmsDespiteLiveService`. Stacked on #302 status honesty. Contract:
+  `docs/operator/messages-protocol-discriminator.md`. Floor **4011 → 4027**
+  (+16 hermetic discriminator tests on top of #302). Linux host cannot
+  compile macOS 26; CI must re-measure.
 - **messages_send status honesty after premature AppleScript error (#302).**
   `messages_send` now correlates chat.db after invoke even when Messages
   AppleScript returns an error. A matching local outbound row is dispatch
@@ -9,8 +20,8 @@
   `isError`), and `scriptError` / `macErrorCode` stay observational.
   `providerDeliveryConfirmed` remains false. Does not clear the Mac
   bubble (no public API — same residual as closed #199). Does not
-  implement protocol pick (#303). Does not change host Auto-review
-  (#294). Parent epic #301. Floor **4004 → 4011** (+7 honesty tests).
+  change host Auto-review (#294). Parent epic #301. Floor **4004 → 4011**
+  (+7 honesty tests).
 
 - **messages_send notify-default for ordinary 1:1 text (#298).** Catalog
   default is Notify when the target is a single 1:1 handle/chat and the

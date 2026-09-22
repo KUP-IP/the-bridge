@@ -46,7 +46,8 @@ Delivered** / **failed to send** even after the phone delivered. There is
 Closing GitHub #199 was **documentation + honesty**, not a UI wipe.
 #302 continues that honesty onto the **tool response**: agents must not
 claim failure when local correlation succeeded. Protocol pick (RCS vs SMS
-vs iMessage) is **#303**, not this path.
+vs iMessage) is [#303](https://github.com/KUP-IP/the-bridge/issues/303)
+— see `docs/operator/messages-protocol-discriminator.md`.
 
 ## Operator / agent contract
 
