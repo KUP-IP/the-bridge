@@ -45,11 +45,11 @@ func runMessagesProtocolDiscriminatorTests() async {
 
     await test("#303 parseTarget: group ids stay off the 1:1 discriminator") {
         try expect(
-            MessagesProtocolDiscriminator.parseChatIdentifier("chat123456789") == .group("chat123456789")
+            MessagesProtocolDiscriminator.parseChatIdentifier("chat123456789") == .group(chatIdentifier: "chat123456789")
         )
         try expect(
             MessagesProtocolDiscriminator.parseChatIdentifier("677927082d92462b9e1ddc5450b9ae10")
-                == .group("677927082d92462b9e1ddc5450b9ae10")
+                == .group(chatIdentifier: "677927082d92462b9e1ddc5450b9ae10")
         )
         try expect(
             MessagesProtocolDiscriminator.parseTarget(

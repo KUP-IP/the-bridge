@@ -64,7 +64,7 @@ public enum MessagesProtocolDiscriminator: Sendable {
         if isPhoneHandle(trimmed) || isEmailHandle(trimmed) {
             return .oneToOne(handle: trimmed, declaredThreadService: nil)
         }
-        return .group(trimmed)
+        return .group(chatIdentifier: trimmed)
     }
 
     public static func parseServicePrefixed(_ raw: String) -> (declaredService: String?, handle: String)? {
