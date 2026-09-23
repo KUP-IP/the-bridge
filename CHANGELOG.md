@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **notion_datasource_get formula.expression pass-through (Ask 1 Option A).**
+  Schema flatten now includes a flat additive `expression` string on
+  `type:"formula"` properties when Notion returns `formula.expression`.
+  Missing/null expression omits the field (never invented). Non-formula
+  props unchanged (id/name/type + options/groups). Helper:
+  `NotionDataSourceSchemaFlatten`. Not on the 4.0.9 ship train — tip/agent
+  LIVE capability only. Floor **4027 → 4030** (+3 hermetic flatten tests).
+
 - **messages_send protocol discriminator (#303 / epic #301).** Inherit the
   live 1:1 thread/contact service (latest inbound, else unambiguous
   `chat.guid` / `service_name`) or refuse with an explicit reason. 1:1

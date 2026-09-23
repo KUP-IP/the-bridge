@@ -255,7 +255,10 @@
 #   closed; 1:1 chatIdentifier uses the same bind (no first-match remap).
 #   +16 MessagesProtocolDiscriminatorTests. Linux host cannot compile
 #   macOS 26; CI must re-measure and raise if the green count is higher.
-FLOOR="${BRIDGE_TEST_FLOOR:-4027}"
+# 2026-09-23: 4027 → 4030 (+3) — Ask 1 Option A: notion_datasource_get
+#   formula.expression flat pass-through via NotionDataSourceSchemaFlatten
+#   (+3 hermetic flatten tests in NotionModuleTests).
+FLOOR="${BRIDGE_TEST_FLOOR:-4030}"
 
 echo "🧪 test-floor-gate: building debug test executable + running suite (floor=${FLOOR})..."
 swift build -c debug --product TheBridgeTests
