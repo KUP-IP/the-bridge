@@ -9,7 +9,9 @@
   and guidance that Not Delivered is a real missed handoff. Dest-present
   SMS (even with Mac `error=4`) stays #302. Incomplete dest/`is_sent`
   evidence does not fail closed. iMessage unchanged. Contract:
-  `docs/operator/messages-continuity-delivery.md`.
+  `docs/operator/messages-continuity-delivery.md`. Floor **4030 → 4034**
+  (+4 honesty tests). Stacked on main after #307; prior 4031 measure is
+  void. Linux host cannot compile macOS 26; CI must re-measure.
 
 - **notion_datasource_get formula.expression pass-through (Ask 1 Option A).**
   Schema flatten now includes a flat additive `expression` string on
