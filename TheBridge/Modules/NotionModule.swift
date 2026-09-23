@@ -80,6 +80,50 @@ public enum NotionRelationFilter {
     }
 }
 
+/// Pure flatten for `notion_datasource_get` schema entries (and any twin
+/// dump that wants the same shape). Always emits id/name/type. Select-like
+/// types keep options/groups. Formula props add a flat `expression` when
+/// Notion returns `formula.expression` — omit when missing/null; never invent.
+public enum NotionDataSourceSchemaFlatten {
+    public static func item(name: String, definition: [String: Any]) -> [String: Value] {
+        let propId = definition["id"] as? String ?? ""
+        let propType = definition["type"] as? String ?? ""
+        var item: [String: Value] = [
+            "name": .string(name),
+            "id": .string(propId),
+            "type": .string(propType)
+        ]
+        // Include select/multi_select/status options if present
+        if let typeConfig = definition[propType] as? [String: Any],
+           let options = typeConfig["options"] as? [[String: Any]] {
+            item["options"] = .array(options.compactMap { opt in
+                guard let optName = opt["name"] as? String else { return nil }
+                return .string(optName)
+            })
+        }
+        if let typeConfig = definition[propType] as? [String: Any],
+           let groups = typeConfig["groups"] as? [[String: Any]] {
+            item["groups"] = .array(groups.compactMap { grp in
+                guard let grpName = grp["name"] as? String else { return nil }
+                return .string(grpName)
+            })
+        }
+        // Ask 1 Option A (2026-09-23): pass formula.expression through flat.
+        if propType == "formula",
+           let formula = definition["formula"] as? [String: Any],
+           let expression = formula["expression"] as? String {
+            item["expression"] = .string(expression)
+        }
+        return item
+    }
+
+    public static func schema(from properties: [String: [String: Any]]) -> [Value] {
+        properties.sorted(by: { $0.key < $1.key }).map { name, def in
+            .object(item(name: name, definition: def))
+        }
+    }
+}
+
 // MARK: - NotionModule
 
 /// Provides Notion workspace integration tools.
@@ -1715,31 +1759,7 @@ public enum NotionModule {
                 // Extract properties/schema
                 var schemaItems: [Value] = []
                 if let properties = json["properties"] as? [String: [String: Any]] {
-                    for (propName, propDef) in properties.sorted(by: { $0.key < $1.key }) {
-                        let propId = propDef["id"] as? String ?? ""
-                        let propType = propDef["type"] as? String ?? ""
-                        var item: [String: Value] = [
-                            "name": .string(propName),
-                            "id": .string(propId),
-                            "type": .string(propType)
-                        ]
-                        // Include select/multi_select/status options if present
-                        if let typeConfig = propDef[propType] as? [String: Any],
-                           let options = typeConfig["options"] as? [[String: Any]] {
-                            item["options"] = .array(options.compactMap { opt in
-                                guard let optName = opt["name"] as? String else { return nil }
-                                return .string(optName)
-                            })
-                        }
-                        if let typeConfig = propDef[propType] as? [String: Any],
-                           let groups = typeConfig["groups"] as? [[String: Any]] {
-                            item["groups"] = .array(groups.compactMap { grp in
-                                guard let grpName = grp["name"] as? String else { return nil }
-                                return .string(grpName)
-                            })
-                        }
-                        schemaItems.append(.object(item))
-                    }
+                    schemaItems = NotionDataSourceSchemaFlatten.schema(from: properties)
                 }
 
                 return .object([

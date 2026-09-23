@@ -97,8 +97,13 @@ func runMemoryHubCockpitTests() async {
 
     await test("activity_jsonl_appendOnly_oneLinePerEvent") {
         try await withHubTempHome {
+            // Retention prune uses wall-clock `now` (D24: 90 days). Fixture
+            // timestamps are fixed at 2026-06-25; once CI's Date() passes
+            // ~2026-09-23 those events look aged and pruneIfNeeded rewrites
+            // the JSONL to empty mid-test. Anchor `now` to the fixture day.
+            let fixtureNow = ISO8601DateFormatter().date(from: "2026-06-25T12:00:00Z")!
             for i in 0..<3 {
-                try MemoryHubActivityLog.append(makeEvent(action: "a\(i)"))
+                try MemoryHubActivityLog.append(makeEvent(action: "a\(i)"), now: fixtureNow)
             }
             let raw = try String(contentsOf: MemoryHubActivityLog.fileURL, encoding: .utf8)
             let lines = raw.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }

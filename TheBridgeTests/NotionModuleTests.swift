@@ -13,6 +13,92 @@ import TheBridgeLib
 func runNotionModuleTests() async {
     print("\n📝 NotionModule Tests")
 
+    // ============================================================
+    // MARK: - NotionDataSourceSchemaFlatten (formula.expression)
+    // ============================================================
+
+    await test("schema flatten: formula.expression passes through flat") {
+        let props: [String: [String: Any]] = [
+            "EXERCISE INFO": [
+                "id": "ex%3A",
+                "type": "formula",
+                "formula": ["expression": "prop(\"Name\")"]
+            ],
+            "Name": [
+                "id": "title",
+                "type": "title",
+                "title": [:] as [String: Any]
+            ]
+        ]
+        let items = NotionDataSourceSchemaFlatten.schema(from: props)
+        try expect(items.count == 2, "expected 2 schema items, got \(items.count)")
+
+        guard case .object(let formulaItem) = items.first(where: {
+            if case .object(let d) = $0, case .string(let n) = d["name"], n == "EXERCISE INFO" { return true }
+            return false
+        }) else {
+            throw TestError.assertion("EXERCISE INFO formula prop missing from schema")
+        }
+        try expect({
+            if case .string(let t) = formulaItem["type"] { return t == "formula" }
+            return false
+        }(), "type must remain formula")
+        try expect({
+            if case .string(let e) = formulaItem["expression"] { return e == "prop(\"Name\")" }
+            return false
+        }(), "expression must pass through verbatim")
+        try expect(formulaItem["id"] != nil && formulaItem["name"] != nil, "id/name preserved")
+    }
+
+    await test("schema flatten: non-formula props unchanged (no expression key)") {
+        let props: [String: [String: Any]] = [
+            "Status": [
+                "id": "st",
+                "type": "status",
+                "status": [
+                    "options": [["name": "Done"], ["name": "Todo"]],
+                    "groups": [["name": "Complete"]]
+                ] as [String: Any]
+            ]
+        ]
+        let item = NotionDataSourceSchemaFlatten.item(name: "Status", definition: props["Status"]!)
+        try expect({
+            if case .string(let t) = item["type"] { return t == "status" }
+            return false
+        }(), "type status")
+        try expect(item["expression"] == nil, "non-formula must not invent expression")
+        try expect({
+            if case .array(let opts) = item["options"] { return opts.count == 2 }
+            return false
+        }(), "options still present")
+        try expect({
+            if case .array(let groups) = item["groups"] { return groups.count == 1 }
+            return false
+        }(), "groups still present")
+    }
+
+    await test("schema flatten: missing/null formula.expression does not crash; field omitted") {
+        let missing: [String: Any] = ["id": "f1", "type": "formula", "formula": [:] as [String: Any]]
+        let nullish: [String: Any] = [
+            "id": "f2",
+            "type": "formula",
+            "formula": ["expression": NSNull()]
+        ]
+        let bare: [String: Any] = ["id": "f3", "type": "formula"]
+
+        let a = NotionDataSourceSchemaFlatten.item(name: "A", definition: missing)
+        let b = NotionDataSourceSchemaFlatten.item(name: "B", definition: nullish)
+        let c = NotionDataSourceSchemaFlatten.item(name: "C", definition: bare)
+
+        try expect(a["expression"] == nil, "empty formula object → omit expression")
+        try expect(b["expression"] == nil, "null expression → omit expression")
+        try expect(c["expression"] == nil, "missing formula key → omit expression")
+        try expect({
+            if case .string(let t) = a["type"] { return t == "formula" }
+            return false
+        }(), "still type formula when expression absent")
+    }
+
     let gate = SecurityGate(approvalProvider: TestSecurityApprovalProvider())
     let log = AuditLog()
     let router = ToolRouter(securityGate: gate, auditLog: log)

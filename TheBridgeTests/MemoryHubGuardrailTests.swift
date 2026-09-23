@@ -245,15 +245,19 @@ func runMemoryHubGuardrailTests() async {
 
     await test("activity_corruptJsonl_skipsPreservesRepairs") {
         try await withGuardrailTempHome {
+            // Same 90-day retention trap as CockpitTests: fixture stamps are
+            // 2026-06-25; wall-clock Date() past ~2026-09-23 ages them out and
+            // pruneIfNeeded empties the file before the corrupt-line inject.
+            let fixtureNow = ISO8601DateFormatter().date(from: "2026-06-25T12:00:00Z")!
             // one good event, then a corrupt line, then another good event
             let good1 = MemoryHubActivityEvent(timestamp: "2026-06-25T09:00:00Z", memoId: "m", phase: .execute, action: "a1", status: "executed", provenance: "election", actor: "curator", detail: "ok")
-            try MemoryHubActivityLog.append(good1)
+            try MemoryHubActivityLog.append(good1, now: fixtureNow)
             // inject a corrupt line directly
             let handle = try FileHandle(forWritingTo: MemoryHubActivityLog.fileURL)
             try handle.seekToEnd(); try handle.write(contentsOf: Data("{not valid json\n".utf8)); try handle.close()
             let good2 = MemoryHubActivityEvent(timestamp: "2026-06-25T09:01:00Z", memoId: "m", phase: .execute, action: "a2", status: "executed", provenance: "election", actor: "curator", detail: "ok")
             let before = try Data(contentsOf: MemoryHubActivityLog.fileURL)
-            try MemoryHubActivityLog.append(good2)
+            try MemoryHubActivityLog.append(good2, now: fixtureNow)
             let result = MemoryHubActivityLog.loadWithRepair()
             try expect(result.events.count == 2, "good events loaded, corrupt skipped, got \(result.events.count)")
             try expect(result.skipped == 1 && result.firstErrorOffset != nil, "skipped count + first error offset")
@@ -261,7 +265,7 @@ func runMemoryHubGuardrailTests() async {
             let after = try Data(contentsOf: MemoryHubActivityLog.fileURL)
             try expect(after.count > before.count, "original corrupt line preserved (file only grew)")
             // repair scan appends a repair activity without removing the corrupt line
-            let skipped = MemoryHubActivityLog.repairScan()
+            let skipped = MemoryHubActivityLog.repairScan(now: fixtureNow)
             try expect(skipped == 1, "repair scan reports the corrupt line")
             try expect(MemoryHubActivityLog.load().contains { $0.action == "activity_repair" }, "repair activity recorded")
         }
