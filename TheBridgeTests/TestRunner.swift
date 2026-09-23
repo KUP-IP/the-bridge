@@ -716,7 +716,7 @@ await runRegistryHydrationTests()    // Packet Runner v1 (FR-1/§8.3): packet-re
 await runMessagesModuleTests()
 await runMessagesProtocolDiscriminatorTests()  // #303 inherit / fail-closed protocol discriminator
 await runMessagesSendApprovalPolicyTests()  // messages_send ordinary 3-tier SecurityGate ladder
-await runMessagesSendStatusHonestyTests()   // #302: correlate after script error; do not claim failure
+await runMessagesSendStatusHonestyTests()   // #302 + Continuity-dead SMS honesty
 await runThreadMessagesReceiptTests()  // THREAD Messages Receipt M1: exact ROWID + recoverable Intent/Result journal
 await runCallHistoryModuleTests()      // Bridge v4 Wave 1: calls_recent filters, schema/FDA errors, annotations
 await runMessagesSuiteAuditTests()   // Messages-suite every-angle-of-attack audit

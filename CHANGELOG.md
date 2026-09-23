@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **messages_send SMS Continuity-dead honesty.** A correlated local SMS
+  row with `error≠0`, `is_sent=0`, `is_delivered=0`, and empty
+  `destination_caller_id` is no longer `sent=true`. Envelope sets
+  `sent=false`, a claimable `error`, `continuityHandoffObserved=false`,
+  and guidance that Not Delivered is a real missed handoff. Dest-present
+  SMS (even with Mac `error=4`) stays #302. Incomplete dest/`is_sent`
+  evidence does not fail closed. iMessage unchanged. Contract:
+  `docs/operator/messages-continuity-delivery.md`.
+
 - **notion_datasource_get formula.expression pass-through (Ask 1 Option A).**
   Schema flatten now includes a flat additive `expression` string on
   `type:"formula"` properties when Notion returns `formula.expression`.
