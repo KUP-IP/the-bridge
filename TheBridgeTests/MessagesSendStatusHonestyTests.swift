@@ -5,7 +5,9 @@
 // correlates after a premature AppleScript/Messages error. `error` is
 // claimable send failure only — a string there trips ToolRouter
 // dispatchFormatted isError. scriptError / macErrorCode are observational.
-// Does not implement #303 protocol pick. No live Messages.app send.
+// Continuity-dead SMS (empty destination_caller_id + is_sent=0 + error≠0)
+// is the exception: sent=false. Does not implement #303 protocol pick.
+// No live Messages.app send.
 
 import Foundation
 import MCP
@@ -267,9 +269,161 @@ func runMessagesSendStatusHonestyTests() async {
         let send = await router.registrations(forModule: "messages").first { $0.name == "messages_send" }!
         try expect(send.description.localizedCaseInsensitiveContains("do not report send failure"))
         try expect(send.description.localizedCaseInsensitiveContains("scriptError"))
+        try expect(send.description.localizedCaseInsensitiveContains("Continuity-dead"))
         try expect(send.description.contains("Does not change host Auto-review"))
         try expect(send.metadata?.whenNotToUse.contains(where: {
             $0.localizedCaseInsensitiveContains("correlatedLocalRecord")
         }) == true)
+        try expect(send.metadata?.whenNotToUse.contains(where: {
+            $0.localizedCaseInsensitiveContains("destination_caller_id")
+        }) == true)
+    }
+
+    await test("SMS Continuity-dead signature is sent=false with claimable error") {
+        let classified = MessagesModule.classifyDeliveryCandidates(
+            [[
+                "ROWID": 56550,
+                "is_from_me": 1,
+                "text": "hello",
+                "handle_id": "+15551234567",
+                "chat_identifier": "+15551234567",
+                "service": "SMS",
+                "mac_error": 4,
+                "mac_is_delivered": 0,
+                "mac_is_sent": 0,
+                "destination_caller_id": "",
+                "message_unix_seconds": 1_800_000_000.0
+            ]],
+            expectedTarget: "+15551234567",
+            expectedBody: "hello"
+        )
+        try expect(classified.verified)
+        try expect(classified.macErrorCode == 4)
+        try expect(classified.macIsSent == false)
+        try expect(classified.macIsDelivered == false)
+        try expect(classified.destinationCallerIdPresent == false)
+        try expect(MessagesModule.smsContinuityHandoffFailed(classified))
+
+        let attempt = MessagesModule.reconcileInvokedSend(
+            invocation: .init(),
+            verification: classified,
+            service: "SMS"
+        )
+        try expect(!attempt.dispatchSucceeded)
+        try expect(attempt.error == MessagesModule.smsContinuityHandoffFailedError)
+
+        let fields = MessagesModule.oneToOneSendMCPFields(
+            recipient: "+15551234567", body: "hello", attempt: attempt
+        )
+        guard case .bool(let sent) = fields["sent"],
+              case .bool(let correlated) = fields["correlatedLocalRecord"],
+              case .bool(let provider) = fields["providerDeliveryConfirmed"],
+              case .bool(let handedOff) = fields["continuityHandoffObserved"],
+              case .bool(let destPresent) = fields["destinationCallerIdPresent"],
+              case .bool(let macSent) = fields["macIsSent"],
+              case .bool(let macUi) = fields["macUiMayShowFalseFailure"],
+              case .string(let guidance) = fields["agentGuidance"] else {
+            throw TestError.assertion("expected Continuity-dead envelope, got \(fields.keys.sorted())")
+        }
+        try expect(!sent, "Continuity-dead SMS must not claim sent=true")
+        try expect(correlated, "local row still correlates")
+        try expect(!provider)
+        try expect(!handedOff)
+        try expect(!destPresent)
+        try expect(!macSent)
+        try expect(!macUi, "Not Delivered is a real missed handoff, not a Mac UI lie")
+        try expect(guidance == MessagesModule.smsContinuityHandoffFailedGuidance)
+        try expect(hasClaimableError(fields))
+    }
+
+    await test("SMS dest-present + is_sent=1 keeps #302 sent=true even with mac error") {
+        let classified = MessagesModule.classifyDeliveryCandidates(
+            [[
+                "ROWID": 56454,
+                "is_from_me": 1,
+                "text": "hello",
+                "handle_id": "+15557654321",
+                "chat_identifier": "+15557654321",
+                "service": "SMS",
+                "mac_error": 4,
+                "mac_is_delivered": 1,
+                "mac_is_sent": 1,
+                "destination_caller_id": "+15550001111",
+                "message_unix_seconds": 1_800_000_000.0
+            ]],
+            expectedTarget: "+15557654321",
+            expectedBody: "hello"
+        )
+        try expect(classified.destinationCallerIdPresent == true)
+        try expect(classified.macIsSent == true)
+        try expect(!MessagesModule.smsContinuityHandoffFailed(classified))
+
+        let attempt = MessagesModule.reconcileInvokedSend(
+            invocation: .init(error: "failed to send", errorNumber: -1708),
+            verification: classified,
+            service: "SMS"
+        )
+        try expect(attempt.dispatchSucceeded)
+        try expect(attempt.error == nil)
+        let fields = MessagesModule.oneToOneSendMCPFields(
+            recipient: "+15557654321", body: "hello", attempt: attempt
+        )
+        guard case .bool(let sent) = fields["sent"],
+              case .bool(let handedOff) = fields["continuityHandoffObserved"],
+              case .bool(let macUi) = fields["macUiMayShowFalseFailure"] else {
+            throw TestError.assertion("expected dest-present SMS honesty envelope")
+        }
+        try expect(sent)
+        try expect(handedOff)
+        try expect(macUi)
+        try expect(!hasClaimableError(fields))
+    }
+
+    await test("SMS Continuity helper stays false when dest/is_sent evidence is missing") {
+        let incomplete = MessagesDeliveryVerification(
+            status: .verified,
+            messageRowId: 99,
+            service: "SMS",
+            macErrorCode: 4,
+            macIsDelivered: false
+        )
+        try expect(!MessagesModule.smsContinuityHandoffFailed(incomplete))
+        let iMessageDeadLooking = MessagesDeliveryVerification(
+            status: .verified,
+            messageRowId: 100,
+            service: "iMessage",
+            macErrorCode: 4,
+            macIsDelivered: false,
+            macIsSent: false,
+            destinationCallerIdPresent: false
+        )
+        try expect(!MessagesModule.smsContinuityHandoffFailed(iMessageDeadLooking))
+    }
+
+    await test("chatIdentifier SMS Continuity-dead envelope is sent=false") {
+        let verification = MessagesDeliveryVerification(
+            status: .verified,
+            messageRowId: 56549,
+            service: "SMS",
+            macErrorCode: 3,
+            macIsDelivered: false,
+            macIsSent: false,
+            destinationCallerIdPresent: false
+        )
+        let fields = MessagesModule.chatIdentifierSendMCPFields(
+            chatIdentifier: "SMS;-;+15551234567",
+            body: "hello",
+            verification: verification,
+            invocation: .init()
+        )
+        guard case .bool(let sent) = fields["sent"],
+              case .bool(let correlated) = fields["correlatedLocalRecord"],
+              case .bool(let handedOff) = fields["continuityHandoffObserved"] else {
+            throw TestError.assertion("expected chatIdentifier Continuity-dead envelope")
+        }
+        try expect(!sent)
+        try expect(correlated)
+        try expect(!handedOff)
+        try expect(hasClaimableError(fields))
     }
 }

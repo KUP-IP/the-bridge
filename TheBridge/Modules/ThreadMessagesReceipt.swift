@@ -25,6 +25,13 @@ public struct MessagesDeliveryVerification: Sendable, Equatable {
     public var macErrorCode: Int?
     /// chat.db `message.is_delivered` — Mac-side flag only. Never provider delivery.
     public var macIsDelivered: Bool?
+    /// chat.db `message.is_sent` — Mac-side flag only. Continuity SMS sets
+    /// this when the iPhone radio accepted the handoff.
+    public var macIsSent: Bool?
+    /// Whether chat.db `destination_caller_id` is a non-empty string.
+    /// Continuity SMS writes the Mac owner's phone here after handoff.
+    /// The raw number is never copied into the MCP envelope.
+    public var destinationCallerIdPresent: Bool?
 
     public init(
         status: MessagesDeliveryVerificationStatus,
@@ -37,7 +44,9 @@ public struct MessagesDeliveryVerification: Sendable, Equatable {
         candidateRowIds: [Int] = [],
         error: String? = nil,
         macErrorCode: Int? = nil,
-        macIsDelivered: Bool? = nil
+        macIsDelivered: Bool? = nil,
+        macIsSent: Bool? = nil,
+        destinationCallerIdPresent: Bool? = nil
     ) {
         self.status = status
         self.messageRowId = messageRowId
@@ -50,6 +59,8 @@ public struct MessagesDeliveryVerification: Sendable, Equatable {
         self.error = error
         self.macErrorCode = macErrorCode
         self.macIsDelivered = macIsDelivered
+        self.macIsSent = macIsSent
+        self.destinationCallerIdPresent = destinationCallerIdPresent
     }
 
     public var verified: Bool { status == .verified && messageRowId != nil }
@@ -89,7 +100,9 @@ public struct MessagesDeliveryAttempt: Sendable, Equatable {
     }
 
     /// Dispatch succeeded: AppleScript returned no claimable failure, or a
-    /// local outbound row correlated after a premature script error (#302).
+    /// local outbound row correlated after a premature script error (#302),
+    /// unless SMS Continuity handoff is positively dead (empty
+    /// destination_caller_id + is_sent=0 + is_delivered=0 + error≠0).
     public var dispatchSucceeded: Bool { invoked && error == nil }
 }
 

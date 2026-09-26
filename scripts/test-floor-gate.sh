@@ -258,7 +258,13 @@
 # 2026-09-23: 4027 → 4030 (+3) — Ask 1 Option A: notion_datasource_get
 #   formula.expression flat pass-through via NotionDataSourceSchemaFlatten
 #   (+3 hermetic flatten tests in NotionModuleTests).
-FLOOR="${BRIDGE_TEST_FLOOR:-4030}"
+# 2026-09-23: 4030 → 4034 (+4) — SMS Continuity-dead honesty: fail closed
+#   when a correlated SMS row has error≠0, is_sent=0, is_delivered=0, and
+#   empty destination_caller_id. Dest-present SMS stays #302. +4
+#   MessagesSendStatusHonestyTests. Stacked on main d1ada9bf after #307;
+#   prior 4031 measure is void. Linux host cannot compile macOS 26;
+#   CI must re-measure.
+FLOOR="${BRIDGE_TEST_FLOOR:-4034}"
 
 echo "🧪 test-floor-gate: building debug test executable + running suite (floor=${FLOOR})..."
 swift build -c debug --product TheBridgeTests

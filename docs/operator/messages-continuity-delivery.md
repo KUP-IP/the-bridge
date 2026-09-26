@@ -8,7 +8,17 @@ the matching outbound row (iMessage or Continuity SMS). Recipients receive
 the text; Mac Messages may still paint **failed to send** / **Try again** /
 **Not Delivered**.
 
-That is a **display/status** bug, not a delivery miss.
+That is a **display/status** bug, not a delivery miss — **only when
+Continuity actually handed the SMS to the iPhone radio**.
+
+A different, live-verified failure mode is **Continuity-dead SMS**:
+`chat.db` has a local outbound SMS row, but `error≠0`, `is_sent=0`,
+`is_delivered=0`, and `destination_caller_id` is empty. Successful
+Continuity SMS (even when Mac `error=4`) writes the Mac owner's phone
+into `destination_caller_id` and sets `is_sent=1`. Empty dest + not
+sent means the iPhone radio was never reached (SKChannel /
+PresenceService down). That is a **real missed handoff**, not a Mac
+bubble lie.
 
 ## What Bridge can prove
 
@@ -19,18 +29,33 @@ That is a **display/status** bug, not a delivery miss.
   (`correlatedLocalRecord` / `verified`).
 
 After invoke, Bridge **always** polls for that local row — including when
-AppleScript returned an error (#302). If the row is found:
+AppleScript returned an error (#302). If the row is found and it is
+**not** Continuity-dead SMS:
 
 - `sent` is **true** (dispatch succeeded).
 - MCP `error` is **null** so `dispatchFormatted` does not mark `isError`.
 - `scriptError` / `scriptErrorNumber` stay observational.
 - `agentGuidance` tells the caller not to report failure.
-- `macErrorCode` / `macIsDelivered` are chat.db flags only.
+- `macErrorCode` / `macIsDelivered` / `macIsSent` are chat.db flags only.
+
+If the correlated row is **SMS** and **positively** has `error≠0`,
+`is_sent=0`, `is_delivered=0`, and empty `destination_caller_id`:
+
+- `sent` is **false**.
+- MCP `error` is the Continuity-handoff failure string (claimable).
+- `continuityHandoffObserved=false`.
+- `agentGuidance` tells the caller **not** to say the message was sent.
+- `macUiMayShowFalseFailure=false` — Not Delivered is real.
+
+Missing dest/`is_sent` fields do **not** fail closed (incomplete
+evidence stays #302). iMessage never uses this discriminator.
 
 That correlation is **not** provider delivery. Envelopes always set
 `providerDeliveryConfirmed=false`. Bridge will never flip that flag from a
 local chat.db match, a Messages.app success dialog, `is_delivered`, or a
-later read of `is_read` / `date_read`.
+later read of `is_read` / `date_read`. The raw `destination_caller_id`
+value is never copied into the envelope — only
+`destinationCallerIdPresent`.
 
 ## What Bridge cannot do
 
@@ -54,9 +79,14 @@ vs iMessage) is [#303](https://github.com/KUP-IP/the-bridge/issues/303)
 - Treat `sent` / local correlation as **consequence-possible**, not
   provider-delivered.
 - Do **not** tell the user “the send failed” because AppleScript returned
-  an error if `correlatedLocalRecord` is true.
+  an error if `correlatedLocalRecord` is true **and**
+  `continuityHandoffObserved` is not false.
+- Do **not** tell the user the SMS was sent when `sent=false` and
+  `continuityHandoffObserved=false` — that is Continuity-dead, not a
+  display lie.
 - Do not tell the user “delivered” because chat.db has a row.
-- The Mac bubble may still lie after a successful iPhone or iMessage send.
-  That is an Apple display/Continuity bug, not a Bridge send failure.
+- The Mac bubble may still lie after a successful iPhone or iMessage send
+  (`destination_caller_id` present, `is_sent=1`). That is an Apple
+  display/Continuity bug, not a Bridge send failure.
 - Group **create** is a separate residual (#204): existing-group send via
   `chatIdentifier` works; creating a new group is not built.
