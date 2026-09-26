@@ -368,7 +368,7 @@ func runEndToEndTests() async {
         try expect(file.count == 12, "FileModule: expected 12")
         try expect(session.count == 4, "SessionModule: expected 4 (PKT-1116 audit_recent)")
         try expect(messages.count == 6, "MessagesModule: expected 6")
-        try expect(system.count == 3, "SystemModule: expected 3")
+        try expect(system.count == 4, "SystemModule: expected 4 (url_open #312)")
         try expect(contacts.count == 4, "ContactsModule: expected 4")
         // Sprint A · mcp-builder #1: notion_block_read removed (24 → 23).
         // FB-notionwrite: notion_page_edit added (23 → 24).

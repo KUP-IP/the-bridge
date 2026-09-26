@@ -23,7 +23,9 @@ Inventory date: 2026-07-30
 | Background | `bg_run` | same analysis as shell; governed worktree execution is denied before startup |
 | Script runner | `run_script` | always `worktree_target_unresolved`; opaque effects cannot satisfy C0 |
 
-Every protected public schema exposes optional `ownerSession`; it becomes mandatory when a live Git worktree identity is resolved. `run_script` exposes the field for compatibility, but it cannot override fail-closed behavior.
+`url_open` is **not** on this list. It opens allowlisted http(s)/notion URLs via `NSWorkspace` and never enters C0 command analysis. `shell_exec open <http(s)>` remains unresolved (opaque `open`); the denial remedy names `url_open` / `applescript_exec open location`. Operator map: `docs/operator/remote-url-open.md`.
+
+Every protected public schema exposes optional `ownerSession`; it becomes mandatory when a live Git worktree identity is resolved. `run_script` exposes the field for compatibility, but it cannot override fail-closed behavior. `run_script` always-unresolved is unchanged — see the operator doc for the cross-link only.
 
 ## Command-analysis coverage
 

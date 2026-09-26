@@ -1297,9 +1297,16 @@ public enum WorktreeOwnershipGuard {
             remedy = "Release the expired claim with abandoned_with_recovery_note before retrying."
         case "worktree_target_unresolved":
             ownerState = .notEvaluated
-            remedy = toolName == "run_script"
-                ? "Use shell_exec with an explicit command and workingDir."
-                : "Use a supported command with an explicit, statically resolvable worktree target."
+            if toolName == "run_script" {
+                remedy = "Use shell_exec with an explicit command and workingDir."
+            } else if (toolName == "shell_exec" || toolName == "bg_run"),
+                      case .object(let object) = arguments,
+                      let command = string(object["command"]),
+                      URLOpenPolicy.shellCommandOpensRemoteURL(command) {
+                remedy = URLOpenPolicy.shellOpenRemoteURLRemedy
+            } else {
+                remedy = "Use a supported command with an explicit, statically resolvable worktree target."
+            }
         case "worktree_background_unsupported":
             ownerState = .notEvaluated
             remedy = "Use foreground shell_exec with an explicit command and workingDir."

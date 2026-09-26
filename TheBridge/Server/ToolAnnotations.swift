@@ -419,6 +419,11 @@ public enum ToolAnnotationCatalog {
         // irreversible mutation), not idempotent, tier .request ⇒ requiresConfirmation,
         // openWorld (compiler / dependency fetch / wider machine).
         "system_info": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
+        // #312: lease-free Mac URL open (http/https/notion). Notify-tier —
+        // user-visible browser/app switch, not a Confirm gate. Not read-only
+        // (opens a handler), not destructive, not idempotent (another tab
+        // each call), openWorld (default browser / Notion.app).
+        "url_open": .init(readOnlyHint: false, destructiveHint: false, idempotentHint: false, requiresConfirmation: false, openWorld: true),
         "tools_list": .init(readOnlyHint: true, destructiveHint: false, idempotentHint: true, requiresConfirmation: false, openWorld: false),
     ]
 

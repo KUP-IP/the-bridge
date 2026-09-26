@@ -1,8 +1,9 @@
 // SystemModule.swift – V1-05 System Tools
 // TheBridge · Modules
 //
-// Three tools: system_info (open), process_list (open), notify (open).
-// Uses sw_vers, sysctl, ps, and UserNotifications for macOS integration.
+// Four tools: system_info (open), process_list (open), notify (open),
+// url_open (notify). Uses sw_vers, sysctl, ps, UserNotifications, and
+// NSWorkspace for macOS integration.
 
 import AppKit
 import Foundation
@@ -247,8 +248,57 @@ public enum SystemModule {
             }
         ))
 
-
-
+        // MARK: 4. url_open – notify (#312)
+        // Lease-free Mac URL open. Does not go through shell_exec / C0
+        // command analysis. Restricted to http(s)/notion so it cannot open
+        // worktree file paths.
+        await router.register(ToolRegistration(
+            name: "url_open",
+            module: moduleName,
+            tier: .notify,
+            description: "Open an http(s) or notion URL on the Mac in the default handler (browser or Notion.app). Same effective behavior as AppleScript open location. Not worktree-gated — do not use shell_exec open for remote URLs. When to use: after creating a Notion page, or whenever a remote client should surface a live http(s)/notion URL on the operator Mac. Not for: local file paths, file: URLs, or arbitrary schemes (those stay on shell_exec / Finder and remain C0-gated). Related: applescript_exec (general Automation; still valid as open location), shell_exec (not for open http(s)).",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "url": .object([
+                        "type": .string("string"),
+                        "description": .string("Absolute http, https, or notion URL to open. file: and other schemes are rejected.")
+                    ])
+                ]),
+                "required": .array([.string("url")])
+            ]),
+            handler: { arguments in
+                guard case .object(let args) = arguments,
+                      case .string(let raw) = args["url"] else {
+                    throw ToolRouterError.invalidArguments(
+                        toolName: "url_open",
+                        reason: URLOpenPolicy.ParseError.missing.errorDescription
+                            ?? "missing required 'url' parameter"
+                    )
+                }
+                switch URLOpenPolicy.parse(raw) {
+                case .failure(let error):
+                    throw ToolRouterError.invalidArguments(
+                        toolName: "url_open",
+                        reason: error.errorDescription ?? "invalid url"
+                    )
+                case .success(let url):
+                    let opened: Bool
+                    if Bundle.main.bundleURL.pathExtension == "app" {
+                        opened = await MainActor.run { NSWorkspace.shared.open(url) }
+                    } else {
+                        // Standalone test executable: validation already succeeded;
+                        // skip a real browser launch (same Bundle-gate as notify).
+                        opened = true
+                    }
+                    return .object([
+                        "opened": .bool(opened),
+                        "url": .string(url.absoluteString),
+                        "scheme": .string(url.scheme?.lowercased() ?? "")
+                    ])
+                }
+            }
+        ))
     }
 
     // MARK: - Notification Helper

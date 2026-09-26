@@ -16,13 +16,14 @@ func runSystemModuleTests() async {
     await SystemModule.register(on: router)
 
     // Registration tests
-    await test("SystemModule registers 3 tools") {
+    await test("SystemModule registers 4 tools") {
         let tools = await router.registrations(forModule: "system")
-        try expect(tools.count == 3, "Expected 3 system tools, got \(tools.count)")
+        try expect(tools.count == 4, "Expected 4 system tools, got \(tools.count)")
         let names = Set(tools.map(\.name))
         try expect(names.contains("system_info"), "Missing system_info")
         try expect(names.contains("process_list"), "Missing process_list")
         try expect(names.contains("notify"), "Missing notify")
+        try expect(names.contains("url_open"), "Missing url_open")
     }
 
     // Tier tests
@@ -42,6 +43,12 @@ func runSystemModuleTests() async {
         let tools = await router.registrations(forModule: "system")
         let tool = tools.first(where: { $0.name == "notify" })!
         try expect(tool.tier == .open, "Expected open, got \(tool.tier.rawValue)")
+    }
+
+    await test("url_open tier is notify") {
+        let tools = await router.registrations(forModule: "system")
+        let tool = tools.first(where: { $0.name == "url_open" })!
+        try expect(tool.tier == .notify, "Expected notify, got \(tool.tier.rawValue)")
     }
 
     // Functional tests — system_info
@@ -209,6 +216,96 @@ func runSystemModuleTests() async {
                 }
             }
         }
+    }
+
+    await test("url_open opens https without ownerSession") {
+        let result = try await router.dispatch(
+            toolName: "url_open",
+            arguments: .object([
+                "url": .string("https://www.notion.so/28acbb58889e80d5b111ed23b996c304")
+            ])
+        )
+        guard case .object(let dict) = result,
+              case .bool(let opened) = dict["opened"],
+              case .string(let url) = dict["url"],
+              case .string(let scheme) = dict["scheme"] else {
+            throw TestError.assertion("Expected opened/url/scheme object")
+        }
+        try expect(opened, "url_open should succeed in the test harness")
+        try expect(url.contains("notion.so"), "canonical URL should be preserved")
+        try expect(scheme == "https", "scheme should be https, got \(scheme)")
+    }
+
+    await test("url_open accepts notion scheme") {
+        let result = try await router.dispatch(
+            toolName: "url_open",
+            arguments: .object(["url": .string("notion://www.notion.so/page")])
+        )
+        guard case .object(let dict) = result,
+              case .bool(let opened) = dict["opened"],
+              case .string(let scheme) = dict["scheme"] else {
+            throw TestError.assertion("Expected opened/scheme object")
+        }
+        try expect(opened)
+        try expect(scheme == "notion")
+    }
+
+    await test("url_open rejects file URLs") {
+        do {
+            _ = try await router.dispatch(
+                toolName: "url_open",
+                arguments: .object(["url": .string("file:///tmp/secret.txt")])
+            )
+            throw TestError.assertion("Expected error for file: URL")
+        } catch let error as ToolRouterError {
+            try expect(
+                error.localizedDescription.contains("file"),
+                "file: refusal should name the scheme: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    await test("url_open rejects javascript URLs") {
+        do {
+            _ = try await router.dispatch(
+                toolName: "url_open",
+                arguments: .object(["url": .string("javascript:alert(1)")])
+            )
+            throw TestError.assertion("Expected error for javascript: URL")
+        } catch is ToolRouterError {
+            // Expected
+        }
+    }
+
+    await test("url_open rejects missing url") {
+        do {
+            _ = try await router.dispatch(
+                toolName: "url_open",
+                arguments: .object([:])
+            )
+            throw TestError.assertion("Expected error for missing url")
+        } catch is ToolRouterError {
+            // Expected
+        }
+    }
+
+    await test("url_open succeeds with C0 enabled and no worktree claim") {
+        let c0Router = ToolRouter(
+            securityGate: gate,
+            auditLog: log,
+            worktreeOwnershipEnabled: true,
+            licenseStatusProvider: { .grandfathered }
+        )
+        await SystemModule.register(on: c0Router)
+        let result = try await c0Router.dispatch(
+            toolName: "url_open",
+            arguments: .object(["url": .string("https://www.notion.so/keep-os")])
+        )
+        guard case .object(let dict) = result,
+              case .bool(let opened) = dict["opened"] else {
+            throw TestError.assertion("C0-enabled url_open should return an opened receipt")
+        }
+        try expect(opened, "url_open must not require a worktree claim")
     }
 
     await test("process_list respects limit param") {

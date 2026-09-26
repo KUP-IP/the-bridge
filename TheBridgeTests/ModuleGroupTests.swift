@@ -81,6 +81,7 @@ func runModuleGroupTests() async {
         try expect(ModuleGroupDerivation.resolve(toolName: "tools_list") == .system)
         try expect(ModuleGroupDerivation.resolve(toolName: "session_info") == .system)
         try expect(ModuleGroupDerivation.resolve(toolName: "notify") == .system)
+        try expect(ModuleGroupDerivation.resolve(toolName: "url_open") == .system)
         // Genuinely unknown — must STILL bucket to .system.
         try expect(ModuleGroupDerivation.resolve(toolName: "totally_made_up_tool_xyz") == .system)
     }

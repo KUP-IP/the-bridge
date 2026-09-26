@@ -264,7 +264,13 @@
 #   MessagesSendStatusHonestyTests. Stacked on main d1ada9bf after #307;
 #   prior 4031 measure is void. Linux host cannot compile macOS 26;
 #   CI must re-measure.
-FLOOR="${BRIDGE_TEST_FLOOR:-4034}"
+# 2026-09-26: 4034 → 4046 (+12) — #312 url_open: lease-free http(s)/notion
+#   Mac URL open + shell_exec open http(s) denial names url_open /
+#   applescript_exec open location. +7 SystemModuleTests +2
+#   WorktreeOwnershipTests +3 URLOpenPolicyTests.
+#   staticFeatureModuleToolCount 225 → 226. Linux host cannot compile
+#   macOS 26; CI must re-measure.
+FLOOR="${BRIDGE_TEST_FLOOR:-4046}"
 
 echo "🧪 test-floor-gate: building debug test executable + running suite (floor=${FLOOR})..."
 swift build -c debug --product TheBridgeTests

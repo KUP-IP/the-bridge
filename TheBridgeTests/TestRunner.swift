@@ -730,6 +730,7 @@ await runMailModuleTests()           // PKT-961 (v3.7·H): mail_* Apple Mail mod
 // (the NotesModuleTests.swift file landed but its run-sequence call did not).
 await runNotesModuleTests()
 await runSystemModuleTests()
+await runURLOpenPolicyTests()
 await runRemindersModuleTests()   // PKT-957 (v3.7·D): reminders_* EventKit module (mock seam)
 await runCalendarModuleTests()    // PKT-962 (v3.7·I): calendar_* EventKit module (mock seam; reuses v3.7·D store + entitlement)
 await runCalendarRegistrySyncEngineTests() // Calendar–Registry Sync fail-closed hermetic recovery matrix
