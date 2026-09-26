@@ -2457,6 +2457,58 @@ func runWorktreeOwnershipTests() async {
         try expect(!releaseError.contains("owner-a"), "release denial must redact another ownerSession")
     }
 
+    await test("C0 url_open is not worktree-gated") {
+        let fixture = try C0GitFixture()
+        let store = WorktreeOwnershipStore(databaseURL: fixture.databaseURL("url-open"))
+        let authorization = try await WorktreeOwnershipGuard.authorizeToolMutation(
+            toolName: "url_open",
+            arguments: .object([
+                "url": .string("https://www.notion.so/28acbb58889e80d5b111ed23b996c304")
+            ]),
+            store: store
+        )
+        try expect(authorization == nil, "url_open must not require a worktree claim")
+    }
+
+    await test("C0 shell_exec open http(s) denial names url_open") {
+        let router = ToolRouter(
+            securityGate: SecurityGate(approvalProvider: TestSecurityApprovalProvider()),
+            auditLog: AuditLog(),
+            worktreeOwnershipEnabled: true,
+            licenseStatusProvider: { .grandfathered }
+        )
+        await ShellModule.register(on: router)
+
+        let denied = await router.dispatchFormatted(
+            toolName: "shell_exec",
+            arguments: .object([
+                "command": .string("open https://www.notion.so/28acbb58889e80d5b111ed23b996c304")
+            ])
+        )
+        try expect(denied.isError)
+        try expect(denied.text.contains("worktree_target_unresolved"))
+        try expect(denied.text.contains("url_open"), "error must name url_open, got: \(denied.text)")
+        try expect(
+            denied.text.contains("applescript_exec") && denied.text.contains("open location"),
+            "error must name the AppleScript alternative, got: \(denied.text)"
+        )
+        try expect(
+            denied.text.contains("Do not retry shell_exec open"),
+            "error must tell fleets to stop retrying shell open, got: \(denied.text)"
+        )
+
+        let fileOpen = await router.dispatchFormatted(
+            toolName: "shell_exec",
+            arguments: .object(["command": .string("open /tmp/c0-not-a-url")])
+        )
+        try expect(fileOpen.isError)
+        try expect(fileOpen.text.contains("worktree_target_unresolved"))
+        try expect(
+            !fileOpen.text.contains("url_open"),
+            "file open must keep the generic C0 remedy, got: \(fileOpen.text)"
+        )
+    }
+
     await test("C0 unresolved run_script denial identifies unresolved target and remedy") {
         let router = ToolRouter(
             securityGate: SecurityGate(approvalProvider: TestSecurityApprovalProvider()),
@@ -2725,6 +2777,6 @@ func runWorktreeOwnershipTests() async {
         try expect(claimAnnotation?.idempotentHint == true)
         try expect(releaseAnnotation?.idempotentHint == false)
         try expect(commandAnnotation?.requiresConfirmation == true)
-        try expect(BridgeConstants.staticFeatureModuleToolCount == 225)
+        try expect(BridgeConstants.staticFeatureModuleToolCount == 226)
     }
 }

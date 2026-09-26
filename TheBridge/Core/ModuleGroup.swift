@@ -266,6 +266,7 @@ public enum ModuleGroupOverride {
     ///   • `tools_list`       → system         (registry self-inspection)
     ///   • `session_info` / `session_clear` → system  (cross-cutting session ops)
     ///   • `system_info`      → system         (canonical)
+    ///   • `url_open`         → system         (lease-free Mac URL open; #312)
     ///   • `process_list`     → system         (top-level supervision)
     ///   • `port_inspect`     → system         (network primitive but read-only and system-level)
     ///   • `spotlight_query`  → system         (system search)
@@ -292,6 +293,7 @@ public enum ModuleGroupOverride {
         "session_info":         .system,
         "session_clear":        .system,
         "system_info":          .system,
+        "url_open":             .system,
         "process_list":         .system,
         "spotlight_query":      .system,
         "permissions_status":   .system,

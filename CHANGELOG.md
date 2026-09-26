@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **url_open for remote Notion/http(s) URLs (#312).** New notify-tier
+  `url_open` opens an allowlisted `http` / `https` / `notion` URL on the
+  Mac via `NSWorkspace` (same effective behavior as AppleScript
+  `open location`) and is **not** worktree-gated. `file:` and other
+  schemes stay rejected so this is not a C0 bypass. `shell_exec open
+  <http(s)>` still fails as `worktree_target_unresolved` (opaque `open`);
+  the denial remedy now names `url_open` and `applescript_exec open
+  location` so fleets stop retrying shell open. Operator map:
+  `docs/operator/remote-url-open.md`. `staticFeatureModuleToolCount`
+  **225 → 226**. Floor **4034 → 4046** (+12). Linux host cannot compile
+  macOS 26; CI must re-measure. Not Installed from Source.
+
 - **messages_send SMS Continuity-dead honesty.** A correlated local SMS
   row with `error≠0`, `is_sent=0`, `is_delivered=0`, and empty
   `destination_caller_id` is no longer `sent=true`. Envelope sets

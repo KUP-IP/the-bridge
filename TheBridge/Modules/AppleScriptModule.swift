@@ -28,7 +28,7 @@ public enum AppleScriptModule {
             name: "applescript_exec",
             module: moduleName,
             tier: .request,
-            description: "Run AppleScript in-process under The Bridge's TCC grants. Preferred over shell_exec osascript. Priority 2 on the app-control cascade (after Accessibility).",
+            description: "Run AppleScript in-process under The Bridge's TCC grants. Preferred over shell_exec osascript. Priority 2 on the app-control cascade (after Accessibility). For opening an http(s) or notion URL on the Mac, prefer url_open — it is not worktree-gated. open location \"{url}\" remains valid here if url_open is unavailable.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([

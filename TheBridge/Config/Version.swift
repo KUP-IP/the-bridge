@@ -513,7 +513,10 @@ public enum BridgeConstants {
     ///   for file_read. Notion is not binary SSOT. 239 + 1 = 240.
     /// #284 Jobs gut + local-model connection removal (2026-09-20): −13 job_*
     ///   scheduler tools − 2 ollama_* tools. 240 − 15 = 225.
-    public static let staticFeatureModuleToolCount = 225
+    /// #312 url_open (2026-09-26): +1 system-family tool. Lease-free
+    ///   http(s)/notion URL open so remote fleets do not shell_exec open
+    ///   (C0 worktree_target_unresolved). 225 + 1 = 226.
+    public static let staticFeatureModuleToolCount = 226
 
     /// Distinct `module` string families included in `staticFeatureModuleToolCount` (Stripe and `builtin` excluded).
     /// v2.2 · 0.1 (PKT-738): 15 + 1 (dev) = 16.

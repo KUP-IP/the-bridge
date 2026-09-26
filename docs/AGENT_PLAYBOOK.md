@@ -25,6 +25,7 @@ section — do not assume them.
 | Surgical in-place file edit | `file_edit` (`mode:"replace"` or `mode:"patch"`) | `shell_exec` + `sed`/`python3` heredoc |
 | Search source code | `code_search` (ripgrep, structured matches) | `shell_exec rg` for programmatic consumption |
 | Ground `$HOME` / user / cwd before touching the filesystem | `system_info` | guessing `/Users/<name>` from an email |
+| Open a Notion / http(s) URL on the operator Mac | `url_open` | `shell_exec open` (C0 `worktree_target_unresolved`) |
 | Read specific columns from a Notion data source | `notion_query` with `properties` + `pageSize` | N follow-up reads to bucket by Status |
 | Read one Notion page's prose | `notion_page_markdown_read` | paginating raw blocks yourself |
 | Long-running shell work generally | `bg_process_*` | `cmd &` (still capped to the request window) |
@@ -97,6 +98,25 @@ File tools also expand a leading `~` (VERIFIED-FIXED 2026-05-30), so `~/Develope
 resolves correctly.
 
 Source: `TheBridge/Modules/SystemModule.swift`.
+
+## Open a live Notion / http(s) URL → `url_open`
+
+Remote clients cannot `shell_exec open https://…` — C0 treats `open` as an
+opaque executable (`worktree_target_unresolved`). That is intentional and is
+**not** a lease to weaken. After a Notion write, open the returned URL with:
+
+- **`url_open`** (`.notify`) — `url` must be an absolute `http`, `https`, or
+  `notion` URL. Same effective behavior as AppleScript `open location`.
+  Not worktree-gated. Rejects `file:` and other schemes.
+- Fallback on an older host: `applescript_exec` with
+  `open location "{url}"` (still Request-tier Automation).
+
+Do not retry `shell_exec open`. File opens stay on `shell_exec` and remain
+C0-gated. Operator map of worktree-gated vs AppleScript-legal tools:
+`docs/operator/remote-url-open.md`. `run_script` stays always-unresolved
+(C0 inventory).
+
+Source: `TheBridge/Modules/URLOpen.swift` + `SystemModule.swift`.
 
 ## Long Notion reads → `notion_query` projection + `notion_page_markdown_read`
 
